@@ -570,10 +570,10 @@ def test_canary_fix7_uses_fresh_paired_run_namespaces() -> None:
     control = load_taskwise_config_v1(cli.CONFIG_ROOT / "control_canary9_taskwise_online_v1.yaml")
     online = load_taskwise_config_v1(cli.CONFIG_ROOT / "online_canary9_taskwise_online_v1.yaml")
 
-    assert control.run_name == "control_canary9_repeated_session_v1_fix7"
-    assert online.run_name == "online_canary9_taskwise_evolution_v1_fix7"
-    assert control.output_directory.endswith("/canary9/control_fix7")
-    assert online.output_directory.endswith("/canary9/online_fix7")
+    assert control.run_name == "control_canary9_repeated_session_v1_fix8"
+    assert online.run_name == "online_canary9_taskwise_evolution_v1_fix8"
+    assert control.output_directory.endswith("/canary9/control_fix8")
+    assert online.output_directory.endswith("/canary9/online_fix8")
     assert "fix1" not in control.output_directory
     assert "fix1" not in online.output_directory
 

@@ -5,6 +5,7 @@ import json
 from dataclasses import replace
 from dataclasses import fields
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -23,6 +24,11 @@ from openevo_chembench.taskwise_canary_receipt_v1 import (
     write_taskwise_paired_canary_receipt_v1,
 )
 from openevo_chembench.taskwise_config_v1 import load_taskwise_config_v1
+from openevo_chembench.reflector_execution_boundary_v2 import (
+    ReflectorBoundaryStatusV2,
+    ReflectorExecutionReceiptV2,
+    TASKWISE_SOURCE_SPLIT,
+)
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
@@ -259,4 +265,123 @@ def test_success_gate_rejects_any_private_core_failure_receipt(tmp_path: Path) -
 
     assert captured.value.findings == frozenset(
         {TaskwiseCanaryFindingV1.CORE_FAILURE_DIAGNOSTICS_PRESENT}
+    )
+
+
+def _write_reflector_receipt(
+    tmp_path: Path,
+    *,
+    status: ReflectorBoundaryStatusV2 = ReflectorBoundaryStatusV2.COMPLETED,
+    codex_returncode: int = 0,
+    last_message_sha256: str | None = "d" * 64,
+    stderr_tail_codes: tuple[str, ...] = (),
+) -> tuple[Path, SimpleNamespace]:
+    audit_root = tmp_path / "private_reflector_events"
+    invocation_id = "a" * 32
+    invocation_root = audit_root / invocation_id
+    invocation_root.mkdir(parents=True)
+    event_raw = b'{"type":"assistant_message"}\n'
+    event_sha256 = hashlib.sha256(event_raw).hexdigest()
+    event_path = invocation_root / "events.jsonl"
+    event_path.write_bytes(event_raw)
+    event_path.chmod(0o600)
+    receipt = ReflectorExecutionReceiptV2(
+        invocation_id=invocation_id,
+        status=status,
+        mechanism="bubblewrap",
+        wrapper_invoked=True,
+        real_codex_sha256="1" * 64,
+        dev_artifact_sha256="2" * 64,
+        ordered_records_sha256="3" * 64,
+        record_count=1,
+        event_stream_sha256=event_sha256,
+        event_counts=(),
+        private_event_reference=f"{invocation_id}/events.jsonl",
+        last_message_sha256=last_message_sha256,
+        cleanup_complete=True,
+        retry_allowed=False,
+        resume_allowed=False,
+        replacement_completion_allowed=False,
+        codex_returncode=codex_returncode,
+        stderr_sha256=hashlib.sha256(b"redacted stderr").hexdigest(),
+        stderr_tail_codes=stderr_tail_codes,
+        protocol_id="taskwise_online_evolution_v1",
+        source_split=TASKWISE_SOURCE_SPLIT,
+    )
+    receipt_path = invocation_root / "receipt.json"
+    receipt_path.write_text(
+        json.dumps(receipt.to_payload(), sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    receipt_path.chmod(0o600)
+    result = SimpleNamespace(
+        reflector_execution_receipt_sha256=receipt.digest,
+        update_index=1,
+        reflector_input_digest=receipt.ordered_records_sha256,
+        reflector_event_stream_sha256=receipt.event_stream_sha256,
+    )
+    return audit_root, result
+
+
+def test_completed_reflector_with_recovered_timeout_warning_is_accepted(
+    tmp_path: Path,
+) -> None:
+    audit_root, result = _write_reflector_receipt(
+        tmp_path,
+        stderr_tail_codes=("CODEX_TIMEOUT",),
+    )
+
+    digest = receipt_module._verify_reflector_receipts(audit_root, (result,))
+
+    assert len(digest) == 64
+
+
+@pytest.mark.parametrize(
+    "stderr_code",
+    ("CODEX_AUTH_ERROR", "CODEX_CONFIG_PARSE_ERROR", "CODEX_STDERR_REDACTED"),
+)
+def test_completed_reflector_rejects_nonrecoverable_stderr_codes(
+    tmp_path: Path,
+    stderr_code: str,
+) -> None:
+    audit_root, result = _write_reflector_receipt(
+        tmp_path,
+        stderr_tail_codes=(stderr_code,),
+    )
+
+    with pytest.raises(receipt_module._CoreEvidenceError) as captured:
+        receipt_module._verify_reflector_receipts(audit_root, (result,))
+
+    assert captured.value.findings == frozenset(
+        {TaskwiseCanaryFindingV1.REFLECTOR_SECURITY_INVALID}
+    )
+
+
+@pytest.mark.parametrize(
+    ("status", "returncode", "last_message"),
+    (
+        (ReflectorBoundaryStatusV2.CODEX_FAILED, 0, "d" * 64),
+        (ReflectorBoundaryStatusV2.COMPLETED, 1, "d" * 64),
+        (ReflectorBoundaryStatusV2.COMPLETED, 0, None),
+    ),
+)
+def test_timeout_warning_does_not_override_other_reflector_failures(
+    tmp_path: Path,
+    status: ReflectorBoundaryStatusV2,
+    returncode: int,
+    last_message: str | None,
+) -> None:
+    audit_root, result = _write_reflector_receipt(
+        tmp_path,
+        status=status,
+        codex_returncode=returncode,
+        last_message_sha256=last_message,
+        stderr_tail_codes=("CODEX_TIMEOUT",),
+    )
+
+    with pytest.raises(receipt_module._CoreEvidenceError) as captured:
+        receipt_module._verify_reflector_receipts(audit_root, (result,))
+
+    assert captured.value.findings == frozenset(
+        {TaskwiseCanaryFindingV1.REFLECTOR_SECURITY_INVALID}
     )

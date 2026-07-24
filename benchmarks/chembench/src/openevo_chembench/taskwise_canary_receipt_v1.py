@@ -88,6 +88,7 @@ PRODUCT_DISCLAIMER = "NOT_OPENEVO_PRODUCT_RELEASE_ATTESTATION"
 CANARY_CLASSIFICATION = "NON_PERFORMANCE_SAFETY_CANARY"
 CANARY_EVIDENCE_SCOPE = "CANARY_MECHANISM_AND_SECURITY_ONLY"
 PERFORMANCE_GATE_DISCLAIMER = "NOT_A_PERFORMANCE_GATE"
+_RECOVERED_COMPLETION_STDERR_CODES = frozenset({"CODEX_TIMEOUT"})
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _ZERO_SHA256 = "0" * 64
 _RESERVED_FIELDS = frozenset(
@@ -1303,7 +1304,10 @@ def _verify_reflector_receipts(
             or receipt.resume_allowed
             or receipt.replacement_completion_allowed
             or receipt.codex_returncode != 0
-            or receipt.stderr_tail_codes
+            or any(
+                code not in _RECOVERED_COMPLETION_STDERR_CODES
+                for code in receipt.stderr_tail_codes
+            )
             or receipt.source_split != TASKWISE_SOURCE_SPLIT
             or receipt.protocol_id != "taskwise_online_evolution_v1"
             or receipt.last_message_sha256 is None
