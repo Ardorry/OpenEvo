@@ -35,7 +35,9 @@ import uuid
 
 from openevo_chembench.local_codex_executor import (
     _DISABLED_CODEX_FEATURES,
+    _SAFE_ENV_KEYS,
     _find_security_tool_use,
+    _sanitized_execution_environment,
 )
 
 
@@ -751,6 +753,7 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
             command,
             input_text=prompt,
             timeout_seconds=float(config["timeout_seconds"]),
+            environment=_sanitized_execution_environment(),
         )
         codex_returncode = completed.returncode
         event_stream = completed.stdout
@@ -1180,8 +1183,9 @@ def _bubblewrap_base_command(
         "--share-net",
         "--die-with-parent",
         "--new-session",
-        "--clearenv",
     ]
+    if not include_codex:
+        command.append("--clearenv")
     try:
         executable_prefix = executable_source.resolve().open("rb").read(128)
     except OSError as exc:
@@ -1281,9 +1285,22 @@ def _run_process_group(
     *,
     input_text: str,
     timeout_seconds: float,
+    environment: Mapping[str, str],
 ) -> _ProcessResult:
+    if not isinstance(environment, Mapping) or any(
+        type(key) is not str or type(value) is not str for key, value in environment.items()
+    ):
+        raise TypeError("environment must be a string mapping")
+    if (
+        not set(environment).issubset(_SAFE_ENV_KEYS)
+        or not environment.get("PATH")
+        or not environment.get("LANG")
+        or any("\x00" in value for value in environment.values())
+    ):
+        raise ReflectorBoundaryError("REFLECTOR_MODEL_TRANSPORT_ENV_INVALID")
     process = subprocess.Popen(
         list(command),
+        env=dict(environment),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

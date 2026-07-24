@@ -11,6 +11,7 @@ import subprocess
 import pytest
 
 from openevo_chembench.reflector_execution_boundary_v2 import (
+    ReflectorBoundaryError,
     ReflectorBoundaryStatusV2,
     ReflectorExecutionBoundaryV2,
     ReflectorExecutionReceiptV2,
@@ -19,6 +20,8 @@ from openevo_chembench.reflector_execution_boundary_v2 import (
     _create_layout,
     _reflector_hardening_arguments,
     _replace_upstream_paths,
+    _run_process_group,
+    _sanitized_execution_environment,
     inspect_reflector_codex_policy_v2,
 )
 
@@ -347,6 +350,7 @@ def test_real_native_codex_mount_policy_excludes_host_system_and_protected_roots
         executable_command=("/opt/codex-bin", "--version"),
         include_codex=True,
     )
+    assert "--clearenv" not in command
     bind_sources = {
         Path(command[index + 1]).resolve()
         for index, value in enumerate(command[:-2])
@@ -371,6 +375,85 @@ def test_real_native_codex_mount_policy_excludes_host_system_and_protected_roots
     )
     assert completed.returncode == 0
     assert completed.stdout.strip() == "codex-cli 0.144.6"
+
+
+def test_reflector_codex_receives_only_sanitized_transport_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proxy_sentinel = "http://proxy-sentinel.invalid:8080"
+    private_sentinel = "private-environment-sentinel"
+    monkeypatch.setenv("https_proxy", proxy_sentinel)
+    monkeypatch.setenv("CHEMBENCH_PRIVATE_SENTINEL", private_sentinel)
+    layout_root = tmp_path / "layout"
+    layout_root.mkdir()
+    layout = _create_layout(layout_root)
+    (layout["inputs"] / "dev_loo_dataset.jsonl").write_text("{}\n", encoding="utf-8")
+    fake = tmp_path / "fake-codex"
+    fake.write_text(
+        '#!/bin/sh\nprintf \'%s|%s\' "${https_proxy:-}" "${CHEMBENCH_PRIVATE_SENTINEL:-}"\n',
+        encoding="utf-8",
+    )
+    fake.chmod(0o700)
+    command = _bubblewrap_base_command(
+        bwrap_binary=Path(shutil.which("bwrap") or ""),
+        layout=layout,
+        executable_source=fake,
+        executable_command=("/opt/codex-bin",),
+        include_codex=True,
+    )
+    environment = _sanitized_execution_environment()
+    assert environment["https_proxy"] == proxy_sentinel
+    assert "CHEMBENCH_PRIVATE_SENTINEL" not in environment
+    assert "--clearenv" not in command
+    assert proxy_sentinel not in command
+    assert private_sentinel not in command
+
+    completed = _run_process_group(
+        command,
+        input_text="",
+        timeout_seconds=10.0,
+        environment=environment,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout == f"{proxy_sentinel}|"
+    assert private_sentinel not in completed.stdout
+    assert proxy_sentinel not in completed.stderr
+    assert private_sentinel not in completed.stderr
+
+
+def test_reflector_helper_probe_keeps_clearenv(tmp_path: Path) -> None:
+    layout_root = tmp_path / "layout"
+    layout_root.mkdir()
+    layout = _create_layout(layout_root)
+    (layout["inputs"] / "dev_loo_dataset.jsonl").write_text("{}\n", encoding="utf-8")
+    command = _bubblewrap_base_command(
+        bwrap_binary=Path(shutil.which("bwrap") or ""),
+        layout=layout,
+        executable_source=Path("/bin/true"),
+        executable_command=("/bin/true",),
+        include_codex=False,
+    )
+
+    assert command.count("--clearenv") == 1
+
+
+def test_reflector_process_rejects_non_transport_environment() -> None:
+    with pytest.raises(
+        ReflectorBoundaryError,
+        match="REFLECTOR_MODEL_TRANSPORT_ENV_INVALID",
+    ):
+        _run_process_group(
+            ("/bin/true",),
+            input_text="",
+            timeout_seconds=10.0,
+            environment={
+                "LANG": "C.UTF-8",
+                "PATH": "/usr/bin:/bin",
+                "PRIVATE_SECRET": "forbidden",
+            },
+        )
 
 
 def test_safe_assistant_event_creates_private_log_and_cleans_root(
