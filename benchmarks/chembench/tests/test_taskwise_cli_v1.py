@@ -544,6 +544,18 @@ def test_manifest_is_bound_to_config_scope_and_path() -> None:
         cli._verify_static_inputs(wrong_scope, path)
 
 
+def test_canary_fix2_uses_fresh_paired_run_namespaces() -> None:
+    control = load_taskwise_config_v1(cli.CONFIG_ROOT / "control_canary9_taskwise_online_v1.yaml")
+    online = load_taskwise_config_v1(cli.CONFIG_ROOT / "online_canary9_taskwise_online_v1.yaml")
+
+    assert control.run_name == "control_canary9_repeated_session_v1_fix2"
+    assert online.run_name == "online_canary9_taskwise_evolution_v1_fix2"
+    assert control.output_directory.endswith("/canary9/control_fix2")
+    assert online.output_directory.endswith("/canary9/online_fix2")
+    assert "fix1" not in control.output_directory
+    assert "fix1" not in online.output_directory
+
+
 def test_control_online_dispatch_and_private_compare(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -7,13 +7,14 @@ minimal bubblewrap filesystem.  The model transport network remains shared,
 but the repository, benchmark test data, results, user home, and prior
 transcripts are not mounted.
 
-No function in this module invokes Codex during preflight.  The visibility
-probe and unit tests execute only deterministic helper processes.
+Preflight invokes only ``codex --version`` and ``codex debug prompt-input`` in
+an isolated empty home to validate the exact config parser policy.  It never
+uses ``codex exec``, authenticates, or invokes a model.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
@@ -39,19 +40,27 @@ from openevo_chembench.local_codex_executor import (
 
 
 PROTOCOL_ID = "chembench4k_frozen_generalization_v2"
+TASKWISE_PROTOCOL_ID = "taskwise_online_evolution_v1"
 EXPECTED_RECORDS = 45
 TASKWISE_SOURCE_SPLIT = "taskwise_safe_signal"
 _ALLOWED_SOURCE_SPLITS = frozenset({"dev", TASKWISE_SOURCE_SPLIT})
+_PROTOCOL_BY_SOURCE_SPLIT = {
+    "dev": PROTOCOL_ID,
+    TASKWISE_SOURCE_SPLIT: TASKWISE_PROTOCOL_ID,
+}
 CONFIG_ENV = "OPENEVO_CHEMBENCH_REFLECTOR_BOUNDARY_CONFIG_V2"
 WRAPPER_STATUS_ENV = "OPENEVO_CHEMBENCH_REFLECTOR_WRAPPER_V2"
 ISOLATION_FINDING = "REFLECTOR_FILESYSTEM_ISOLATION_MISSING"
 TOOL_VIOLATION_STATUS = "REFLECTOR_SECURITY_TOOL_USE_VIOLATION"
 _CONFIG_SCHEMA = "chembench4k_reflector_wrapper_config_v2"
-_RECEIPT_SCHEMA = "chembench4k_reflector_execution_receipt_v2"
+_RECEIPT_SCHEMA_V2 = "chembench4k_reflector_execution_receipt_v2"
+_RECEIPT_SCHEMA = "chembench4k_reflector_execution_receipt_v3"
 _ROOT_PREFIX = "openevo-chembench-reflector-v2-"
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _MAX_EVENT_BYTES = 16 * 1024 * 1024
 _MAX_LAST_MESSAGE_BYTES = 64 * 1024
+_CODEX_POLICY_PROBE_TIMEOUT_SECONDS = 15.0
+_EXPECTED_CODEX_VERSION = "codex-cli 0.144.6"
 _WRAPPER_EXIT_INVALID = 80
 _WRAPPER_EXIT_CODEX = 81
 _WRAPPER_EXIT_TOOL = 86
@@ -67,6 +76,39 @@ _SAFE_ETC_PATHS = (
     Path("/etc/ld.so.cache"),
     Path("/etc/localtime"),
 )
+_REFLECTOR_HARDENING_CONFIG = (
+    'model_reasoning_effort="medium"',
+    'web_search="disabled"',
+    'approval_policy="never"',
+    'forced_login_method="chatgpt"',
+    "check_for_update_on_startup=false",
+    "allow_login_shell=false",
+    'shell_environment_policy.inherit="none"',
+)
+_REFLECTOR_POLICY_FINDINGS = frozenset(
+    {
+        "REFLECTOR_CODEX_CONFIG_AGENTS_ENABLED_FORBIDDEN",
+        "REFLECTOR_CODEX_CONFIG_POLICY_INVALID",
+        "REFLECTOR_CODEX_CONFIG_PROBE_REJECTED",
+        "REFLECTOR_CODEX_CONFIG_PROBE_UNAVAILABLE",
+        "REFLECTOR_CODEX_VERSION_MISMATCH",
+    }
+)
+_STDERR_TAIL_CODES = frozenset(
+    {
+        "CODEX_AUTH_ERROR",
+        "CODEX_CONFIG_PARSE_ERROR",
+        "CODEX_RATE_LIMIT",
+        "CODEX_STDERR_REDACTED",
+        "CODEX_TIMEOUT",
+        "CODEX_TRANSPORT_ERROR",
+    }
+)
+
+ReflectorCodexPolicyProbeRunnerV2 = Callable[
+    [Sequence[str], Path, Mapping[str, str], float],
+    tuple[int, str],
+]
 
 
 class ReflectorBoundaryStatusV2(str, Enum):
@@ -114,6 +156,11 @@ class ReflectorExecutionReceiptV2:
     retry_allowed: bool
     resume_allowed: bool
     replacement_completion_allowed: bool
+    codex_returncode: int | None = None
+    stderr_sha256: str = hashlib.sha256(b"").hexdigest()
+    stderr_tail_codes: tuple[str, ...] = ()
+    protocol_id: str = PROTOCOL_ID
+    source_split: str = "dev"
 
     @property
     def digest(self) -> str:
@@ -122,7 +169,7 @@ class ReflectorExecutionReceiptV2:
     def to_payload(self) -> dict[str, Any]:
         return {
             "schema_version": _RECEIPT_SCHEMA,
-            "protocol_id": PROTOCOL_ID,
+            "protocol_id": self.protocol_id,
             "invocation_id": self.invocation_id,
             "status": self.status.value,
             "mechanism": self.mechanism,
@@ -139,11 +186,15 @@ class ReflectorExecutionReceiptV2:
             "retry_allowed": self.retry_allowed,
             "resume_allowed": self.resume_allowed,
             "replacement_completion_allowed": self.replacement_completion_allowed,
+            "codex_returncode": self.codex_returncode,
+            "stderr_sha256": self.stderr_sha256,
+            "stderr_tail_codes": list(self.stderr_tail_codes),
+            "source_split": self.source_split,
         }
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> ReflectorExecutionReceiptV2:
-        expected = {
+        legacy_expected = {
             "schema_version",
             "protocol_id",
             "invocation_id",
@@ -163,11 +214,20 @@ class ReflectorExecutionReceiptV2:
             "resume_allowed",
             "replacement_completion_allowed",
         }
-        if set(payload) != expected:
+        current_expected = legacy_expected | {
+            "codex_returncode",
+            "source_split",
+            "stderr_sha256",
+            "stderr_tail_codes",
+        }
+        schema_version = payload.get("schema_version")
+        if not (
+            (schema_version == _RECEIPT_SCHEMA_V2 and set(payload) == legacy_expected)
+            or (schema_version == _RECEIPT_SCHEMA and set(payload) == current_expected)
+        ):
             raise ReflectorBoundaryError("REFLECTOR_RECEIPT_SCHEMA_INVALID")
         if (
-            payload["schema_version"] != _RECEIPT_SCHEMA
-            or payload["protocol_id"] != PROTOCOL_ID
+            payload["protocol_id"] not in _PROTOCOL_BY_SOURCE_SPLIT.values()
             or payload["mechanism"] != "bubblewrap"
             or type(payload["wrapper_invoked"]) is not bool
             or type(payload["cleanup_complete"]) is not bool
@@ -194,6 +254,35 @@ class ReflectorExecutionReceiptV2:
             type(last_digest) is not str or _SHA256_RE.fullmatch(last_digest) is None
         ):
             raise ReflectorBoundaryError("REFLECTOR_RECEIPT_SCHEMA_INVALID")
+        if schema_version == _RECEIPT_SCHEMA:
+            codex_returncode = payload["codex_returncode"]
+            source_split = payload["source_split"]
+            stderr_sha256 = payload["stderr_sha256"]
+            stderr_tail_codes = payload["stderr_tail_codes"]
+            if (
+                (
+                    codex_returncode is not None
+                    and (
+                        isinstance(codex_returncode, bool) or not isinstance(codex_returncode, int)
+                    )
+                )
+                or source_split not in _ALLOWED_SOURCE_SPLITS
+                or payload["protocol_id"] != _PROTOCOL_BY_SOURCE_SPLIT[source_split]
+                or type(stderr_sha256) is not str
+                or _SHA256_RE.fullmatch(stderr_sha256) is None
+                or type(stderr_tail_codes) is not list
+                or len(stderr_tail_codes) > 4
+                or any(
+                    type(code) is not str or code not in _STDERR_TAIL_CODES
+                    for code in stderr_tail_codes
+                )
+            ):
+                raise ReflectorBoundaryError("REFLECTOR_RECEIPT_SCHEMA_INVALID")
+        else:
+            codex_returncode = None
+            source_split = "dev"
+            stderr_sha256 = hashlib.sha256(b"").hexdigest()
+            stderr_tail_codes = []
         counts: list[tuple[str, int]] = []
         for key, value in payload["event_counts"].items():
             if type(key) is not str or type(value) is not int or value <= 0:
@@ -220,6 +309,11 @@ class ReflectorExecutionReceiptV2:
             retry_allowed=payload["retry_allowed"],
             resume_allowed=payload["resume_allowed"],
             replacement_completion_allowed=payload["replacement_completion_allowed"],
+            codex_returncode=codex_returncode,
+            stderr_sha256=stderr_sha256,
+            stderr_tail_codes=tuple(stderr_tail_codes),
+            protocol_id=str(payload["protocol_id"]),
+            source_split=source_split,
         )
 
 
@@ -231,6 +325,8 @@ class ReflectorBoundaryActivationV2:
     expected_records_sha256: str
     expected_record_count: int
     expected_real_codex_sha256: str
+    expected_protocol_id: str
+    expected_source_split: str
 
     def require_receipt(self) -> ReflectorExecutionReceiptV2:
         """Require a successful, cleaned, zero-tool wrapper invocation."""
@@ -267,6 +363,8 @@ class ReflectorBoundaryActivationV2:
             or receipt.record_count != self.expected_record_count
             or receipt.ordered_records_sha256 != self.expected_records_sha256
             or receipt.real_codex_sha256 != self.expected_real_codex_sha256
+            or receipt.protocol_id != self.expected_protocol_id
+            or receipt.source_split != self.expected_source_split
             or not receipt.wrapper_invoked
         ):
             raise ReflectorBoundaryError("REFLECTOR_WRAPPER_RECEIPT_BINDING_INVALID")
@@ -289,6 +387,7 @@ class ReflectorExecutionBoundaryV2:
         bwrap_binary: str | Path | None = None,
         timeout_seconds: float = 900.0,
         temporary_parent: str | Path | None = None,
+        config_probe_runner: ReflectorCodexPolicyProbeRunnerV2 | None = None,
     ) -> None:
         self.dev_artifact_path = Path(dev_artifact_path).resolve()
         self.expected_records_sha256 = expected_records_sha256
@@ -309,6 +408,7 @@ class ReflectorExecutionBoundaryV2:
         self.temporary_parent = (
             None if temporary_parent is None else Path(temporary_parent).resolve()
         )
+        self.config_probe_runner = config_probe_runner
         if _SHA256_RE.fullmatch(expected_records_sha256) is None:
             raise ValueError("expected_records_sha256 must be a lowercase SHA-256")
         if (
@@ -388,6 +488,10 @@ class ReflectorExecutionBoundaryV2:
         )
         if len(records) != self.expected_record_count or digest != self.expected_records_sha256:
             raise ReflectorBoundaryError("REFLECTOR_DEV_ARTIFACT_BINDING_INVALID")
+        verify_reflector_codex_policy_v2(
+            self.real_codex_binary,
+            probe_runner=self.config_probe_runner,
+        )
         return capability
 
     @contextmanager
@@ -421,7 +525,7 @@ class ReflectorExecutionBoundaryV2:
             _exclusive_write(wrapper_path, launcher.encode("utf-8"), mode=0o700)
             config = {
                 "schema_version": _CONFIG_SCHEMA,
-                "protocol_id": PROTOCOL_ID,
+                "protocol_id": _PROTOCOL_BY_SOURCE_SPLIT[self.expected_source_split],
                 "invocation_id": invocation_id,
                 "bwrap_binary": os.fspath(self.bwrap_binary),
                 "real_codex_binary": os.fspath(self.real_codex_binary),
@@ -458,6 +562,8 @@ class ReflectorExecutionBoundaryV2:
                 expected_records_sha256=self.expected_records_sha256,
                 expected_record_count=self.expected_record_count,
                 expected_real_codex_sha256=real_codex_sha256,
+                expected_protocol_id=_PROTOCOL_BY_SOURCE_SPLIT[self.expected_source_split],
+                expected_source_split=self.expected_source_split,
             )
             try:
                 yield activation
@@ -602,6 +708,8 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
     status = ReflectorBoundaryStatusV2.INVALID_INVOCATION
     event_stream = ""
     event_counts: dict[str, int] = {}
+    codex_returncode: int | None = None
+    stderr = ""
     last_message_sha256: str | None = None
     return_code = _WRAPPER_EXIT_INVALID
     try:
@@ -644,7 +752,9 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
             input_text=prompt,
             timeout_seconds=float(config["timeout_seconds"]),
         )
+        codex_returncode = completed.returncode
         event_stream = completed.stdout
+        stderr = completed.stderr
         if len(event_stream.encode("utf-8", errors="replace")) > _MAX_EVENT_BYTES:
             event_counts = {"unknown_tool": 1}
         else:
@@ -708,6 +818,11 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
             retry_allowed=False,
             resume_allowed=False,
             replacement_completion_allowed=False,
+            codex_returncode=codex_returncode,
+            stderr_sha256=hashlib.sha256(stderr.encode("utf-8", errors="replace")).hexdigest(),
+            stderr_tail_codes=_stderr_tail_codes(stderr),
+            protocol_id=str(config["protocol_id"]),
+            source_split=str(config["source_split"]),
         )
         _exclusive_write(
             Path(config["receipt_path"]),
@@ -755,11 +870,12 @@ def _load_wrapper_config(path: Path) -> dict[str, Any]:
         not isinstance(payload, dict)
         or set(payload) != expected
         or payload["schema_version"] != _CONFIG_SCHEMA
-        or payload["protocol_id"] != PROTOCOL_ID
+        or payload["protocol_id"] not in _PROTOCOL_BY_SOURCE_SPLIT.values()
         or isinstance(payload["record_count"], bool)
         or not isinstance(payload["record_count"], int)
         or not 1 <= payload["record_count"] <= EXPECTED_RECORDS
         or payload["source_split"] not in _ALLOWED_SOURCE_SPLITS
+        or payload["protocol_id"] != _PROTOCOL_BY_SOURCE_SPLIT[payload["source_split"]]
     ):
         raise ReflectorBoundaryError("REFLECTOR_WRAPPER_CONFIG_INVALID")
     for key in ("real_codex_sha256", "dev_artifact_sha256", "ordered_records_sha256"):
@@ -831,23 +947,194 @@ def _replace_upstream_paths(arguments: list[str]) -> list[str]:
     existing_disabled = {
         replaced[index + 1] for index, value in enumerate(replaced[:-1]) if value == "--disable"
     }
+    replaced[insertion:insertion] = _reflector_hardening_arguments(existing_disabled)
+    return replaced
+
+
+def _reflector_hardening_arguments(
+    existing_disabled: set[str] | frozenset[str] = frozenset(),
+) -> list[str]:
+    """Return the single audited source of reflector Codex hardening args."""
+
+    if not isinstance(existing_disabled, (set, frozenset)) or any(
+        type(value) is not str for value in existing_disabled
+    ):
+        raise TypeError("existing_disabled must be a set of feature names")
     hardening: list[str] = []
     for feature in _DISABLED_CODEX_FEATURES:
         if feature not in existing_disabled:
             hardening.extend(("--disable", feature))
-    for config in (
-        'model_reasoning_effort="medium"',
-        'web_search="disabled"',
-        'approval_policy="never"',
-        'forced_login_method="chatgpt"',
-        "check_for_update_on_startup=false",
-        "allow_login_shell=false",
-        'shell_environment_policy.inherit="none"',
-        "agents.enabled=false",
-    ):
+    for config in _REFLECTOR_HARDENING_CONFIG:
+        key = config.partition("=")[0]
+        if key == "agents.enabled":
+            raise ReflectorBoundaryError("REFLECTOR_CODEX_CONFIG_AGENTS_ENABLED_FORBIDDEN")
         hardening.extend(("--config", config))
-    replaced[insertion:insertion] = hardening
-    return replaced
+    return hardening
+
+
+def inspect_reflector_codex_policy_v2(
+    real_codex_binary: str | Path,
+    *,
+    probe_runner: ReflectorCodexPolicyProbeRunnerV2 | None = None,
+    hardening_arguments: Sequence[str] | None = None,
+) -> dict[str, object]:
+    """Run a zero-model Codex config-parser probe in an isolated empty home."""
+
+    executable = Path(real_codex_binary).resolve()
+    arguments = tuple(
+        _reflector_hardening_arguments() if hardening_arguments is None else hardening_arguments
+    )
+    findings: set[str] = set()
+    config_values = _flag_values(arguments, "--config")
+    disabled_values = _flag_values(arguments, "--disable")
+    if (
+        any(value.partition("=")[0] == "agents.enabled" for value in config_values)
+        or "agents.enabled=false" in arguments
+    ):
+        findings.add("REFLECTOR_CODEX_CONFIG_AGENTS_ENABLED_FORBIDDEN")
+    expected_arguments = tuple(_reflector_hardening_arguments())
+    if (
+        arguments != expected_arguments
+        or "exec" in arguments
+        or "--model" in arguments
+        or tuple(config_values) != _REFLECTOR_HARDENING_CONFIG
+        or tuple(disabled_values) != _DISABLED_CODEX_FEATURES
+    ):
+        findings.add("REFLECTOR_CODEX_CONFIG_POLICY_INVALID")
+
+    runner = probe_runner or _default_reflector_codex_policy_probe_runner_v2
+    version_returncode: int | None = None
+    version_output = ""
+    config_returncode: int | None = None
+    try:
+        with tempfile.TemporaryDirectory(prefix=".reflector-codex-policy-preflight-") as temporary:
+            root = Path(temporary)
+            paths = {
+                name: root / name
+                for name in (
+                    "home",
+                    "codex_home",
+                    "xdg_config",
+                    "xdg_cache",
+                    "xdg_state",
+                    "tmp",
+                    "work",
+                )
+            }
+            for path in paths.values():
+                path.mkdir(mode=0o700)
+            environment = {
+                "CODEX_HOME": os.fspath(paths["codex_home"]),
+                "HOME": os.fspath(paths["home"]),
+                "LANG": "C.UTF-8",
+                "PATH": os.environ.get("PATH", os.defpath),
+                "TMP": os.fspath(paths["tmp"]),
+                "TMPDIR": os.fspath(paths["tmp"]),
+                "XDG_CACHE_HOME": os.fspath(paths["xdg_cache"]),
+                "XDG_CONFIG_HOME": os.fspath(paths["xdg_config"]),
+                "XDG_STATE_HOME": os.fspath(paths["xdg_state"]),
+            }
+            version_returncode, version_output = runner(
+                (os.fspath(executable), "--version"),
+                paths["work"],
+                environment,
+                _CODEX_POLICY_PROBE_TIMEOUT_SECONDS,
+            )
+            config_returncode, _discarded_output = runner(
+                (
+                    os.fspath(executable),
+                    "debug",
+                    "prompt-input",
+                    *arguments,
+                    "REFLECTOR_CONFIG_POLICY_PREFLIGHT_NO_MODEL",
+                ),
+                paths["work"],
+                environment,
+                _CODEX_POLICY_PROBE_TIMEOUT_SECONDS,
+            )
+    except (OSError, RuntimeError, TypeError, ValueError):
+        findings.add("REFLECTOR_CODEX_CONFIG_PROBE_UNAVAILABLE")
+    else:
+        if version_returncode != 0 or version_output.strip() != _EXPECTED_CODEX_VERSION:
+            findings.add("REFLECTOR_CODEX_VERSION_MISMATCH")
+        if config_returncode != 0:
+            findings.add("REFLECTOR_CODEX_CONFIG_PROBE_REJECTED")
+
+    receipt = {
+        "schema_version": "chembench4k_reflector_codex_policy_preflight_v1",
+        "status": "PASS" if not findings else "BLOCKED",
+        "finding_codes": sorted(findings),
+        "codex_cli_version": _EXPECTED_CODEX_VERSION.removeprefix("codex-cli "),
+        "hardening_sha256": _canonical_sha256(list(arguments)),
+        "model_calls": 0,
+        "stderr_included": False,
+    }
+    return receipt
+
+
+def verify_reflector_codex_policy_v2(
+    real_codex_binary: str | Path,
+    *,
+    probe_runner: ReflectorCodexPolicyProbeRunnerV2 | None = None,
+) -> dict[str, object]:
+    receipt = inspect_reflector_codex_policy_v2(
+        real_codex_binary,
+        probe_runner=probe_runner,
+    )
+    findings = receipt["finding_codes"]
+    if type(findings) is not list or any(
+        code not in _REFLECTOR_POLICY_FINDINGS for code in findings
+    ):
+        raise ReflectorBoundaryError("REFLECTOR_CODEX_CONFIG_POLICY_INVALID")
+    if findings:
+        raise ReflectorBoundaryError(findings[0])
+    return receipt
+
+
+def _flag_values(arguments: Sequence[str], flag: str) -> tuple[str, ...]:
+    if (
+        isinstance(arguments, (str, bytes))
+        or not isinstance(arguments, Sequence)
+        or any(type(value) is not str for value in arguments)
+    ):
+        raise ReflectorBoundaryError("REFLECTOR_CODEX_CONFIG_POLICY_INVALID")
+    values: list[str] = []
+    for index, value in enumerate(arguments):
+        if value == flag:
+            if index + 1 >= len(arguments) or arguments[index + 1].startswith("--"):
+                raise ReflectorBoundaryError("REFLECTOR_CODEX_CONFIG_POLICY_INVALID")
+            values.append(arguments[index + 1])
+    return tuple(values)
+
+
+def _default_reflector_codex_policy_probe_runner_v2(
+    command: Sequence[str],
+    cwd: Path,
+    environment: Mapping[str, str],
+    timeout_seconds: float,
+) -> tuple[int, str]:
+    """Execute only version/debug commands and discard stderr completely."""
+
+    if "exec" in command or "--model" in command:
+        raise ReflectorBoundaryError("REFLECTOR_CODEX_CONFIG_POLICY_INVALID")
+    try:
+        completed = subprocess.run(
+            tuple(command),
+            cwd=cwd,
+            env=dict(environment),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+            start_new_session=True,
+        )
+    except subprocess.TimeoutExpired:
+        return 124, ""
+    except OSError:
+        return 126, ""
+    return completed.returncode, completed.stdout
 
 
 def _resolve_native_codex_binary(candidate: Path) -> Path:
@@ -986,6 +1273,7 @@ def _bubblewrap_base_command(
 class _ProcessResult:
     returncode: int
     stdout: str
+    stderr: str
 
 
 def _run_process_group(
@@ -1017,8 +1305,38 @@ def _run_process_group(
             except ProcessLookupError:
                 pass
             stdout, _stderr = process.communicate()
-        return _ProcessResult(returncode=124, stdout=stdout)
-    return _ProcessResult(returncode=process.returncode, stdout=stdout)
+        return _ProcessResult(returncode=124, stdout=stdout, stderr=_stderr)
+    return _ProcessResult(
+        returncode=process.returncode,
+        stdout=stdout,
+        stderr=_stderr,
+    )
+
+
+def _stderr_tail_codes(stderr: str) -> tuple[str, ...]:
+    """Map at most four stderr tail lines into a non-text closed taxonomy."""
+
+    if type(stderr) is not str:
+        raise TypeError("stderr must be text")
+    codes: list[str] = []
+    for line in tuple(item for item in stderr.splitlines() if item.strip())[-4:]:
+        normalized = line.casefold()
+        if "config.toml" in normalized or "invalid type" in normalized:
+            code = "CODEX_CONFIG_PARSE_ERROR"
+        elif "auth" in normalized or "login" in normalized:
+            code = "CODEX_AUTH_ERROR"
+        elif "429" in normalized or "rate limit" in normalized:
+            code = "CODEX_RATE_LIMIT"
+        elif "timeout" in normalized or "timed out" in normalized:
+            code = "CODEX_TIMEOUT"
+        elif any(
+            marker in normalized for marker in ("connection", "transport", "websocket", "network")
+        ):
+            code = "CODEX_TRANSPORT_ERROR"
+        else:
+            code = "CODEX_STDERR_REDACTED"
+        codes.append(code)
+    return tuple(codes)
 
 
 def _create_layout(root: Path) -> dict[str, Path]:

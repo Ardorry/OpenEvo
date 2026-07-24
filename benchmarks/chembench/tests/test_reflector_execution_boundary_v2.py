@@ -13,10 +13,13 @@ import pytest
 from openevo_chembench.reflector_execution_boundary_v2 import (
     ReflectorBoundaryStatusV2,
     ReflectorExecutionBoundaryV2,
+    ReflectorExecutionReceiptV2,
     TASKWISE_SOURCE_SPLIT,
     _bubblewrap_base_command,
     _create_layout,
+    _reflector_hardening_arguments,
     _replace_upstream_paths,
+    inspect_reflector_codex_policy_v2,
 )
 
 
@@ -78,6 +81,31 @@ printf '%s\\n' '# Do' 'Check constraints.' '# Avoid' 'Avoid lookup.' '# Validate
     path.chmod(0o700)
 
 
+def _fake_failing_codex(path: Path) -> str:
+    stderr = "Error loading config.toml: invalid type: boolean false, expected mapping\n"
+    path.write_text(
+        f"#!/bin/sh\nprintf '%s' '{stderr}' >&2\nexit 1\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o700)
+    return stderr
+
+
+def _passing_policy_probe(
+    arguments,
+    _cwd: Path,
+    _environment,
+    _timeout_seconds: float,
+) -> tuple[int, str]:
+    command = tuple(arguments)
+    if command[1:] == ("--version",):
+        return 0, "codex-cli 0.144.6\n"
+    assert command[1:3] == ("debug", "prompt-input")
+    assert "exec" not in command
+    assert "--model" not in command
+    return 0, "discarded config parser output"
+
+
 def _boundary(
     tmp_path: Path,
     *,
@@ -102,6 +130,7 @@ def _boundary(
             auth_source=auth,
             timeout_seconds=30,
             temporary_parent=temporary_parent,
+            config_probe_runner=_passing_policy_probe,
         ),
         audit,
         temporary_parent,
@@ -148,6 +177,117 @@ def test_wrapper_preserves_upstream_args_and_adds_actual_disable_overrides(
     assert 'web_search="disabled"' in rewritten
     assert 'model_reasoning_effort="medium"' in rewritten
     assert 'approval_policy="never"' in rewritten
+    assert "agents.enabled=false" not in rewritten
+
+
+def test_reflector_hardening_has_no_agents_enabled_override() -> None:
+    arguments = _reflector_hardening_arguments()
+    config_values = [
+        arguments[index + 1] for index, value in enumerate(arguments[:-1]) if value == "--config"
+    ]
+    assert config_values == [
+        'model_reasoning_effort="medium"',
+        'web_search="disabled"',
+        'approval_policy="never"',
+        'forced_login_method="chatgpt"',
+        "check_for_update_on_startup=false",
+        "allow_login_shell=false",
+        'shell_environment_policy.inherit="none"',
+    ]
+    assert all(not value.startswith("agents.") for value in config_values)
+
+
+def test_reflector_config_probe_is_zero_model_and_discards_subprocess_text(
+    tmp_path: Path,
+) -> None:
+    fake_binary = tmp_path / "codex"
+    fake_binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_binary.chmod(0o700)
+    calls: list[tuple[str, ...]] = []
+
+    def fake_probe(
+        arguments,
+        cwd: Path,
+        environment,
+        _timeout_seconds: float,
+    ) -> tuple[int, str]:
+        command = tuple(arguments)
+        calls.append(command)
+        assert not any(cwd.iterdir())
+        assert Path(environment["HOME"]).is_dir()
+        assert Path(environment["CODEX_HOME"]).is_dir()
+        assert Path(environment["XDG_CONFIG_HOME"]).is_dir()
+        assert Path(environment["XDG_CACHE_HOME"]).is_dir()
+        assert Path(environment["XDG_STATE_HOME"]).is_dir()
+        assert Path(environment["TMPDIR"]).is_dir()
+        if command[1:] == ("--version",):
+            return 0, "codex-cli 0.144.6\n"
+        assert command[1:3] == ("debug", "prompt-input")
+        assert "exec" not in command
+        assert "--model" not in command
+        return 0, "PRIVATE OUTPUT MUST NOT ENTER RECEIPT"
+
+    receipt = inspect_reflector_codex_policy_v2(
+        fake_binary,
+        probe_runner=fake_probe,
+    )
+
+    assert receipt["status"] == "PASS"
+    assert receipt["finding_codes"] == []
+    assert receipt["model_calls"] == 0
+    assert receipt["stderr_included"] is False
+    assert "PRIVATE OUTPUT" not in json.dumps(receipt, sort_keys=True)
+    assert len(calls) == 2
+
+
+def test_reflector_config_probe_rejects_agents_enabled_without_model(
+    tmp_path: Path,
+) -> None:
+    fake_binary = tmp_path / "codex"
+    fake_binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_binary.chmod(0o700)
+    invalid = tuple(_reflector_hardening_arguments()) + (
+        "--config",
+        "agents.enabled=false",
+    )
+
+    receipt = inspect_reflector_codex_policy_v2(
+        fake_binary,
+        probe_runner=_passing_policy_probe,
+        hardening_arguments=invalid,
+    )
+
+    assert receipt["status"] == "BLOCKED"
+    assert receipt["model_calls"] == 0
+    assert "REFLECTOR_CODEX_CONFIG_AGENTS_ENABLED_FORBIDDEN" in receipt["finding_codes"]
+    assert "REFLECTOR_CODEX_CONFIG_POLICY_INVALID" in receipt["finding_codes"]
+
+
+def test_reflector_preflight_fails_closed_when_config_parser_rejects(
+    tmp_path: Path,
+) -> None:
+    boundary, audit, _temporary = _boundary(
+        tmp_path,
+        event={"type": "turn.completed", "usage": {}},
+    )
+
+    def rejecting_probe(
+        arguments,
+        _cwd: Path,
+        _environment,
+        _timeout_seconds: float,
+    ) -> tuple[int, str]:
+        if tuple(arguments)[1:] == ("--version",):
+            return 0, "codex-cli 0.144.6\n"
+        return 1, "PRIVATE STDERR MUST NOT SURFACE"
+
+    boundary.config_probe_runner = rejecting_probe
+    with pytest.raises(
+        RuntimeError,
+        match="REFLECTOR_CODEX_CONFIG_PROBE_REJECTED",
+    ):
+        boundary.preflight()
+    assert not audit.exists()
 
 
 def test_bubblewrap_visibility_denies_host_sentinels(tmp_path: Path) -> None:
@@ -267,6 +407,82 @@ def test_safe_assistant_event_creates_private_log_and_cleans_root(
     assert not list(temporary_parent.glob("openevo-chembench-reflector-v2-*"))
 
 
+def test_codex_failure_receipt_keeps_only_safe_private_diagnostics(
+    tmp_path: Path,
+) -> None:
+    boundary, audit, temporary_parent = _boundary(
+        tmp_path,
+        event={"type": "turn.completed", "usage": {}},
+    )
+    expected_stderr = _fake_failing_codex(boundary.real_codex_binary)
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+
+    with boundary.activate() as activation:
+        completed = subprocess.run(
+            _upstream_args(upstream),
+            input="synthetic prompt that must not enter diagnostics",
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+
+    assert completed.returncode != 0
+    assert completed.stdout == ""
+    assert completed.stderr.strip() == "CODEX_FAILED"
+    assert not (upstream / "last-message.md").exists()
+    receipt = activation.load_receipt_for_audit()
+    assert receipt.status is ReflectorBoundaryStatusV2.CODEX_FAILED
+    assert receipt.codex_returncode == 1
+    assert receipt.stderr_sha256 == hashlib.sha256(expected_stderr.encode("utf-8")).hexdigest()
+    assert receipt.stderr_tail_codes == ("CODEX_CONFIG_PARSE_ERROR",)
+    serialized = json.dumps(receipt.to_payload(), sort_keys=True)
+    assert "synthetic prompt" not in serialized
+    assert "invalid type" not in serialized
+    assert "boolean false" not in serialized
+    assert stat.S_IMODE(activation.receipt_path.stat().st_mode) == 0o600
+    assert stat.S_IMODE((audit / receipt.private_event_reference).stat().st_mode) == 0o600
+    assert not list(temporary_parent.glob("openevo-chembench-reflector-v2-*"))
+
+
+def test_legacy_fix1_v2_receipt_remains_readable() -> None:
+    receipt = ReflectorExecutionReceiptV2(
+        invocation_id="a" * 32,
+        status=ReflectorBoundaryStatusV2.CODEX_FAILED,
+        mechanism="bubblewrap",
+        wrapper_invoked=True,
+        real_codex_sha256="1" * 64,
+        dev_artifact_sha256="2" * 64,
+        ordered_records_sha256="3" * 64,
+        record_count=1,
+        event_stream_sha256=hashlib.sha256(b"").hexdigest(),
+        event_counts=(),
+        private_event_reference=f"{'a' * 32}/events.jsonl",
+        last_message_sha256=None,
+        cleanup_complete=True,
+        retry_allowed=False,
+        resume_allowed=False,
+        replacement_completion_allowed=False,
+    )
+    legacy = receipt.to_payload()
+    legacy["schema_version"] = "chembench4k_reflector_execution_receipt_v2"
+    for key in (
+        "codex_returncode",
+        "source_split",
+        "stderr_sha256",
+        "stderr_tail_codes",
+    ):
+        legacy.pop(key)
+
+    loaded = ReflectorExecutionReceiptV2.from_payload(legacy)
+
+    assert loaded.status is ReflectorBoundaryStatusV2.CODEX_FAILED
+    assert loaded.codex_returncode is None
+    assert loaded.stderr_sha256 == hashlib.sha256(b"").hexdigest()
+    assert loaded.stderr_tail_codes == ()
+
+
 def test_taskwise_two_record_boundary_uses_same_isolated_wrapper(
     tmp_path: Path,
 ) -> None:
@@ -307,6 +523,7 @@ def test_taskwise_two_record_boundary_uses_same_isolated_wrapper(
         auth_source=auth,
         timeout_seconds=30,
         temporary_parent=temporary_parent,
+        config_probe_runner=_passing_policy_probe,
     )
     upstream = tmp_path / "upstream"
     upstream.mkdir()
@@ -323,6 +540,8 @@ def test_taskwise_two_record_boundary_uses_same_isolated_wrapper(
     receipt = activation.require_receipt()
     assert receipt.record_count == 2
     assert receipt.ordered_records_sha256 == _canonical_sha256(records)
+    assert receipt.protocol_id == "taskwise_online_evolution_v1"
+    assert receipt.source_split == TASKWISE_SOURCE_SPLIT
 
 
 def test_malformed_event_is_unknown_tool_violation(tmp_path: Path) -> None:

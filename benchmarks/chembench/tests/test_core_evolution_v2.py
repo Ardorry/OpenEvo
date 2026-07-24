@@ -186,6 +186,14 @@ def _write_synthetic_reflector_codex(
     path.write_text(
         f"""#!/bin/sh
 set -eu
+if [ "${{1:-}}" = "--version" ]; then
+  printf '%s\\n' 'codex-cli 0.144.6'
+  exit 0
+fi
+if [ "${{1:-}}" = "debug" ] && [ "${{2:-}}" = "prompt-input" ]; then
+  printf '%s\\n' '{{}}'
+  exit 0
+fi
 output=""
 while [ "$#" -gt 0 ]; do
   if [ "$1" = "--output-last-message" ]; then
