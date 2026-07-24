@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
@@ -211,6 +212,7 @@ _CLI_PUBLIC_FAILURE_CODES = (
             "TASKWISE_ARM_PARITY_MISMATCH",
             "TASKWISE_CLI_INTERNAL_ERROR",
             "TASKWISE_COMPARISON_OUTPUT_EXISTS",
+            "TASKWISE_COMPARISON_STORAGE_INVALID",
             "TASKWISE_CONFIG_PATH_BINDING_MISMATCH",
             "TASKWISE_CONTROL_MEMORY_EVIDENCE_INVALID",
             "TASKWISE_CORE_PREFLIGHT_FAILED",
@@ -859,15 +861,7 @@ def compare(
                 / "private"
                 / "taskwise_comparison_v1.json"
             )
-        path.parent.mkdir(mode=0o700, exist_ok=True)
-        if path.exists():
-            raise TaskwiseCLIError("TASKWISE_COMPARISON_OUTPUT_EXISTS")
-        payload = _canonical_bytes(report)
-        descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(payload)
-            stream.flush()
-            os.fsync(stream.fileno())
+        _persist_private_comparison_report_v1(path, report)
     return report
 
 
@@ -1143,14 +1137,155 @@ def _persist_pilot_stream_report(
         REPOSITORY_ROOT,
         generation_id,
     )
-    path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
-    if path.exists():
-        raise TaskwiseCLIError("TASKWISE_COMPARISON_OUTPUT_EXISTS")
-    descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    with os.fdopen(descriptor, "wb") as stream:
-        stream.write(_canonical_bytes(report))
-        stream.flush()
-        os.fsync(stream.fileno())
+    _persist_private_comparison_report_v1(path, report)
+
+
+def _persist_private_comparison_report_v1(
+    path: Path,
+    report: dict[str, Any],
+) -> None:
+    """Persist one immutable private report beneath an attested generation."""
+
+    parent_descriptor: int | None = None
+    report_descriptor: int | None = None
+    try:
+        payload = _canonical_bytes(report)
+        parent_descriptor = _open_private_comparison_parent_v1(path)
+        flags = (
+            os.O_CREAT
+            | os.O_EXCL
+            | os.O_WRONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        try:
+            report_descriptor = os.open(
+                path.name,
+                flags,
+                0o600,
+                dir_fd=parent_descriptor,
+            )
+        except FileExistsError as exc:
+            raise TaskwiseCLIError("TASKWISE_COMPARISON_OUTPUT_EXISTS") from exc
+        os.fchmod(report_descriptor, 0o600)
+        metadata = os.fstat(report_descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_uid != os.geteuid()
+        ):
+            raise OSError("private comparison report attestation failed")
+        with os.fdopen(report_descriptor, "wb") as stream:
+            report_descriptor = None
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.fsync(parent_descriptor)
+    except TaskwiseCLIError:
+        raise
+    except OSError as exc:
+        raise TaskwiseCLIError("TASKWISE_COMPARISON_STORAGE_INVALID") from exc
+    finally:
+        if report_descriptor is not None:
+            try:
+                os.close(report_descriptor)
+            except OSError:
+                pass
+        if parent_descriptor is not None:
+            try:
+                os.close(parent_descriptor)
+            except OSError:
+                pass
+
+
+def _open_private_comparison_parent_v1(path: Path) -> int:
+    """Create and open the private generation directory without symlinks."""
+
+    if not isinstance(path, Path) or not path.is_absolute() or ".." in path.parts:
+        raise OSError("private comparison path is invalid")
+    try:
+        relative = path.relative_to(REPOSITORY_ROOT)
+    except ValueError as exc:
+        raise OSError("private comparison path escapes repository") from exc
+    parts = relative.parts
+    valid_canary = (
+        len(parts) == 7
+        and parts[:4]
+        == (
+            "results",
+            "chembench4k_taskwise_online_v1",
+            "canary9",
+            "generations",
+        )
+        and parts[5:] == ("private", "taskwise_comparison_v1.json")
+    )
+    valid_pilot = (
+        len(parts) == 6
+        and parts[:3]
+        == (
+            "results",
+            "chembench4k_taskwise_online_v1",
+            "pilot500_generations",
+        )
+        and parts[4:] == ("private", "taskwise_stream_comparison_v1.json")
+    )
+    if not (valid_canary or valid_pilot):
+        raise OSError("private comparison path schema is invalid")
+    try:
+        validate_taskwise_generation_id_v1(parts[-3])
+    except (TypeError, ValueError) as exc:
+        raise OSError("private comparison generation is invalid") from exc
+
+    directory_flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    current_descriptor: int | None = None
+    try:
+        current_descriptor = os.open(REPOSITORY_ROOT, directory_flags)
+        root_metadata = os.fstat(current_descriptor)
+        if not stat.S_ISDIR(root_metadata.st_mode) or root_metadata.st_uid != os.geteuid():
+            raise OSError("repository root attestation failed")
+        for index, component in enumerate(parts[:-1]):
+            created = False
+            try:
+                child_descriptor = os.open(
+                    component,
+                    directory_flags,
+                    dir_fd=current_descriptor,
+                )
+            except FileNotFoundError:
+                os.mkdir(component, mode=0o700, dir_fd=current_descriptor)
+                child_descriptor = os.open(
+                    component,
+                    directory_flags,
+                    dir_fd=current_descriptor,
+                )
+                os.fchmod(child_descriptor, 0o700)
+                created = True
+            previous_descriptor = current_descriptor
+            current_descriptor = child_descriptor
+            os.close(previous_descriptor)
+            metadata = os.fstat(current_descriptor)
+            is_generation_private = index >= len(parts) - 3
+            if (
+                not stat.S_ISDIR(metadata.st_mode)
+                or metadata.st_uid != os.geteuid()
+                or ((created or is_generation_private) and stat.S_IMODE(metadata.st_mode) != 0o700)
+            ):
+                raise OSError("private comparison directory attestation failed")
+        assert current_descriptor is not None
+        result = current_descriptor
+        current_descriptor = None
+        return result
+    finally:
+        if current_descriptor is not None:
+            try:
+                os.close(current_descriptor)
+            except OSError:
+                pass
 
 
 def verify_taskwise_source_gate_v1(config: TaskwiseExperimentConfigV1) -> str:

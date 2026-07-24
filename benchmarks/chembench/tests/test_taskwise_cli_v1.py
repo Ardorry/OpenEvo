@@ -566,14 +566,14 @@ def test_manifest_is_bound_to_config_scope_and_path() -> None:
         cli._verify_static_inputs(wrong_scope, path)
 
 
-def test_canary_fix5_uses_fresh_paired_run_namespaces() -> None:
+def test_canary_fix6_uses_fresh_paired_run_namespaces() -> None:
     control = load_taskwise_config_v1(cli.CONFIG_ROOT / "control_canary9_taskwise_online_v1.yaml")
     online = load_taskwise_config_v1(cli.CONFIG_ROOT / "online_canary9_taskwise_online_v1.yaml")
 
-    assert control.run_name == "control_canary9_repeated_session_v1_fix5"
-    assert online.run_name == "online_canary9_taskwise_evolution_v1_fix5"
-    assert control.output_directory.endswith("/canary9/control_fix5")
-    assert online.output_directory.endswith("/canary9/online_fix5")
+    assert control.run_name == "control_canary9_repeated_session_v1_fix6"
+    assert online.run_name == "online_canary9_taskwise_evolution_v1_fix6"
+    assert control.output_directory.endswith("/canary9/control_fix6")
+    assert online.output_directory.endswith("/canary9/online_fix6")
     assert "fix1" not in control.output_directory
     assert "fix1" not in online.output_directory
 
