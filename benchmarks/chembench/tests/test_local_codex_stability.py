@@ -261,16 +261,18 @@ class LocalCodexStabilityTests(unittest.TestCase):
 
             self.assertEqual(
                 first.exception.code,
-                LocalCodexExecutionErrorCode.DISALLOWED_PLUGIN_ACTIVITY,
+                LocalCodexExecutionErrorCode.CLEANUP_FAILED,
             )
             self.assertEqual(
                 second.exception.code,
                 LocalCodexExecutionErrorCode.CLEANUP_FAILED,
             )
+            self.assertFalse(second.exception.retry_allowed)
+            self.assertFalse(second.exception.resume_allowed)
             self.assertEqual(len(runner.calls), 1)
             roots_before_close = list(isolation_parent.glob("openevo-chembench-local-codex-*"))
             self.assertEqual(len(roots_before_close), 1)
-            self.assertFalse((roots_before_close[0] / "codex-home" / "auth.json").exists())
+            self.assertFalse((roots_before_close[0] / "codex_home" / "auth.json").exists())
 
             executor.close()
             self.assertEqual(
@@ -278,7 +280,7 @@ class LocalCodexStabilityTests(unittest.TestCase):
                 [],
             )
             receipts = sorted(diagnostics.glob("receipt_*.json"))
-            self.assertGreaterEqual(len(receipts), 2)
+            self.assertGreaterEqual(len(receipts), 1)
 
     def test_command_oserror_cleans_isolation_root(self) -> None:
         runner = _StableRunner(
@@ -303,6 +305,12 @@ class LocalCodexStabilityTests(unittest.TestCase):
             receipts = sorted(diagnostics.glob("receipt_*.json"))
             self.assertEqual(len(receipts), 1)
             serialized = receipts[0].read_text(encoding="utf-8")
+            payload = json.loads(serialized)
+            self.assertEqual(payload["exception_class"], "OSError")
+            self.assertEqual(
+                payload["redacted_exception_message"],
+                "executor operating-system error",
+            )
             self.assertNotIn(_STDERR_SENTINEL, serialized)
 
     def test_failed_command_persists_only_safe_stderr_metadata(self) -> None:
@@ -355,6 +363,9 @@ class LocalCodexStabilityTests(unittest.TestCase):
                     f"root_log = {os.fspath(root_log)!r}\n"
                     "with open(root_log, 'a', encoding='utf-8') as stream:\n"
                     "    stream.write(os.environ['HOME'] + '\\n')\n"
+                    "output_path = sys.argv[sys.argv.index('--output-last-message') + 1]\n"
+                    "with open(output_path, 'w', encoding='utf-8') as stream:\n"
+                    "    stream.write('<answer>A</answer>\\n')\n"
                     f"sys.stdout.write({_transcript()!r})\n"
                 ),
                 encoding="utf-8",
@@ -419,6 +430,9 @@ class LocalCodexStabilityTests(unittest.TestCase):
                     ")\n"
                     "with open(pid_file, 'w', encoding='utf-8') as stream:\n"
                     "    stream.write(str(child.pid))\n"
+                    "output_path = sys.argv[sys.argv.index('--output-last-message') + 1]\n"
+                    "with open(output_path, 'w', encoding='utf-8') as stream:\n"
+                    "    stream.write('<answer>A</answer>\\n')\n"
                     f"sys.stdout.write({_transcript()!r})\n"
                 ),
                 encoding="utf-8",
@@ -494,6 +508,11 @@ class LocalCodexStabilityTests(unittest.TestCase):
             self.assertEqual(len(receipts), 1)
             serialized = receipts[0].read_text(encoding="utf-8")
             payload = json.loads(serialized)
+            self.assertEqual(payload["exception_class"], "TimeoutExpired")
+            self.assertEqual(
+                payload["redacted_exception_message"],
+                "executor command timed out",
+            )
             self.assertIn("COMMAND_TIMEOUT", payload["finding_codes"])
             self.assertEqual(
                 payload["stderr_sha256"],

@@ -88,6 +88,44 @@ _TOKEN_FIELDS = (
     "output_tokens",
     "reasoning_output_tokens",
 )
+_TASKWISE_EXECUTOR_FAILURE_CODES = frozenset(
+    {
+        "EXECUTOR_PREFLIGHT_FAILED",
+        "EXECUTOR_AUTH_MATERIALIZATION_FAILED",
+        "EXECUTOR_PROCESS_SPAWN_FAILED",
+        "EXECUTOR_CODEX_STARTUP_FAILED",
+        "EXECUTOR_MODEL_TRANSPORT_FAILED",
+        "EXECUTOR_TIMEOUT",
+        "EXECUTOR_NONZERO_EXIT",
+        "EXECUTOR_EVENT_STREAM_INVALID",
+        "EXECUTOR_SECURITY_TOOL_USE_VIOLATION",
+        "EXECUTOR_OUTPUT_MISSING",
+        "EXECUTOR_OUTPUT_INVALID",
+        "EXECUTOR_PRIVATE_DIAGNOSTICS_FAILED",
+        "EXECUTOR_CLEANUP_FAILED",
+        "EXECUTOR_POST_ATTESTATION_FAILED",
+        "EXECUTOR_INTERNAL_ERROR",
+    }
+)
+_EXECUTOR_STAGES = frozenset(
+    {
+        "PRE_INVOCATION_ATTESTATION",
+        "INVOCATION_ROOT_CREATION",
+        "AUTH_MATERIALIZATION",
+        "CODEX_CONFIG_GENERATION",
+        "PROCESS_SPAWN",
+        "CODEX_STARTUP",
+        "MODEL_TRANSPORT",
+        "EVENT_STREAM_PARSE",
+        "OUTPUT_LAST_MESSAGE_READ",
+        "COMPLETION_VALIDATION",
+        "PRIVATE_EVENT_PERSISTENCE",
+        "PROCESS_GROUP_SHUTDOWN",
+        "CLEANUP",
+        "POST_INVOCATION_ATTESTATION",
+        "INTERNAL",
+    }
+)
 _SAFE_ENV_KEYS = (
     "ALL_PROXY",
     "HTTPS_PROXY",
@@ -191,6 +229,9 @@ class LocalCommandResult:
     returncode: int
     stdout: str
     stderr: str
+    output_last_message_exists: bool | None = None
+    output_last_message: str | None = None
+    output_last_message_invalid: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +255,16 @@ class _InvocationLayout:
     tmp: Path
     work: Path
     private_events: Path
+    output_last_message: Path
+
+
+@dataclass(frozen=True, slots=True)
+class _InvocationDiagnosticContext:
+    run_id: str | None = None
+    task_uid: str | None = None
+    task_index: int | None = None
+    round_index: int | None = None
+    session_id: str | None = None
 
 
 CommandRunner = Callable[
@@ -243,6 +294,38 @@ class LocalCodexExecutionErrorCode(str, Enum):
     PROCESS_TERMINATION_FAILED = "process_termination_failed"
 
 
+def _default_taskwise_failure_code(code: LocalCodexExecutionErrorCode) -> str:
+    mapping = {
+        LocalCodexExecutionErrorCode.INVALID_REQUEST: "EXECUTOR_PREFLIGHT_FAILED",
+        LocalCodexExecutionErrorCode.CODEX_UNAVAILABLE: "EXECUTOR_PREFLIGHT_FAILED",
+        LocalCodexExecutionErrorCode.CODEX_VERSION_MISMATCH: "EXECUTOR_PREFLIGHT_FAILED",
+        LocalCodexExecutionErrorCode.SUBSCRIPTION_AUTH_UNAVAILABLE: (
+            "EXECUTOR_AUTH_MATERIALIZATION_FAILED"
+        ),
+        LocalCodexExecutionErrorCode.SUBSCRIPTION_AUTH_PERMISSIONS_UNSAFE: (
+            "EXECUTOR_AUTH_MATERIALIZATION_FAILED"
+        ),
+        LocalCodexExecutionErrorCode.PROMPT_AUDIT_FAILED: "EXECUTOR_PREFLIGHT_FAILED",
+        LocalCodexExecutionErrorCode.CLI_TIMEOUT: "EXECUTOR_TIMEOUT",
+        LocalCodexExecutionErrorCode.CLI_FAILED: "EXECUTOR_NONZERO_EXIT",
+        LocalCodexExecutionErrorCode.TRANSCRIPT_INVALID: "EXECUTOR_EVENT_STREAM_INVALID",
+        LocalCodexExecutionErrorCode.DISALLOWED_TOOL_EVENT: (
+            "EXECUTOR_SECURITY_TOOL_USE_VIOLATION"
+        ),
+        LocalCodexExecutionErrorCode.SECURITY_TOOL_USE_VIOLATION: (
+            "EXECUTOR_SECURITY_TOOL_USE_VIOLATION"
+        ),
+        LocalCodexExecutionErrorCode.RESPONSE_MISSING: "EXECUTOR_OUTPUT_MISSING",
+        LocalCodexExecutionErrorCode.ISOLATION_SETUP_FAILED: "EXECUTOR_PREFLIGHT_FAILED",
+        LocalCodexExecutionErrorCode.CLEANUP_FAILED: "EXECUTOR_CLEANUP_FAILED",
+        LocalCodexExecutionErrorCode.DISALLOWED_PLUGIN_ACTIVITY: (
+            "EXECUTOR_SECURITY_TOOL_USE_VIOLATION"
+        ),
+        LocalCodexExecutionErrorCode.PROCESS_TERMINATION_FAILED: ("EXECUTOR_CLEANUP_FAILED"),
+    }
+    return mapping[code]
+
+
 class _ProcessTerminationError(RuntimeError):
     """Internal marker for a process group that did not reach quiescence."""
 
@@ -252,7 +335,9 @@ class LocalCodexExecutionError(RuntimeError):
 
     __slots__ = (
         "code",
+        "completion_observed",
         "diagnostic_receipt",
+        "executor_stage",
         "event_counts",
         "event_digest",
         "private_event_reference",
@@ -260,6 +345,8 @@ class LocalCodexExecutionError(RuntimeError):
         "resume_allowed",
         "retry_allowed",
         "run_status",
+        "taskwise_failure_code",
+        "timed_out",
     )
 
     def __init__(
@@ -270,6 +357,10 @@ class LocalCodexExecutionError(RuntimeError):
         event_counts: Mapping[str, int] | None = None,
         event_digest: str | None = None,
         private_event_reference: str | None = None,
+        taskwise_failure_code: str | None = None,
+        executor_stage: str | None = None,
+        completion_observed: bool = False,
+        timed_out: bool = False,
     ) -> None:
         if type(code) is not LocalCodexExecutionErrorCode:
             raise TypeError("LocalCodexExecutionError.code must be LocalCodexExecutionErrorCode")
@@ -293,22 +384,59 @@ class LocalCodexExecutionError(RuntimeError):
             type(private_event_reference) is not str or not private_event_reference
         ):
             raise TypeError("private_event_reference must be a non-empty string or None")
+        resolved_failure_code = (
+            _default_taskwise_failure_code(code)
+            if taskwise_failure_code is None
+            else taskwise_failure_code
+        )
+        if resolved_failure_code not in _TASKWISE_EXECUTOR_FAILURE_CODES:
+            raise ValueError("taskwise_failure_code is outside the closed vocabulary")
+        if executor_stage is not None and executor_stage not in _EXECUTOR_STAGES:
+            raise ValueError("executor_stage is outside the closed vocabulary")
+        if type(completion_observed) is not bool or type(timed_out) is not bool:
+            raise TypeError("completion_observed and timed_out must be booleans")
         self.code = code
+        self.taskwise_failure_code = resolved_failure_code
+        self.executor_stage = executor_stage
+        self.completion_observed = completion_observed
+        self.timed_out = timed_out
         self.diagnostic_receipt = diagnostic_receipt
         self.event_counts = dict(sorted(normalized_event_counts.items()))
         self.event_digest = event_digest
         self.private_event_reference = private_event_reference
-        is_security_violation = code is LocalCodexExecutionErrorCode.SECURITY_TOOL_USE_VIOLATION
+        is_security_violation = resolved_failure_code == "EXECUTOR_SECURITY_TOOL_USE_VIOLATION"
         self.run_status = _SECURITY_TOOL_USE_VIOLATION if is_security_violation else None
-        self.retry_allowed = not is_security_violation
-        self.resume_allowed = not is_security_violation
-        self.replacement_completion_allowed = not is_security_violation
+        infrastructure_retry_safe = (
+            not is_security_violation
+            and not completion_observed
+            and resolved_failure_code
+            in {
+                "EXECUTOR_PREFLIGHT_FAILED",
+                "EXECUTOR_AUTH_MATERIALIZATION_FAILED",
+                "EXECUTOR_PROCESS_SPAWN_FAILED",
+                "EXECUTOR_CODEX_STARTUP_FAILED",
+                "EXECUTOR_MODEL_TRANSPORT_FAILED",
+                "EXECUTOR_TIMEOUT",
+                "EXECUTOR_NONZERO_EXIT",
+            }
+        )
+        self.retry_allowed = infrastructure_retry_safe
+        self.resume_allowed = infrastructure_retry_safe
+        self.replacement_completion_allowed = infrastructure_retry_safe
         super().__init__(f"local Codex execution failed: error_type={code.value}")
 
     def to_log_fields(self) -> dict[str, object]:
         """Return a public-safe receipt; raw event payloads are never included."""
 
-        fields: dict[str, object] = {"error_type": self.code.value}
+        fields: dict[str, object] = {
+            "error_type": self.taskwise_failure_code,
+            "executor_stage": self.executor_stage,
+            "completion_observed": self.completion_observed,
+            "timed_out": self.timed_out,
+            "retry_allowed": self.retry_allowed,
+            "resume_allowed": self.resume_allowed,
+            "replacement_completion_allowed": self.replacement_completion_allowed,
+        }
         if self.diagnostic_receipt is not None:
             fields["diagnostic_receipt"] = self.diagnostic_receipt
         if self.run_status is not None:
@@ -498,7 +626,7 @@ class LocalCodexCLIExecutor:
         diagnostic_reference: str | None = None
         if pending_outcome is not None and not pending_outcome.complete:
             diagnostic_reference = self._write_diagnostic_receipt(
-                phase="cleanup",
+                phase="CLEANUP",
                 error_code=LocalCodexExecutionErrorCode.CLEANUP_FAILED,
                 result=None,
                 error_errno=pending_outcome.last_errno,
@@ -673,7 +801,16 @@ class LocalCodexCLIExecutor:
             actual=actual,
         )
         receipt.require_match()
-        attempt = self._execute_prompt_once(prompt)
+        attempt = self._execute_prompt_once(
+            prompt,
+            diagnostic_context=_InvocationDiagnosticContext(
+                run_id=getattr(request, "run_id", None),
+                task_uid=getattr(request, "task_uid", None),
+                task_index=request.task_ordinal,
+                round_index=request.round_index,
+                session_id=request.session_id,
+            ),
+        )
         if request.session_id in self._taskwise_context_receipts:
             raise RuntimeError("taskwise context receipt was issued twice")
         self._taskwise_context_receipts[request.session_id] = receipt
@@ -692,7 +829,12 @@ class LocalCodexCLIExecutor:
         except KeyError as exc:
             raise RuntimeError("taskwise context receipt is unavailable") from exc
 
-    def _execute_prompt_once(self, prompt: str) -> RawAttempt:
+    def _execute_prompt_once(
+        self,
+        prompt: str,
+        *,
+        diagnostic_context: _InvocationDiagnosticContext | None = None,
+    ) -> RawAttempt:
         if type(prompt) is not str or not prompt:
             raise TypeError("prompt must be non-empty text")
         if self._closed:
@@ -702,7 +844,7 @@ class LocalCodexCLIExecutor:
         pending_outcome = self._drain_pending_cleanup()
         if pending_outcome is not None and not pending_outcome.complete:
             diagnostic_reference = self._write_diagnostic_receipt(
-                phase="cleanup",
+                phase="CLEANUP",
                 error_code=LocalCodexExecutionErrorCode.CLEANUP_FAILED,
                 result=None,
                 error_errno=pending_outcome.last_errno,
@@ -722,10 +864,17 @@ class LocalCodexCLIExecutor:
         transcript_digest: str | None = None
         failure: LocalCodexExecutionError | None = None
         unexpected: BaseException | None = None
-        failure_phase = "setup"
+        failure_phase = "INVOCATION_ROOT_CREATION"
         failure_errno: int | None = None
+        command: tuple[str, ...] | None = None
         isolation_root: Path | None = None
+        invocation_root_id: str | None = None
         isolated_auth: Path | None = None
+        output_last_message_exists = False
+        output_last_message_sha256: str | None = None
+        output_last_message_invalid = False
+        diagnostic_exception_class: str | None = None
+        diagnostic_exception_message = ""
         plugin_activity = False
         cleanup_outcome = _CleanupOutcome(
             complete=True,
@@ -738,6 +887,8 @@ class LocalCodexCLIExecutor:
         try:
             layout = _create_invocation_layout(self._isolation_parent)
             isolation_root = layout.root
+            invocation_root_id = layout.root.name
+            failure_phase = "AUTH_MATERIALIZATION"
             isolated_auth = layout.codex_home / "auth.json"
             shutil.copyfile(self._auth_file, isolated_auth)
             isolated_auth.chmod(0o600)
@@ -756,14 +907,17 @@ class LocalCodexCLIExecutor:
                     "XDG_STATE_HOME": os.fspath(layout.xdg_state),
                 }
             )
+            failure_phase = "PRE_INVOCATION_ATTESTATION"
             _attest_invocation(layout, environment=environment)
+            failure_phase = "CODEX_CONFIG_GENERATION"
             command = _codex_command(
                 executable=self._codex_executable,
                 model=self._model,
                 reasoning_effort=self._reasoning_effort,
                 workspace=layout.work,
+                output_last_message=layout.output_last_message,
             )
-            failure_phase = "command"
+            failure_phase = "PROCESS_SPAWN"
             result = self._command_runner(
                 command,
                 prompt,
@@ -773,26 +927,85 @@ class LocalCodexCLIExecutor:
             )
             if type(result) is not LocalCommandResult:
                 raise TypeError("command runner must return LocalCommandResult")
+            if result.output_last_message_exists is not None:
+                output_last_message_exists = result.output_last_message_exists
+                output_last_message_invalid = result.output_last_message_invalid
+                if result.output_last_message is not None:
+                    output_last_message_sha256 = hashlib.sha256(
+                        result.output_last_message.encode("utf-8")
+                    ).hexdigest()
+            failure_phase = "PRIVATE_EVENT_PERSISTENCE"
             _write_invocation_event_log(
                 layout.private_events,
                 result.stdout,
             )
+            failure_phase = "EVENT_STREAM_PARSE"
             security_violation = _find_security_tool_use(result.stdout)
             if security_violation is not None:
                 raise security_violation
             if result.returncode != 0:
-                failure = LocalCodexExecutionError(LocalCodexExecutionErrorCode.CLI_FAILED)
+                taskwise_code, classified_stage = _classify_nonzero_result(result)
+                failure_phase = classified_stage
+                failure = LocalCodexExecutionError(
+                    LocalCodexExecutionErrorCode.CLI_FAILED,
+                    taskwise_failure_code=taskwise_code,
+                    executor_stage=classified_stage,
+                    completion_observed=_completion_observed(result.stdout),
+                )
             else:
-                failure_phase = "transcript"
+                failure_phase = "EVENT_STREAM_PARSE"
                 response, usage, transcript_digest = _parse_jsonl_transcript(result.stdout)
+                failure_phase = "OUTPUT_LAST_MESSAGE_READ"
+                if result.output_last_message_exists is not None:
+                    output_last_message_exists = result.output_last_message_exists
+                    output_last_message_invalid = result.output_last_message_invalid
+                    if output_last_message_invalid:
+                        failure = LocalCodexExecutionError(
+                            LocalCodexExecutionErrorCode.TRANSCRIPT_INVALID,
+                            taskwise_failure_code="EXECUTOR_OUTPUT_INVALID",
+                            executor_stage="COMPLETION_VALIDATION",
+                            completion_observed=True,
+                        )
+                    elif not output_last_message_exists or result.output_last_message is None:
+                        failure = LocalCodexExecutionError(
+                            LocalCodexExecutionErrorCode.RESPONSE_MISSING,
+                            taskwise_failure_code="EXECUTOR_OUTPUT_MISSING",
+                            executor_stage=failure_phase,
+                            completion_observed=True,
+                        )
+                    else:
+                        failure_phase = "COMPLETION_VALIDATION"
+                        if result.output_last_message.strip() != response.strip():
+                            failure = LocalCodexExecutionError(
+                                LocalCodexExecutionErrorCode.TRANSCRIPT_INVALID,
+                                taskwise_failure_code="EXECUTOR_OUTPUT_INVALID",
+                                executor_stage=failure_phase,
+                                completion_observed=True,
+                            )
         except subprocess.TimeoutExpired as exc:
+            diagnostic_exception_class = type(exc).__name__
+            diagnostic_exception_message = "executor command timed out"
             result = LocalCommandResult(
                 returncode=-signal.SIGKILL,
                 stdout=_subprocess_stream_text(exc.output),
                 stderr=_subprocess_stream_text(exc.stderr),
             )
-            failure = LocalCodexExecutionError(LocalCodexExecutionErrorCode.CLI_TIMEOUT)
+            failure = LocalCodexExecutionError(
+                LocalCodexExecutionErrorCode.CLI_TIMEOUT,
+                executor_stage=("MODEL_TRANSPORT"),
+                completion_observed=_completion_observed(result.stdout),
+                timed_out=True,
+            )
         except LocalCodexExecutionError as exc:
+            diagnostic_exception_class = type(exc).__name__
+            diagnostic_exception_message = "closed executor failure"
+            if exc.executor_stage is None:
+                exc.executor_stage = failure_phase
+            if result is not None and _completion_observed(result.stdout):
+                exc.completion_observed = True
+                exc.retry_allowed = False
+                exc.resume_allowed = False
+                exc.replacement_completion_allowed = False
             if (
                 exc.code is LocalCodexExecutionErrorCode.SECURITY_TOOL_USE_VIOLATION
                 and result is not None
@@ -804,19 +1017,38 @@ class LocalCodexCLIExecutor:
                 )
             failure = exc
         except OSError as exc:
+            diagnostic_exception_class = type(exc).__name__
+            diagnostic_exception_message = "executor operating-system error"
             failure_errno = exc.errno
-            code = (
-                LocalCodexExecutionErrorCode.CODEX_UNAVAILABLE
-                if failure_phase == "command"
-                else LocalCodexExecutionErrorCode.ISOLATION_SETUP_FAILED
+            taskwise_code = (
+                "EXECUTOR_PROCESS_SPAWN_FAILED"
+                if failure_phase == "PROCESS_SPAWN"
+                else (
+                    "EXECUTOR_AUTH_MATERIALIZATION_FAILED"
+                    if failure_phase == "AUTH_MATERIALIZATION"
+                    else "EXECUTOR_PREFLIGHT_FAILED"
+                )
             )
-            failure = LocalCodexExecutionError(code)
-        except _ProcessTerminationError:
             failure = LocalCodexExecutionError(
-                LocalCodexExecutionErrorCode.PROCESS_TERMINATION_FAILED
+                (
+                    LocalCodexExecutionErrorCode.CODEX_UNAVAILABLE
+                    if failure_phase == "PROCESS_SPAWN"
+                    else LocalCodexExecutionErrorCode.ISOLATION_SETUP_FAILED
+                ),
+                taskwise_failure_code=taskwise_code,
+                executor_stage=failure_phase,
+            )
+        except _ProcessTerminationError as exc:
+            diagnostic_exception_class = type(exc).__name__
+            diagnostic_exception_message = "executor process group did not terminate"
+            failure = LocalCodexExecutionError(
+                LocalCodexExecutionErrorCode.PROCESS_TERMINATION_FAILED,
+                executor_stage="PROCESS_GROUP_SHUTDOWN",
             )
         except BaseException as exc:
             unexpected = exc
+            diagnostic_exception_class = type(exc).__name__
+            diagnostic_exception_message = "unexpected executor internal error"
         finally:
             if isolation_root is not None:
                 plugin_activity = _has_disallowed_plugin_activity(isolation_root)
@@ -829,15 +1061,46 @@ class LocalCodexCLIExecutor:
                 if not cleanup_outcome.complete:
                     self._pending_cleanup.add(isolation_root)
 
-        if plugin_activity and failure is None and unexpected is None:
-            failure_phase = "cleanup"
-            failure = LocalCodexExecutionError(
-                LocalCodexExecutionErrorCode.DISALLOWED_PLUGIN_ACTIVITY
-            )
+        if plugin_activity:
+            if (
+                failure is None
+                or failure.taskwise_failure_code != "EXECUTOR_SECURITY_TOOL_USE_VIOLATION"
+            ):
+                failure_phase = "CLEANUP"
+                failure = LocalCodexExecutionError(
+                    LocalCodexExecutionErrorCode.DISALLOWED_PLUGIN_ACTIVITY,
+                    executor_stage=failure_phase,
+                    completion_observed=(
+                        False if result is None else _completion_observed(result.stdout)
+                    ),
+                )
+                diagnostic_exception_class = type(failure).__name__
+                diagnostic_exception_message = "disallowed plugin activity detected"
+                unexpected = None
         if not cleanup_outcome.complete and failure is None and unexpected is None:
-            failure_phase = "cleanup"
+            failure_phase = "CLEANUP"
             failure_errno = cleanup_outcome.last_errno
-            failure = LocalCodexExecutionError(LocalCodexExecutionErrorCode.CLEANUP_FAILED)
+            failure = LocalCodexExecutionError(
+                LocalCodexExecutionErrorCode.CLEANUP_FAILED,
+                executor_stage=failure_phase,
+                completion_observed=(
+                    False if result is None else _completion_observed(result.stdout)
+                ),
+            )
+
+        if unexpected is not None:
+            failure_phase = "INTERNAL"
+            failure = LocalCodexExecutionError(
+                LocalCodexExecutionErrorCode.ISOLATION_SETUP_FAILED,
+                taskwise_failure_code="EXECUTOR_INTERNAL_ERROR",
+                executor_stage=failure_phase,
+                completion_observed=(
+                    False if result is None else _completion_observed(result.stdout)
+                ),
+            )
+        if failure is not None and diagnostic_exception_class is None:
+            diagnostic_exception_class = type(failure).__name__
+            diagnostic_exception_message = "closed executor failure"
 
         diagnostic_reference: str | None = None
         if (
@@ -865,14 +1128,35 @@ class LocalCodexCLIExecutor:
                     and failure.code is LocalCodexExecutionErrorCode.SECURITY_TOOL_USE_VIOLATION
                     else None
                 ),
+                diagnostic_context=diagnostic_context,
+                exception=unexpected,
+                exception_class=diagnostic_exception_class,
+                exception_message=diagnostic_exception_message,
+                command=command,
+                invocation_root_id=invocation_root_id,
+                output_last_message_exists=output_last_message_exists,
+                output_last_message_sha256=output_last_message_sha256,
+                taskwise_failure_code=(None if failure is None else failure.taskwise_failure_code),
+                completion_observed=(False if failure is None else failure.completion_observed),
+                retry_allowed=False if failure is None else failure.retry_allowed,
+                resume_allowed=False if failure is None else failure.resume_allowed,
+                replacement_completion_allowed=(
+                    False if failure is None else failure.replacement_completion_allowed
+                ),
             )
 
-        if unexpected is not None:
-            raise unexpected
         if failure is not None:
+            if diagnostic_reference is None:
+                if failure.taskwise_failure_code != "EXECUTOR_SECURITY_TOOL_USE_VIOLATION":
+                    failure = LocalCodexExecutionError(
+                        LocalCodexExecutionErrorCode.ISOLATION_SETUP_FAILED,
+                        taskwise_failure_code="EXECUTOR_PRIVATE_DIAGNOSTICS_FAILED",
+                        executor_stage="PRIVATE_EVENT_PERSISTENCE",
+                        completion_observed=failure.completion_observed,
+                    )
             if diagnostic_reference is not None:
                 failure.diagnostic_receipt = diagnostic_reference
-            if failure.code is LocalCodexExecutionErrorCode.SECURITY_TOOL_USE_VIOLATION:
+            if failure.taskwise_failure_code == "EXECUTOR_SECURITY_TOOL_USE_VIOLATION":
                 self._security_violation = _copy_security_violation(failure)
             raise failure
         if response is None or usage is None or transcript_digest is None:
@@ -937,6 +1221,19 @@ class LocalCodexCLIExecutor:
         cleanup_outcome: _CleanupOutcome,
         timed_out: bool,
         security_violation: LocalCodexExecutionError | None = None,
+        diagnostic_context: _InvocationDiagnosticContext | None = None,
+        exception: BaseException | None = None,
+        exception_class: str | None = None,
+        exception_message: str = "",
+        command: Sequence[str] | None = None,
+        invocation_root_id: str | None = None,
+        output_last_message_exists: bool = False,
+        output_last_message_sha256: str | None = None,
+        taskwise_failure_code: str | None = None,
+        completion_observed: bool = False,
+        retry_allowed: bool = False,
+        resume_allowed: bool = False,
+        replacement_completion_allowed: bool = False,
     ) -> str | None:
         findings: list[str] = []
         stderr = "" if result is None else result.stderr
@@ -962,19 +1259,81 @@ class LocalCodexCLIExecutor:
                 else "PRIVATE_EVENT_RETENTION_FAILED"
             )
         event_counts = {} if security_violation is None else dict(security_violation.event_counts)
+        stdout = "" if result is None else result.stdout
+        stdout_bytes = stdout.encode("utf-8", errors="replace")
+        event_summary = _event_stream_summary(stdout)
+        context = diagnostic_context or _InvocationDiagnosticContext()
+        effective_failure_code = taskwise_failure_code
+        if effective_failure_code is None and error_code is not None:
+            effective_failure_code = _default_taskwise_failure_code(error_code)
+        if security_violation is not None:
+            effective_failure_code = "EXECUTOR_SECURITY_TOOL_USE_VIOLATION"
+        if exception is not None:
+            effective_failure_code = "EXECUTOR_INTERNAL_ERROR"
         payload = {
-            "schema_version": "2",
-            "phase": phase,
-            "error_code": None if error_code is None else error_code.value,
+            "schema_version": "taskwise_executor_private_diagnostic_v1",
+            "run_id": context.run_id,
+            "task_uid": context.task_uid,
+            "task_index": context.task_index,
+            "round_index": context.round_index,
+            "session_id": context.session_id,
+            "executor_stage": phase,
+            "exception_class": (
+                type(exception).__name__
+                if exception_class is None and exception is not None
+                else exception_class
+            ),
+            "redacted_exception_message": _redact_diagnostic_text(
+                exception_message,
+                isolation_root_id=invocation_root_id,
+            ),
+            "error_code": effective_failure_code,
+            "legacy_error_code": None if error_code is None else error_code.value,
             "run_status": (
                 _SECURITY_TOOL_USE_VIOLATION
-                if error_code is LocalCodexExecutionErrorCode.SECURITY_TOOL_USE_VIOLATION
+                if effective_failure_code == "EXECUTOR_SECURITY_TOOL_USE_VIOLATION"
                 else None
             ),
+            "process_return_code": None if result is None else result.returncode,
+            "process_signal": (
+                None if result is None or result.returncode >= 0 else -result.returncode
+            ),
+            "timed_out": timed_out,
+            "redacted_argv": _redacted_command(command),
+            "codex_version": self._codex_version,
+            "real_codex_binary": os.fspath(self._codex_executable),
+            "model": self._model,
+            "invocation_root_id": invocation_root_id,
+            "auth_materialization_status": (
+                "NOT_STARTED"
+                if invocation_root_id is None
+                else ("REMOVED" if cleanup_outcome.auth_removed else "RESIDUAL")
+            ),
+            "stdout_sha256": hashlib.sha256(stdout_bytes).hexdigest(),
+            "stdout_bytes": len(stdout_bytes),
+            "stderr_sha256": hashlib.sha256(stderr_bytes).hexdigest(),
+            "redacted_stdout_tail": _redact_diagnostic_text(
+                _diagnostic_tail(stdout),
+                isolation_root_id=invocation_root_id,
+            ),
+            "redacted_stderr_tail": _redact_diagnostic_text(
+                _diagnostic_tail(stderr),
+                isolation_root_id=invocation_root_id,
+            ),
+            "last_event_type": event_summary["last_event_type"],
+            "event_count": event_summary["event_count"],
+            "tool_event_count": event_summary["tool_event_count"],
+            "output_last_message_exists": output_last_message_exists,
+            "output_last_message_sha256": output_last_message_sha256,
+            "completion_observed": completion_observed,
+            "cleanup_status": "COMPLETE" if cleanup_outcome.complete else "FAILED",
+            "residual_root_count": 0 if cleanup_outcome.complete else 1,
+            "created_at_utc": datetime.now(UTC).isoformat(timespec="milliseconds"),
+            # Backward-compatible metadata used by existing forensic tooling.
+            "phase": phase,
             "returncode": None if result is None else result.returncode,
             "errno": error_errno,
             "errno_name": (None if error_errno is None else errno.errorcode.get(error_errno)),
-            "stderr_sha256": hashlib.sha256(stderr_bytes).hexdigest(),
             "stderr_bytes": len(stderr_bytes),
             "stderr_lines": 0 if not stderr else len(stderr.splitlines()),
             "finding_codes": sorted(set(findings)),
@@ -986,9 +1345,9 @@ class LocalCodexCLIExecutor:
             "event_digest": (
                 None if security_violation is None else security_violation.event_digest
             ),
-            "retry_allowed": (None if security_violation is None else False),
-            "resume_allowed": (None if security_violation is None else False),
-            "replacement_completion_allowed": (None if security_violation is None else False),
+            "retry_allowed": retry_allowed,
+            "resume_allowed": resume_allowed,
+            "replacement_completion_allowed": replacement_completion_allowed,
             "timestamp_utc": datetime.now(UTC).isoformat(timespec="milliseconds"),
         }
         return _persist_diagnostic_receipt(self._diagnostic_root, payload)
@@ -1065,6 +1424,7 @@ def _create_invocation_layout(parent: Path) -> _InvocationLayout:
         tmp=root / "tmp",
         work=root / "work",
         private_events=root / "private_events",
+        output_last_message=root / "tmp" / "output_last_message.txt",
     )
     try:
         for directory in (
@@ -1299,8 +1659,6 @@ def _cleanup_isolation_root(
             break
         except OSError as exc:
             last_errno = exc.errno
-            if exc.errno == errno.ENOTEMPTY:
-                disallowed_activity_seen = True
             if exc.errno not in _TRANSIENT_CLEANUP_ERRNOS:
                 break
         else:
@@ -1383,6 +1741,7 @@ def _codex_command(
     model: str,
     reasoning_effort: str | None,
     workspace: Path,
+    output_last_message: Path,
 ) -> tuple[str, ...]:
     command: list[str] = [
         os.fspath(executable),
@@ -1423,8 +1782,8 @@ def _codex_command(
             "allow_login_shell=false",
             "--config",
             'shell_environment_policy.inherit="none"',
-            "--config",
-            "agents.enabled=false",
+            "--output-last-message",
+            os.fspath(output_last_message),
             "--cd",
             os.fspath(workspace),
             "-",
@@ -1521,7 +1880,7 @@ def _copy_security_violation(
 ) -> LocalCodexExecutionError:
     if (
         type(error) is not LocalCodexExecutionError
-        or error.code is not LocalCodexExecutionErrorCode.SECURITY_TOOL_USE_VIOLATION
+        or error.taskwise_failure_code != "EXECUTOR_SECURITY_TOOL_USE_VIOLATION"
     ):
         raise TypeError("error must be a security tool-use violation")
     return LocalCodexExecutionError(
@@ -1530,7 +1889,203 @@ def _copy_security_violation(
         event_counts=error.event_counts,
         event_digest=error.event_digest,
         private_event_reference=error.private_event_reference,
+        executor_stage=error.executor_stage,
+        completion_observed=error.completion_observed,
     )
+
+
+def _classify_nonzero_result(result: LocalCommandResult) -> tuple[str, str]:
+    text = f"{result.stderr}\n{result.stdout}".casefold()
+    if any(
+        marker in text
+        for marker in (
+            "auth",
+            "credential",
+            "forced_login_method",
+            "login required",
+            "not logged in",
+        )
+    ):
+        return "EXECUTOR_AUTH_MATERIALIZATION_FAILED", "CODEX_STARTUP"
+    if any(
+        marker in text
+        for marker in (
+            "failed to load codex config",
+            "config could not be loaded",
+            "invalid type",
+            "unknown config",
+            "unknown feature",
+            "unexpected argument",
+            "unrecognized option",
+            "strict config",
+        )
+    ):
+        return "EXECUTOR_CODEX_STARTUP_FAILED", "CODEX_STARTUP"
+    if any(
+        marker in text
+        for marker in (
+            "429",
+            "rate limit",
+            "connection",
+            "connectivity",
+            "dns",
+            "network",
+            "proxy",
+            "tls",
+            "certificate",
+            "transport",
+            "stream disconnected",
+            "model provider",
+            "model is not available",
+        )
+    ):
+        return "EXECUTOR_MODEL_TRANSPORT_FAILED", "MODEL_TRANSPORT"
+    return "EXECUTOR_NONZERO_EXIT", "CODEX_STARTUP"
+
+
+def _completion_observed(transcript: str) -> bool:
+    if type(transcript) is not str:
+        return False
+    for raw_line in transcript.splitlines():
+        try:
+            event = json.loads(raw_line)
+        except (json.JSONDecodeError, RecursionError):
+            continue
+        if not isinstance(event, Mapping) or event.get("type") != "item.completed":
+            continue
+        item = event.get("item")
+        if (
+            isinstance(item, Mapping)
+            and item.get("type") == "agent_message"
+            and type(item.get("text")) is str
+            and bool(str(item["text"]).strip())
+        ):
+            return True
+    return False
+
+
+def _event_stream_summary(transcript: str) -> dict[str, object]:
+    event_count = 0
+    tool_event_count = 0
+    last_event_type: str | None = None
+    if type(transcript) is not str:
+        return {
+            "event_count": event_count,
+            "tool_event_count": tool_event_count,
+            "last_event_type": last_event_type,
+        }
+    for raw_line in transcript.splitlines():
+        try:
+            event = json.loads(raw_line)
+        except (json.JSONDecodeError, RecursionError):
+            continue
+        if not isinstance(event, Mapping) or type(event.get("type")) is not str:
+            continue
+        event_count += 1
+        event_type = str(event["type"])
+        last_event_type = event_type
+        category: str | None = None
+        if event_type in {"item.started", "item.updated", "item.completed"}:
+            item = event.get("item")
+            if isinstance(item, Mapping) and type(item.get("type")) is str:
+                item_type = str(item["type"]).casefold()
+                if item_type not in _ALLOWED_ITEM_TYPES:
+                    category = _security_event_category(item_type)
+        elif event_type not in {
+            "thread.started",
+            "turn.started",
+            "turn.completed",
+            "error",
+            "turn.failed",
+        }:
+            category = _security_event_category(event_type)
+        tool_event_count += int(category is not None)
+    return {
+        "event_count": event_count,
+        "tool_event_count": tool_event_count,
+        "last_event_type": last_event_type,
+    }
+
+
+def _diagnostic_tail(text: str, *, limit: int = 4096) -> str:
+    encoded = text.encode("utf-8", errors="replace")
+    return encoded[-limit:].decode("utf-8", errors="replace")
+
+
+def _redact_diagnostic_text(
+    text: str,
+    *,
+    isolation_root_id: str | None,
+) -> str:
+    if type(text) is not str or not text:
+        return ""
+    redacted = text
+    protected_values = {
+        os.fspath(_REPOSITORY_ROOT),
+        os.fspath(_WORKSPACE_ROOT),
+        os.fspath(Path.home()),
+    }
+    if isolation_root_id:
+        protected_values.add(isolation_root_id)
+    for value in sorted(protected_values, key=len, reverse=True):
+        if value:
+            redacted = redacted.replace(value, "<redacted-path>")
+    redacted = re.sub(
+        r"""(?ix)
+        (?P<prefix>["']?authorization["']?\s*[:=]\s*["']?)
+        (?:bearer\s+)?
+        [^"'\s,;}\]]+
+        """,
+        r"\g<prefix><redacted-secret>",
+        redacted,
+    )
+    redacted = re.sub(
+        r"""(?ix)
+        (?P<prefix>
+            ["']?
+            (?:cookie|set-cookie|api[_-]?key|access[_-]?token|
+               refresh[_-]?token|id[_-]?token)
+            ["']?\s*[:=]\s*["']?
+        )
+        [^"'\s,;}\]]+
+        """,
+        r"\g<prefix><redacted-secret>",
+        redacted,
+    )
+    redacted = re.sub(
+        r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+",
+        "bearer <redacted-secret>",
+        redacted,
+    )
+    redacted = re.sub(r"https?://[^\s]+", "<redacted-url>", redacted)
+    for marker in (
+        "target_scores",
+        "target",
+        "correct_answer",
+        "answer_mapping",
+        "private-uuid",
+        "auth.json",
+    ):
+        redacted = re.sub(re.escape(marker), "<redacted-field>", redacted, flags=re.I)
+    return redacted
+
+
+def _redacted_command(command: Sequence[str] | None) -> list[str]:
+    if command is None:
+        return []
+    redacted: list[str] = []
+    hide_next_path = False
+    for value in command:
+        if hide_next_path:
+            redacted.append("<isolated-path>")
+            hide_next_path = False
+            continue
+        if value in {"--cd", "--output-last-message"}:
+            redacted.append(value)
+            hide_next_path = True
+            continue
+        redacted.append(value)
+    return redacted
 
 
 def _find_security_tool_use(
@@ -1621,7 +2176,7 @@ def _security_event_category(event_name: str) -> str | None:
         return "app"
     if "external" in tokens:
         return "external_tool"
-    if "tool" in tokens or normalized:
+    if "tool" in tokens:
         return "unknown_tool"
     return None
 
@@ -1663,7 +2218,7 @@ def _parse_jsonl_transcript(
                 raise LocalCodexExecutionError(LocalCodexExecutionErrorCode.TRANSCRIPT_INVALID)
             item_type = str(item["type"]).casefold()
             if item_type not in _ALLOWED_ITEM_TYPES:
-                raise LocalCodexExecutionError(LocalCodexExecutionErrorCode.DISALLOWED_TOOL_EVENT)
+                raise LocalCodexExecutionError(LocalCodexExecutionErrorCode.TRANSCRIPT_INVALID)
             if event_type == "item.completed" and item_type == "agent_message":
                 text = item.get("text")
                 if type(text) is str and text.strip():
@@ -1747,11 +2302,43 @@ def _run_local_command(
         )
         if not quiescent:
             raise _ProcessTerminationError
+    output_exists, output_text, output_invalid = _read_output_last_message(
+        command,
+        cwd=cwd,
+    )
     return LocalCommandResult(
         returncode=process.returncode,
         stdout=stdout,
         stderr=stderr,
+        output_last_message_exists=output_exists,
+        output_last_message=output_text,
+        output_last_message_invalid=output_invalid,
     )
+
+
+def _read_output_last_message(
+    command: Sequence[str],
+    *,
+    cwd: Path,
+) -> tuple[bool | None, str | None, bool]:
+    try:
+        index = tuple(command).index("--output-last-message")
+        raw_path = tuple(command)[index + 1]
+    except (ValueError, IndexError):
+        return None, None, False
+    target = Path(raw_path)
+    expected = cwd.parent / "tmp" / "output_last_message.txt"
+    if target != expected:
+        return True, None, True
+    try:
+        metadata = target.lstat()
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+            return True, None, True
+        return True, target.read_text(encoding="utf-8"), False
+    except FileNotFoundError:
+        return False, None, False
+    except (OSError, UnicodeError):
+        return True, None, True
 
 
 def _terminate_invocation_processes(

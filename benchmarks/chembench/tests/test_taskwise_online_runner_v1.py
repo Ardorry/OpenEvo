@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import stat
 from pathlib import Path
 
 import pytest
@@ -29,12 +30,12 @@ from openevo_chembench.taskwise_online_runner_v1 import (
     TaskwiseCoreUpdateOutcomeV1,
     TaskwiseEpisodeStateV1,
     TaskwiseEpisodeV1,
-    TaskwiseExecutionFailureV1,
     TaskwiseMemoryPublicMetricsV1,
     TaskwiseOnlineRunnerV1,
     TaskwiseRunConfigV1,
     TaskwiseRunStatusV1,
     TaskwiseRunnerCoreUpdateRequestV1,
+    TASKWISE_EXECUTOR_FAILURE_CODES_V1,
     _chain_rows,
     load_private_taskwise_results_v1,
 )
@@ -208,6 +209,32 @@ class _CoreSecurityViolation(RuntimeError):
     finding_code = "TASKWISE_REFLECTOR_SECURITY_TOOL_USE_VIOLATION"
 
 
+class _ExecutorFailure(RuntimeError):
+    def __init__(
+        self,
+        *,
+        code: str,
+        completion_observed: bool,
+        diagnostic_receipt: str | None = None,
+        event_digest: str | None = None,
+        event_counts: dict[str, int] | None = None,
+        executor_stage: str | None = None,
+        message: str = "PRIVATE_EXECUTOR_BODY_SENTINEL",
+    ) -> None:
+        self.taskwise_failure_code = code
+        self.completion_observed = completion_observed
+        self.diagnostic_receipt = diagnostic_receipt
+        self.event_digest = event_digest
+        self.event_counts = {} if event_counts is None else event_counts
+        self.executor_stage = executor_stage
+        self.run_status = (
+            "SECURITY_TOOL_USE_VIOLATION"
+            if code == "EXECUTOR_SECURITY_TOOL_USE_VIOLATION"
+            else None
+        )
+        super().__init__(message)
+
+
 class _FailingCorePort:
     def update_text_memory(
         self,
@@ -220,6 +247,11 @@ class _FailingCorePort:
         _reference: CoreMemoryReferenceV1,
     ) -> CoreResolvedTextMemoryV2:
         raise AssertionError("security-terminated Core state must not resolve")
+
+
+class _PrivateFailurePersistenceFailingRunner(TaskwiseOnlineRunnerV1):
+    def _append_private_failure(self, _exc: object) -> str:
+        raise OSError("PRIVATE_DIAGNOSTIC_PERSISTENCE_BODY_SENTINEL")
 
 
 class _UnresolvableCorePort(_DummyCorePort):
@@ -353,6 +385,7 @@ def test_episode_state_machine_has_the_exact_seven_states() -> None:
 
 def test_agent_request_projects_session_and_round_out_of_prompt_payload() -> None:
     memory = _memory("projection")
+    task_uid = _episodes(1)[0].task.uid
     request = TaskwiseAgentRequestV1(
         rendered_public_prompt="Only this public prompt reaches Codex.",
         resolved_text_memory=memory,
@@ -360,6 +393,8 @@ def test_agent_request_projects_session_and_round_out_of_prompt_payload() -> Non
         arm="online",
         task_ordinal=3,
         round_index=1,
+        run_id="taskwise_online_run",
+        task_uid=task_uid,
     )
 
     projected = request.to_frozen_agent_request()
@@ -371,15 +406,46 @@ def test_agent_request_projects_session_and_round_out_of_prompt_payload() -> Non
     assert "session_projection" not in serialized
     assert "task_ordinal" not in serialized
     assert "round_index" not in serialized
+    assert request.run_id not in serialized
+    assert task_uid not in serialized
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    (
+        ("run_id", "../unsafe"),
+        ("task_uid", "not-a-sha256"),
+    ),
+)
+def test_agent_request_rejects_invalid_private_diagnostic_identifiers(
+    field_name: str,
+    value: str,
+) -> None:
+    kwargs = {
+        "rendered_public_prompt": "Public prompt.",
+        "resolved_text_memory": None,
+        "session_id": "session_projection_0002",
+        "arm": "control",
+        "task_ordinal": 0,
+        "round_index": 0,
+        "run_id": "taskwise_control_run",
+        "task_uid": _episodes(1)[0].task.uid,
+    }
+    kwargs[field_name] = value
+
+    with pytest.raises(ValueError):
+        TaskwiseAgentRequestV1(**kwargs)
 
 
 def test_control_runs_three_fresh_sessions_per_task_without_memory_or_updates(
     tmp_path: Path,
 ) -> None:
+    config = _config(tmp_path, "control")
+    episodes = _episodes()
     executor = _DummyExecutor(["A"] * 6)
     runner = TaskwiseOnlineRunnerV1(
-        config=_config(tmp_path, "control"),
-        episodes=_episodes(),
+        config=config,
+        episodes=episodes,
         executor=executor,
         session_id_factory=_session_factory("control"),
     )
@@ -397,6 +463,15 @@ def test_control_runs_three_fresh_sessions_per_task_without_memory_or_updates(
     assert result.session_attempt_count == 6
     assert len({request.session_id for request in executor.requests}) == 6
     assert [request.round_index for request in executor.requests] == [0, 1, 2, 0, 1, 2]
+    assert all(request.run_id == config.run_id for request in executor.requests)
+    assert [request.task_uid for request in executor.requests] == [
+        episodes[0].task.uid,
+        episodes[0].task.uid,
+        episodes[0].task.uid,
+        episodes[1].task.uid,
+        episodes[1].task.uid,
+        episodes[1].task.uid,
+    ]
     assert all(request.resolved_text_memory is None for request in executor.requests)
     assert [request.rendered_public_prompt for request in executor.requests[:3]] == [
         "Rendered public prompt 0\nAnswer:"
@@ -430,6 +505,9 @@ def test_control_runs_three_fresh_sessions_per_task_without_memory_or_updates(
         .splitlines()
     ]
     assert all(row["trajectory"] is None for row in private_rows)
+    failures_path = result.output_directory / "private" / "failures.jsonl"
+    assert failures_path.read_bytes() == b""
+    assert stat.S_IMODE(failures_path.stat().st_mode) == 0o600
 
 
 def test_online_uses_complete_prefixes_and_carries_only_update_two(
@@ -664,16 +742,20 @@ def test_no_uppercase_completion_remains_an_official_parse_failure(
     assert all(not row.correct for row in rows)
 
 
-def test_precompletion_failure_requires_explicit_validated_resume(
+def test_precompletion_executor_failure_is_terminal_and_preserves_safe_metadata(
     tmp_path: Path,
 ) -> None:
     config = _config(tmp_path, "control")
+    event_digest = _sha256("safe synthetic event stream")
     first_executor = _DummyExecutor(
         [
             "A",
-            TaskwiseExecutionFailureV1(
-                "INFRASTRUCTURE_UNAVAILABLE",
+            _ExecutorFailure(
+                code="EXECUTOR_MODEL_TRANSPORT_FAILED",
                 completion_observed=False,
+                diagnostic_receipt="receipt_safe_0001.json",
+                event_digest=event_digest,
+                executor_stage="MODEL_TRANSPORT",
             ),
         ]
     )
@@ -687,22 +769,59 @@ def test_precompletion_failure_requires_explicit_validated_resume(
     assert failed.status is TaskwiseRunStatusV1.EXECUTION_FAILED
     assert failed.completion_count == 1
     assert failed.session_attempt_count == 2
-    assert failed.resume_allowed is True
-    resumed_executor = _DummyExecutor(["A", "A"])
-    resumed = TaskwiseOnlineRunnerV1(
-        config=config,
-        episodes=_episodes(1),
-        executor=resumed_executor,
-        resume=True,
-        session_id_factory=_session_factory("resumed"),
-    ).run()
-
-    assert resumed.status is TaskwiseRunStatusV1.COMPLETED
-    assert resumed.completion_count == 3
-    assert resumed.session_attempt_count == 4
+    assert failed.resume_allowed is False
+    assert failed.finding_codes == ("EXECUTOR_MODEL_TRANSPORT_FAILED",)
     state = json.loads((config.output_directory / "run_state.json").read_text())
-    assert state["resume_count"] == 1
-    assert len(state["issued_session_ids"]) == len(set(state["issued_session_ids"])) == 4
+    assert state["failure"]["code"] == "EXECUTOR_MODEL_TRANSPORT_FAILED"
+    assert state["failure"]["completion_observed"] is False
+    assert state["failure"]["diagnostic_receipt"] == "receipt_safe_0001.json"
+    assert state["failure"]["event_digest"] == event_digest
+    assert len(state["failure"]["diagnostic_record_sha256"]) == 64
+    assert set(state["failure"]["diagnostic_record_sha256"]) <= set("0123456789abcdef")
+    serialized_state = json.dumps(state, sort_keys=True)
+    assert "PRIVATE_EXECUTOR_BODY_SENTINEL" not in serialized_state
+    assert "event_counts" not in state["failure"]
+    assert "executor_stage" not in state["failure"]
+
+    failures_path = config.output_directory / "private" / "failures.jsonl"
+    assert stat.S_IMODE(failures_path.stat().st_mode) == 0o600
+    failures = [json.loads(line) for line in failures_path.read_text().splitlines()]
+    assert failures == [
+        {
+            "schema_version": "taskwise_private_failure_v1",
+            "protocol_id": "repeated_session_control_v1",
+            "arm": "control",
+            "run_id": config.run_id,
+            "task_uid": _episodes(1)[0].task.uid,
+            "task_ordinal": 0,
+            "episode_state": TaskwiseEpisodeStateV1.ROUND_0_COMPLETED.value,
+            "round_index": 1,
+            "update_index": None,
+            "session_id": "session_first_0002",
+            "code": "EXECUTOR_MODEL_TRANSPORT_FAILED",
+            "completion_observed": False,
+            "security_violation": False,
+            "executor_stage": "MODEL_TRANSPORT",
+            "diagnostic_receipt": "receipt_safe_0001.json",
+            "event_digest": event_digest,
+            "event_counts": {},
+            "retry_allowed": False,
+            "resume_allowed": False,
+            "replacement_completion_allowed": False,
+        }
+    ]
+    assert "PRIVATE_EXECUTOR_BODY_SENTINEL" not in failures_path.read_text()
+    assert "Rendered public prompt" not in failures_path.read_text()
+    assert "choice-a" not in failures_path.read_text()
+
+    with pytest.raises(RuntimeError, match="forbids resume"):
+        TaskwiseOnlineRunnerV1(
+            config=config,
+            episodes=_episodes(1),
+            executor=_DummyExecutor(["A", "A"]),
+            resume=True,
+            session_id_factory=_session_factory("resumed"),
+        ).run()
 
 
 @pytest.mark.parametrize("pause_state", tuple(TaskwiseEpisodeStateV1))
@@ -745,17 +864,20 @@ def test_online_resume_revalidates_every_persisted_state(
     ("failure", "expected_status"),
     (
         (
-            TaskwiseExecutionFailureV1(
-                "COMPLETION_PERSISTENCE_FAILURE",
+            _ExecutorFailure(
+                code="EXECUTOR_OUTPUT_INVALID",
                 completion_observed=True,
+                executor_stage="COMPLETION_VALIDATION",
             ),
             TaskwiseRunStatusV1.EXECUTION_FAILED,
         ),
         (
-            TaskwiseExecutionFailureV1(
-                "SECURITY_TOOL_USE_VIOLATION",
+            _ExecutorFailure(
+                code="EXECUTOR_SECURITY_TOOL_USE_VIOLATION",
                 completion_observed=False,
-                security_violation=True,
+                event_digest=_sha256("security event stream"),
+                event_counts={"file_read": 1},
+                executor_stage="EVENT_STREAM_PARSE",
             ),
             TaskwiseRunStatusV1.SECURITY_TOOL_USE_VIOLATION,
         ),
@@ -763,7 +885,7 @@ def test_online_resume_revalidates_every_persisted_state(
 )
 def test_completion_or_security_failure_forbids_retry_and_resume(
     tmp_path: Path,
-    failure: TaskwiseExecutionFailureV1,
+    failure: _ExecutorFailure,
     expected_status: TaskwiseRunStatusV1,
 ) -> None:
     config = _config(tmp_path, "control")
@@ -778,6 +900,15 @@ def test_completion_or_security_failure_forbids_retry_and_resume(
     assert failed.status is expected_status
     assert failed.resume_allowed is False
     assert len(executor.requests) == 1
+    failure_rows = [
+        json.loads(line)
+        for line in (config.output_directory / "private" / "failures.jsonl")
+        .read_text()
+        .splitlines()
+    ]
+    assert len(failure_rows) == 1
+    assert failure_rows[0]["code"] == failure.taskwise_failure_code
+    assert failure_rows[0]["completion_observed"] is failure.completion_observed
     with pytest.raises(RuntimeError, match="forbids resume"):
         TaskwiseOnlineRunnerV1(
             config=config,
@@ -786,6 +917,104 @@ def test_completion_or_security_failure_forbids_retry_and_resume(
             resume=True,
             session_id_factory=_session_factory("forbidden"),
         ).run()
+
+
+@pytest.mark.parametrize("code", sorted(TASKWISE_EXECUTOR_FAILURE_CODES_V1))
+def test_runner_preserves_every_closed_executor_failure_code(
+    tmp_path: Path,
+    code: str,
+) -> None:
+    executor = _DummyExecutor(
+        [
+            _ExecutorFailure(
+                code=code,
+                completion_observed=False,
+                executor_stage="PRE_INVOCATION_ATTESTATION",
+            )
+        ]
+    )
+
+    result = TaskwiseOnlineRunnerV1(
+        config=_config(tmp_path / code, "control"),
+        episodes=_episodes(1),
+        executor=executor,
+        session_id_factory=_session_factory(f"closed-{code.lower()}"),
+    ).run()
+
+    expected_status = (
+        TaskwiseRunStatusV1.SECURITY_TOOL_USE_VIOLATION
+        if code == "EXECUTOR_SECURITY_TOOL_USE_VIOLATION"
+        else TaskwiseRunStatusV1.EXECUTION_FAILED
+    )
+    assert result.status is expected_status
+    assert result.finding_codes == (code,)
+    assert result.resume_allowed is False
+
+
+def test_nonempty_security_event_counts_override_nonsecurity_executor_code(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path, "control")
+    result = TaskwiseOnlineRunnerV1(
+        config=config,
+        episodes=_episodes(1),
+        executor=_DummyExecutor(
+            [
+                _ExecutorFailure(
+                    code="EXECUTOR_MODEL_TRANSPORT_FAILED",
+                    completion_observed=False,
+                    event_digest=_sha256("contradictory security event stream"),
+                    event_counts={"file_read": 1},
+                    executor_stage="MODEL_TRANSPORT",
+                )
+            ]
+        ),
+        session_id_factory=_session_factory("security-count-priority"),
+    ).run()
+
+    assert result.status is TaskwiseRunStatusV1.SECURITY_TOOL_USE_VIOLATION
+    assert result.finding_codes == ("EXECUTOR_SECURITY_TOOL_USE_VIOLATION",)
+    assert result.resume_allowed is False
+    state = json.loads((config.output_directory / "run_state.json").read_text())
+    assert state["failure"]["code"] == "EXECUTOR_SECURITY_TOOL_USE_VIOLATION"
+    failure = json.loads((config.output_directory / "private" / "failures.jsonl").read_text())
+    assert failure["security_violation"] is True
+    assert failure["event_counts"] == {"file_read": 1}
+
+
+def test_unknown_executor_failure_collapses_without_exception_body(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path, "control")
+    executor = _DummyExecutor(
+        [
+            _ExecutorFailure(
+                code="NOT_IN_THE_CLOSED_VOCABULARY",
+                completion_observed=False,
+                diagnostic_receipt="../../unsafe-private-body",
+                executor_stage="UNSAFE_STAGE",
+            )
+        ]
+    )
+
+    result = TaskwiseOnlineRunnerV1(
+        config=config,
+        episodes=_episodes(1),
+        executor=executor,
+        session_id_factory=_session_factory("unknown-executor"),
+    ).run()
+
+    assert result.finding_codes == ("EXECUTOR_INTERNAL_ERROR",)
+    state_text = (config.output_directory / "run_state.json").read_text()
+    failures_text = (config.output_directory / "private" / "failures.jsonl").read_text()
+    assert "NOT_IN_THE_CLOSED_VOCABULARY" not in state_text + failures_text
+    assert "PRIVATE_EXECUTOR_BODY_SENTINEL" not in state_text + failures_text
+    assert "../../unsafe-private-body" not in state_text + failures_text
+    row = json.loads(failures_text)
+    assert row["code"] == "EXECUTOR_INTERNAL_ERROR"
+    assert row["completion_observed"] is False
+    assert row["executor_stage"] == "INTERNAL"
+    assert row["diagnostic_receipt"] is None
 
 
 def test_reflector_security_violation_terminates_the_whole_online_run(
@@ -800,12 +1029,12 @@ def test_reflector_security_violation_terminates_the_whole_online_run(
         session_id_factory=_session_factory("reflector-security"),
     ).run()
 
-    assert result.status is TaskwiseRunStatusV1.TASKWISE_EVOLUTION_UPDATE_FAILED
+    assert result.status is TaskwiseRunStatusV1.SECURITY_TOOL_USE_VIOLATION
     assert result.resume_allowed is False
     assert result.completion_count == 1
     assert result.update_count == 0
     assert len(executor.requests) == 1
-    assert result.finding_codes == ("TASKWISE_EVOLUTION_UPDATE_FAILED",)
+    assert result.finding_codes == ("EXECUTOR_SECURITY_TOOL_USE_VIOLATION",)
     with pytest.raises(RuntimeError, match="forbids resume"):
         TaskwiseOnlineRunnerV1(
             config=_config(tmp_path, "online"),
@@ -814,6 +1043,49 @@ def test_reflector_security_violation_terminates_the_whole_online_run(
             core_update_port=_DummyCorePort(),
             resume=True,
             session_id_factory=_session_factory("reflector-resume-forbidden"),
+        ).run()
+
+
+def test_private_diagnostics_failure_cannot_erase_security_latch(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path, "control")
+    result = _PrivateFailurePersistenceFailingRunner(
+        config=config,
+        episodes=_episodes(1),
+        executor=_DummyExecutor(
+            [
+                _ExecutorFailure(
+                    code="EXECUTOR_SECURITY_TOOL_USE_VIOLATION",
+                    completion_observed=False,
+                    event_digest=_sha256("latched security event stream"),
+                    event_counts={"mcp": 1},
+                    executor_stage="EVENT_STREAM_PARSE",
+                )
+            ]
+        ),
+        session_id_factory=_session_factory("security-diagnostic-failure"),
+    ).run()
+
+    assert result.status is TaskwiseRunStatusV1.SECURITY_TOOL_USE_VIOLATION
+    assert result.resume_allowed is False
+    assert result.finding_codes == (
+        "EXECUTOR_SECURITY_TOOL_USE_VIOLATION",
+        "EXECUTOR_PRIVATE_DIAGNOSTICS_FAILED",
+    )
+    state = json.loads((config.output_directory / "run_state.json").read_text())
+    assert state["failure"]["code"] == "EXECUTOR_SECURITY_TOOL_USE_VIOLATION"
+    assert state["failure"]["secondary_finding_codes"] == ["EXECUTOR_PRIVATE_DIAGNOSTICS_FAILED"]
+    serialized = json.dumps(state, sort_keys=True)
+    assert "PRIVATE_DIAGNOSTIC_PERSISTENCE_BODY_SENTINEL" not in serialized
+    assert (config.output_directory / "private" / "failures.jsonl").read_bytes() == b""
+    with pytest.raises(RuntimeError, match="forbids resume"):
+        TaskwiseOnlineRunnerV1(
+            config=config,
+            episodes=_episodes(1),
+            executor=_DummyExecutor(["A"] * 3),
+            resume=True,
+            session_id_factory=_session_factory("security-no-resume"),
         ).run()
 
 
@@ -841,10 +1113,9 @@ def test_unresolvable_approved_memory_fails_without_predecessor_fallback(
     assert len(core.requests) == 1
     assert len(executor.requests) == 1
     state = json.loads((config.output_directory / "run_state.json").read_text())
-    assert state["failure"] == {
-        "code": "TASKWISE_EVOLUTION_UPDATE_FAILED",
-        "completion_observed": True,
-    }
+    assert state["failure"]["code"] == "TASKWISE_EVOLUTION_UPDATE_FAILED"
+    assert state["failure"]["completion_observed"] is True
+    assert len(state["failure"]["diagnostic_record_sha256"]) == 64
     assert state["active_memory"]["core_artifact_id"] == "artifact_0_1"
     with pytest.raises(RuntimeError, match="forbids resume"):
         TaskwiseOnlineRunnerV1(
@@ -885,10 +1156,21 @@ def test_update_two_failure_does_not_start_round_two_or_fallback(
     state = json.loads((config.output_directory / "run_state.json").read_text())
     assert state["episode_state"] == TaskwiseEpisodeStateV1.ROUND_1_COMPLETED.value
     assert state["active_memory"]["core_artifact_id"] == "artifact_0_1"
-    assert state["failure"] == {
-        "code": "TASKWISE_EVOLUTION_UPDATE_FAILED",
-        "completion_observed": True,
-    }
+    assert state["failure"]["code"] == "TASKWISE_EVOLUTION_UPDATE_FAILED"
+    assert state["failure"]["completion_observed"] is True
+    assert len(state["failure"]["diagnostic_record_sha256"]) == 64
+    failure_rows = [
+        json.loads(line)
+        for line in (config.output_directory / "private" / "failures.jsonl")
+        .read_text()
+        .splitlines()
+    ]
+    assert len(failure_rows) == 1
+    assert failure_rows[0]["code"] == "TASKWISE_EVOLUTION_UPDATE_FAILED"
+    assert failure_rows[0]["update_index"] == 2
+    assert failure_rows[0]["round_index"] == 1
+    assert failure_rows[0]["session_id"] is None
+    assert "synthetic update-two validation failure" not in json.dumps(failure_rows)
     with pytest.raises(RuntimeError, match="forbids resume"):
         TaskwiseOnlineRunnerV1(
             config=config,
@@ -902,20 +1184,14 @@ def test_update_two_failure_does_not_start_round_two_or_fallback(
 
 def test_resume_rejects_binding_or_history_tampering(tmp_path: Path) -> None:
     config = _config(tmp_path, "control")
-    failed = TaskwiseOnlineRunnerV1(
-        config=config,
-        episodes=_episodes(1),
-        executor=_DummyExecutor(
-            [
-                TaskwiseExecutionFailureV1(
-                    "INFRASTRUCTURE_UNAVAILABLE",
-                    completion_observed=False,
-                )
-            ]
-        ),
-        session_id_factory=_session_factory("tamper"),
-    ).run()
-    assert failed.resume_allowed is True
+    with pytest.raises(_SimulatedProcessLoss):
+        _PauseAfterStateRunner(
+            config=config,
+            episodes=_episodes(1),
+            executor=_DummyExecutor(["A"]),
+            pause_state=TaskwiseEpisodeStateV1.TASK_OPENED,
+            session_id_factory=_session_factory("tamper"),
+        ).run()
     state_path = config.output_directory / "run_state.json"
     state = json.loads(state_path.read_text())
     state["binding"]["task_sequence_sha256"] = "0" * 64

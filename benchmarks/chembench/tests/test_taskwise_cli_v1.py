@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,6 +19,10 @@ from openevo_chembench.frozen_runtime_v2 import (
     _issue_core_resolved_text_memory_v2,
 )
 from openevo_chembench.models import RawAttempt, TranscriptReference
+from openevo_chembench.local_codex_executor import (
+    LocalCodexExecutionError,
+    LocalCodexExecutionErrorCode,
+)
 from openevo_chembench.taskwise_config_v1 import (
     TASKWISE_MEMORY_LIMITS_V1,
     load_taskwise_config_v1,
@@ -31,6 +36,7 @@ from openevo_chembench.taskwise_online_runner_v1 import (
     CoreMemoryReferenceV1,
     TaskwiseCoreUpdateOutcomeV1,
     TaskwiseEpisodeV1,
+    TaskwiseExecutionFailureV1,
     TaskwiseMemoryPublicMetricsV1,
 )
 from openevo_chembench.taskwise_sampling_v1 import TaskwiseManifestSet
@@ -233,6 +239,200 @@ def test_source_gate_recomputes_the_source_manifest(
         cli.verify_taskwise_source_gate_v1(config)
 
 
+def test_no_model_codex_policy_probe_accepts_the_exact_01446_policy() -> None:
+    config = load_taskwise_config_v1(cli.CONFIG_ROOT / "control_canary9_taskwise_online_v1.yaml")
+    command = cli._codex_command(
+        executable=Path("/opt/codex"),
+        model=config.model,
+        reasoning_effort=config.reasoning_effort,
+        workspace=Path("/empty-work"),
+        output_last_message=Path("/private/last-message"),
+    )
+    calls: list[tuple[str, ...]] = []
+
+    def fake_probe(
+        arguments,
+        _cwd: Path,
+        _environment,
+        _timeout_seconds: float,
+    ) -> tuple[int, str]:
+        received = tuple(arguments)
+        calls.append(received)
+        if received[1:] == ("--version",):
+            return 0, "codex-cli 0.144.6\n"
+        assert "exec" not in received
+        assert "--model" not in received
+        assert received[1:3] == ("debug", "prompt-input")
+        return 0, "discarded parser output"
+
+    receipt = cli.verify_taskwise_codex_policy_v1(
+        config,
+        command=command,
+        probe_runner=fake_probe,
+    )
+
+    assert receipt["status"] == "PASS"
+    assert receipt["finding_codes"] == []
+    assert receipt["model_calls"] == 0
+    assert receipt["stderr_included"] is False
+    assert "agents.enabled" not in receipt["config_keys"]
+    assert len(calls) == 2
+
+
+def test_no_model_codex_policy_probe_rejects_agents_enabled_without_stderr() -> None:
+    config = load_taskwise_config_v1(cli.CONFIG_ROOT / "control_canary9_taskwise_online_v1.yaml")
+    command = cli._codex_command(
+        executable=Path("/opt/codex"),
+        model=config.model,
+        reasoning_effort=config.reasoning_effort,
+        workspace=Path("/empty-work"),
+        output_last_message=Path("/private/last-message"),
+    )
+    insertion = command.index("--output-last-message")
+    invalid_command = (
+        command[:insertion] + ("--config", "agents.enabled=false") + command[insertion:]
+    )
+
+    def fake_probe(
+        arguments,
+        _cwd: Path,
+        _environment,
+        _timeout_seconds: float,
+    ) -> tuple[int, str]:
+        received = tuple(arguments)
+        if received[1:] == ("--version",):
+            return 0, "codex-cli 0.144.6\n"
+        assert "exec" not in received
+        return 1, "PRIVATE STDERR MUST NOT SURFACE"
+
+    receipt = cli.inspect_taskwise_codex_policy_v1(
+        config,
+        command=invalid_command,
+        probe_runner=fake_probe,
+    )
+
+    assert receipt["status"] == "BLOCKED"
+    assert "EXECUTOR_CONFIG_POLICY_AGENTS_ENABLED_FORBIDDEN" in receipt["finding_codes"]
+    assert "EXECUTOR_CONFIG_POLICY_PROBE_REJECTED" in receipt["finding_codes"]
+    serialized = json.dumps(receipt, sort_keys=True)
+    assert "stderr" not in serialized.casefold() or receipt["stderr_included"] is False
+    assert "PRIVATE STDERR" not in serialized
+    with pytest.raises(
+        cli.TaskwiseCLIError,
+        match="EXECUTOR_CONFIG_POLICY_AGENTS_ENABLED_FORBIDDEN",
+    ):
+        cli.verify_taskwise_codex_policy_v1(
+            config,
+            command=invalid_command,
+            probe_runner=fake_probe,
+        )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_code"),
+    [
+        ("missing_output", "EXECUTOR_CONFIG_POLICY_COMMAND_INVALID"),
+        ("duplicate_output", "EXECUTOR_CONFIG_POLICY_COMMAND_INVALID"),
+        ("extra_flag", "EXECUTOR_CONFIG_POLICY_COMMAND_INVALID"),
+        ("extra_config", "EXECUTOR_CONFIG_POLICY_CONFIG_MISMATCH"),
+        ("extra_feature", "EXECUTOR_CONFIG_POLICY_FEATURES_MISMATCH"),
+    ],
+)
+def test_codex_policy_is_an_exact_command_attestation(
+    mutation: str,
+    expected_code: str,
+) -> None:
+    config = load_taskwise_config_v1(cli.CONFIG_ROOT / "control_canary9_taskwise_online_v1.yaml")
+    command = cli._codex_command(
+        executable=Path("/opt/codex"),
+        model=config.model,
+        reasoning_effort=config.reasoning_effort,
+        workspace=Path("/empty-work"),
+        output_last_message=Path("/private/last-message"),
+    )
+    output_index = command.index("--output-last-message")
+    if mutation == "missing_output":
+        mutated = command[:output_index] + command[output_index + 2 :]
+    elif mutation == "duplicate_output":
+        mutated = (
+            command[:output_index]
+            + ("--output-last-message", "/private/other-message")
+            + command[output_index:]
+        )
+    elif mutation == "extra_flag":
+        mutated = command[:-1] + ("--oss", command[-1])
+    elif mutation == "extra_config":
+        mutated = (
+            command[:output_index] + ("--config", 'model_verbosity="low"') + command[output_index:]
+        )
+    else:
+        mutated = (
+            command[:output_index] + ("--disable", "experimental_feature") + command[output_index:]
+        )
+
+    receipt = cli.inspect_taskwise_codex_policy_v1(
+        config,
+        command=mutated,
+        probe_runner=lambda arguments, *_args: (
+            (0, "codex-cli 0.144.6\n") if tuple(arguments)[1:] == ("--version",) else (0, "")
+        ),
+    )
+
+    assert receipt["status"] == "BLOCKED"
+    assert expected_code in receipt["finding_codes"]
+
+
+def test_closed_executor_adapter_preserves_sanitized_failure_metadata() -> None:
+    class FailingExecutor:
+        def execute_taskwise(self, _request):
+            raise LocalCodexExecutionError(
+                LocalCodexExecutionErrorCode.CLI_FAILED,
+                diagnostic_receipt=f"receipt_{'a' * 32}.json",
+                taskwise_failure_code="EXECUTOR_NONZERO_EXIT",
+                executor_stage="CODEX_STARTUP",
+                completion_observed=False,
+            )
+
+        def consume_taskwise_context_receipt(self, _session_id: str):
+            raise AssertionError("failed invocation has no context receipt")
+
+        def close(self) -> None:
+            pass
+
+    adapter = cli._ClosedExecutorFailureAdapterV1(FailingExecutor())
+    with pytest.raises(TaskwiseExecutionFailureV1) as captured:
+        adapter.execute_taskwise(object())
+
+    failure = captured.value
+    assert failure.code == "EXECUTOR_NONZERO_EXIT"
+    assert failure.completion_observed is False
+    assert failure.resume_allowed is False
+    assert failure.diagnostic_receipt == f"receipt_{'a' * 32}.json"
+    assert failure.executor_stage == "CODEX_STARTUP"
+    assert "stderr" not in str(failure).casefold()
+
+
+def test_default_executor_diagnostics_are_namespaced_by_run_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = load_taskwise_config_v1(cli.CONFIG_ROOT / "control_canary9_taskwise_online_v1.yaml")
+    captured: dict[str, object] = {}
+
+    def fake_executor(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(cli, "LocalCodexCLIExecutor", fake_executor)
+    cli.build_default_taskwise_executor_v1(config)
+
+    diagnostic_root = Path(captured["diagnostic_root"])
+    assert diagnostic_root.parts[-3:] == (
+        config.scope,
+        config.run_name,
+        config.arm,
+    )
+
+
 def test_dry_run_recomputes_manifest_binding_without_paid_objects(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -247,12 +447,27 @@ def test_dry_run_recomputes_manifest_binding_without_paid_objects(
         lambda _config: pytest.fail("dry-run instantiated Core"),
     )
 
-    receipt = cli.dry_run()
+    policy_calls = 0
+
+    def policy_gate(_config):
+        nonlocal policy_calls
+        policy_calls += 1
+        return {
+            "schema_version": "taskwise_codex_policy_preflight_v1",
+            "status": "PASS",
+            "finding_codes": [],
+            "model_calls": 0,
+            "stderr_included": False,
+        }
+
+    receipt = cli.dry_run(executor_policy_gate=policy_gate)
 
     assert receipt["status"] == "PASS"
+    assert policy_calls == 1
     assert receipt["model_calls"] == 0
     assert receipt["executor_instantiated"] is False
     assert receipt["core_port_instantiated"] is False
+    assert receipt["codex_policy_preflight"]["status"] == "PASS"
     assert receipt["scopes"]["canary9"]["item_count"] == 9
     assert all(receipt["scopes"][scope]["item_count"] == 50 for scope in PILOT500_STREAM_SCOPES)
     assert receipt["pilot500_stream_design"] == {
@@ -262,6 +477,38 @@ def test_dry_run_recomputes_manifest_binding_without_paid_objects(
         "generation_zero_reset_between_streams": True,
         "legacy_single_chain_scope": "pilot500",
     }
+
+
+def test_cli_main_projects_arbitrary_exception_to_closed_public_code(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        cli,
+        "run_arm",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("private path /secret and stderr payload")
+        ),
+    )
+
+    status = cli.main(
+        [
+            "run-arm",
+            "--config",
+            os.fspath(cli.CONFIG_ROOT / "control_canary9_taskwise_online_v1.yaml"),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert status == 2
+    assert payload == {
+        "error_type": "TASKWISE_CLI_INTERNAL_ERROR",
+        "model_calls": 0,
+        "status": "BLOCKED",
+    }
+    assert "secret" not in captured.err
+    assert "stderr payload" not in captured.err
 
 
 def test_manifest_is_bound_to_config_scope_and_path() -> None:
@@ -701,6 +948,88 @@ def test_suite_orchestrator_stops_entire_suite_on_terminal_failure(
     assert state["status"] == "FAILED"
     assert state[counter_name] == 1
     assert state["completed_streams"] == 0
+    assert state["infrastructure_failures"] == 0
+
+
+@pytest.mark.parametrize(
+    ("status", "failure_code", "expected_class"),
+    [
+        ("EXECUTION_FAILED", "EXECUTOR_NONZERO_EXIT", "infrastructure"),
+        (
+            "EXECUTION_FAILED",
+            "EXECUTOR_SECURITY_TOOL_USE_VIOLATION",
+            "security",
+        ),
+        (
+            "TASKWISE_EVOLUTION_UPDATE_FAILED",
+            "EXECUTOR_NONZERO_EXIT",
+            "evolution_update",
+        ),
+        (
+            "TASKWISE_CONTEXT_BINDING_VIOLATION",
+            "EXECUTOR_NONZERO_EXIT",
+            "context",
+        ),
+    ],
+)
+def test_terminal_failure_class_precedes_executor_infrastructure_class(
+    status: str,
+    failure_code: str,
+    expected_class: str,
+) -> None:
+    assert (
+        cli._stream_failure_class(
+            {
+                "run_status": status,
+                "failure_code": failure_code,
+            }
+        )
+        == expected_class
+    )
+
+
+def test_legacy_unclassified_executor_failure_is_closed_at_suite_boundary() -> None:
+    assert (
+        cli._closed_suite_failure_code(
+            "EXECUTION_FAILED",
+            "UNCLASSIFIED_EXECUTOR_FAILURE",
+        )
+        == "EXECUTOR_INTERNAL_ERROR"
+    )
+
+
+def test_suite_records_config_policy_failure_without_arbitrary_exception_text(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cli, "WORKSPACE_ROOT", tmp_path)
+    monkeypatch.setattr(cli, "_verify_static_inputs", lambda *_args: None)
+    suite_state = tmp_path / "suite" / "control.json"
+
+    def blocked_runner(_config_path: Path, *, resume: bool) -> dict[str, object]:
+        assert resume is False
+        raise cli.TaskwiseCLIError("EXECUTOR_CONFIG_POLICY_AGENTS_ENABLED_FORBIDDEN")
+
+    with pytest.raises(
+        cli.TaskwiseCLIError,
+        match="EXECUTOR_CONFIG_POLICY_AGENTS_ENABLED_FORBIDDEN",
+    ):
+        cli.run_pilot500_stream_suite(
+            arm="control",
+            arm_runner=blocked_runner,
+            suite_state_path=suite_state,
+            source_gate=lambda _config: _SOURCE_COMMIT,
+        )
+
+    state = json.loads(suite_state.read_text(encoding="utf-8"))
+    stream = state["streams"]["pilot500_stream_00"]
+    assert stream["failure_code"] == ("EXECUTOR_CONFIG_POLICY_AGENTS_ENABLED_FORBIDDEN")
+    assert state["executor_failures"] == 1
+    assert state["executor_failure_codes"] == {
+        "EXECUTOR_CONFIG_POLICY_AGENTS_ENABLED_FORBIDDEN": 1
+    }
+    assert state["infrastructure_failures"] == 1
+    assert "stderr" not in json.dumps(state).casefold()
 
 
 def test_suite_orchestrator_records_resumable_infrastructure_failure(
@@ -731,6 +1060,12 @@ def test_suite_orchestrator_records_resumable_infrastructure_failure(
     assert calls == 1
     assert result["status"] == "INCOMPLETE"
     assert result["infrastructure_failures"] == 1
+    assert result["executor_failures"] == 1
+    assert result["executor_failure_codes"] == {"EXECUTOR_MODEL_TRANSPORT_FAILED": 1}
+    assert (
+        result["streams"]["pilot500_stream_00"]["failure_code"]
+        == "EXECUTOR_MODEL_TRANSPORT_FAILED"
+    )
     assert result["streams"]["pilot500_stream_01"]["action"] == "NOT_STARTED"
 
 
@@ -755,6 +1090,8 @@ def test_incomplete_stream_comparison_uses_only_public_state(
     assert report["decision"] == "NO_GO"
     assert report["completed_streams"] == 0
     assert report["infrastructure_failures"] == 20
+    assert report["executor_failures"] == 0
+    assert report["executor_failure_codes"] == {}
     assert report["private_results_read"] is False
 
 
@@ -794,6 +1131,12 @@ def test_failed_stream_comparison_reports_all_public_failure_counts(
             "TASKWISE_CONTEXT_BINDING_VIOLATION",
             1,
         ),
+        (
+            4,
+            "EXECUTION_FAILED",
+            "EXECUTOR_NONZERO_EXIT",
+            0,
+        ),
     )
     for stream_index, status, failure_code, context_count in failures:
         config = load_taskwise_config_v1(
@@ -819,4 +1162,6 @@ def test_failed_stream_comparison_reports_all_public_failure_counts(
     assert report["artifact_validation_failures"] == 1
     assert report["context_binding_violations"] == 1
     assert report["infrastructure_failures"] == 16
+    assert report["executor_failures"] == 1
+    assert report["executor_failure_codes"] == {"EXECUTOR_NONZERO_EXIT": 1}
     assert report["private_results_read"] is False

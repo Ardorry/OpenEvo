@@ -61,8 +61,71 @@ _ARMS = ("control", "online")
 _ROUNDS_PER_TASK = 3
 _UPDATES_PER_ONLINE_TASK = 2
 _ZERO_SHA256 = "0" * 64
+_DIAGNOSTIC_RECEIPT = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
 ONLINE_PROTOCOL_ID = "taskwise_online_evolution_v1"
 CONTROL_PROTOCOL_ID = "repeated_session_control_v1"
+TASKWISE_EXECUTOR_FAILURE_CODES_V1 = frozenset(
+    {
+        "EXECUTOR_PREFLIGHT_FAILED",
+        "EXECUTOR_AUTH_MATERIALIZATION_FAILED",
+        "EXECUTOR_PROCESS_SPAWN_FAILED",
+        "EXECUTOR_CODEX_STARTUP_FAILED",
+        "EXECUTOR_MODEL_TRANSPORT_FAILED",
+        "EXECUTOR_TIMEOUT",
+        "EXECUTOR_NONZERO_EXIT",
+        "EXECUTOR_EVENT_STREAM_INVALID",
+        "EXECUTOR_SECURITY_TOOL_USE_VIOLATION",
+        "EXECUTOR_OUTPUT_MISSING",
+        "EXECUTOR_OUTPUT_INVALID",
+        "EXECUTOR_PRIVATE_DIAGNOSTICS_FAILED",
+        "EXECUTOR_CLEANUP_FAILED",
+        "EXECUTOR_POST_ATTESTATION_FAILED",
+        "EXECUTOR_INTERNAL_ERROR",
+    }
+)
+TASKWISE_EXECUTOR_STAGES_V1 = frozenset(
+    {
+        "PRE_INVOCATION_ATTESTATION",
+        "INVOCATION_ROOT_CREATION",
+        "AUTH_MATERIALIZATION",
+        "CODEX_CONFIG_GENERATION",
+        "PROCESS_SPAWN",
+        "CODEX_STARTUP",
+        "MODEL_TRANSPORT",
+        "EVENT_STREAM_PARSE",
+        "OUTPUT_LAST_MESSAGE_READ",
+        "COMPLETION_VALIDATION",
+        "PRIVATE_EVENT_PERSISTENCE",
+        "PROCESS_GROUP_SHUTDOWN",
+        "CLEANUP",
+        "POST_INVOCATION_ATTESTATION",
+        "INTERNAL",
+    }
+)
+_TASKWISE_SECURITY_EVENT_CATEGORIES = frozenset(
+    {
+        "app",
+        "browser",
+        "command_execution",
+        "external_tool",
+        "file_read",
+        "file_write",
+        "mcp",
+        "network",
+        "plugin",
+        "shell",
+        "subagent",
+        "unknown_tool",
+        "web",
+    }
+)
+_TASKWISE_INTERNAL_FAILURE_CODES = frozenset(
+    {
+        CONTEXT_BINDING_VIOLATION,
+        "TASKWISE_EVOLUTION_UPDATE_FAILED",
+    }
+)
+_TASKWISE_FAILURE_CODES = TASKWISE_EXECUTOR_FAILURE_CODES_V1 | _TASKWISE_INTERNAL_FAILURE_CODES
 
 
 class TaskwiseEpisodeStateV1(str, Enum):
@@ -241,6 +304,8 @@ class TaskwiseAgentRequestV1:
     arm: Literal["control", "online"]
     task_ordinal: int
     round_index: Literal[0, 1, 2]
+    run_id: str | None = None
+    task_uid: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.rendered_public_prompt) is not str or not self.rendered_public_prompt:
@@ -262,6 +327,14 @@ class TaskwiseAgentRequestV1:
             raise ValueError("task_ordinal must be non-negative")
         if self.round_index not in (0, 1, 2):
             raise ValueError("round_index must be 0, 1, or 2")
+        if self.run_id is not None and (
+            type(self.run_id) is not str or _RUNTIME_ID.fullmatch(self.run_id) is None
+        ):
+            raise ValueError("run_id must be a bounded runtime identifier or None")
+        if self.task_uid is not None and (
+            type(self.task_uid) is not str or _SHA256.fullmatch(self.task_uid) is None
+        ):
+            raise ValueError("task_uid must be a lowercase SHA-256 or None")
         if self.arm == "control" and self.resolved_text_memory is not None:
             raise ValueError("control request must not contain memory")
 
@@ -616,16 +689,51 @@ class TaskwiseExecutionFailureV1(RuntimeError):
         code: str,
         *,
         completion_observed: bool,
-        security_violation: bool = False,
+        diagnostic_receipt: str | None = None,
+        event_digest: str | None = None,
+        event_counts: dict[str, int] | None = None,
+        executor_stage: str | None = None,
     ) -> None:
-        if type(code) is not str or not code or not re.fullmatch(r"[A-Z0-9_]+", code):
-            raise ValueError("failure code must use the closed-style public vocabulary")
-        if type(completion_observed) is not bool or type(security_violation) is not bool:
-            raise TypeError("failure flags must be booleans")
+        if type(code) is not str or code not in _TASKWISE_FAILURE_CODES:
+            raise ValueError("failure code is outside the taskwise closed vocabulary")
+        if type(completion_observed) is not bool:
+            raise TypeError("completion_observed must be boolean")
+        if diagnostic_receipt is not None and (
+            type(diagnostic_receipt) is not str
+            or _DIAGNOSTIC_RECEIPT.fullmatch(diagnostic_receipt) is None
+            or "/" in diagnostic_receipt
+            or "\\" in diagnostic_receipt
+        ):
+            raise ValueError("diagnostic_receipt must be a safe basename or None")
+        if event_digest is not None and (
+            type(event_digest) is not str or _SHA256.fullmatch(event_digest) is None
+        ):
+            raise ValueError("event_digest must be a lowercase SHA-256 or None")
+        if event_counts is None:
+            normalized_event_counts: dict[str, int] = {}
+        elif type(event_counts) is not dict:
+            raise TypeError("event_counts must be an exact dict or None")
+        else:
+            normalized_event_counts = {}
+            for category, count in event_counts.items():
+                if category not in _TASKWISE_SECURITY_EVENT_CATEGORIES:
+                    raise ValueError("event_counts contains an unknown category")
+                if type(count) is not int or count <= 0:
+                    raise ValueError("event_counts values must be positive integers")
+                normalized_event_counts[category] = count
+        if executor_stage is not None and executor_stage not in TASKWISE_EXECUTOR_STAGES_V1:
+            raise ValueError("executor_stage is outside the closed vocabulary")
         self.code = code
         self.completion_observed = completion_observed
-        self.security_violation = security_violation
-        self.resume_allowed = not completion_observed and not security_violation
+        self.security_violation = code == "EXECUTOR_SECURITY_TOOL_USE_VIOLATION"
+        self.diagnostic_receipt = diagnostic_receipt
+        self.event_digest = event_digest
+        self.event_counts = dict(sorted(normalized_event_counts.items()))
+        self.executor_stage = executor_stage
+        # A failed formal taskwise run is terminal even when the executor can
+        # prove that no completion was observed.  Replaying it would alter the
+        # fixed stream/session treatment and can fork the memory lineage.
+        self.resume_allowed = False
         super().__init__(f"taskwise execution failed: error_type={code}")
 
 
@@ -751,6 +859,7 @@ class TaskwiseOnlineRunnerV1:
         self._state: dict[str, Any] = {}
         self._public_path = config.output_directory / "public" / "events.jsonl"
         self._private_path = config.output_directory / "private" / "evaluations.jsonl"
+        self._private_failures_path = config.output_directory / "private" / "failures.jsonl"
         self._state_path = config.output_directory / "run_state.json"
 
     def _build_binding(self) -> dict[str, object]:
@@ -872,22 +981,18 @@ class TaskwiseOnlineRunnerV1:
             arm=self._config.arm,
             task_ordinal=ordinal,
             round_index=round_index,
+            run_id=self._config.run_id,
+            task_uid=episode.task.uid,
         )
         try:
             attempt = self._executor.execute_taskwise(request)
-        except TaskwiseExecutionFailureV1:
-            raise
         except Exception as exc:
-            security = _is_security_violation(exc)
-            raise TaskwiseExecutionFailureV1(
-                ("SECURITY_TOOL_USE_VIOLATION" if security else "UNCLASSIFIED_EXECUTOR_FAILURE"),
-                completion_observed=True,
-                security_violation=security,
-            ) from exc
+            raise _taskwise_failure_from_executor(exc) from exc
         if type(attempt) is not RawAttempt:
             raise TaskwiseExecutionFailureV1(
-                "INVALID_EXECUTOR_RESULT",
+                "EXECUTOR_OUTPUT_INVALID",
                 completion_observed=True,
+                executor_stage="COMPLETION_VALIDATION",
             )
         self._state["pending_invocation"]["completion_observed"] = True
         self._write_state()
@@ -1002,6 +1107,8 @@ class TaskwiseOnlineRunnerV1:
         except TaskwiseExecutionFailureV1:
             raise
         except Exception as exc:
+            if _is_security_violation(exc):
+                raise _taskwise_failure_from_executor(exc) from exc
             # A Core update may have created a job or artifact before failing.
             # Validation and reflector-security failures are update failures too.
             # Their side effects are ambiguous, so the whole run is terminal and
@@ -1049,6 +1156,8 @@ class TaskwiseOnlineRunnerV1:
             self._state["core_artifact_count"] += 1
             self._write_state()
         except Exception as exc:
+            if _is_security_violation(exc):
+                raise _taskwise_failure_from_executor(exc) from exc
             raise TaskwiseExecutionFailureV1(
                 "TASKWISE_EVOLUTION_UPDATE_FAILED",
                 completion_observed=True,
@@ -1161,6 +1270,7 @@ class TaskwiseOnlineRunnerV1:
         (root / "private").mkdir(mode=0o700)
         _create_file(self._public_path, mode=0o644)
         _create_file(self._private_path, mode=0o600)
+        _create_file(self._private_failures_path, mode=0o600)
         self._state = {
             "schema_version": "taskwise_online_run_state_v1",
             "protocol_id": _protocol_id(self._config.arm),
@@ -1218,13 +1328,7 @@ class TaskwiseOnlineRunnerV1:
             and pending is None
             and self._state.get("resume_allowed") is False
         )
-        explicitly_resumable_failure = (
-            status == TaskwiseRunStatusV1.EXECUTION_FAILED.value
-            and self._state.get("resume_allowed") is True
-            and type(pending) is dict
-            and pending.get("completion_observed") is False
-        )
-        if not safely_checkpointed and not explicitly_resumable_failure:
+        if not safely_checkpointed:
             raise RuntimeError("taskwise run state forbids resume")
         if type(self._state.get("issued_session_ids")) is not list or len(
             self._state["issued_session_ids"]
@@ -1232,6 +1336,8 @@ class TaskwiseOnlineRunnerV1:
             raise RuntimeError("resume cannot replace an observed or ambiguous completion")
         public_rows = _read_jsonl(self._public_path, private=False)
         private_rows = _read_jsonl(self._private_path, private=True)
+        if _read_jsonl(self._private_failures_path, private=True):
+            raise RuntimeError("taskwise failed run cannot resume")
         completion_rows = [row for row in public_rows if row.get("kind") == "completion"]
         update_rows = [row for row in public_rows if row.get("kind") == "core_update"]
         violation_rows = [
@@ -1470,6 +1576,61 @@ class TaskwiseOnlineRunnerV1:
             line,
         )
 
+    def _append_private_failure(self, exc: TaskwiseExecutionFailureV1) -> str:
+        """Persist only closed diagnostic metadata, never exception text."""
+
+        if type(exc) is not TaskwiseExecutionFailureV1:
+            raise TypeError("failure must be exact TaskwiseExecutionFailureV1")
+        if self._private_failures_path.stat().st_mode & 0o077:
+            raise RuntimeError("private taskwise failure permissions are unsafe")
+        pending = self._state.get("pending_invocation")
+        ordinal = self._state.get("task_ordinal")
+        task_uid = (
+            self._episodes[ordinal].task.uid
+            if type(ordinal) is int and 0 <= ordinal < len(self._episodes)
+            else None
+        )
+        episode_state = self._state.get("episode_state")
+        update_index = (
+            1
+            if episode_state == TaskwiseEpisodeStateV1.ROUND_0_COMPLETED.value
+            and type(pending) is not dict
+            else (
+                2
+                if episode_state == TaskwiseEpisodeStateV1.ROUND_1_COMPLETED.value
+                and type(pending) is not dict
+                else None
+            )
+        )
+        value: dict[str, object] = {
+            "schema_version": "taskwise_private_failure_v1",
+            "protocol_id": _protocol_id(self._config.arm),
+            "arm": self._config.arm,
+            "run_id": self._config.run_id,
+            "task_uid": task_uid,
+            "task_ordinal": ordinal,
+            "episode_state": episode_state,
+            "round_index": (
+                pending.get("round_index")
+                if type(pending) is dict
+                else (None if update_index is None else update_index - 1)
+            ),
+            "update_index": update_index,
+            "session_id": (pending.get("session_id") if type(pending) is dict else None),
+            "code": exc.code,
+            "completion_observed": exc.completion_observed,
+            "security_violation": exc.security_violation,
+            "executor_stage": exc.executor_stage,
+            "diagnostic_receipt": exc.diagnostic_receipt,
+            "event_digest": exc.event_digest,
+            "event_counts": dict(exc.event_counts),
+            "retry_allowed": False,
+            "resume_allowed": False,
+            "replacement_completion_allowed": False,
+        }
+        line = _append_json(self._private_failures_path, value)
+        return hashlib.sha256(line).hexdigest()
+
     def _write_state(self) -> None:
         _atomic_json(self._state_path, self._state, mode=0o644)
 
@@ -1477,6 +1638,22 @@ class TaskwiseOnlineRunnerV1:
         self,
         exc: TaskwiseExecutionFailureV1,
     ) -> TaskwiseRunResultV1:
+        secondary_finding_codes: tuple[str, ...] = ()
+        try:
+            diagnostic_record_sha256 = self._append_private_failure(exc)
+        except Exception:
+            diagnostic_record_sha256 = None
+            if exc.security_violation:
+                # Never let a secondary persistence failure erase an already
+                # latched tool-use violation.  The public state records only a
+                # closed secondary code, never the private exception body.
+                secondary_finding_codes = ("EXECUTOR_PRIVATE_DIAGNOSTICS_FAILED",)
+            else:
+                exc = TaskwiseExecutionFailureV1(
+                    "EXECUTOR_PRIVATE_DIAGNOSTICS_FAILED",
+                    completion_observed=True,
+                    executor_stage="PRIVATE_EVENT_PERSISTENCE",
+                )
         if self._state.get("pending_invocation") is not None:
             self._state["pending_invocation"]["completion_observed"] = exc.completion_observed
         if exc.security_violation:
@@ -1488,25 +1665,31 @@ class TaskwiseOnlineRunnerV1:
         else:
             status = TaskwiseRunStatusV1.EXECUTION_FAILED
         self._state["status"] = status.value
-        self._state["resume_allowed"] = exc.resume_allowed
-        self._state["failure"] = {
+        self._state["resume_allowed"] = False
+        failure: dict[str, object] = {
             "code": exc.code,
             "completion_observed": exc.completion_observed,
         }
+        if exc.diagnostic_receipt is not None:
+            failure["diagnostic_receipt"] = exc.diagnostic_receipt
+        if exc.event_digest is not None:
+            failure["event_digest"] = exc.event_digest
+        if diagnostic_record_sha256 is not None:
+            failure["diagnostic_record_sha256"] = diagnostic_record_sha256
+        if secondary_finding_codes:
+            failure["secondary_finding_codes"] = list(secondary_finding_codes)
+        self._state["failure"] = failure
         self._write_state()
-        return self._result(finding_codes=(exc.code,))
+        return self._result(finding_codes=(exc.code, *secondary_finding_codes))
 
     def _record_fail_closed_internal_error(self) -> None:
-        pending = self._state.get("pending_invocation")
-        if type(pending) is dict:
-            pending["completion_observed"] = True
-        self._state["status"] = TaskwiseRunStatusV1.EXECUTION_FAILED.value
-        self._state["resume_allowed"] = False
-        self._state["failure"] = {
-            "code": "FAIL_CLOSED_INTERNAL_ERROR",
-            "completion_observed": True,
-        }
-        self._write_state()
+        self._record_execution_failure(
+            TaskwiseExecutionFailureV1(
+                "EXECUTOR_INTERNAL_ERROR",
+                completion_observed=True,
+                executor_stage="INTERNAL",
+            )
+        )
 
     def _result(self, *, finding_codes: tuple[str, ...] = ()) -> TaskwiseRunResultV1:
         return TaskwiseRunResultV1(
@@ -1678,15 +1861,68 @@ def _chain_rows(rows: list[dict[str, Any]]) -> str:
     return digest
 
 
+def _taskwise_failure_from_executor(exc: Exception) -> TaskwiseExecutionFailureV1:
+    """Copy only validated, closed metadata from an executor exception."""
+
+    if type(exc) is TaskwiseExecutionFailureV1:
+        return exc
+    raw_code = getattr(exc, "taskwise_failure_code", None)
+    event_counts = getattr(exc, "event_counts", None)
+    security_violation = (
+        _is_security_violation(exc)
+        or (raw_code == "EXECUTOR_SECURITY_TOOL_USE_VIOLATION")
+        or (type(event_counts) is dict and bool(event_counts))
+    )
+    if security_violation:
+        code = "EXECUTOR_SECURITY_TOOL_USE_VIOLATION"
+    elif raw_code in TASKWISE_EXECUTOR_FAILURE_CODES_V1:
+        code = raw_code
+    else:
+        code = "EXECUTOR_INTERNAL_ERROR"
+
+    raw_completion_observed = getattr(exc, "completion_observed", None)
+    completion_observed = (
+        raw_completion_observed if type(raw_completion_observed) is bool else True
+    )
+    diagnostic_receipt = getattr(exc, "diagnostic_receipt", None)
+    event_digest = getattr(exc, "event_digest", None)
+    executor_stage = getattr(exc, "executor_stage", None)
+    try:
+        return TaskwiseExecutionFailureV1(
+            code,
+            completion_observed=completion_observed,
+            diagnostic_receipt=diagnostic_receipt,
+            event_digest=event_digest,
+            event_counts=event_counts,
+            executor_stage=executor_stage,
+        )
+    except (TypeError, ValueError):
+        # Unsafe metadata is discarded rather than copied into either the
+        # public state or private audit record.  Security evidence remains a
+        # security violation; all other malformed exceptions collapse to the
+        # closed internal executor code.
+        return TaskwiseExecutionFailureV1(
+            (
+                "EXECUTOR_SECURITY_TOOL_USE_VIOLATION"
+                if security_violation
+                else "EXECUTOR_INTERNAL_ERROR"
+            ),
+            completion_observed=completion_observed,
+            executor_stage="INTERNAL",
+        )
+
+
 def _is_security_violation(exc: Exception) -> bool:
     run_status = getattr(exc, "run_status", None)
     code = getattr(exc, "code", None)
     code_value = getattr(code, "value", code)
     finding_code = getattr(exc, "finding_code", None)
+    event_counts = getattr(exc, "event_counts", None)
     return (
         run_status == "SECURITY_TOOL_USE_VIOLATION"
         or code_value == "security_tool_use_violation"
         or code_value == "SECURITY_TOOL_USE_VIOLATION"
+        or (type(event_counts) is dict and bool(event_counts))
         or finding_code
         in {
             "REFLECTOR_SECURITY_TOOL_USE_VIOLATION",
@@ -1746,6 +1982,8 @@ __all__ = [
     "CONTROL_PROTOCOL_ID",
     "CoreMemoryReferenceV1",
     "ONLINE_PROTOCOL_ID",
+    "TASKWISE_EXECUTOR_FAILURE_CODES_V1",
+    "TASKWISE_EXECUTOR_STAGES_V1",
     "TaskwiseAgentRequestV1",
     "TaskwiseCoreUpdatePortV1",
     "TaskwiseCoreUpdateOutcomeV1",

@@ -6,9 +6,10 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +20,11 @@ from openevo.evolution.framework import (
 from openevo_chembench.chembench4k_dataset import ChemBench4KDatasetLoader
 from openevo_chembench.chembench4k_models import CHEMBENCH4K_CATEGORIES
 from openevo_chembench.chembench4k_prompt import render_official_five_shot_prompt
-from openevo_chembench.local_codex_executor import LocalCodexCLIExecutor
+from openevo_chembench.local_codex_executor import (
+    LocalCodexCLIExecutor,
+    LocalCodexExecutionError,
+    _codex_command,
+)
 from openevo_chembench.taskwise_config_v1 import (
     SOURCE_COMMIT_PLACEHOLDER,
     TaskwiseExperimentConfigV1,
@@ -33,6 +38,7 @@ from openevo_chembench.taskwise_core_evolution_v1 import (
 from openevo_chembench.taskwise_online_runner_v1 import (
     TaskwiseCoreUpdatePortV1,
     TaskwiseEpisodeV1,
+    TaskwiseExecutionFailureV1,
     TaskwiseExecutorV1,
     TaskwiseMemoryPublicMetricsV1,
     TaskwiseOnlineRunnerV1,
@@ -93,6 +99,140 @@ _ARTIFACT_FAILURE_CODES = frozenset(
         "TASKWISE_ARTIFACT_VALIDATION_FAILED",
     }
 )
+_EXECUTOR_FAILURE_CODES = frozenset(
+    {
+        "EXECUTOR_PREFLIGHT_FAILED",
+        "EXECUTOR_AUTH_MATERIALIZATION_FAILED",
+        "EXECUTOR_PROCESS_SPAWN_FAILED",
+        "EXECUTOR_CODEX_STARTUP_FAILED",
+        "EXECUTOR_MODEL_TRANSPORT_FAILED",
+        "EXECUTOR_TIMEOUT",
+        "EXECUTOR_NONZERO_EXIT",
+        "EXECUTOR_EVENT_STREAM_INVALID",
+        "EXECUTOR_SECURITY_TOOL_USE_VIOLATION",
+        "EXECUTOR_OUTPUT_MISSING",
+        "EXECUTOR_OUTPUT_INVALID",
+        "EXECUTOR_PRIVATE_DIAGNOSTICS_FAILED",
+        "EXECUTOR_CLEANUP_FAILED",
+        "EXECUTOR_POST_ATTESTATION_FAILED",
+        "EXECUTOR_INTERNAL_ERROR",
+        "EXECUTOR_PUBLIC_STATE_UNAVAILABLE",
+        "EXECUTOR_SUITE_ORCHESTRATION_FAILED",
+        "EXECUTOR_CONFIG_POLICY_AGENTS_ENABLED_FORBIDDEN",
+        "EXECUTOR_CONFIG_POLICY_COMMAND_INVALID",
+        "EXECUTOR_CONFIG_POLICY_CONFIG_MISMATCH",
+        "EXECUTOR_CONFIG_POLICY_FEATURES_MISMATCH",
+        "EXECUTOR_CONFIG_POLICY_PROBE_REJECTED",
+        "EXECUTOR_CONFIG_POLICY_PROBE_UNAVAILABLE",
+        "EXECUTOR_CONFIG_POLICY_VERSION_MISMATCH",
+    }
+)
+_EXECUTOR_FAILURE_ALIASES = {
+    "UNCLASSIFIED_EXECUTOR_FAILURE": "EXECUTOR_INTERNAL_ERROR",
+    "FAIL_CLOSED_INTERNAL_ERROR": "EXECUTOR_INTERNAL_ERROR",
+    "INVALID_EXECUTOR_RESULT": "EXECUTOR_OUTPUT_INVALID",
+    "INFRASTRUCTURE_TRANSPORT_FAILURE": "EXECUTOR_MODEL_TRANSPORT_FAILED",
+    "RUN_STATE_UNAVAILABLE": "EXECUTOR_PUBLIC_STATE_UNAVAILABLE",
+    "SUITE_ORCHESTRATION_ERROR": "EXECUTOR_SUITE_ORCHESTRATION_FAILED",
+}
+_TASKWISE_CODEX_REQUIRED_FLAGS = frozenset(
+    {
+        "--ephemeral",
+        "--ignore-rules",
+        "--ignore-user-config",
+        "--json",
+        "--skip-git-repo-check",
+        "--strict-config",
+    }
+)
+_TASKWISE_CODEX_FORBIDDEN_FLAGS = frozenset(
+    {
+        "--add-dir",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--enable",
+        "--search",
+    }
+)
+_TASKWISE_CODEX_REQUIRED_DISABLED_FEATURES = frozenset(
+    {
+        "apps",
+        "auth_elicitation",
+        "browser_use",
+        "browser_use_external",
+        "browser_use_full_cdp_access",
+        "code_mode",
+        "code_mode_host",
+        "code_mode_only",
+        "computer_use",
+        "enable_fanout",
+        "enable_mcp_apps",
+        "goals",
+        "hooks",
+        "image_generation",
+        "in_app_browser",
+        "memories",
+        "multi_agent",
+        "multi_agent_v2",
+        "plugin_sharing",
+        "plugins",
+        "request_permissions_tool",
+        "remote_plugin",
+        "shell_snapshot",
+        "shell_tool",
+        "skill_mcp_dependency_install",
+        "tool_call_mcp_elicitation",
+        "tool_suggest",
+        "unified_exec",
+        "workspace_dependencies",
+    }
+)
+_TASKWISE_CODEX_EXPECTED_CONFIG = {
+    "approval_policy": '"never"',
+    "allow_login_shell": "false",
+    "check_for_update_on_startup": "false",
+    "forced_login_method": '"chatgpt"',
+    "model_reasoning_effort": '"medium"',
+    "shell_environment_policy.inherit": '"none"',
+    "web_search": '"disabled"',
+}
+_CODEX_POLICY_PROBE_TIMEOUT_SECONDS = 15.0
+_CLI_PUBLIC_FAILURE_CODES = (
+    _EXECUTOR_FAILURE_CODES
+    | _ARTIFACT_FAILURE_CODES
+    | frozenset(
+        {
+            "REFLECTOR_FILESYSTEM_ISOLATION_MISSING",
+            "TASKWISE_ARM_PARITY_MISMATCH",
+            "TASKWISE_CLI_INTERNAL_ERROR",
+            "TASKWISE_COMPARISON_OUTPUT_EXISTS",
+            "TASKWISE_CONFIG_PATH_BINDING_MISMATCH",
+            "TASKWISE_CONTROL_MEMORY_EVIDENCE_INVALID",
+            "TASKWISE_CORE_RUN_STATE_MISMATCH",
+            "TASKWISE_EPISODE_COUNT_MISMATCH",
+            "TASKWISE_GIT_IDENTITY_UNAVAILABLE",
+            "TASKWISE_OUTPUT_TARGET_EXISTS",
+            "TASKWISE_PACKAGE_SOURCE_DIRTY",
+            "TASKWISE_PAIRED_CONFIG_UNAVAILABLE",
+            "TASKWISE_PAIRED_RUN_BINDING_MISMATCH",
+            "TASKWISE_PUBLIC_EVENT_EVIDENCE_INVALID",
+            "TASKWISE_RESUME_OUTPUT_MISSING",
+            "TASKWISE_RUN_EVIDENCE_INVALID",
+            "TASKWISE_RUN_NOT_COMPARABLE",
+            "TASKWISE_RUN_STATE_INVALID",
+            "TASKWISE_RUN_STATE_UNAVAILABLE",
+            "TASKWISE_SCOPE_INVALID",
+            "TASKWISE_SOURCE_COMMIT_MISMATCH",
+            "TASKWISE_SOURCE_MANIFEST_MISMATCH",
+            "TASKWISE_STREAM_TASK_COUNT_MISMATCH",
+            "TASKWISE_SUITE_ARM_INVALID",
+            "TASKWISE_SUITE_EVIDENCE_INVALID",
+            "TASKWISE_SUITE_RESULT_INVALID",
+            "TASKWISE_SUITE_STATE_INVALID",
+            "TASKWISE_SUITE_TERMINAL_FAILURE",
+            "TASKWISE_VERIFIED_FRAMEWORK_LOCK_MISSING",
+        }
+    )
+)
 
 
 class TaskwiseCLIError(RuntimeError):
@@ -108,6 +248,205 @@ CorePortFactoryV1 = Callable[
     TaskwiseCoreUpdatePortV1,
 ]
 SourceGateV1 = Callable[[TaskwiseExperimentConfigV1], str]
+CodexPolicyProbeRunnerV1 = Callable[
+    [Sequence[str], Path, Mapping[str, str], float],
+    tuple[int, str],
+]
+CodexPolicyGateV1 = Callable[[TaskwiseExperimentConfigV1], dict[str, object]]
+
+
+class _ClosedExecutorFailureAdapterV1:
+    """Preserve sanitized Local Codex failure semantics at the runner boundary."""
+
+    def __init__(self, delegate: TaskwiseExecutorV1) -> None:
+        self._delegate = delegate
+
+    def execute_taskwise(self, request):
+        try:
+            return self._delegate.execute_taskwise(request)
+        except LocalCodexExecutionError as exc:
+            code = exc.taskwise_failure_code
+            if code not in _EXECUTOR_FAILURE_CODES:
+                code = "EXECUTOR_INTERNAL_ERROR"
+            converted = TaskwiseExecutionFailureV1(
+                code,
+                completion_observed=exc.completion_observed,
+                diagnostic_receipt=exc.diagnostic_receipt,
+                event_digest=exc.event_digest,
+                event_counts=exc.event_counts,
+                executor_stage=exc.executor_stage,
+            )
+            raise converted from None
+
+    def consume_taskwise_context_receipt(self, session_id: str):
+        return self._delegate.consume_taskwise_context_receipt(session_id)
+
+    def close(self) -> None:
+        close = getattr(self._delegate, "close", None)
+        if callable(close):
+            close()
+
+
+def inspect_taskwise_codex_policy_v1(
+    config: TaskwiseExperimentConfigV1,
+    *,
+    command: tuple[str, ...] | None = None,
+    probe_runner: CodexPolicyProbeRunnerV1 | None = None,
+) -> dict[str, object]:
+    """Validate the exact Codex policy with a non-model config parser probe.
+
+    The returned receipt is deliberately closed: neither stderr nor arbitrary
+    subprocess text can enter public state.
+    """
+
+    if type(config) is not TaskwiseExperimentConfigV1:
+        raise TypeError("config must be exact TaskwiseExperimentConfigV1")
+    executable = shutil.which("codex")
+    actual_command = command
+    if actual_command is None and executable is not None:
+        actual_command = _codex_command(
+            executable=Path(executable),
+            model=config.model,
+            reasoning_effort=config.reasoning_effort,
+            workspace=Path("/__openevo_taskwise_empty_workdir__"),
+            output_last_message=Path("/__openevo_taskwise_output_last_message__"),
+        )
+
+    findings: set[str] = set()
+    config_entries: dict[str, str] = {}
+    disabled_features: frozenset[str] = frozenset()
+    if actual_command is None:
+        findings.add("EXECUTOR_CONFIG_POLICY_PROBE_UNAVAILABLE")
+        normalized_command: tuple[str, ...] = ()
+    else:
+        normalized_command = _normalized_policy_command(actual_command)
+        try:
+            config_entries = _command_key_value_entries(actual_command, "--config")
+            disabled_features = frozenset(_command_values(actual_command, "--disable"))
+            _validate_static_codex_policy(
+                config=config,
+                command=actual_command,
+                config_entries=config_entries,
+                disabled_features=disabled_features,
+            )
+        except TaskwiseCLIError as exc:
+            code = str(exc)
+            findings.add(
+                code
+                if code in _EXECUTOR_FAILURE_CODES
+                else "EXECUTOR_CONFIG_POLICY_COMMAND_INVALID"
+            )
+
+    version_output = ""
+    probe_returncode: int | None = None
+    if actual_command is not None:
+        runner = probe_runner or _default_codex_policy_probe_runner_v1
+        try:
+            with tempfile.TemporaryDirectory(
+                prefix=".taskwise-codex-policy-preflight-"
+            ) as temporary:
+                root = Path(temporary)
+                work = root / "work"
+                home = root / "home"
+                codex_home = root / "codex_home"
+                xdg_config = root / "xdg_config"
+                xdg_cache = root / "xdg_cache"
+                xdg_state = root / "xdg_state"
+                tmp = root / "tmp"
+                for path in (
+                    work,
+                    home,
+                    codex_home,
+                    xdg_config,
+                    xdg_cache,
+                    xdg_state,
+                    tmp,
+                ):
+                    path.mkdir(mode=0o700)
+                environment = {
+                    "CODEX_HOME": os.fspath(codex_home),
+                    "HOME": os.fspath(home),
+                    "LANG": "C.UTF-8",
+                    "PATH": os.environ.get("PATH", os.defpath),
+                    "TMP": os.fspath(tmp),
+                    "TMPDIR": os.fspath(tmp),
+                    "XDG_CACHE_HOME": os.fspath(xdg_cache),
+                    "XDG_CONFIG_HOME": os.fspath(xdg_config),
+                    "XDG_STATE_HOME": os.fspath(xdg_state),
+                }
+                version_returncode, version_output = runner(
+                    (actual_command[0], "--version"),
+                    work,
+                    environment,
+                    _CODEX_POLICY_PROBE_TIMEOUT_SECONDS,
+                )
+                probe_returncode, _probe_output = runner(
+                    _no_model_codex_policy_probe_command(actual_command),
+                    work,
+                    environment,
+                    _CODEX_POLICY_PROBE_TIMEOUT_SECONDS,
+                )
+        except (OSError, RuntimeError, TypeError, ValueError):
+            findings.add("EXECUTOR_CONFIG_POLICY_PROBE_UNAVAILABLE")
+        else:
+            expected_version = f"codex-cli {config.codex_cli_version}"
+            if version_returncode != 0 or version_output.strip() != expected_version:
+                findings.add("EXECUTOR_CONFIG_POLICY_VERSION_MISMATCH")
+            if probe_returncode != 0:
+                findings.add("EXECUTOR_CONFIG_POLICY_PROBE_REJECTED")
+
+    receipt = {
+        "schema_version": "taskwise_codex_policy_preflight_v1",
+        "status": "PASS" if not findings else "BLOCKED",
+        "finding_codes": sorted(findings),
+        "codex_cli_version": config.codex_cli_version,
+        "config_keys": sorted(config_entries),
+        "disabled_features": sorted(disabled_features),
+        "policy_sha256": hashlib.sha256(
+            _canonical_bytes(
+                {
+                    "codex_cli_version": config.codex_cli_version,
+                    "command": list(normalized_command),
+                }
+            )
+        ).hexdigest(),
+        "model_calls": 0,
+        "stderr_included": False,
+    }
+    if set(receipt) != {
+        "schema_version",
+        "status",
+        "finding_codes",
+        "codex_cli_version",
+        "config_keys",
+        "disabled_features",
+        "policy_sha256",
+        "model_calls",
+        "stderr_included",
+    }:
+        raise AssertionError("Codex policy receipt schema drifted")
+    return receipt
+
+
+def verify_taskwise_codex_policy_v1(
+    config: TaskwiseExperimentConfigV1,
+    *,
+    command: tuple[str, ...] | None = None,
+    probe_runner: CodexPolicyProbeRunnerV1 | None = None,
+) -> dict[str, object]:
+    """Require the closed no-model policy receipt before paid construction."""
+
+    receipt = inspect_taskwise_codex_policy_v1(
+        config,
+        command=command,
+        probe_runner=probe_runner,
+    )
+    findings = receipt["finding_codes"]
+    if type(findings) is not list or any(code not in _EXECUTOR_FAILURE_CODES for code in findings):
+        raise TaskwiseCLIError("EXECUTOR_CONFIG_POLICY_COMMAND_INVALID")
+    if findings:
+        raise TaskwiseCLIError(findings[0])
+    return receipt
 
 
 def run_arm(
@@ -117,6 +456,7 @@ def run_arm(
     executor_factory: ExecutorFactoryV1 | None = None,
     core_port_factory: CorePortFactoryV1 | None = None,
     source_gate: SourceGateV1 | None = None,
+    executor_policy_gate: CodexPolicyGateV1 | None = None,
 ) -> dict[str, object]:
     """Validate every frozen input before constructing paid runtime objects."""
 
@@ -137,9 +477,13 @@ def run_arm(
         raise TaskwiseCLIError("TASKWISE_RESUME_OUTPUT_MISSING")
     if not resume and output_directory.exists():
         raise TaskwiseCLIError("TASKWISE_OUTPUT_TARGET_EXISTS")
+    if executor_policy_gate is not None:
+        executor_policy_gate(config)
+    elif executor_factory is None:
+        verify_taskwise_codex_policy_v1(config)
     selected_executor_factory = executor_factory or build_default_taskwise_executor_v1
     selected_core_factory = core_port_factory or build_default_taskwise_core_port_v1
-    executor = selected_executor_factory(config)
+    executor = _ClosedExecutorFailureAdapterV1(selected_executor_factory(config))
     core_port: TaskwiseCoreUpdatePortV1 | None = None
     try:
         core_port = None if config.arm == "control" else selected_core_factory(config)
@@ -232,12 +576,12 @@ def run_pilot500_stream_suite(
         _write_suite_state(state_path, state)
         try:
             result = runner(config_path, resume=resume)
-        except Exception:
+        except Exception as exc:
             state["streams"][scope] = {
                 "action": "ORCHESTRATION_ERROR",
                 "run_status": "EXECUTION_FAILED",
                 "resume_allowed": False,
-                "failure_code": "SUITE_ORCHESTRATION_ERROR",
+                "failure_code": _executor_failure_code_from_exception(exc),
                 "completed": False,
                 "missing": False,
             }
@@ -273,13 +617,20 @@ def run_pilot500_stream_suite(
     return state
 
 
-def dry_run() -> dict[str, object]:
+def dry_run(
+    *,
+    executor_policy_gate: CodexPolicyGateV1 | None = None,
+) -> dict[str, object]:
     """Recompute configs, parity, dataset, and manifests without paid objects."""
 
     scopes: dict[str, object] = {}
+    codex_policy_preflight: dict[str, object] | None = None
     for scope in _PRIMARY_SCOPES:
         control_path = CONFIG_ROOT / f"control_{scope}_taskwise_online_v1.yaml"
         control = load_taskwise_config_v1(control_path)
+        if codex_policy_preflight is None:
+            gate = executor_policy_gate or verify_taskwise_codex_policy_v1
+            codex_policy_preflight = gate(control)
         loader, manifest, paired = _verify_static_inputs(control, control_path)
         scopes[scope] = {
             "item_count": manifest.item_count,
@@ -297,6 +648,7 @@ def dry_run() -> dict[str, object]:
         "model_calls": 0,
         "executor_instantiated": False,
         "core_port_instantiated": False,
+        "codex_policy_preflight": codex_policy_preflight,
         "pilot500_stream_design": {
             "stream_count": PILOT500_STREAM_COUNT,
             "tasks_per_stream": PILOT500_TASKS_PER_STREAM,
@@ -554,7 +906,7 @@ def _pilot_stream_run_evidence(
                 item = {
                     "run_status": "EXECUTION_FAILED",
                     "resume_allowed": False,
-                    "failure_code": "RUN_STATE_UNAVAILABLE",
+                    "failure_code": "EXECUTOR_PUBLIC_STATE_UNAVAILABLE",
                     "completed": False,
                     "missing": False,
                 }
@@ -592,6 +944,8 @@ def _incomplete_pilot_stream_report(
     evolution_update_failures = 0
     artifact_validation_failures = 0
     context_binding_violations = 0
+    executor_failures = 0
+    executor_failure_codes: dict[str, int] = {}
     terminal = False
     per_stream: list[dict[str, object]] = []
     for scope in PILOT500_STREAM_SCOPES:
@@ -605,6 +959,12 @@ def _incomplete_pilot_stream_report(
             item = pair[arm]
             failure_class = _stream_failure_class(item)
             missing = item.get("missing") is True
+            executor_code = _executor_failure_code(item.get("failure_code"))
+            if executor_code is not None:
+                executor_failures += 1
+                executor_failure_codes[executor_code] = (
+                    executor_failure_codes.get(executor_code, 0) + 1
+                )
             if missing or failure_class == "infrastructure":
                 infrastructure_failures += 1
             elif failure_class == "security":
@@ -632,6 +992,7 @@ def _incomplete_pilot_stream_report(
             stream_payload[f"{arm}_status"] = item.get("run_status")
             stream_payload[f"{arm}_resume_allowed"] = item.get("resume_allowed") is True
             stream_payload[f"{arm}_failure_code"] = item.get("failure_code")
+            stream_payload[f"{arm}_executor_failure_code"] = executor_code
         per_stream.append(stream_payload)
 
     completed_streams = sum(item["completed"] is True for item in per_stream)
@@ -653,6 +1014,8 @@ def _incomplete_pilot_stream_report(
         "evolution_update_failures": evolution_update_failures,
         "artifact_validation_failures": artifact_validation_failures,
         "context_binding_violations": context_binding_violations,
+        "executor_failures": executor_failures,
+        "executor_failure_codes": dict(sorted(executor_failure_codes.items())),
         "go_gate": {
             "completed_streams_required": PILOT500_STREAM_COUNT,
             "security_violations_required": 0,
@@ -720,6 +1083,7 @@ def build_default_taskwise_executor_v1(
             / "taskwise_online_v1"
             / "private_executor_events"
             / config.scope
+            / config.run_name
             / config.arm
         ),
     )
@@ -937,6 +1301,142 @@ def _executor_policy_sha256(config: TaskwiseExperimentConfigV1) -> str:
     return hashlib.sha256(_canonical_bytes(config.to_payload()["executor"])).hexdigest()
 
 
+def _command_values(command: Sequence[str], flag: str) -> tuple[str, ...]:
+    if (
+        isinstance(command, (str, bytes))
+        or not isinstance(command, Sequence)
+        or any(type(item) is not str for item in command)
+        or type(flag) is not str
+    ):
+        raise TaskwiseCLIError("EXECUTOR_CONFIG_POLICY_COMMAND_INVALID")
+    values: list[str] = []
+    index = 0
+    while index < len(command):
+        if command[index] != flag:
+            index += 1
+            continue
+        if index + 1 >= len(command) or command[index + 1].startswith("--"):
+            raise TaskwiseCLIError("EXECUTOR_CONFIG_POLICY_COMMAND_INVALID")
+        values.append(command[index + 1])
+        index += 2
+    return tuple(values)
+
+
+def _command_key_value_entries(
+    command: Sequence[str],
+    flag: str,
+) -> dict[str, str]:
+    entries: dict[str, str] = {}
+    for value in _command_values(command, flag):
+        key, separator, raw_value = value.partition("=")
+        if separator != "=" or not key or not raw_value or key.strip() != key or key in entries:
+            raise TaskwiseCLIError("EXECUTOR_CONFIG_POLICY_COMMAND_INVALID")
+        entries[key] = raw_value
+    return entries
+
+
+def _validate_static_codex_policy(
+    *,
+    config: TaskwiseExperimentConfigV1,
+    command: Sequence[str],
+    config_entries: Mapping[str, str],
+    disabled_features: frozenset[str],
+) -> None:
+    cd_values = _command_values(command, "--cd")
+    output_values = _command_values(command, "--output-last-message")
+    if (
+        len(command) < 2
+        or command[1] != "exec"
+        or _command_values(command, "--model") != (config.model,)
+        or _command_values(command, "--sandbox") != ("read-only",)
+        or len(cd_values) != 1
+        or len(output_values) != 1
+        or command[-1] != "-"
+        or not _TASKWISE_CODEX_REQUIRED_FLAGS.issubset(command)
+        or _TASKWISE_CODEX_FORBIDDEN_FLAGS.intersection(command)
+    ):
+        raise TaskwiseCLIError("EXECUTOR_CONFIG_POLICY_COMMAND_INVALID")
+    if "agents.enabled" in config_entries:
+        raise TaskwiseCLIError("EXECUTOR_CONFIG_POLICY_AGENTS_ENABLED_FORBIDDEN")
+    expected_config = dict(_TASKWISE_CODEX_EXPECTED_CONFIG)
+    expected_config["model_reasoning_effort"] = f'"{config.reasoning_effort}"'
+    if dict(config_entries) != expected_config:
+        raise TaskwiseCLIError("EXECUTOR_CONFIG_POLICY_CONFIG_MISMATCH")
+    if disabled_features != _TASKWISE_CODEX_REQUIRED_DISABLED_FEATURES:
+        raise TaskwiseCLIError("EXECUTOR_CONFIG_POLICY_FEATURES_MISMATCH")
+    expected_command = _codex_command(
+        executable=Path(command[0]),
+        model=config.model,
+        reasoning_effort=config.reasoning_effort,
+        workspace=Path(cd_values[0]),
+        output_last_message=Path(output_values[0]),
+    )
+    if tuple(command) != expected_command:
+        raise TaskwiseCLIError("EXECUTOR_CONFIG_POLICY_COMMAND_INVALID")
+
+
+def _normalized_policy_command(command: Sequence[str]) -> tuple[str, ...]:
+    normalized: list[str] = []
+    replace_next = False
+    for index, item in enumerate(command):
+        if index == 0:
+            normalized.append("<CODEX_EXECUTABLE>")
+        elif replace_next:
+            normalized.append("<EMPTY_WORKDIR>")
+            replace_next = False
+        else:
+            normalized.append(item)
+            replace_next = item == "--cd"
+    return tuple(normalized)
+
+
+def _no_model_codex_policy_probe_command(
+    command: Sequence[str],
+) -> tuple[str, ...]:
+    if not command:
+        raise TaskwiseCLIError("EXECUTOR_CONFIG_POLICY_COMMAND_INVALID")
+    probe: list[str] = [
+        command[0],
+        "debug",
+        "prompt-input",
+    ]
+    for flag in ("--disable", "--config"):
+        for value in _command_values(command, flag):
+            probe.extend((flag, value))
+    probe.append("TASKWISE_CONFIG_POLICY_PREFLIGHT_NO_MODEL")
+    if "exec" in probe or "--model" in probe:
+        raise AssertionError("non-model Codex policy probe became executable")
+    return tuple(probe)
+
+
+def _default_codex_policy_probe_runner_v1(
+    command: Sequence[str],
+    cwd: Path,
+    environment: Mapping[str, str],
+    timeout_seconds: float,
+) -> tuple[int, str]:
+    """Run only version/config-parser commands and discard stderr completely."""
+
+    try:
+        result = subprocess.run(
+            tuple(command),
+            cwd=cwd,
+            env=dict(environment),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=False,
+            timeout=timeout_seconds,
+            start_new_session=True,
+        )
+    except subprocess.TimeoutExpired:
+        return 124, ""
+    except OSError:
+        return 126, ""
+    return result.returncode, result.stdout
+
+
 def _load_or_initialize_suite_state(path: Path, *, arm: str) -> dict[str, Any]:
     if not path.exists():
         return {
@@ -952,6 +1452,8 @@ def _load_or_initialize_suite_state(path: Path, *, arm: str) -> dict[str, Any]:
             "evolution_update_failures": 0,
             "artifact_validation_failures": 0,
             "context_binding_violations": 0,
+            "executor_failures": 0,
+            "executor_failure_codes": {},
             "streams": {
                 scope: {
                     "action": "NOT_STARTED",
@@ -1050,7 +1552,7 @@ def _suite_stream_action(
             {
                 "run_status": "EXECUTION_FAILED",
                 "resume_allowed": False,
-                "failure_code": "RUN_STATE_UNAVAILABLE",
+                "failure_code": "EXECUTOR_PUBLIC_STATE_UNAVAILABLE",
                 "completed": False,
                 "missing": False,
             },
@@ -1078,14 +1580,53 @@ def _suite_stream_action(
     return "terminal", evidence
 
 
+def _executor_failure_code(value: object) -> str | None:
+    if type(value) is not str:
+        return None
+    if value in _EXECUTOR_FAILURE_CODES:
+        return value
+    return _EXECUTOR_FAILURE_ALIASES.get(value)
+
+
+def _closed_suite_failure_code(status: object, value: object) -> str | None:
+    if status == TaskwiseRunStatusV1.SECURITY_TOOL_USE_VIOLATION.value:
+        return (
+            value
+            if value == "EXECUTOR_SECURITY_TOOL_USE_VIOLATION"
+            else "SECURITY_TOOL_USE_VIOLATION"
+        )
+    if status == TaskwiseRunStatusV1.TASKWISE_CONTEXT_BINDING_VIOLATION.value:
+        return "TASKWISE_CONTEXT_BINDING_VIOLATION"
+    if value in _ARTIFACT_FAILURE_CODES:
+        return value
+    if status == TaskwiseRunStatusV1.TASKWISE_EVOLUTION_UPDATE_FAILED.value:
+        return "TASKWISE_EVOLUTION_UPDATE_FAILED"
+    executor_code = _executor_failure_code(value)
+    if executor_code is not None:
+        return executor_code
+    if status == TaskwiseRunStatusV1.EXECUTION_FAILED.value:
+        return "EXECUTOR_INTERNAL_ERROR"
+    return None
+
+
+def _executor_failure_code_from_exception(exc: Exception) -> str:
+    if type(exc) is TaskwiseCLIError:
+        code = _executor_failure_code(str(exc))
+        if code is not None:
+            return code
+    raw_code = getattr(exc, "taskwise_failure_code", None)
+    code = _executor_failure_code(raw_code)
+    return code or "EXECUTOR_SUITE_ORCHESTRATION_FAILED"
+
+
 def _suite_state_evidence(state: dict[str, Any]) -> dict[str, object]:
     failure = state.get("failure")
-    failure_code = failure.get("code") if type(failure) is dict else None
+    raw_failure_code = failure.get("code") if type(failure) is dict else None
     status = state.get("status")
     return {
         "run_status": status,
         "resume_allowed": state.get("resume_allowed") is True,
-        "failure_code": failure_code if type(failure_code) is str else None,
+        "failure_code": _closed_suite_failure_code(status, raw_failure_code),
         "completed": status == TaskwiseRunStatusV1.COMPLETED.value,
         "missing": False,
     }
@@ -1098,7 +1639,7 @@ def _suite_result_evidence(result: object) -> dict[str, object]:
     if status not in {item.value for item in TaskwiseRunStatusV1}:
         raise TaskwiseCLIError("TASKWISE_SUITE_RESULT_INVALID")
     findings = result.get("finding_codes")
-    failure_code = (
+    raw_failure_code = (
         findings[0]
         if type(findings) is list and len(findings) == 1 and type(findings[0]) is str
         else None
@@ -1106,7 +1647,7 @@ def _suite_result_evidence(result: object) -> dict[str, object]:
     return {
         "run_status": status,
         "resume_allowed": result.get("resume_allowed") is True,
-        "failure_code": failure_code,
+        "failure_code": _closed_suite_failure_code(status, raw_failure_code),
         "completed": status == TaskwiseRunStatusV1.COMPLETED.value,
         "missing": False,
     }
@@ -1130,6 +1671,16 @@ def _update_suite_totals(state: dict[str, Any]) -> None:
     state["context_binding_violations"] = sum(
         _stream_failure_class(entry) == "context" for entry in entries
     )
+    executor_codes = tuple(
+        code
+        for entry in entries
+        if type(entry) is dict
+        and (code := _executor_failure_code(entry.get("failure_code"))) is not None
+    )
+    state["executor_failures"] = len(executor_codes)
+    state["executor_failure_codes"] = {
+        code: executor_codes.count(code) for code in sorted(set(executor_codes))
+    }
 
 
 def _stream_failure_class(entry: object) -> str | None:
@@ -1137,14 +1688,25 @@ def _stream_failure_class(entry: object) -> str | None:
         return "infrastructure"
     status = entry.get("run_status")
     code = entry.get("failure_code")
-    if status == TaskwiseRunStatusV1.SECURITY_TOOL_USE_VIOLATION.value:
+    if (
+        status == TaskwiseRunStatusV1.SECURITY_TOOL_USE_VIOLATION.value
+        or code == "EXECUTOR_SECURITY_TOOL_USE_VIOLATION"
+    ):
         return "security"
-    if status == TaskwiseRunStatusV1.TASKWISE_CONTEXT_BINDING_VIOLATION.value:
+    if (
+        status == TaskwiseRunStatusV1.TASKWISE_CONTEXT_BINDING_VIOLATION.value
+        or code == "TASKWISE_CONTEXT_BINDING_VIOLATION"
+    ):
         return "context"
     if code in _ARTIFACT_FAILURE_CODES:
         return "artifact"
-    if status == TaskwiseRunStatusV1.TASKWISE_EVOLUTION_UPDATE_FAILED.value:
+    if (
+        status == TaskwiseRunStatusV1.TASKWISE_EVOLUTION_UPDATE_FAILED.value
+        or code == "TASKWISE_EVOLUTION_UPDATE_FAILED"
+    ):
         return "evolution_update"
+    if _executor_failure_code(code) is not None:
+        return "infrastructure"
     if status in {
         TaskwiseRunStatusV1.EXECUTION_FAILED.value,
         TaskwiseRunStatusV1.INITIALIZED.value,
@@ -1333,6 +1895,16 @@ def _safe_cli_payload(command: str, payload: dict[str, Any]) -> dict[str, object
     return payload
 
 
+def _closed_cli_error_code(error: BaseException) -> str:
+    """Project arbitrary exceptions to the CLI's closed public finding set."""
+
+    if type(error) is TaskwiseCLIError:
+        code = str(error)
+        if code in _CLI_PUBLIC_FAILURE_CODES:
+            return code
+    return "TASKWISE_CLI_INTERNAL_ERROR"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="chembench4k-taskwise-online-v1")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -1363,7 +1935,7 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(
                 {
                     "status": "BLOCKED",
-                    "error_type": str(exc),
+                    "error_type": _closed_cli_error_code(exc),
                     "model_calls": 0,
                 },
                 sort_keys=True,

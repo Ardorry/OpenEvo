@@ -78,6 +78,7 @@ class PackageBoundaryTests(unittest.TestCase):
             "taskwise_feedback_v1.py",
             "taskwise_online_runner_v1.py",
             "taskwise_reporting_v1.py",
+            "taskwise_round0_smoke_v1.py",
             "taskwise_sampling_v1.py",
             "taskwise_stream_statistics_v1.py",
             "taskwise_trajectory_v1.py",
