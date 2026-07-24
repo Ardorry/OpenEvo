@@ -156,11 +156,16 @@ _PATH_OR_BENCHMARK_RE = re.compile(
     r"\.(?:json|jsonl|parquet|sqlite3?)\b)",
     re.IGNORECASE | re.MULTILINE,
 )
+_EXPLICIT_OPTION_TOKEN_RE = r"[ABCDabcd]\b"
+_IMPLICIT_OPTION_TOKEN_RE = r"(?:[ABCD]\b|[bcd]\b|a(?=\s*(?:\Z|[^\w\s])))"
 _ANSWER_MAP_RE = re.compile(
-    r"(?:the\s+)?(?:correct\s+)?answer\s*(?:is|=|:)\s*[A-Z]\b|"
-    r"(?:choose|select|pick)\s+(?:option\s+)?[A-Z]\b|"
-    r"(?:question|item|uid|index)\s*[^\n]{0,48}(?:->|=|:)\s*[A-Z]\b",
-    re.IGNORECASE,
+    rf"(?i:(?:the\s+)?(?:correct\s+)?answer\s*(?:is|=|:))\s*"
+    rf"{_IMPLICIT_OPTION_TOKEN_RE}|"
+    rf"(?i:(?:choose|select|pick)\s+option\s+){_EXPLICIT_OPTION_TOKEN_RE}|"
+    rf"(?i:(?:choose|select|pick)\s+){_IMPLICIT_OPTION_TOKEN_RE}|"
+    rf"(?i:\boption\s+){_EXPLICIT_OPTION_TOKEN_RE}|"
+    r"(?i:(?:question|item|uid|index)\s*)[^\n]{0,48}"
+    rf"(?:->|=|:)\s*{_EXPLICIT_OPTION_TOKEN_RE}",
 )
 
 

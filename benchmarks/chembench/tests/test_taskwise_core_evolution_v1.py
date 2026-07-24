@@ -881,6 +881,109 @@ def test_leaking_candidate_is_rejected_and_never_promoted(
         )
 
 
+@pytest.mark.parametrize(
+    "answer_map",
+    (
+        "The answer is B",
+        "answer is b",
+        "answer is a",
+        "answer is a!",
+        "the answer is A general placeholder",
+        "answer is b variable",
+        "option a",
+        "choose option A",
+        "SELECT d",
+        "pick option c",
+        "question 17 -> D",
+        "item: a",
+    ),
+)
+def test_answer_map_detector_rejects_only_explicit_abcd_mappings(
+    bridge: TaskwiseCoreEvolutionBridgeV1,
+    monkeypatch: pytest.MonkeyPatch,
+    answer_map: str,
+) -> None:
+    candidate = _memory(1).replace(
+        "Classify the reasoning mode before comparing choices, revision 1.",
+        f"Apply this prohibited synthetic mapping: {answer_map}.",
+    )
+    monkeypatch.setattr(
+        core_methods,
+        "_generate_reflector_markdown",
+        lambda *_args, **_kwargs: candidate,
+    )
+    monkeypatch.setattr(
+        core_methods,
+        "_guard_generic_reflector_output",
+        lambda markdown, **_kwargs: (
+            markdown,
+            {
+                "finding_count": 0,
+                "redaction_count": 0,
+                "remaining_finding_count": 0,
+                "findings": [],
+            },
+        ),
+    )
+
+    with pytest.raises(
+        TaskwiseCoreEvolutionError,
+        match="TASKWISE_ARTIFACT_VALIDATION_FAILED",
+    ):
+        bridge.apply_update(
+            _request(task_index=0, update_index=1, predecessor=None),
+            test_only_allow_synthetic_reflector=True,
+        )
+
+
+@pytest.mark.parametrize(
+    "ordinary_strategy",
+    (
+        "The answer is a general validation rule, not an option mapping.",
+        "For a substitution step, select a reagent before comparing conditions.",
+        "When equations use a free variable, select x and verify its dimensions.",
+        "When the answer is chlorine, verify the element identity independently.",
+        "For an arbitrary label, choose option z only as a local notation.",
+    ),
+)
+def test_non_abcd_strategy_language_is_not_an_answer_map(
+    bridge: TaskwiseCoreEvolutionBridgeV1,
+    monkeypatch: pytest.MonkeyPatch,
+    ordinary_strategy: str,
+) -> None:
+    candidate = _memory(1).replace(
+        "Classify the reasoning mode before comparing choices, revision 1.",
+        ordinary_strategy,
+    )
+    monkeypatch.setattr(
+        core_methods,
+        "_generate_reflector_markdown",
+        lambda *_args, **_kwargs: candidate,
+    )
+    monkeypatch.setattr(
+        core_methods,
+        "_guard_generic_reflector_output",
+        lambda markdown, **_kwargs: (
+            markdown,
+            {
+                "finding_count": 0,
+                "redaction_count": 0,
+                "remaining_finding_count": 0,
+                "findings": [],
+            },
+        ),
+    )
+
+    result = bridge.apply_update(
+        _request(task_index=0, update_index=1, predecessor=None),
+        test_only_allow_synthetic_reflector=True,
+    )
+
+    assert result.validation_receipt.passed is True
+    assert result.validation_receipt.finding_codes == ()
+    assert result.core_artifact_id
+
+
 def test_promotion_oserror_writes_closed_private_failure_receipt(
     bridge: TaskwiseCoreEvolutionBridgeV1,
     monkeypatch: pytest.MonkeyPatch,
