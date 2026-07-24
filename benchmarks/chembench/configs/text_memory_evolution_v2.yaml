@@ -1,0 +1,32 @@
+schema_version: chembench4k_text_memory_evolution_config_v2
+protocol_id: chembench4k_frozen_generalization_v2
+execution_mode: standalone_openevo_maintainer_benchmark
+dataset:
+  repository: AI4Chem/ChemBench4K
+  revision: f8ad41a980170f4c5d0cc97e57722d06887c8f53
+  root: data/chembench4k/AI4Chem_ChemBench4K/f8ad41a980170f4c5d0cc97e57722d06887c8f53
+dev_trajectory:
+  protocol: category_leave_one_out_four_shot_v2
+  expected_records: 45
+  private_input: OpenEvo/benchmarks/chembench/state/v2/dev_loo/private_dev_trajectories.jsonl
+core:
+  framework_lock: OpenEvo/benchmarks/chembench/state/v2/framework/framework-lock.json
+  database: OpenEvo/benchmarks/chembench/state/v2/core/evolution.sqlite3
+  artifact_root: OpenEvo/benchmarks/chembench/state/v2/core/artifacts
+  method_id: text_memory_expel_reflector
+  target_id: text_memory
+reflector:
+  provider: codex_cli
+  model: gpt-5.5
+  reasoning_effort: medium
+  max_records: 45
+  timeout_seconds: 900
+  real_execution_enabled: true
+  paid_execution_requires_explicit_script: true
+artifact:
+  text_memory: true
+  skill_bundle: false
+  agent_system: false
+  parametric_memory: false
+  frozen_record: OpenEvo/benchmarks/chembench/state/v2/frozen_text_memory_v2.json
+  validator: chembench4k_text_memory_validator_v2

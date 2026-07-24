@@ -1,0 +1,14 @@
+# Generated local execution state and private benchmark labels.
+state/
+private_manifests/
+
+# Python/tool caches and editable-install metadata.
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Generated private/terminal launch evidence.
+manifests/v2/benchmark_execution_receipt_v2.json
+manifests/v2/source_manifest_acceptance_v2.json

@@ -1,0 +1,42 @@
+schema_version: chembench4k_frozen_config_v2
+protocol_id: chembench4k_frozen_generalization_v2
+execution_mode: standalone_openevo_maintainer_benchmark
+arm: baseline
+scope: canary18
+run_name: baseline_canary18_frozen_v2
+output_directory: OpenEvo/results/chembench4k_frozen_v2/canary18/baseline
+dataset:
+  repository: AI4Chem/ChemBench4K
+  revision: f8ad41a980170f4c5d0cc97e57722d06887c8f53
+  root: data/chembench4k/AI4Chem_ChemBench4K/f8ad41a980170f4c5d0cc97e57722d06887c8f53
+  manifest: data/chembench4k/AI4Chem_ChemBench4K/f8ad41a980170f4c5d0cc97e57722d06887c8f53/chembench4k_dataset_manifest_v2.json
+  task_manifest: OpenEvo/benchmarks/chembench/manifests/v2/canary18_public_manifest.jsonl
+  private_task_manifest: OpenEvo/benchmarks/chembench/private_manifests/v2/canary18_private_manifest.jsonl
+model: gpt-5.5
+reasoning_effort: medium
+codex_cli_version: 0.144.6
+prompt_renderer_id: chembench4k_official_five_shot_v2
+parser_id: official_first_capital_parser_v2
+evaluator_id: chembench4k_accuracy_v2
+evolution:
+  enabled: false
+  target: text_memory
+  skill_bundle: false
+  agent_system: false
+  frozen_artifact_id: null
+  frozen_artifact_sha256: null
+  context_resolution_digest: null
+  resolved_memory_sha256: null
+executor:
+  backend: local_codex_cli
+  harness: codex_cli
+  timeout_seconds: 600
+  concurrency: 1
+  infrastructure_retries_before_completion: 0
+  tools_enabled: false
+  mcp_enabled: false
+  web_enabled: false
+  network_enabled: false
+  subagents_enabled: false
+receipt_path: OpenEvo/benchmarks/chembench/manifests/v2/benchmark_execution_receipt_v2.json
+pilot_protocol_hash: REQUIRED_AT_FREEZE

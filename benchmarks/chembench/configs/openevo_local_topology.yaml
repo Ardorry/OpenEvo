@@ -1,0 +1,40 @@
+rollout:
+  host: 127.0.0.1
+  port: 8080
+  public_url: http://127.0.0.1:8080
+  save_dir:
+  dispatch_poll_interval_seconds: 0.25
+  callback_grace_seconds: 120
+
+gateway:
+  heartbeat_interval_seconds: 5
+  completion_persistence:
+    enabled: false
+    max_field_bytes: 1048576
+    queue_size: 128
+  nodes:
+    - id: core-gateway
+      host: 127.0.0.1
+      port: 8100
+      public_url: http://127.0.0.1:8100
+      max_init_workers: 1
+      max_run_workers: 1
+      max_postrun_workers: 1
+      model_served: ""
+      inference:
+        engine: vllm
+        base_url: http://127.0.0.1:8000
+
+# The ChemBench runner owns its deterministic evolution plane. Enabling the
+# optional OpenEvo Evolution Backend here would duplicate that authority.
+evolution:
+  enabled: false
+  backend_url: http://127.0.0.1:8200
+  context:
+    target_dir: /openevo/session/evolution
+    timeout_seconds: 10
+    fail_open: false
+  event_export:
+    enabled: false
+    timeout_seconds: 10
+    fail_open: false

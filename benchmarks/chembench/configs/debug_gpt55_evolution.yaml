@@ -1,0 +1,53 @@
+schema_version: 1
+protocol_id: chembench.single_task_multi_artifact.v1
+
+revisions:
+  openevo: bbcabf1eb885a816160706aceff08ef7f738b51a
+  chembench: 6e1d25748952393f44e35b8e85bbe567246a6430
+
+execution_backend: managed_codex
+codex_cli_version: "0.144.1"
+prompt_version: chembench-public-prompt.v1
+seed: 20260723
+
+dataset:
+  repository: jablonkagroup/ChemBench
+  split: train
+  configurations:
+    - general_chemistry
+
+agent:
+  harness: codex
+  model: gpt-5.5
+  auth_mode: subscription
+  capture_mode: transcript
+  ephemeral: true
+
+evolution:
+  max_rounds: 1
+
+artifact:
+  text_memory: true
+  skill_bundle: false
+  agent_system: false
+  parametric_memory: false
+
+runtime:
+  raw_event_export_enabled: false
+  gateway_evaluator_enabled: false
+  network_enabled: false
+  network_tools_enabled: false
+  browser_enabled: false
+  external_web_enabled: false
+  private_dataset_mounted: false
+  mcp_servers: []
+  num_samples: 1
+
+debug:
+  config_name: general_chemistry
+  task_count: 10
+  rollout_url: http://127.0.0.1:8080
+  result_root: results/debug
+  task_timeout_seconds: 600
+  poll_interval_seconds: 1
+  max_poll_attempts: 900
