@@ -37,6 +37,7 @@ from openevo_chembench.taskwise_attempt_v1 import (
     require_taskwise_online_attempt_v1,
     taskwise_attempts_root_v1,
     validate_taskwise_attempt_id_v1,
+    write_taskwise_attempt_suite_state_v1,
 )
 from openevo_chembench.taskwise_canary_receipt_v1 import (
     TaskwisePilotAuthorizationV1,
@@ -135,6 +136,39 @@ _ARTIFACT_FAILURE_CODES = frozenset(
     {
         "ARTIFACT_VALIDATION_FAILED",
         "TASKWISE_ARTIFACT_VALIDATION_FAILED",
+        "TASKWISE_ARTIFACT_PROMOTION_FAILED",
+        "TASKWISE_CORE_LINEAGE_INVALID",
+        "TASKWISE_LINEAGE_FORK",
+        "TASKWISE_LINEAGE_JUMP",
+        "TASKWISE_LINEAGE_ROLLBACK",
+        "TASKWISE_PREDECESSOR_BINDING_INVALID",
+        "TASKWISE_RUNTIME_PREDECESSOR_FORK",
+        "TASKWISE_TYPED_ARTIFACT_INVALID",
+    }
+)
+_CONTEXT_FAILURE_CODES = frozenset(
+    {
+        "TASKWISE_CONTEXT_BINDING_VIOLATION",
+        "TASKWISE_CONTEXT_IDENTITY_DRIFT",
+        "TASKWISE_CONTEXT_RESOLUTION_FAILED",
+        "TASKWISE_RUNTIME_MEMORY_REFERENCE_INVALID",
+    }
+)
+_EVOLUTION_FAILURE_CODES = frozenset(
+    {
+        "TASKWISE_CORE_JOB_FAILED",
+        "TASKWISE_CORE_UPDATE_FAILED",
+        "TASKWISE_EVOLUTION_UPDATE_FAILED",
+        "TASKWISE_JOB_IDENTITY_DRIFT",
+    }
+)
+_SECURITY_FAILURE_CODES = frozenset(
+    {
+        "EXECUTOR_SECURITY_TOOL_USE_VIOLATION",
+        "REFLECTOR_SECURITY_TOOL_USE_VIOLATION",
+        "SECURITY_TOOL_USE_VIOLATION",
+        "TASKWISE_REFLECTOR_SECURITY_TOOL_USE_VIOLATION",
+        "TASKWISE_SECURITY_TOOL_USE_VIOLATION",
     }
 )
 _EXECUTOR_FAILURE_CODES = frozenset(
@@ -237,6 +271,9 @@ _CODEX_POLICY_PROBE_TIMEOUT_SECONDS = 15.0
 _CLI_PUBLIC_FAILURE_CODES = (
     _EXECUTOR_FAILURE_CODES
     | _ARTIFACT_FAILURE_CODES
+    | _CONTEXT_FAILURE_CODES
+    | _EVOLUTION_FAILURE_CODES
+    | _SECURITY_FAILURE_CODES
     | frozenset(
         {
             "REFLECTOR_FILESYSTEM_ISOLATION_MISSING",
@@ -649,6 +686,7 @@ def run_arm(
                 generation_id=generation_id,
                 attempt_id=attempt_id,
                 arm=config.arm,
+                scope=template_config.scope,
             )
         except (OSError, TaskwiseAttemptError, ValueError) as exc:
             raise TaskwiseCLIError(str(exc)) from exc
@@ -661,6 +699,7 @@ def run_arm(
                 generation_id=generation_id,
                 attempt_id=attempt_id,
                 arm=config.arm,
+                scope=template_config.scope,
             )
         except (OSError, TaskwiseAttemptError, ValueError) as exc:
             raise TaskwiseCLIError(str(exc)) from exc
@@ -727,6 +766,14 @@ def run_pilot500_stream_suite(
         raise TaskwiseCLIError("TASKWISE_SUITE_ARM_INVALID")
     authorization = require_taskwise_pilot_authorization_v1()
     generation = _authorized_pilot_generation_v1(authorization, generation_id)
+    gate = source_gate or verify_taskwise_source_gate_v1
+    preflight: list[tuple[str, Path, TaskwiseExperimentConfigV1]] = []
+    for scope in PILOT500_STREAM_SCOPES:
+        config_path = CONFIG_ROOT / f"{arm}_{scope}_taskwise_online_v1.yaml"
+        template_config = load_taskwise_config_v1(config_path)
+        gate(template_config)
+        _verify_static_inputs(template_config, config_path)
+        preflight.append((scope, config_path, template_config))
     try:
         if suite_state_path is not None:
             attempt = validate_taskwise_attempt_id_v1(
@@ -761,42 +808,67 @@ def run_pilot500_stream_suite(
     state["paired_canary_generation_id"] = authorization.paired_canary_generation_id
     state["canary_receipt_sha256"] = authorization.receipt_sha256
     state["pilot_binding_sha256"] = authorization.pilot_binding_sha256
+    state_persisted = False
 
-    gate = source_gate or verify_taskwise_source_gate_v1
-    for scope in PILOT500_STREAM_SCOPES:
-        config_path = CONFIG_ROOT / f"{arm}_{scope}_taskwise_online_v1.yaml"
-        template_config = load_taskwise_config_v1(config_path)
-        gate(template_config)
-        _verify_static_inputs(template_config, config_path)
-        config = taskwise_pilot_runtime_config_v1(
-            template_config,
-            generation,
-            attempt,
-        )
-        output = _resolve_workspace_path(
-            config.output_directory,
-            field_name="stream output_directory",
-            must_exist=False,
-        )
-        action, evidence = _suite_stream_action(output, expected_arm=arm)
-        if action == "terminal":
-            state["streams"][scope] = {
-                "action": "TERMINAL_FAILURE",
-                **evidence,
-            }
-            state["status"] = "FAILED"
-            _update_suite_totals(state)
-            _write_suite_state(state_path, state)
-            raise TaskwiseCLIError("TASKWISE_SUITE_TERMINAL_FAILURE")
+    def persist_state() -> None:
+        nonlocal state_persisted
+        if suite_state_path is None:
+            try:
+                write_taskwise_attempt_suite_state_v1(
+                    REPOSITORY_ROOT,
+                    suite_kind="pilot500",
+                    generation_id=generation,
+                    attempt_id=attempt,
+                    arm=arm,
+                    state=state,
+                    create_only=not state_persisted,
+                )
+            except TaskwiseAttemptError as exc:
+                raise TaskwiseCLIError(str(exc)) from exc
+        else:
+            _write_suite_state(
+                state_path,
+                state,
+                create_only=not state_persisted,
+            )
+        state_persisted = True
 
+    for scope, config_path, template_config in preflight:
         state["status"] = "INCOMPLETE"
+        state["active_scope"] = scope
         state["streams"][scope] = {
             "action": "STARTING",
-            **evidence,
+            "run_status": "MISSING",
+            "resume_allowed": False,
+            "failure_code": None,
+            "completed": False,
+            "missing": True,
         }
         _update_suite_totals(state)
-        _write_suite_state(state_path, state)
+        persist_state()
         try:
+            config = taskwise_pilot_runtime_config_v1(
+                template_config,
+                generation,
+                attempt,
+            )
+            output = _resolve_workspace_path(
+                config.output_directory,
+                field_name="stream output_directory",
+                must_exist=False,
+            )
+            action, evidence = _suite_stream_action(output, expected_arm=arm)
+            if action == "terminal":
+                state["streams"][scope] = {
+                    "action": "TERMINAL_FAILURE",
+                    **evidence,
+                }
+                state["active_scope"] = None
+                state["status"] = "FAILED"
+                _update_suite_totals(state)
+                persist_state()
+                raise TaskwiseCLIError("TASKWISE_SUITE_TERMINAL_FAILURE")
+
             runner_arguments = {
                 "resume": False,
                 "generation_id": generation,
@@ -804,40 +876,43 @@ def run_pilot500_stream_suite(
             if arm_runner is None:
                 runner_arguments["attempt_id"] = attempt
             result = runner(config_path, **runner_arguments)
+            result_evidence = _suite_result_evidence(result)
         except Exception as exc:
+            if state.get("status") == "FAILED":
+                raise
+            failure_evidence = _orchestration_failure_evidence(exc)
             state["streams"][scope] = {
                 "action": "ORCHESTRATION_ERROR",
-                "run_status": "EXECUTION_FAILED",
-                "resume_allowed": False,
-                "failure_code": _executor_failure_code_from_exception(exc),
-                "completed": False,
-                "missing": False,
+                **failure_evidence,
             }
+            state["active_scope"] = None
             state["status"] = "FAILED"
             _update_suite_totals(state)
-            _write_suite_state(state_path, state)
+            persist_state()
             raise
-        result_evidence = _suite_result_evidence(result)
         state["streams"][scope] = {
             "action": "STARTED",
             **result_evidence,
         }
         if result_evidence["completed"]:
             state["streams"][scope]["action"] = "COMPLETED"
+            state["active_scope"] = None
             _update_suite_totals(state)
-            _write_suite_state(state_path, state)
+            persist_state()
             continue
         # The paid suite never resumes or stitches streams.  Any synchronous
         # non-completion closes this attempt; only the next paired attempt may
         # restart from stream zero, and only for closed infrastructure codes.
         state["status"] = "FAILED"
+        state["active_scope"] = None
         _update_suite_totals(state)
-        _write_suite_state(state_path, state)
+        persist_state()
         raise TaskwiseCLIError("TASKWISE_SUITE_TERMINAL_FAILURE")
 
     state["status"] = "COMPLETED"
+    state["active_scope"] = None
     _update_suite_totals(state)
-    _write_suite_state(state_path, state)
+    persist_state()
     return state
 
 
@@ -856,6 +931,14 @@ def run_full_stream_suite(
         raise TaskwiseCLIError("TASKWISE_SUITE_ARM_INVALID")
     authorization = require_taskwise_full_authorization_v1()
     generation = _authorized_full_generation_v1(authorization, generation_id)
+    gate = source_gate or verify_taskwise_source_gate_v1
+    preflight: list[tuple[str, Path, TaskwiseExperimentConfigV1]] = []
+    for scope in FULL_STREAM_SCOPES:
+        config_path = CONFIG_ROOT / f"{arm}_{scope}_taskwise_online_v1.yaml"
+        template_config = load_taskwise_config_v1(config_path)
+        gate(template_config)
+        _verify_static_inputs(template_config, config_path)
+        preflight.append((scope, config_path, template_config))
     try:
         if suite_state_path is not None:
             attempt = validate_taskwise_attempt_id_v1(
@@ -899,42 +982,67 @@ def run_full_stream_suite(
     state["pilot_go_receipt_sha256"] = authorization.receipt_sha256
     state["pilot_report_sha256"] = authorization.pilot_report_sha256
     state["full_binding_sha256"] = authorization.full_binding_sha256
+    state_persisted = False
 
-    gate = source_gate or verify_taskwise_source_gate_v1
-    for scope in FULL_STREAM_SCOPES:
-        config_path = CONFIG_ROOT / f"{arm}_{scope}_taskwise_online_v1.yaml"
-        template_config = load_taskwise_config_v1(config_path)
-        gate(template_config)
-        _verify_static_inputs(template_config, config_path)
-        config = taskwise_full_runtime_config_v1(
-            template_config,
-            generation,
-            attempt,
-        )
-        output = _resolve_workspace_path(
-            config.output_directory,
-            field_name="full stream output_directory",
-            must_exist=False,
-        )
-        action, evidence = _suite_stream_action(output, expected_arm=arm)
-        if action == "terminal":
-            state["streams"][scope] = {
-                "action": "TERMINAL_FAILURE",
-                **evidence,
-            }
-            state["status"] = "FAILED"
-            _update_suite_totals(state)
-            _write_suite_state(state_path, state)
-            raise TaskwiseCLIError("TASKWISE_SUITE_TERMINAL_FAILURE")
+    def persist_state() -> None:
+        nonlocal state_persisted
+        if suite_state_path is None:
+            try:
+                write_taskwise_attempt_suite_state_v1(
+                    REPOSITORY_ROOT,
+                    suite_kind="full",
+                    generation_id=generation,
+                    attempt_id=attempt,
+                    arm=arm,
+                    state=state,
+                    create_only=not state_persisted,
+                )
+            except TaskwiseAttemptError as exc:
+                raise TaskwiseCLIError(str(exc)) from exc
+        else:
+            _write_suite_state(
+                state_path,
+                state,
+                create_only=not state_persisted,
+            )
+        state_persisted = True
 
+    for scope, config_path, template_config in preflight:
         state["status"] = "INCOMPLETE"
+        state["active_scope"] = scope
         state["streams"][scope] = {
             "action": "STARTING",
-            **evidence,
+            "run_status": "MISSING",
+            "resume_allowed": False,
+            "failure_code": None,
+            "completed": False,
+            "missing": True,
         }
         _update_suite_totals(state)
-        _write_suite_state(state_path, state)
+        persist_state()
         try:
+            config = taskwise_full_runtime_config_v1(
+                template_config,
+                generation,
+                attempt,
+            )
+            output = _resolve_workspace_path(
+                config.output_directory,
+                field_name="full stream output_directory",
+                must_exist=False,
+            )
+            action, evidence = _suite_stream_action(output, expected_arm=arm)
+            if action == "terminal":
+                state["streams"][scope] = {
+                    "action": "TERMINAL_FAILURE",
+                    **evidence,
+                }
+                state["active_scope"] = None
+                state["status"] = "FAILED"
+                _update_suite_totals(state)
+                persist_state()
+                raise TaskwiseCLIError("TASKWISE_SUITE_TERMINAL_FAILURE")
+
             runner_arguments = {
                 "resume": False,
                 "generation_id": generation,
@@ -942,37 +1050,40 @@ def run_full_stream_suite(
             if arm_runner is None:
                 runner_arguments["attempt_id"] = attempt
             result = runner(config_path, **runner_arguments)
+            result_evidence = _suite_result_evidence(result)
         except Exception as exc:
+            if state.get("status") == "FAILED":
+                raise
+            failure_evidence = _orchestration_failure_evidence(exc)
             state["streams"][scope] = {
                 "action": "ORCHESTRATION_ERROR",
-                "run_status": "EXECUTION_FAILED",
-                "resume_allowed": False,
-                "failure_code": _executor_failure_code_from_exception(exc),
-                "completed": False,
-                "missing": False,
+                **failure_evidence,
             }
+            state["active_scope"] = None
             state["status"] = "FAILED"
             _update_suite_totals(state)
-            _write_suite_state(state_path, state)
+            persist_state()
             raise
-        result_evidence = _suite_result_evidence(result)
         state["streams"][scope] = {
             "action": "STARTED",
             **result_evidence,
         }
         if result_evidence["completed"]:
             state["streams"][scope]["action"] = "COMPLETED"
+            state["active_scope"] = None
             _update_suite_totals(state)
-            _write_suite_state(state_path, state)
+            persist_state()
             continue
         state["status"] = "FAILED"
+        state["active_scope"] = None
         _update_suite_totals(state)
-        _write_suite_state(state_path, state)
+        persist_state()
         raise TaskwiseCLIError("TASKWISE_SUITE_TERMINAL_FAILURE")
 
     state["status"] = "COMPLETED"
+    state["active_scope"] = None
     _update_suite_totals(state)
-    _write_suite_state(state_path, state)
+    persist_state()
     return state
 
 
@@ -1038,6 +1149,10 @@ def compare(
 
     if scope not in _SCOPES:
         raise TaskwiseCLIError("TASKWISE_SCOPE_INVALID")
+    if scope in PILOT500_STREAM_SCOPES and persist:
+        # Per-stream reports are internal inputs to the attempt-scoped aggregate.
+        # The legacy scope root is not an authorized persistence namespace.
+        raise TaskwiseCLIError("TASKWISE_COMPARISON_STORAGE_INVALID")
     control_path = CONFIG_ROOT / f"control_{scope}_taskwise_online_v1.yaml"
     control_template = load_taskwise_config_v1(control_path)
     if scope == "canary9":
@@ -1867,7 +1982,30 @@ def _persist_private_comparison_report_v1(
                 dir_fd=parent_descriptor,
             )
         except FileExistsError as exc:
-            raise TaskwiseCLIError("TASKWISE_COMPARISON_OUTPUT_EXISTS") from exc
+            existing_descriptor: int | None = None
+            try:
+                existing_descriptor = os.open(
+                    path.name,
+                    os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=parent_descriptor,
+                )
+                existing_metadata = os.fstat(existing_descriptor)
+                with os.fdopen(existing_descriptor, "rb") as existing_stream:
+                    existing_descriptor = None
+                    existing_payload = existing_stream.read()
+            except OSError as read_error:
+                raise TaskwiseCLIError("TASKWISE_COMPARISON_STORAGE_INVALID") from read_error
+            finally:
+                if existing_descriptor is not None:
+                    os.close(existing_descriptor)
+            if (
+                not stat.S_ISREG(existing_metadata.st_mode)
+                or stat.S_IMODE(existing_metadata.st_mode) != 0o600
+                or existing_metadata.st_uid != os.geteuid()
+                or existing_payload != payload
+            ):
+                raise TaskwiseCLIError("TASKWISE_COMPARISON_OUTPUT_EXISTS") from exc
+            return
         os.fchmod(report_descriptor, 0o600)
         metadata = os.fstat(report_descriptor)
         if (
@@ -2055,12 +2193,29 @@ def freeze_taskwise_paired_canary_receipt_v1(
         generation,
     )
     if receipt_path.exists() or receipt_path.is_symlink():
-        raise TaskwiseCLIError("TASKWISE_PAIRED_CANARY_RECEIPT_EXISTS")
+        try:
+            authorization = verify_taskwise_paired_canary_receipt_v1(
+                inputs,
+                receipt_path,
+            )
+            receipt_sha256 = authorization.receipt_sha256
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            raise TaskwiseCLIError("TASKWISE_PAIRED_CANARY_RECEIPT_EXISTS") from exc
+        return {
+            "schema_version": "taskwise_paired_canary_receipt_freeze_v1",
+            "status": "PASS",
+            "paid_pilot_allowed": True,
+            "receipt_sha256": receipt_sha256,
+            "evidence_digest": authorization.evidence_digest,
+            "receipt_path": receipt_path.relative_to(REPOSITORY_ROOT).as_posix(),
+            "paired_canary_generation_id": generation,
+            "model_calls": 0,
+        }
     try:
         receipt = write_taskwise_paired_canary_receipt_v1(inputs, receipt_path)
-        receipt_sha256 = hashlib.sha256(receipt_path.read_bytes()).hexdigest()
-    except FileExistsError as exc:
-        raise TaskwiseCLIError("TASKWISE_PAIRED_CANARY_RECEIPT_EXISTS") from exc
+        receipt_sha256 = hashlib.sha256(receipt.canonical_bytes()).hexdigest()
+    except FileExistsError:
+        return freeze_taskwise_paired_canary_receipt_v1(generation)
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
         raise TaskwiseCLIError("TASKWISE_PAIRED_CANARY_RECEIPT_INVALID") from exc
     return {
@@ -2134,12 +2289,36 @@ def freeze_taskwise_pilot_go_receipt_v1(
         generation,
     )
     if receipt_path.exists() or receipt_path.is_symlink():
-        raise TaskwiseCLIError("TASKWISE_PILOT_GO_RECEIPT_EXISTS")
+        try:
+            authorization = verify_taskwise_pilot_go_receipt_v1(
+                inputs,
+                receipt_path,
+            )
+            receipt_sha256 = authorization.receipt_sha256
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            raise TaskwiseCLIError("TASKWISE_PILOT_GO_RECEIPT_EXISTS") from exc
+        if authorization.pilot_attempt_id != completed_attempt:
+            raise TaskwiseCLIError("TASKWISE_PAIRED_ATTEMPT_MISMATCH")
+        return {
+            "schema_version": "taskwise_pilot_go_receipt_freeze_v1",
+            "status": "PASS",
+            "paid_full_allowed": True,
+            "receipt_sha256": receipt_sha256,
+            "evidence_digest": authorization.evidence_digest,
+            "pilot_generation_id": generation,
+            "pilot_attempt_id": completed_attempt,
+            "full_generation_id": authorization.full_generation_id,
+            "receipt_path": receipt_path.relative_to(REPOSITORY_ROOT).as_posix(),
+            "model_calls": 0,
+        }
     try:
         receipt = write_taskwise_pilot_go_receipt_v1(inputs, receipt_path)
-        receipt_sha256 = hashlib.sha256(receipt_path.read_bytes()).hexdigest()
-    except FileExistsError as exc:
-        raise TaskwiseCLIError("TASKWISE_PILOT_GO_RECEIPT_EXISTS") from exc
+        receipt_sha256 = hashlib.sha256(receipt.canonical_bytes()).hexdigest()
+    except FileExistsError:
+        return freeze_taskwise_pilot_go_receipt_v1(
+            generation,
+            completed_attempt,
+        )
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
         raise TaskwiseCLIError("TASKWISE_PILOT_GO_RECEIPT_INVALID") from exc
     return {
@@ -2560,6 +2739,7 @@ def _load_or_initialize_suite_state(
         "schema_version": schema_version,
         "arm": arm,
         "status": "INCOMPLETE",
+        "active_scope": None,
         "stream_count": len(stream_scopes),
         "per_stream_task_count": counts,
         "total_task_count": sum(counts.values()),
@@ -2589,12 +2769,55 @@ def _load_or_initialize_suite_state(
     return payload
 
 
-def _write_suite_state(path: Path, state: dict[str, Any]) -> None:
+def _directory_open_flags() -> int:
+    return (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+
+
+def _write_suite_state(
+    path: Path,
+    state: dict[str, Any],
+    *,
+    create_only: bool,
+) -> None:
     if state.get("status") not in _SUITE_RUN_STATUSES:
         raise TaskwiseCLIError("TASKWISE_SUITE_STATE_INVALID")
     path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
     path.parent.chmod(0o700)
     payload = _canonical_bytes(state)
+    if create_only:
+        descriptor: int | None = None
+        try:
+            descriptor = os.open(
+                path,
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+                0o644,
+            )
+            os.fchmod(descriptor, 0o644)
+            with os.fdopen(descriptor, "wb") as stream:
+                descriptor = None
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            parent_descriptor = os.open(path.parent, _directory_open_flags())
+            try:
+                os.fsync(parent_descriptor)
+            finally:
+                os.close(parent_descriptor)
+            return
+        except FileExistsError as exc:
+            raise TaskwiseCLIError("TASKWISE_SUITE_STATE_EXISTS") from exc
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{path.name}.",
         suffix=".tmp",
@@ -2608,6 +2831,11 @@ def _write_suite_state(path: Path, state: dict[str, Any]) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         temporary.replace(path)
+        parent_descriptor = os.open(path.parent, _directory_open_flags())
+        try:
+            os.fsync(parent_descriptor)
+        finally:
+            os.close(parent_descriptor)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -2693,6 +2921,9 @@ def _closed_suite_failure_code(status: object, value: object) -> str | None:
 
 
 def _executor_failure_code_from_exception(exc: Exception) -> str:
+    terminal = _closed_terminal_exception_code(exc)
+    if terminal is not None:
+        return terminal
     if type(exc) is TaskwiseCLIError:
         code = _executor_failure_code(str(exc))
         if code is not None:
@@ -2700,6 +2931,51 @@ def _executor_failure_code_from_exception(exc: Exception) -> str:
     raw_code = getattr(exc, "taskwise_failure_code", None)
     code = _executor_failure_code(raw_code)
     return code or "EXECUTOR_SUITE_ORCHESTRATION_FAILED"
+
+
+def _closed_terminal_exception_code(exc: Exception) -> str | None:
+    candidates = (
+        str(exc) if type(exc) is TaskwiseCLIError else None,
+        getattr(exc, "taskwise_failure_code", None),
+        getattr(exc, "finding_code", None),
+        getattr(exc, "code", None),
+    )
+    for candidate in candidates:
+        value = getattr(candidate, "value", candidate)
+        if type(value) is not str:
+            continue
+        if value in _SECURITY_FAILURE_CODES:
+            return (
+                "EXECUTOR_SECURITY_TOOL_USE_VIOLATION"
+                if value.startswith("EXECUTOR_")
+                else "SECURITY_TOOL_USE_VIOLATION"
+            )
+        if value in _CONTEXT_FAILURE_CODES:
+            return "TASKWISE_CONTEXT_BINDING_VIOLATION"
+        if value in _ARTIFACT_FAILURE_CODES:
+            return value
+        if value in _EVOLUTION_FAILURE_CODES:
+            return "TASKWISE_EVOLUTION_UPDATE_FAILED"
+    return None
+
+
+def _orchestration_failure_evidence(exc: Exception) -> dict[str, object]:
+    code = _executor_failure_code_from_exception(exc)
+    if code in {"EXECUTOR_SECURITY_TOOL_USE_VIOLATION", "SECURITY_TOOL_USE_VIOLATION"}:
+        status = TaskwiseRunStatusV1.SECURITY_TOOL_USE_VIOLATION.value
+    elif code == "TASKWISE_CONTEXT_BINDING_VIOLATION":
+        status = TaskwiseRunStatusV1.TASKWISE_CONTEXT_BINDING_VIOLATION.value
+    elif code == "TASKWISE_EVOLUTION_UPDATE_FAILED":
+        status = TaskwiseRunStatusV1.TASKWISE_EVOLUTION_UPDATE_FAILED.value
+    else:
+        status = TaskwiseRunStatusV1.EXECUTION_FAILED.value
+    return {
+        "run_status": status,
+        "resume_allowed": False,
+        "failure_code": code,
+        "completed": False,
+        "missing": False,
+    }
 
 
 def _suite_state_evidence(state: dict[str, Any]) -> dict[str, object]:

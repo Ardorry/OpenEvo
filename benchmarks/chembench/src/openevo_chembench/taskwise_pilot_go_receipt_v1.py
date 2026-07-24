@@ -473,7 +473,18 @@ def verify_taskwise_pilot_go_receipt_v1(
         stored = json.loads(stored_bytes)
     except (UnicodeError, json.JSONDecodeError) as exc:
         raise RuntimeError("taskwise pilot GO receipt is invalid") from exc
-    if type(stored) is not dict:
+    timestamp = stored.get("created_at_utc") if type(stored) is dict else None
+    try:
+        parsed_timestamp = datetime.fromisoformat(timestamp) if type(timestamp) is str else None
+    except ValueError:
+        parsed_timestamp = None
+    if (
+        type(stored) is not dict
+        or stored_bytes != _canonical_bytes(stored)
+        or parsed_timestamp is None
+        or parsed_timestamp.tzinfo != UTC
+        or parsed_timestamp.isoformat(timespec="seconds") != timestamp
+    ):
         raise RuntimeError("taskwise pilot GO receipt is invalid")
     current = recompute_taskwise_pilot_go_receipt_v1(inputs)
     expected = current.to_payload()

@@ -93,6 +93,9 @@ METHOD_ID = "text_memory_expel_reflector"
 REFLECTOR_PROJECTION_ID = "taskwise_reflector_trajectory_projection_v1"
 TARGET_ID = "text_memory"
 MODEL = "gpt-5.5"
+CORE_LEASE_GRACE_SECONDS = 120
+MAX_CORE_LEASE_SECONDS = 86_400
+DEFAULT_REFLECTOR_TIMEOUT_SECONDS = 600
 ABSOLUTE_MAX_MEMORY_FILE_BYTES = 64 * 1024
 MAX_MANIFEST_BYTES = 1024 * 1024
 _EVENT_TYPE = "openevo.session_completed"
@@ -601,6 +604,9 @@ class TaskwiseCoreUpdateResultV1(_FrozenModel):
     configured_max_records: Literal[1, 2]
     records_visible_to_reflector: Literal[1, 2]
     reflector_input_digest: str
+    reflector_timeout_seconds: int = Field(gt=0)
+    core_lease_seconds: int = Field(gt=0)
+    core_lease_grace_seconds: Literal[120] = CORE_LEASE_GRACE_SECONDS
     plan_id: str
     plan_digest: str
     job_id: str
@@ -665,6 +671,7 @@ class TaskwiseCoreUpdateResultV1(_FrozenModel):
             or len(self.trajectory_ids) != self.update_index
             or self.configured_max_records != self.update_index
             or self.records_visible_to_reflector != self.update_index
+            or self.core_lease_seconds != _core_lease_seconds(self.reflector_timeout_seconds)
         ):
             raise ValueError("update evidence does not bind the complete round prefix")
         if (self.predecessor is None) != (self.global_update_ordinal == 1):
@@ -936,9 +943,14 @@ class TaskwiseCoreEvolutionBridgeV1:
         reflector_boundary_factory: ReflectorBoundaryFactoryV1 | None = None,
         checkpoint_path: str | Path | None = None,
         memory_limits: TaskwiseMemoryLimitsV1 = TASKWISE_MEMORY_LIMITS_V1,
+        reflector_timeout_seconds: int = DEFAULT_REFLECTOR_TIMEOUT_SECONDS,
     ) -> None:
         if type(memory_limits) is not TaskwiseMemoryLimitsV1:
             raise TypeError("memory_limits must be exact TaskwiseMemoryLimitsV1")
+        self._reflector_timeout_seconds = _validate_reflector_timeout_seconds(
+            reflector_timeout_seconds
+        )
+        self._core_lease_seconds = _core_lease_seconds(self._reflector_timeout_seconds)
         self._registry = require_verified_executable_registry(executable_registry)
         self._require_method()
         self._memory_limits = memory_limits
@@ -1034,7 +1046,6 @@ class TaskwiseCoreEvolutionBridgeV1:
         request: TaskwiseCoreUpdateRequestV1,
         *,
         test_only_allow_synthetic_reflector: bool = False,
-        lease_seconds: int = 600,
     ) -> TaskwiseCoreUpdateResultV1:
         """Execute one immutable Core update; no adapter artifact is accepted."""
 
@@ -1129,7 +1140,6 @@ class TaskwiseCoreEvolutionBridgeV1:
                     job_id=plan["job_id"],
                     job_type=plan["job_type"],
                     trajectory_digest=trajectory_digest,
-                    lease_seconds=lease_seconds,
                     test_only_allow_synthetic_reflector=(test_only_allow_synthetic_reflector),
                 )
             except TaskwiseCoreEvolutionError as exc:
@@ -1221,12 +1231,17 @@ class TaskwiseCoreEvolutionBridgeV1:
         validator_forbidden_literals: tuple[str, ...],
     ) -> None:
         lineage_receipt = result.required_lineage_receipt()
+        literal_delta = _checkpoint_literal_delta(
+            self._seen_forbidden_literals,
+            validator_forbidden_literals,
+        )
         payload = {
-            "schema_version": "taskwise_core_private_checkpoint_v1",
+            "schema_version": "taskwise_core_private_checkpoint_v2",
             "result": result.model_dump(mode="json"),
             "required_lineage": lineage_receipt.model_dump(mode="json"),
             "required_lineage_sha256": lineage_receipt.digest,
-            "validator_forbidden_literals": list(validator_forbidden_literals),
+            "validator_forbidden_literals_delta": list(literal_delta),
+            "validator_input_digest": result.validator_input_digest,
         }
         encoded = (_canonical_json(payload) + "\n").encode("utf-8")
         if self._checkpoint_path.exists():
@@ -1267,7 +1282,7 @@ class TaskwiseCoreEvolutionBridgeV1:
             rows = [json.loads(line) for line in encoded_lines]
         except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
             raise TaskwiseCoreEvolutionError("TASKWISE_PRIVATE_CHECKPOINT_INVALID") from exc
-        prior_literals: set[str] = set()
+        prior_literals: tuple[str, ...] = ()
         for expected_ordinal, (encoded, row) in enumerate(
             zip(encoded_lines, rows, strict=True),
             start=1,
@@ -1280,9 +1295,10 @@ class TaskwiseCoreEvolutionBridgeV1:
                     "result",
                     "required_lineage",
                     "required_lineage_sha256",
-                    "validator_forbidden_literals",
+                    "validator_forbidden_literals_delta",
+                    "validator_input_digest",
                 }
-                or row["schema_version"] != "taskwise_core_private_checkpoint_v1"
+                or row["schema_version"] != "taskwise_core_private_checkpoint_v2"
                 or encoded != (_canonical_json(row) + "\n").encode("utf-8")
             ):
                 raise TaskwiseCoreEvolutionError("TASKWISE_PRIVATE_CHECKPOINT_INVALID")
@@ -1291,7 +1307,10 @@ class TaskwiseCoreEvolutionBridgeV1:
                 lineage_receipt = TaskwiseArtifactLineageReceiptV1.model_validate(
                     row["required_lineage"]
                 )
-                literals = _deduplicate_literals(tuple(row["validator_forbidden_literals"]))
+                literals = _merge_checkpoint_literal_delta(
+                    prior_literals,
+                    row["validator_forbidden_literals_delta"],
+                )
             except (TypeError, ValueError) as exc:
                 raise TaskwiseCoreEvolutionError("TASKWISE_PRIVATE_CHECKPOINT_INVALID") from exc
             if (
@@ -1304,7 +1323,8 @@ class TaskwiseCoreEvolutionBridgeV1:
                 )
                 or lineage_receipt != result.required_lineage_receipt()
                 or row["required_lineage_sha256"] != lineage_receipt.digest
-                or not prior_literals.issubset(set(literals))
+                or row["validator_input_digest"] != result.validator_input_digest
+                or _validator_input_digest(literals) != result.validator_input_digest
             ):
                 raise TaskwiseCoreEvolutionError("TASKWISE_PRIVATE_CHECKPOINT_CHAIN_INVALID")
             self.verify_update_result(
@@ -1315,7 +1335,7 @@ class TaskwiseCoreEvolutionBridgeV1:
                 result=result,
                 validator_forbidden_literals=literals,
             )
-            prior_literals = set(literals)
+            prior_literals = literals
         if self._taskwise_job_count() != len(rows):
             raise TaskwiseCoreEvolutionError("TASKWISE_PRIVATE_CHECKPOINT_COUNT_MISMATCH")
 
@@ -1400,6 +1420,13 @@ class TaskwiseCoreEvolutionBridgeV1:
             not isinstance(job_config, dict)
             or not isinstance(job_config.get("lineage"), dict)
             or job_config["lineage"].get("validator_input_digest") != result.validator_input_digest
+            or job_config["lineage"].get("reflector_timeout_seconds")
+            != result.reflector_timeout_seconds
+            or job_config["lineage"].get("core_lease_seconds") != result.core_lease_seconds
+            or job_config["lineage"].get("core_lease_grace_seconds")
+            != result.core_lease_grace_seconds
+            or result.reflector_timeout_seconds != self._reflector_timeout_seconds
+            or result.core_lease_seconds != self._core_lease_seconds
             or "forbidden_literals" in job_config
             or job_config["lineage"].get("memory_limits") != self._memory_limits.to_payload()
             or result.memory_limits_sha256 != self._memory_limits.digest
@@ -1650,6 +1677,9 @@ class TaskwiseCoreEvolutionBridgeV1:
             "trajectory_digest": trajectory_digest,
             "safe_feedback_digest": safe_feedback_digest,
             "validator_input_digest": validator_input_digest,
+            "reflector_timeout_seconds": self._reflector_timeout_seconds,
+            "core_lease_seconds": self._core_lease_seconds,
+            "core_lease_grace_seconds": CORE_LEASE_GRACE_SECONDS,
             "memory_limits": self._memory_limits.to_payload(),
             "memory_limits_sha256": self._memory_limits.digest,
             "dataset_artifact_id": dataset_artifact_id,
@@ -1688,6 +1718,9 @@ class TaskwiseCoreEvolutionBridgeV1:
             "trajectory_digest": result.trajectory_digest,
             "safe_feedback_digest": result.safe_feedback_digest,
             "validator_input_digest": result.validator_input_digest,
+            "reflector_timeout_seconds": result.reflector_timeout_seconds,
+            "core_lease_seconds": result.core_lease_seconds,
+            "core_lease_grace_seconds": result.core_lease_grace_seconds,
             "memory_limits": self._memory_limits.to_payload(),
             "memory_limits_sha256": result.memory_limits_sha256,
             "dataset_artifact_id": result.dataset_artifact_id,
@@ -1729,7 +1762,7 @@ class TaskwiseCoreEvolutionBridgeV1:
                 "reflector_llm": {
                     "provider": "codex_cli",
                     "model": MODEL,
-                    "timeout_seconds": 900.0,
+                    "timeout_seconds": float(self._reflector_timeout_seconds),
                     "max_tokens": self._memory_limits.max_estimated_tokens,
                 },
             },
@@ -1797,7 +1830,6 @@ class TaskwiseCoreEvolutionBridgeV1:
         job_id: str,
         job_type: str,
         trajectory_digest: str,
-        lease_seconds: int,
         test_only_allow_synthetic_reflector: bool,
     ) -> dict[str, str | None]:
         reflector_input_digest: str
@@ -1811,7 +1843,7 @@ class TaskwiseCoreEvolutionBridgeV1:
                 worker_id=(f"{BRIDGE_ID}-task-{request.task_index}-update-{request.update_index}"),
                 capabilities=[job_type],
                 artifact_root=self._store.files.root,
-                lease_seconds=lease_seconds,
+                lease_seconds=self._core_lease_seconds,
                 executable_registry=self._registry,
             )
         else:
@@ -1853,7 +1885,7 @@ class TaskwiseCoreEvolutionBridgeV1:
                         ),
                         capabilities=[job_type],
                         artifact_root=self._store.files.root,
-                        lease_seconds=lease_seconds,
+                        lease_seconds=self._core_lease_seconds,
                         executable_registry=self._registry,
                     )
                 receipt = activation.load_receipt_for_audit()
@@ -2066,6 +2098,8 @@ class TaskwiseCoreEvolutionBridgeV1:
                 configured_max_records=request.update_index,
                 records_visible_to_reflector=request.update_index,
                 reflector_input_digest=reflector_input_digest,
+                reflector_timeout_seconds=self._reflector_timeout_seconds,
+                core_lease_seconds=self._core_lease_seconds,
                 plan_id=plan_id,
                 plan_digest=plan_digest,
                 job_id=job_id,
@@ -2389,7 +2423,7 @@ def build_taskwise_core_port_at_roots_v1(
     if (
         isinstance(timeout_seconds, bool)
         or not isinstance(timeout_seconds, int)
-        or not 0 < timeout_seconds <= 86_400
+        or not 0 < timeout_seconds <= MAX_CORE_LEASE_SECONDS - CORE_LEASE_GRACE_SECONDS
     ):
         raise ValueError("Core reflector timeout must be positive and bounded")
     if type(memory_limits) is not TaskwiseMemoryLimitsV1:
@@ -2446,6 +2480,7 @@ def build_taskwise_core_port_at_roots_v1(
         reflector_boundary_factory=boundary_factory,
         checkpoint_path=state_root / "private_lineage_checkpoints.jsonl",
         memory_limits=memory_limits,
+        reflector_timeout_seconds=timeout_seconds,
     )
     return TaskwiseCoreUpdatePortAdapterV1(bridge)
 
@@ -2552,6 +2587,56 @@ def _deduplicate_literals(values: tuple[str, ...] | list[str]) -> tuple[str, ...
             seen.add(key)
             result.append(stripped)
     return tuple(result)
+
+
+def _checkpoint_literal_delta(
+    prior: tuple[str, ...],
+    current: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Return the append-only literal suffix stored by checkpoint schema v2."""
+
+    normalized_prior = _deduplicate_literals(prior)
+    normalized_current = _deduplicate_literals(current)
+    if (
+        normalized_prior != prior
+        or normalized_current != current
+        or normalized_current[: len(normalized_prior)] != normalized_prior
+    ):
+        raise TaskwiseCoreEvolutionError("TASKWISE_VALIDATOR_INPUT_DRIFT")
+    return normalized_current[len(normalized_prior) :]
+
+
+def _merge_checkpoint_literal_delta(
+    prior: tuple[str, ...],
+    delta: object,
+) -> tuple[str, ...]:
+    """Reconstruct one cumulative validator input without quadratic checkpoint rows."""
+
+    if not isinstance(delta, list) or any(type(item) is not str for item in delta):
+        raise ValueError("checkpoint literal delta must be a string list")
+    normalized_prior = _deduplicate_literals(prior)
+    normalized_delta = _deduplicate_literals(delta)
+    if normalized_prior != prior or len(normalized_delta) != len(delta):
+        raise ValueError("checkpoint literal delta is not canonical")
+    prior_keys = {item.casefold() for item in normalized_prior}
+    if any(item.casefold() in prior_keys for item in normalized_delta):
+        raise ValueError("checkpoint literal delta overlaps its predecessor")
+    return (*normalized_prior, *normalized_delta)
+
+
+def _validate_reflector_timeout_seconds(value: int) -> int:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 0 < value <= MAX_CORE_LEASE_SECONDS - CORE_LEASE_GRACE_SECONDS
+    ):
+        raise ValueError("reflector timeout must leave bounded Core lease grace")
+    return value
+
+
+def _core_lease_seconds(reflector_timeout_seconds: int) -> int:
+    timeout = _validate_reflector_timeout_seconds(reflector_timeout_seconds)
+    return timeout + CORE_LEASE_GRACE_SECONDS
 
 
 def _exclusive_private_write(path: Path, payload: bytes) -> None:

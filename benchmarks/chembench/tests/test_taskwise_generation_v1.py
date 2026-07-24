@@ -7,6 +7,9 @@ from pathlib import Path
 import pytest
 
 import openevo_chembench.taskwise_cli_v1 as cli
+from openevo_chembench.taskwise_attempt_v1 import (
+    allocate_taskwise_control_attempt_v1,
+)
 from openevo_chembench.taskwise_config_v1 import load_taskwise_config_v1
 from openevo_chembench.taskwise_generation_v1 import (
     derive_taskwise_generation_id_v1,
@@ -140,6 +143,26 @@ def test_fresh_nested_generation_private_report_succeeds(
     assert stat.S_IMODE(path.parent.parent.lstat().st_mode) == 0o700
 
 
+def test_attempt_allocation_creates_report_compatible_private_generation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    generation = derive_taskwise_generation_id_v1({"pilot": "attempt-private"})
+    monkeypatch.setattr(cli, "REPOSITORY_ROOT", tmp_path)
+    attempt = allocate_taskwise_control_attempt_v1(
+        tmp_path,
+        suite_kind="pilot500",
+        generation_id=generation,
+    )
+    path = taskwise_pilot_comparison_path_v1(tmp_path, generation, attempt)
+
+    cli._persist_private_comparison_report_v1(path, {"status": "PASS"})
+
+    assert stat.S_IMODE(path.parent.parent.lstat().st_mode) == 0o700
+    assert stat.S_IMODE(path.parent.lstat().st_mode) == 0o700
+    assert stat.S_IMODE(path.lstat().st_mode) == 0o600
+
+
 def test_generation_private_report_rejects_symlink_ancestor(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -184,6 +207,9 @@ def test_existing_generation_report_is_never_overwritten(
     original = {"status": "ORIGINAL"}
     cli._persist_private_comparison_report_v1(path, original)
     original_bytes = path.read_bytes()
+
+    cli._persist_private_comparison_report_v1(path, original)
+    assert path.read_bytes() == original_bytes
 
     with pytest.raises(cli.TaskwiseCLIError, match="COMPARISON_OUTPUT_EXISTS"):
         cli._persist_private_comparison_report_v1(path, {"status": "REPLACEMENT"})

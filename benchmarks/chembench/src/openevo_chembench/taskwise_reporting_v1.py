@@ -131,6 +131,7 @@ def build_taskwise_online_report_v1(
     online_by_key = _validate_arm(online, expected_arm="online")
     if set(control_by_key) != set(online_by_key):
         raise ValueError("control and online arms must contain identical paired tasks")
+    _require_paired_task_identity(control_by_key, online_by_key)
 
     _require_nonnegative_int(
         control_security_violations,
@@ -279,6 +280,7 @@ def _validate_arm(
     grouped: dict[str, dict[int, PrivateTaskwiseRoundResultV1]] = {}
     categories: dict[str, str] = {}
     indices: dict[str, int] = {}
+    targets: dict[str, str] = {}
     for row in rows:
         if type(row) is not PrivateTaskwiseRoundResultV1:
             raise TypeError("report rows must be exact PrivateTaskwiseRoundResultV1")
@@ -290,6 +292,9 @@ def _validate_arm(
         if row.task_uid in indices and indices[row.task_uid] != row.task_index:
             raise ValueError("one task UID cannot have multiple stream positions")
         indices[row.task_uid] = row.task_index
+        if row.task_uid in targets and targets[row.task_uid] != row.target:
+            raise ValueError("one task UID cannot have multiple private targets")
+        targets[row.task_uid] = row.target
         rounds = grouped.setdefault(row.task_uid, {})
         if row.round_index in rounds:
             raise ValueError("taskwise report contains a duplicate round")
@@ -299,6 +304,23 @@ def _validate_arm(
     if sorted(indices.values()) != list(range(len(indices))):
         raise ValueError("task indices must be the complete zero-based stream")
     return grouped
+
+
+def _require_paired_task_identity(
+    control: dict[str, dict[int, PrivateTaskwiseRoundResultV1]],
+    online: dict[str, dict[int, PrivateTaskwiseRoundResultV1]],
+) -> None:
+    """Require both treatments to evaluate the same ordered private task."""
+
+    for task_uid in control:
+        control_task = control[task_uid][0]
+        online_task = online[task_uid][0]
+        if (
+            control_task.task_index != online_task.task_index
+            or control_task.category != online_task.category
+            or control_task.target != online_task.target
+        ):
+            raise ValueError("control and online paired task identity must match")
 
 
 def _arm_metrics(

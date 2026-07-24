@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 
 import pytest
 
@@ -146,6 +147,59 @@ def test_no_uppercase_prediction_remains_an_official_parse_failure() -> None:
     )
 
     assert row.correct is False
+
+
+def test_report_rejects_private_target_drift_between_rounds() -> None:
+    control = list(_rows(arm="control", predictions=(("A", "A", "A"),)))
+    control[1] = replace(control[1], target="B")
+
+    with pytest.raises(ValueError, match="multiple private targets"):
+        build_taskwise_online_report_v1(
+            control=tuple(control),
+            online=_rows(arm="online", predictions=(("A", "A", "A"),)),
+        )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "replacement"),
+    (
+        ("category", "Mol2caption"),
+        ("target", "B"),
+    ),
+)
+def test_report_rejects_cross_arm_private_task_identity_mismatch(
+    field_name: str,
+    replacement: str,
+) -> None:
+    online = tuple(
+        replace(row, **{field_name: replacement})
+        for row in _rows(arm="online", predictions=(("A", "A", "A"),))
+    )
+
+    with pytest.raises(ValueError, match="paired task identity"):
+        build_taskwise_online_report_v1(
+            control=_rows(arm="control", predictions=(("A", "A", "A"),)),
+            online=online,
+        )
+
+
+def test_report_rejects_cross_arm_task_order_mismatch() -> None:
+    online = tuple(
+        replace(row, task_index=1 - row.task_index)
+        for row in _rows(
+            arm="online",
+            predictions=(("A", "A", "A"), ("A", "A", "A")),
+        )
+    )
+
+    with pytest.raises(ValueError, match="paired task identity"):
+        build_taskwise_online_report_v1(
+            control=_rows(
+                arm="control",
+                predictions=(("A", "A", "A"), ("A", "A", "A")),
+            ),
+            online=online,
+        )
 
 
 def _canary_rows(*, arm: str) -> tuple[PrivateTaskwiseRoundResultV1, ...]:

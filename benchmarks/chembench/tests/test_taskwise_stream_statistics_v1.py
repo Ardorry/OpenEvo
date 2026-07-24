@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
+
+import pytest
 
 from openevo_chembench.chembench4k_models import CHEMBENCH4K_CATEGORIES
 from openevo_chembench.taskwise_reporting_v1 import PrivateTaskwiseRoundResultV1
@@ -179,3 +182,16 @@ def test_stream_report_rejects_cross_stream_task_reuse() -> None:
         assert "must not share task UIDs" in str(exc)
     else:  # pragma: no cover - fail closed assertion
         raise AssertionError("cross-stream task reuse was accepted")
+
+
+def test_stream_report_inherits_cross_arm_private_pairing_gate() -> None:
+    streams = list(_streams())
+    original = streams[0]
+    first_uid = original.online[0].task_uid
+    mismatched_online = tuple(
+        replace(row, target="B") if row.task_uid == first_uid else row for row in original.online
+    )
+    streams[0] = replace(original, online=mismatched_online)
+
+    with pytest.raises(ValueError, match="paired task identity"):
+        build_taskwise_pilot500_stream_report_v1(tuple(streams))

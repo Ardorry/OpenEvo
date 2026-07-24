@@ -599,7 +599,14 @@ def test_one_hundred_synthetic_updates_remain_within_memory_policy(
     )
     assert bridge.current_head() == results[-1]
     checkpoint = bridge._checkpoint_path  # noqa: SLF001
-    assert len(checkpoint.read_text(encoding="utf-8").splitlines()) == 100
+    checkpoint_lines = checkpoint.read_text(encoding="utf-8").splitlines()
+    assert len(checkpoint_lines) == 100
+    checkpoint_rows = [json.loads(line) for line in checkpoint_lines]
+    assert all(
+        row["schema_version"] == "taskwise_core_private_checkpoint_v2" for row in checkpoint_rows
+    )
+    assert all("validator_forbidden_literals" not in row for row in checkpoint_rows)
+    assert max(map(len, checkpoint_lines)) < 32_000
     with bridge._store.connect() as connection:  # noqa: SLF001
         assert (
             connection.execute(
@@ -871,8 +878,8 @@ def test_checkpoint_cannot_remove_private_validator_inputs_bound_by_digest(
     first.close()
 
     row = json.loads(checkpoint.read_text(encoding="utf-8"))
-    assert len(row["validator_forbidden_literals"]) > 1
-    row["validator_forbidden_literals"].pop()
+    assert len(row["validator_forbidden_literals_delta"]) > 1
+    row["validator_forbidden_literals_delta"].pop()
     checkpoint.write_text(
         json.dumps(
             row,
@@ -887,13 +894,68 @@ def test_checkpoint_cannot_remove_private_validator_inputs_bound_by_digest(
 
     with pytest.raises(
         TaskwiseCoreEvolutionError,
-        match="TASKWISE_VALIDATOR_INPUT_DRIFT",
+        match="TASKWISE_PRIVATE_CHECKPOINT_CHAIN_INVALID",
     ):
         TaskwiseCoreEvolutionBridgeV1(
             db_path=db_path,
             artifact_root=artifact_root,
             executable_registry=executable_registry,
         )
+
+
+def test_checkpoint_literal_delta_reconstructs_802_updates_with_linear_storage() -> None:
+    current: tuple[str, ...] = ()
+    reconstructed: tuple[str, ...] = ()
+    encoded_bytes = 0
+    largest_delta_bytes = 0
+
+    for ordinal in range(1, 803):
+        current = (*current, f"private-literal-{ordinal:04d}")
+        delta = taskwise_core._checkpoint_literal_delta(reconstructed, current)
+        encoded = json.dumps(list(delta), separators=(",", ":")).encode("utf-8")
+        encoded_bytes += len(encoded)
+        largest_delta_bytes = max(largest_delta_bytes, len(encoded))
+        reconstructed = taskwise_core._merge_checkpoint_literal_delta(
+            reconstructed,
+            list(delta),
+        )
+
+    assert reconstructed == current
+    assert taskwise_core._validator_input_digest(reconstructed) == (
+        taskwise_core._validator_input_digest(current)
+    )
+    assert largest_delta_bytes < 64
+    assert encoded_bytes < 64 * 802
+
+
+def test_core_lease_is_timeout_plus_bounded_grace_and_bound_into_job(
+    bridge: TaskwiseCoreEvolutionBridgeV1,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        core_methods,
+        "_generate_reflector_markdown",
+        lambda *_args, **_kwargs: _memory(1),
+    )
+
+    result = bridge.apply_update(
+        _request(task_index=0, update_index=1, predecessor=None),
+        test_only_allow_synthetic_reflector=True,
+    )
+
+    assert result.reflector_timeout_seconds == 600
+    assert result.core_lease_grace_seconds == 120
+    assert result.core_lease_seconds == 720
+    with bridge._store.connect() as connection:  # noqa: SLF001
+        config = json.loads(
+            connection.execute(
+                "SELECT config_json FROM jobs WHERE job_id = ?",
+                (result.job_id,),
+            ).fetchone()[0]
+        )
+    assert config["lineage"]["reflector_timeout_seconds"] == 600
+    assert config["lineage"]["core_lease_seconds"] == 720
+    assert config["lineage"]["core_lease_grace_seconds"] == 120
 
 
 def test_real_execution_requires_boundary_before_core_write(

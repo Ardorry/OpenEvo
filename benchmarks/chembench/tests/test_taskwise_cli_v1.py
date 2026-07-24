@@ -566,16 +566,16 @@ def test_manifest_is_bound_to_config_scope_and_path() -> None:
         cli._verify_static_inputs(wrong_scope, path)
 
 
-def test_canary_fix9_uses_fresh_paired_run_namespaces() -> None:
+def test_canary_fix10_uses_fresh_paired_run_namespaces() -> None:
     control = load_taskwise_config_v1(cli.CONFIG_ROOT / "control_canary9_taskwise_online_v1.yaml")
     online = load_taskwise_config_v1(cli.CONFIG_ROOT / "online_canary9_taskwise_online_v1.yaml")
 
-    assert control.run_name == "control_canary9_repeated_session_v1_fix9"
-    assert online.run_name == "online_canary9_taskwise_evolution_v1_fix9"
-    assert control.output_directory.endswith("/canary9/control_fix9")
-    assert online.output_directory.endswith("/canary9/online_fix9")
-    assert "fix1" not in control.output_directory
-    assert "fix1" not in online.output_directory
+    assert control.run_name == "control_canary9_repeated_session_v1_fix10"
+    assert online.run_name == "online_canary9_taskwise_evolution_v1_fix10"
+    assert control.output_directory.endswith("/canary9/control_fix10")
+    assert online.output_directory.endswith("/canary9/online_fix10")
+    assert not control.output_directory.endswith("/canary9/control_fix9")
+    assert not online.output_directory.endswith("/canary9/online_fix9")
 
 
 def test_invalid_runtime_id_maps_to_closed_cli_finding(tmp_path: Path) -> None:
@@ -913,6 +913,41 @@ def test_suite_orchestrator_rejects_existing_stream_without_resume_or_stitch(
     assert state["streams"]["pilot500_stream_00"]["action"] == "TERMINAL_FAILURE"
 
 
+def test_suite_preflights_every_stream_before_allocating_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _allow_test_pilot_generation(monkeypatch)
+    checked = 0
+
+    def fail_static_preflight(
+        _config: object,
+        _config_path: Path,
+    ) -> None:
+        nonlocal checked
+        checked += 1
+        raise cli.TaskwiseCLIError("TASKWISE_EPISODE_COUNT_MISMATCH")
+
+    monkeypatch.setattr(cli, "_verify_static_inputs", fail_static_preflight)
+    monkeypatch.setattr(
+        cli,
+        "allocate_taskwise_control_attempt_v1",
+        lambda *_args, **_kwargs: pytest.fail(
+            "attempt allocated before suite preflight completed"
+        ),
+    )
+
+    with pytest.raises(cli.TaskwiseCLIError, match="EPISODE_COUNT_MISMATCH"):
+        cli.run_pilot500_stream_suite(
+            arm="control",
+            arm_runner=lambda *_args, **_kwargs: pytest.fail(
+                "runner invoked after failed suite preflight"
+            ),
+            source_gate=lambda _config: _SOURCE_COMMIT,
+        )
+
+    assert checked == 1
+
+
 def test_direct_pilot_run_arm_cannot_bypass_paired_attempt_authority(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1050,6 +1085,137 @@ def test_legacy_unclassified_executor_failure_is_closed_at_suite_boundary() -> N
     )
 
 
+@pytest.mark.parametrize(
+    ("failure_code", "expected_status", "expected_failure_code"),
+    [
+        (
+            "TASKWISE_REFLECTOR_SECURITY_TOOL_USE_VIOLATION",
+            "SECURITY_TOOL_USE_VIOLATION",
+            "SECURITY_TOOL_USE_VIOLATION",
+        ),
+        (
+            "TASKWISE_CONTEXT_RESOLUTION_FAILED",
+            "TASKWISE_CONTEXT_BINDING_VIOLATION",
+            "TASKWISE_CONTEXT_BINDING_VIOLATION",
+        ),
+        (
+            "TASKWISE_ARTIFACT_VALIDATION_FAILED",
+            "EXECUTION_FAILED",
+            "TASKWISE_ARTIFACT_VALIDATION_FAILED",
+        ),
+        (
+            "TASKWISE_CORE_JOB_FAILED",
+            "TASKWISE_EVOLUTION_UPDATE_FAILED",
+            "TASKWISE_EVOLUTION_UPDATE_FAILED",
+        ),
+        (
+            "EXECUTOR_TIMEOUT",
+            "EXECUTION_FAILED",
+            "EXECUTOR_TIMEOUT",
+        ),
+    ],
+)
+def test_orchestration_exception_classification_preserves_terminal_semantics(
+    failure_code: str,
+    expected_status: str,
+    expected_failure_code: str,
+) -> None:
+    evidence = cli._orchestration_failure_evidence(cli.TaskwiseCLIError(failure_code))
+
+    assert evidence == {
+        "run_status": expected_status,
+        "resume_allowed": False,
+        "failure_code": expected_failure_code,
+        "completed": False,
+        "missing": False,
+    }
+
+
+def test_per_stream_pilot_comparison_cannot_persist_legacy_report() -> None:
+    with pytest.raises(cli.TaskwiseCLIError, match="COMPARISON_STORAGE_INVALID"):
+        cli.compare(
+            scope="pilot500_stream_00",
+            persist=True,
+            source_gate=lambda _config: _SOURCE_COMMIT,
+        )
+
+
+def test_existing_canary_receipt_returns_verifier_bound_digest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "state" / "receipt.json"
+    path.parent.mkdir()
+    path.write_bytes(b"initial")
+    path.chmod(0o600)
+    authorization = SimpleNamespace(
+        receipt_sha256="a" * 64,
+        evidence_digest="b" * 64,
+    )
+    monkeypatch.setattr(cli, "REPOSITORY_ROOT", tmp_path)
+    monkeypatch.setattr(
+        cli,
+        "default_taskwise_canary_receipt_inputs_v1",
+        lambda _root: object(),
+    )
+    monkeypatch.setattr(cli, "_current_canary_generation_v1", lambda _requested: _GENERATION_ID)
+    monkeypatch.setattr(
+        cli,
+        "default_taskwise_canary_receipt_path_v1",
+        lambda _root, _generation: path,
+    )
+
+    def verify(_inputs: object, _path: Path) -> object:
+        path.write_bytes(b"changed-after-verification")
+        return authorization
+
+    monkeypatch.setattr(cli, "verify_taskwise_paired_canary_receipt_v1", verify)
+
+    result = cli.freeze_taskwise_paired_canary_receipt_v1(_GENERATION_ID)
+
+    assert result["receipt_sha256"] == "a" * 64
+
+
+def test_canary_receipt_file_exists_race_reverifies_exact_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "state" / "receipt.json"
+    authorization = SimpleNamespace(
+        receipt_sha256="c" * 64,
+        evidence_digest="d" * 64,
+    )
+    monkeypatch.setattr(cli, "REPOSITORY_ROOT", tmp_path)
+    monkeypatch.setattr(
+        cli,
+        "default_taskwise_canary_receipt_inputs_v1",
+        lambda _root: object(),
+    )
+    monkeypatch.setattr(cli, "_current_canary_generation_v1", lambda _requested: _GENERATION_ID)
+    monkeypatch.setattr(
+        cli,
+        "default_taskwise_canary_receipt_path_v1",
+        lambda _root, _generation: path,
+    )
+
+    def raced_writer(_inputs: object, output: Path) -> object:
+        output.parent.mkdir()
+        output.write_bytes(b"winner")
+        output.chmod(0o600)
+        raise FileExistsError
+
+    monkeypatch.setattr(cli, "write_taskwise_paired_canary_receipt_v1", raced_writer)
+    monkeypatch.setattr(
+        cli,
+        "verify_taskwise_paired_canary_receipt_v1",
+        lambda _inputs, _path: authorization,
+    )
+
+    result = cli.freeze_taskwise_paired_canary_receipt_v1(_GENERATION_ID)
+
+    assert result["receipt_sha256"] == "c" * 64
+
+
 def test_suite_records_config_policy_failure_without_arbitrary_exception_text(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1089,6 +1255,33 @@ def test_suite_records_config_policy_failure_without_arbitrary_exception_text(
     }
     assert state["infrastructure_failures"] == 1
     assert "stderr" not in json.dumps(state).casefold()
+
+
+def test_malformed_runner_result_closes_active_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cli, "WORKSPACE_ROOT", tmp_path)
+    monkeypatch.setattr(cli, "_verify_static_inputs", lambda *_args: None)
+    _allow_test_pilot_generation(monkeypatch)
+    suite_state = tmp_path / "suite" / "control.json"
+
+    with pytest.raises(cli.TaskwiseCLIError, match="SUITE_RESULT_INVALID"):
+        cli.run_pilot500_stream_suite(
+            arm="control",
+            arm_runner=lambda *_args, **_kwargs: {},
+            suite_state_path=suite_state,
+            source_gate=lambda _config: _SOURCE_COMMIT,
+        )
+
+    state = json.loads(suite_state.read_text(encoding="utf-8"))
+    assert state["status"] == "FAILED"
+    assert state["active_scope"] is None
+    assert state["streams"]["pilot500_stream_00"]["action"] == "ORCHESTRATION_ERROR"
+    assert state["streams"]["pilot500_stream_00"]["failure_code"] == (
+        "EXECUTOR_SUITE_ORCHESTRATION_FAILED"
+    )
+    assert state["streams"]["pilot500_stream_01"]["action"] == "NOT_STARTED"
 
 
 def test_suite_records_infrastructure_failure_but_never_resumes_generation(

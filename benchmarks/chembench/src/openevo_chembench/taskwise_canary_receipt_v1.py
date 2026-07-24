@@ -751,7 +751,18 @@ def verify_taskwise_paired_canary_receipt_v1(
         stored = json.loads(stored_bytes)
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise RuntimeError("taskwise paired canary receipt is unavailable") from exc
-    if type(stored) is not dict:
+    timestamp = stored.get("created_at_utc") if type(stored) is dict else None
+    try:
+        parsed_timestamp = datetime.fromisoformat(timestamp) if type(timestamp) is str else None
+    except ValueError:
+        parsed_timestamp = None
+    if (
+        type(stored) is not dict
+        or stored_bytes != _canonical_bytes(stored)
+        or parsed_timestamp is None
+        or parsed_timestamp.tzinfo != UTC
+        or parsed_timestamp.isoformat(timespec="seconds") != timestamp
+    ):
         raise RuntimeError("taskwise paired canary receipt is invalid")
     current = recompute_taskwise_paired_canary_receipt_v1(inputs)
     expected = current.to_payload()
@@ -1294,7 +1305,7 @@ def _verify_reflector_receipts(
         event_path = audit_root / receipt.private_event_reference
         event_raw = _read_regular(event_path, mode=0o600)
         if (
-            payload.get("schema_version") != "chembench4k_reflector_execution_receipt_v3"
+            payload.get("schema_version") != "chembench4k_reflector_execution_receipt_v4"
             or receipt.status is not ReflectorBoundaryStatusV2.COMPLETED
             or receipt.mechanism != "bubblewrap"
             or not receipt.wrapper_invoked
@@ -1310,6 +1321,7 @@ def _verify_reflector_receipts(
             )
             or receipt.source_split != TASKWISE_SOURCE_SPLIT
             or receipt.protocol_id != "taskwise_online_evolution_v1"
+            or receipt.projected_prompt_sha256 is None
             or receipt.last_message_sha256 is None
             or hashlib.sha256(event_raw).hexdigest() != receipt.event_stream_sha256
             or receipt.digest in receipts

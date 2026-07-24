@@ -19,6 +19,7 @@ from openevo_chembench.reflector_execution_boundary_v2 import (
     _bubblewrap_base_command,
     _create_layout,
     _materialize_reflector_transport_environment,
+    _project_reflector_prompt,
     _reflector_hardening_arguments,
     _replace_upstream_paths,
     _run_process_group,
@@ -671,6 +672,7 @@ def test_legacy_fix1_v2_receipt_remains_readable() -> None:
         "source_split",
         "stderr_sha256",
         "stderr_tail_codes",
+        "projected_prompt_sha256",
     ):
         legacy.pop(key)
 
@@ -741,6 +743,36 @@ def test_taskwise_two_record_boundary_uses_same_isolated_wrapper(
     assert receipt.ordered_records_sha256 == _canonical_sha256(records)
     assert receipt.protocol_id == "taskwise_online_evolution_v1"
     assert receipt.source_split == TASKWISE_SOURCE_SPLIT
+    assert (
+        receipt.projected_prompt_sha256
+        == hashlib.sha256(
+            _project_reflector_prompt(
+                "synthetic taskwise prompt",
+                source_split=TASKWISE_SOURCE_SPLIT,
+            ).encode("utf-8")
+        ).hexdigest()
+    )
+
+
+def test_taskwise_prompt_projection_is_deterministic_and_seals_operational_ids() -> None:
+    prompt = """Update text memory.
+- job_id: job_aabbccddeeff0011
+- dataset_artifact_ids: art_aabbccddeeff0011
+Prior: art_1122334455667788 from ds_1122334455667788
+Keep the general rules.
+"""
+
+    first = _project_reflector_prompt(prompt, source_split=TASKWISE_SOURCE_SPLIT)
+    second = _project_reflector_prompt(prompt, source_split=TASKWISE_SOURCE_SPLIT)
+
+    assert first == second
+    assert "job_aabbccddeeff0011" not in first
+    assert "art_aabbccddeeff0011" not in first
+    assert "art_1122334455667788" not in first
+    assert "ds_1122334455667788" not in first
+    assert "Keep the general rules." in first
+    assert "first non-empty line must be exactly `# General Chemistry Memory`" in first
+    assert _project_reflector_prompt(prompt, source_split="dev") == prompt
 
 
 def test_malformed_event_is_unknown_tool_violation(tmp_path: Path) -> None:

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import stat
 from pathlib import Path
 from typing import Any, Literal
@@ -187,12 +188,11 @@ def allocate_taskwise_control_attempt_v1(
 ) -> str:
     """Atomically allocate the first or next infrastructure-only retry attempt."""
 
-    attempts_root = taskwise_attempts_root_v1(
+    existing = _ordered_attempt_ids(
         repository_root,
         suite_kind=suite_kind,
         generation_id=generation_id,
     )
-    existing = _ordered_attempt_ids(attempts_root)
     if existing:
         latest = existing[-1]
         _require_closed_infrastructure_attempt(
@@ -230,12 +230,11 @@ def require_taskwise_online_attempt_v1(
 ) -> str:
     """Require the latest attempt with completed control and no online evidence."""
 
-    attempts_root = taskwise_attempts_root_v1(
+    existing = _ordered_attempt_ids(
         repository_root,
         suite_kind=suite_kind,
         generation_id=generation_id,
     )
-    existing = _ordered_attempt_ids(attempts_root)
     if not existing:
         raise TaskwiseAttemptError("TASKWISE_PAIRED_ATTEMPT_CONTROL_REQUIRED")
     attempt_id = existing[-1]
@@ -252,17 +251,24 @@ def require_taskwise_online_attempt_v1(
         generation_id=generation_id,
         attempt_id=attempt_id,
     )
-    control_path = taskwise_attempt_suite_state_path_v1(
-        repository_root,
-        suite_kind=suite_kind,
-        generation_id=generation_id,
-        attempt_id=attempt_id,
-        arm="control",
+    try:
+        control = read_taskwise_attempt_suite_state_v1(
+            repository_root,
+            suite_kind=suite_kind,
+            generation_id=generation_id,
+            attempt_id=attempt_id,
+            arm="control",
+        )
+    except TaskwiseAttemptError as exc:
+        raise TaskwiseAttemptError("TASKWISE_PAIRED_ATTEMPT_CONTROL_INCOMPLETE") from exc
+    _validate_suite_state(
+        control,
+        expected_arm="control",
+        expected_suite_kind=suite_kind,
+        expected_generation_id=generation_id,
+        expected_attempt_id=attempt_id,
     )
-    if not control_path.exists() or control_path.is_symlink():
-        raise TaskwiseAttemptError("TASKWISE_PAIRED_ATTEMPT_CONTROL_INCOMPLETE")
-    control = _read_suite_state(control_path, expected_arm="control")
-    online_path = taskwise_attempt_suite_state_path_v1(
+    online_exists = taskwise_attempt_suite_state_exists_v1(
         repository_root,
         suite_kind=suite_kind,
         generation_id=generation_id,
@@ -271,7 +277,7 @@ def require_taskwise_online_attempt_v1(
     )
     if control.get("status") != "COMPLETED":
         raise TaskwiseAttemptError("TASKWISE_PAIRED_ATTEMPT_CONTROL_INCOMPLETE")
-    if online_path.exists() or online_path.is_symlink():
+    if online_exists:
         raise TaskwiseAttemptError("TASKWISE_PAIRED_ATTEMPT_ONLINE_EXISTS")
     if _comparison_path(
         repository_root,
@@ -292,12 +298,11 @@ def require_taskwise_completed_paired_attempt_v1(
 ) -> str:
     """Select the sole latest attempt whose control and online arms completed."""
 
-    attempts_root = taskwise_attempts_root_v1(
+    existing = _ordered_attempt_ids(
         repository_root,
         suite_kind=suite_kind,
         generation_id=generation_id,
     )
-    existing = _ordered_attempt_ids(attempts_root)
     if not existing:
         raise TaskwiseAttemptError("TASKWISE_PAIRED_ATTEMPT_MISSING")
     attempt_id = existing[-1]
@@ -322,15 +327,19 @@ def require_taskwise_completed_paired_attempt_v1(
         attempt_id=attempt_id,
     )
     for arm in ("control", "online"):
-        state = _read_suite_state(
-            taskwise_attempt_suite_state_path_v1(
-                repository_root,
-                suite_kind=suite_kind,
-                generation_id=generation_id,
-                attempt_id=attempt_id,
-                arm=arm,
-            ),
+        state = read_taskwise_attempt_suite_state_v1(
+            repository_root,
+            suite_kind=suite_kind,
+            generation_id=generation_id,
+            attempt_id=attempt_id,
+            arm=arm,
+        )
+        _validate_suite_state(
+            state,
             expected_arm=arm,
+            expected_suite_kind=suite_kind,
+            expected_generation_id=generation_id,
+            expected_attempt_id=attempt_id,
         )
         if state.get("status") != "COMPLETED":
             raise TaskwiseAttemptError("TASKWISE_PAIRED_ATTEMPT_INCOMPLETE")
@@ -344,11 +353,14 @@ def require_taskwise_active_arm_attempt_v1(
     generation_id: str,
     attempt_id: str,
     arm: Literal["control", "online"],
+    scope: str,
 ) -> str:
     """Require that ``run-arm`` was entered through the paired suite owner."""
 
     if arm not in _ARMS:
         raise TaskwiseAttemptError("TASKWISE_SUITE_ARM_INVALID")
+    if type(scope) is not str or not scope:
+        raise TaskwiseAttemptError("TASKWISE_ATTEMPT_SUITE_STATE_INVALID")
     attempt = validate_taskwise_attempt_id_v1(attempt_id)
     _verify_attempt_authority(
         repository_root,
@@ -356,17 +368,54 @@ def require_taskwise_active_arm_attempt_v1(
         generation_id=generation_id,
         attempt_id=attempt,
     )
-    state = _read_suite_state(
-        taskwise_attempt_suite_state_path_v1(
-            repository_root,
-            suite_kind=suite_kind,
-            generation_id=generation_id,
-            attempt_id=attempt,
-            arm=arm,
-        ),
-        expected_arm=arm,
+    state = read_taskwise_attempt_suite_state_v1(
+        repository_root,
+        suite_kind=suite_kind,
+        generation_id=generation_id,
+        attempt_id=attempt,
+        arm=arm,
     )
-    if state.get("status") != "INCOMPLETE":
+    _validate_suite_state(
+        state,
+        expected_arm=arm,
+        expected_suite_kind=suite_kind,
+        expected_generation_id=generation_id,
+        expected_attempt_id=attempt,
+    )
+    streams = state.get("streams")
+    expected_scopes = tuple(
+        f"{'pilot500' if suite_kind == 'pilot500' else 'full'}_stream_{index:02d}"
+        for index in range(10)
+    )
+    active = (
+        tuple(
+            stream_scope
+            for stream_scope, entry in streams.items()
+            if type(entry) is dict and entry.get("action") == "STARTING"
+        )
+        if type(streams) is dict
+        else ()
+    )
+    if scope not in expected_scopes:
+        raise TaskwiseAttemptError("TASKWISE_ATTEMPT_NOT_ACTIVE")
+    scope_index = expected_scopes.index(scope)
+    if (
+        state.get("status") != "INCOMPLETE"
+        or state.get("active_scope") != scope
+        or type(streams) is not dict
+        or tuple(sorted(streams)) != expected_scopes
+        or active != (scope,)
+        or type(streams.get(scope)) is not dict
+        or streams[scope].get("action") != "STARTING"
+        or any(
+            type(streams[prior]) is not dict or streams[prior].get("action") != "COMPLETED"
+            for prior in expected_scopes[:scope_index]
+        )
+        or any(
+            type(streams[later]) is not dict or streams[later].get("action") != "NOT_STARTED"
+            for later in expected_scopes[scope_index + 1 :]
+        )
+    ):
         raise TaskwiseAttemptError("TASKWISE_ATTEMPT_NOT_ACTIVE")
     if _comparison_path(
         repository_root,
@@ -375,7 +424,58 @@ def require_taskwise_active_arm_attempt_v1(
         attempt_id=attempt,
     ).exists():
         raise TaskwiseAttemptError("TASKWISE_ATTEMPT_ALREADY_COMPARED")
+    _claim_active_scope(
+        repository_root,
+        suite_kind=suite_kind,
+        generation_id=generation_id,
+        attempt_id=attempt,
+        arm=arm,
+        scope=scope,
+    )
     return attempt
+
+
+def write_taskwise_attempt_suite_state_v1(
+    repository_root: Path,
+    *,
+    suite_kind: Literal["pilot500", "full"],
+    generation_id: str,
+    attempt_id: str,
+    arm: Literal["control", "online"],
+    state: dict[str, Any],
+    create_only: bool,
+) -> None:
+    """Persist suite state relative to an attested attempt directory."""
+
+    if arm not in _ARMS or type(state) is not dict or type(create_only) is not bool:
+        raise TaskwiseAttemptError("TASKWISE_ATTEMPT_SUITE_STATE_INVALID")
+    attempt_descriptor = _open_private_attempt_directory(
+        repository_root,
+        suite_kind=suite_kind,
+        generation_id=generation_id,
+        attempt_id=attempt_id,
+    )
+    filename = f"{arm}_suite_state.json"
+    payload = _canonical_bytes(state)
+    try:
+        if create_only:
+            _create_canonical_file_at(
+                attempt_descriptor,
+                filename,
+                payload,
+                mode=0o644,
+                exists_code="TASKWISE_SUITE_STATE_EXISTS",
+            )
+        else:
+            _replace_canonical_file_at(
+                attempt_descriptor,
+                filename,
+                payload,
+                mode=0o644,
+            )
+        os.fsync(attempt_descriptor)
+    finally:
+        os.close(attempt_descriptor)
 
 
 def _require_closed_infrastructure_attempt(
@@ -403,15 +503,29 @@ def _require_closed_infrastructure_attempt(
         raise TaskwiseAttemptError("TASKWISE_ATTEMPT_ALREADY_COMPARED")
     states: dict[str, dict[str, Any]] = {}
     for arm in ("control", "online"):
-        path = taskwise_attempt_suite_state_path_v1(
+        if not taskwise_attempt_suite_state_exists_v1(
+            repository_root,
+            suite_kind=suite_kind,
+            generation_id=generation_id,
+            attempt_id=attempt_id,
+            arm=arm,
+        ):
+            continue
+        state = read_taskwise_attempt_suite_state_v1(
             repository_root,
             suite_kind=suite_kind,
             generation_id=generation_id,
             attempt_id=attempt_id,
             arm=arm,
         )
-        if path.exists() or path.is_symlink():
-            states[arm] = _read_suite_state(path, expected_arm=arm)
+        _validate_suite_state(
+            state,
+            expected_arm=arm,
+            expected_suite_kind=suite_kind,
+            expected_generation_id=generation_id,
+            expected_attempt_id=attempt_id,
+        )
+        states[arm] = state
     if not states:
         raise TaskwiseAttemptError("TASKWISE_ATTEMPT_INCOMPLETE")
     if any(state.get("status") not in {"COMPLETED", "FAILED"} for state in states.values()):
@@ -451,45 +565,199 @@ def _create_attempt_authority(
     generation_id: str,
     attempt_id: str,
 ) -> None:
-    attempts_root = taskwise_attempts_root_v1(
+    validated_attempt = validate_taskwise_attempt_id_v1(attempt_id)
+    attempts_descriptor = _walk_attempt_hierarchy(
         repository_root,
         suite_kind=suite_kind,
         generation_id=generation_id,
+        create=True,
     )
-    attempts_root.mkdir(parents=True, mode=0o700, exist_ok=True)
-    attempts_root.chmod(0o700)
-    attempt_root = attempts_root / validate_taskwise_attempt_id_v1(attempt_id)
+    attempt_descriptor: int | None = None
+    authority_descriptor: int | None = None
     try:
-        attempt_root.mkdir(mode=0o700, exist_ok=False)
-    except FileExistsError as exc:
-        raise TaskwiseAttemptError("TASKWISE_ATTEMPT_ALREADY_EXISTS") from exc
-    authority = {
-        "schema_version": ATTEMPT_SCHEMA_V1,
-        "suite_kind": suite_kind,
-        "generation_id": _validate_generation_id(generation_id),
-        "attempt_id": attempt_id,
-    }
-    payload = _canonical_bytes(authority)
-    path = attempt_root / "attempt_authority.json"
-    descriptor = os.open(
-        path,
-        os.O_WRONLY
-        | os.O_CREAT
-        | os.O_EXCL
-        | getattr(os, "O_CLOEXEC", 0)
-        | getattr(os, "O_NOFOLLOW", 0),
-        0o600,
-    )
-    try:
-        os.fchmod(descriptor, 0o600)
-        with os.fdopen(descriptor, "wb") as stream:
-            descriptor = -1
+        try:
+            os.mkdir(validated_attempt, mode=0o700, dir_fd=attempts_descriptor)
+        except FileExistsError as exc:
+            raise TaskwiseAttemptError("TASKWISE_ATTEMPT_ALREADY_EXISTS") from exc
+        attempt_descriptor = os.open(
+            validated_attempt,
+            _open_directory_flags(),
+            dir_fd=attempts_descriptor,
+        )
+        attempt_metadata = os.fstat(attempt_descriptor)
+        if (
+            not stat.S_ISDIR(attempt_metadata.st_mode)
+            or stat.S_IMODE(attempt_metadata.st_mode) != 0o700
+            or attempt_metadata.st_uid != os.geteuid()
+        ):
+            raise TaskwiseAttemptError("TASKWISE_ATTEMPT_AUTHORITY_INVALID")
+        authority = {
+            "schema_version": ATTEMPT_SCHEMA_V1,
+            "suite_kind": suite_kind,
+            "generation_id": _validate_generation_id(generation_id),
+            "attempt_id": validated_attempt,
+        }
+        payload = _canonical_bytes(authority)
+        authority_descriptor = os.open(
+            "attempt_authority.json",
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+            dir_fd=attempt_descriptor,
+        )
+        os.fchmod(authority_descriptor, 0o600)
+        with os.fdopen(authority_descriptor, "wb") as stream:
+            authority_descriptor = None
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
+        os.fsync(attempt_descriptor)
+        os.fsync(attempts_descriptor)
+    except TaskwiseAttemptError:
+        raise
+    except OSError as exc:
+        raise TaskwiseAttemptError("TASKWISE_ATTEMPT_AUTHORITY_INVALID") from exc
     finally:
-        if descriptor >= 0:
-            os.close(descriptor)
+        if authority_descriptor is not None:
+            os.close(authority_descriptor)
+        if attempt_descriptor is not None:
+            os.close(attempt_descriptor)
+        os.close(attempts_descriptor)
+
+
+def _private_attempt_components(
+    *,
+    suite_kind: Literal["pilot500", "full"],
+    generation_id: str,
+) -> tuple[str, ...]:
+    if suite_kind not in _SUITE_KINDS:
+        raise ValueError("taskwise suite kind is invalid")
+    generation_directory = (
+        "pilot500_generations" if suite_kind == "pilot500" else "full_generations"
+    )
+    return (
+        "results",
+        "chembench4k_taskwise_online_v1",
+        generation_directory,
+        _validate_generation_id(generation_id),
+        "attempts",
+    )
+
+
+def _open_directory_flags() -> int:
+    return (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+
+
+def _walk_attempt_hierarchy(
+    repository_root: Path,
+    *,
+    suite_kind: Literal["pilot500", "full"],
+    generation_id: str,
+    create: bool,
+) -> int:
+    """Open ``attempts/`` without following any mutable path component."""
+
+    components = _private_attempt_components(
+        suite_kind=suite_kind,
+        generation_id=generation_id,
+    )
+    flags = _open_directory_flags()
+    current: int | None = None
+    try:
+        current = os.open(repository_root.resolve(), flags)
+        root_metadata = os.fstat(current)
+        if not stat.S_ISDIR(root_metadata.st_mode) or root_metadata.st_uid != os.geteuid():
+            raise OSError("repository root attestation failed")
+        for index, component in enumerate(components):
+            private = index >= 3
+            created = False
+            try:
+                child = os.open(component, flags, dir_fd=current)
+            except FileNotFoundError:
+                if not create:
+                    raise
+                os.mkdir(component, mode=(0o700 if private else 0o755), dir_fd=current)
+                child = os.open(component, flags, dir_fd=current)
+                created = True
+            previous = current
+            current = child
+            os.close(previous)
+            if created and private:
+                os.fchmod(current, 0o700)
+            metadata = os.fstat(current)
+            expected_mode = 0o700 if private else None
+            if (
+                not stat.S_ISDIR(metadata.st_mode)
+                or metadata.st_uid != os.geteuid()
+                or (expected_mode is not None and stat.S_IMODE(metadata.st_mode) != expected_mode)
+            ):
+                raise OSError("attempt hierarchy attestation failed")
+        result = current
+        current = None
+        return result
+    except OSError as exc:
+        raise TaskwiseAttemptError("TASKWISE_ATTEMPTS_ROOT_INVALID") from exc
+    finally:
+        if current is not None:
+            os.close(current)
+
+
+def _open_private_attempts_directory(
+    repository_root: Path,
+    *,
+    suite_kind: Literal["pilot500", "full"],
+    generation_id: str,
+) -> int:
+    return _walk_attempt_hierarchy(
+        repository_root,
+        suite_kind=suite_kind,
+        generation_id=generation_id,
+        create=False,
+    )
+
+
+def _open_private_attempt_directory(
+    repository_root: Path,
+    *,
+    suite_kind: Literal["pilot500", "full"],
+    generation_id: str,
+    attempt_id: str,
+) -> int:
+    try:
+        parent = _open_private_attempts_directory(
+            repository_root,
+            suite_kind=suite_kind,
+            generation_id=generation_id,
+        )
+    except TaskwiseAttemptError as exc:
+        raise TaskwiseAttemptError("TASKWISE_ATTEMPT_AUTHORITY_INVALID") from exc
+    try:
+        descriptor = os.open(
+            validate_taskwise_attempt_id_v1(attempt_id),
+            _open_directory_flags(),
+            dir_fd=parent,
+        )
+    except OSError as exc:
+        raise TaskwiseAttemptError("TASKWISE_ATTEMPT_AUTHORITY_INVALID") from exc
+    finally:
+        os.close(parent)
+    metadata = os.fstat(descriptor)
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+        or metadata.st_uid != os.geteuid()
+    ):
+        os.close(descriptor)
+        raise TaskwiseAttemptError("TASKWISE_ATTEMPT_AUTHORITY_INVALID")
+    return descriptor
 
 
 def _verify_attempt_authority(
@@ -499,25 +767,20 @@ def _verify_attempt_authority(
     generation_id: str,
     attempt_id: str,
 ) -> None:
-    root = taskwise_attempt_root_v1(
+    attempt_descriptor = _open_private_attempt_directory(
         repository_root,
         suite_kind=suite_kind,
         generation_id=generation_id,
         attempt_id=attempt_id,
     )
     try:
-        metadata = root.lstat()
-    except OSError as exc:
-        raise TaskwiseAttemptError("TASKWISE_ATTEMPT_AUTHORITY_INVALID") from exc
-    if (
-        stat.S_ISLNK(metadata.st_mode)
-        or not stat.S_ISDIR(metadata.st_mode)
-        or stat.S_IMODE(metadata.st_mode) != 0o700
-        or metadata.st_uid != os.geteuid()
-    ):
-        raise TaskwiseAttemptError("TASKWISE_ATTEMPT_AUTHORITY_INVALID")
-    path = root / "attempt_authority.json"
-    payload = _read_canonical_json(path, mode=0o600)
+        payload = _read_canonical_json_at(
+            attempt_descriptor,
+            "attempt_authority.json",
+            mode=0o600,
+        )
+    finally:
+        os.close(attempt_descriptor)
     if payload != {
         "schema_version": ATTEMPT_SCHEMA_V1,
         "suite_kind": suite_kind,
@@ -527,20 +790,48 @@ def _verify_attempt_authority(
         raise TaskwiseAttemptError("TASKWISE_ATTEMPT_AUTHORITY_INVALID")
 
 
-def _ordered_attempt_ids(path: Path) -> tuple[str, ...]:
+def _ordered_attempt_ids(
+    repository_root: Path,
+    *,
+    suite_kind: Literal["pilot500", "full"],
+    generation_id: str,
+) -> tuple[str, ...]:
+    path = taskwise_attempts_root_v1(
+        repository_root,
+        suite_kind=suite_kind,
+        generation_id=generation_id,
+    )
     if not path.exists():
         return ()
-    metadata = path.lstat()
-    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
-        raise TaskwiseAttemptError("TASKWISE_ATTEMPTS_ROOT_INVALID")
+    descriptor = _open_private_attempts_directory(
+        repository_root,
+        suite_kind=suite_kind,
+        generation_id=generation_id,
+    )
     names = []
-    for child in path.iterdir():
-        if child.name.startswith("."):
-            raise TaskwiseAttemptError("TASKWISE_ATTEMPT_NAMESPACE_INVALID")
-        try:
-            names.append(validate_taskwise_attempt_id_v1(child.name))
-        except ValueError as exc:
-            raise TaskwiseAttemptError("TASKWISE_ATTEMPT_NAMESPACE_INVALID") from exc
+    try:
+        for name in os.listdir(descriptor):
+            if name.startswith("."):
+                raise TaskwiseAttemptError("TASKWISE_ATTEMPT_NAMESPACE_INVALID")
+            try:
+                validated = validate_taskwise_attempt_id_v1(name)
+                metadata = os.stat(
+                    name,
+                    dir_fd=descriptor,
+                    follow_symlinks=False,
+                )
+            except (OSError, ValueError) as exc:
+                raise TaskwiseAttemptError("TASKWISE_ATTEMPT_NAMESPACE_INVALID") from exc
+            if (
+                stat.S_ISLNK(metadata.st_mode)
+                or not stat.S_ISDIR(metadata.st_mode)
+                or stat.S_IMODE(metadata.st_mode) != 0o700
+                or metadata.st_uid != os.geteuid()
+            ):
+                raise TaskwiseAttemptError("TASKWISE_ATTEMPT_NAMESPACE_INVALID")
+            names.append(validated)
+    finally:
+        os.close(descriptor)
     ordered = tuple(sorted(names, key=taskwise_attempt_index_v1))
     expected = tuple(format_taskwise_attempt_id_v1(index) for index in range(1, len(ordered) + 1))
     if ordered != expected:
@@ -548,15 +839,99 @@ def _ordered_attempt_ids(path: Path) -> tuple[str, ...]:
     return ordered
 
 
-def _read_suite_state(path: Path, *, expected_arm: str) -> dict[str, Any]:
-    payload = _read_canonical_json(path, mode=0o644)
+def read_taskwise_attempt_suite_state_v1(
+    repository_root: Path,
+    *,
+    suite_kind: Literal["pilot500", "full"],
+    generation_id: str,
+    attempt_id: str,
+    arm: Literal["control", "online"],
+) -> dict[str, Any]:
+    """Read suite state relative to an attested attempt directory."""
+
+    if arm not in _ARMS:
+        raise TaskwiseAttemptError("TASKWISE_ATTEMPT_SUITE_STATE_INVALID")
+    attempt_descriptor = _open_private_attempt_directory(
+        repository_root,
+        suite_kind=suite_kind,
+        generation_id=generation_id,
+        attempt_id=attempt_id,
+    )
+    try:
+        return _read_canonical_json_at(
+            attempt_descriptor,
+            f"{arm}_suite_state.json",
+            mode=0o644,
+        )
+    finally:
+        os.close(attempt_descriptor)
+
+
+def taskwise_attempt_suite_state_exists_v1(
+    repository_root: Path,
+    *,
+    suite_kind: Literal["pilot500", "full"],
+    generation_id: str,
+    attempt_id: str,
+    arm: Literal["control", "online"],
+) -> bool:
+    """Check state existence without following the attempt or state entry."""
+
+    if arm not in _ARMS:
+        raise TaskwiseAttemptError("TASKWISE_ATTEMPT_SUITE_STATE_INVALID")
+    attempt_descriptor = _open_private_attempt_directory(
+        repository_root,
+        suite_kind=suite_kind,
+        generation_id=generation_id,
+        attempt_id=attempt_id,
+    )
+    try:
+        try:
+            metadata = os.stat(
+                f"{arm}_suite_state.json",
+                dir_fd=attempt_descriptor,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            return False
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) != 0o644
+            or metadata.st_uid != os.geteuid()
+        ):
+            raise TaskwiseAttemptError("TASKWISE_ATTEMPT_EVIDENCE_INVALID")
+        return True
+    except OSError as exc:
+        raise TaskwiseAttemptError("TASKWISE_ATTEMPT_EVIDENCE_INVALID") from exc
+    finally:
+        os.close(attempt_descriptor)
+
+
+def _validate_suite_state(
+    payload: dict[str, Any],
+    *,
+    expected_arm: str,
+    expected_suite_kind: Literal["pilot500", "full"],
+    expected_generation_id: str,
+    expected_attempt_id: str,
+) -> None:
+    expected_schema = (
+        "taskwise_pilot500_stream_suite_state_v1"
+        if expected_suite_kind == "pilot500"
+        else "taskwise_full_stream_suite_state_v1"
+    )
     if (
-        payload.get("arm") != expected_arm
+        payload.get("schema_version") != expected_schema
+        or payload.get("generation_id") != _validate_generation_id(expected_generation_id)
+        or payload.get("arm") != expected_arm
         or payload.get("status") not in {"COMPLETED", "INCOMPLETE", "FAILED"}
-        or payload.get("attempt_id") != path.parent.name
+        or payload.get("attempt_id") != validate_taskwise_attempt_id_v1(expected_attempt_id)
+        or (
+            payload.get("active_scope") is not None
+            and type(payload.get("active_scope")) is not str
+        )
     ):
         raise TaskwiseAttemptError("TASKWISE_ATTEMPT_SUITE_STATE_INVALID")
-    return payload
 
 
 def _read_canonical_json(path: Path, *, mode: int) -> dict[str, Any]:
@@ -576,6 +951,156 @@ def _read_canonical_json(path: Path, *, mode: int) -> dict[str, Any]:
     ):
         raise TaskwiseAttemptError("TASKWISE_ATTEMPT_EVIDENCE_INVALID")
     return payload
+
+
+def _read_canonical_json_at(
+    parent_descriptor: int,
+    filename: str,
+    *,
+    mode: int,
+) -> dict[str, Any]:
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(
+            filename,
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=parent_descriptor,
+        )
+        metadata = os.fstat(descriptor)
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = None
+            raw = stream.read()
+        payload = json.loads(raw)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise TaskwiseAttemptError("TASKWISE_ATTEMPT_EVIDENCE_INVALID") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != mode
+        or metadata.st_uid != os.geteuid()
+        or type(payload) is not dict
+        or raw != _canonical_bytes(payload)
+    ):
+        raise TaskwiseAttemptError("TASKWISE_ATTEMPT_EVIDENCE_INVALID")
+    return payload
+
+
+def _create_canonical_file_at(
+    parent_descriptor: int,
+    filename: str,
+    payload: bytes,
+    *,
+    mode: int,
+    exists_code: str,
+) -> None:
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(
+            filename,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            mode,
+            dir_fd=parent_descriptor,
+        )
+        os.fchmod(descriptor, mode)
+        with os.fdopen(descriptor, "wb") as stream:
+            descriptor = None
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except FileExistsError as exc:
+        raise TaskwiseAttemptError(exists_code) from exc
+    except OSError as exc:
+        raise TaskwiseAttemptError("TASKWISE_ATTEMPT_EVIDENCE_INVALID") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _replace_canonical_file_at(
+    parent_descriptor: int,
+    filename: str,
+    payload: bytes,
+    *,
+    mode: int,
+) -> None:
+    temporary = f".{filename}.{os.getpid()}.{secrets.token_hex(8)}.tmp"
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            mode,
+            dir_fd=parent_descriptor,
+        )
+        os.fchmod(descriptor, mode)
+        with os.fdopen(descriptor, "wb") as stream:
+            descriptor = None
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(
+            temporary,
+            filename,
+            src_dir_fd=parent_descriptor,
+            dst_dir_fd=parent_descriptor,
+        )
+    except OSError as exc:
+        raise TaskwiseAttemptError("TASKWISE_ATTEMPT_EVIDENCE_INVALID") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        try:
+            os.unlink(temporary, dir_fd=parent_descriptor)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            raise TaskwiseAttemptError("TASKWISE_ATTEMPT_EVIDENCE_INVALID") from exc
+
+
+def _claim_active_scope(
+    repository_root: Path,
+    *,
+    suite_kind: Literal["pilot500", "full"],
+    generation_id: str,
+    attempt_id: str,
+    arm: Literal["control", "online"],
+    scope: str,
+) -> None:
+    attempt_descriptor = _open_private_attempt_directory(
+        repository_root,
+        suite_kind=suite_kind,
+        generation_id=generation_id,
+        attempt_id=attempt_id,
+    )
+    claim = {
+        "schema_version": "taskwise_active_scope_claim_v1",
+        "suite_kind": suite_kind,
+        "generation_id": _validate_generation_id(generation_id),
+        "attempt_id": validate_taskwise_attempt_id_v1(attempt_id),
+        "arm": arm,
+        "scope": scope,
+    }
+    try:
+        _create_canonical_file_at(
+            attempt_descriptor,
+            f".{arm}.{scope}.claim.json",
+            _canonical_bytes(claim),
+            mode=0o600,
+            exists_code="TASKWISE_ATTEMPT_NOT_ACTIVE",
+        )
+        os.fsync(attempt_descriptor)
+    finally:
+        os.close(attempt_descriptor)
 
 
 def _strict_nonnegative_int(payload: dict[str, Any], field: str) -> int:

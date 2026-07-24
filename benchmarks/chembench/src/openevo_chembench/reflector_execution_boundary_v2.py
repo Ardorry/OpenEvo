@@ -57,7 +57,8 @@ ISOLATION_FINDING = "REFLECTOR_FILESYSTEM_ISOLATION_MISSING"
 TOOL_VIOLATION_STATUS = "REFLECTOR_SECURITY_TOOL_USE_VIOLATION"
 _CONFIG_SCHEMA = "chembench4k_reflector_wrapper_config_v2"
 _RECEIPT_SCHEMA_V2 = "chembench4k_reflector_execution_receipt_v2"
-_RECEIPT_SCHEMA = "chembench4k_reflector_execution_receipt_v3"
+_RECEIPT_SCHEMA_V3 = "chembench4k_reflector_execution_receipt_v3"
+_RECEIPT_SCHEMA = "chembench4k_reflector_execution_receipt_v4"
 _ROOT_PREFIX = "openevo-chembench-reflector-v2-"
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _MAX_EVENT_BYTES = 16 * 1024 * 1024
@@ -117,6 +118,21 @@ _STDERR_TAIL_CODES = frozenset(
         "CODEX_TRANSPORT_ERROR",
     }
 )
+_TASKWISE_OPERATIONAL_ID_RE = re.compile(
+    r"\b(?:job|art|ds)_[A-Za-z0-9_.:-]{6,}\b",
+    re.ASCII,
+)
+_TASKWISE_OPERATIONAL_LINE_RE = re.compile(
+    r"^\s*-\s*(?:job_id|dataset_artifact_ids?)\s*:",
+    re.IGNORECASE | re.ASCII,
+)
+_TASKWISE_EXACT_H1 = "# General Chemistry Memory"
+_TASKWISE_PROMPT_CONTRACT = (
+    "Taskwise benchmark output requirements:\n"
+    f"- The first non-empty line must be exactly `{_TASKWISE_EXACT_H1}`.\n"
+    "- Preserve every required level-2 memory section and merge or retire "
+    "superseded rules instead of growing memory without bound."
+)
 
 ReflectorCodexPolicyProbeRunnerV2 = Callable[
     [Sequence[str], Path, Mapping[str, str], float],
@@ -174,6 +190,7 @@ class ReflectorExecutionReceiptV2:
     stderr_tail_codes: tuple[str, ...] = ()
     protocol_id: str = PROTOCOL_ID
     source_split: str = "dev"
+    projected_prompt_sha256: str | None = None
 
     @property
     def digest(self) -> str:
@@ -203,6 +220,7 @@ class ReflectorExecutionReceiptV2:
             "stderr_sha256": self.stderr_sha256,
             "stderr_tail_codes": list(self.stderr_tail_codes),
             "source_split": self.source_split,
+            "projected_prompt_sha256": self.projected_prompt_sha256,
         }
 
     @classmethod
@@ -227,15 +245,17 @@ class ReflectorExecutionReceiptV2:
             "resume_allowed",
             "replacement_completion_allowed",
         }
-        current_expected = legacy_expected | {
+        v3_expected = legacy_expected | {
             "codex_returncode",
             "source_split",
             "stderr_sha256",
             "stderr_tail_codes",
         }
+        current_expected = v3_expected | {"projected_prompt_sha256"}
         schema_version = payload.get("schema_version")
         if not (
             (schema_version == _RECEIPT_SCHEMA_V2 and set(payload) == legacy_expected)
+            or (schema_version == _RECEIPT_SCHEMA_V3 and set(payload) == v3_expected)
             or (schema_version == _RECEIPT_SCHEMA and set(payload) == current_expected)
         ):
             raise ReflectorBoundaryError("REFLECTOR_RECEIPT_SCHEMA_INVALID")
@@ -267,7 +287,7 @@ class ReflectorExecutionReceiptV2:
             type(last_digest) is not str or _SHA256_RE.fullmatch(last_digest) is None
         ):
             raise ReflectorBoundaryError("REFLECTOR_RECEIPT_SCHEMA_INVALID")
-        if schema_version == _RECEIPT_SCHEMA:
+        if schema_version in {_RECEIPT_SCHEMA_V3, _RECEIPT_SCHEMA}:
             codex_returncode = payload["codex_returncode"]
             source_split = payload["source_split"]
             stderr_sha256 = payload["stderr_sha256"]
@@ -296,6 +316,14 @@ class ReflectorExecutionReceiptV2:
             source_split = "dev"
             stderr_sha256 = hashlib.sha256(b"").hexdigest()
             stderr_tail_codes = []
+        projected_prompt_sha256 = (
+            payload["projected_prompt_sha256"] if schema_version == _RECEIPT_SCHEMA else None
+        )
+        if projected_prompt_sha256 is not None and (
+            type(projected_prompt_sha256) is not str
+            or _SHA256_RE.fullmatch(projected_prompt_sha256) is None
+        ):
+            raise ReflectorBoundaryError("REFLECTOR_RECEIPT_SCHEMA_INVALID")
         counts: list[tuple[str, int]] = []
         for key, value in payload["event_counts"].items():
             if type(key) is not str or type(value) is not int or value <= 0:
@@ -327,6 +355,7 @@ class ReflectorExecutionReceiptV2:
             stderr_tail_codes=tuple(stderr_tail_codes),
             protocol_id=str(payload["protocol_id"]),
             source_split=source_split,
+            projected_prompt_sha256=projected_prompt_sha256,
         )
 
 
@@ -378,6 +407,10 @@ class ReflectorBoundaryActivationV2:
             or receipt.real_codex_sha256 != self.expected_real_codex_sha256
             or receipt.protocol_id != self.expected_protocol_id
             or receipt.source_split != self.expected_source_split
+            or (
+                receipt.status is ReflectorBoundaryStatusV2.COMPLETED
+                and receipt.projected_prompt_sha256 is None
+            )
             or not receipt.wrapper_invoked
         ):
             raise ReflectorBoundaryError("REFLECTOR_WRAPPER_RECEIPT_BINDING_INVALID")
@@ -724,6 +757,7 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
     codex_returncode: int | None = None
     stderr = ""
     last_message_sha256: str | None = None
+    projected_prompt_sha256: str | None = None
     return_code = _WRAPPER_EXIT_INVALID
     try:
         _copy_private_file(
@@ -760,7 +794,11 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
             ),
             include_codex=True,
         )
-        prompt = sys.stdin.read()
+        prompt = _project_reflector_prompt(
+            sys.stdin.read(),
+            source_split=str(config["source_split"]),
+        )
+        projected_prompt_sha256 = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
         completed = _run_process_group(
             command,
             input_text=prompt,
@@ -838,6 +876,7 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
             stderr_tail_codes=_stderr_tail_codes(stderr),
             protocol_id=str(config["protocol_id"]),
             source_split=str(config["source_split"]),
+            projected_prompt_sha256=projected_prompt_sha256,
         )
         _exclusive_write(
             Path(config["receipt_path"]),
@@ -964,6 +1003,21 @@ def _replace_upstream_paths(arguments: list[str]) -> list[str]:
     }
     replaced[insertion:insertion] = _reflector_hardening_arguments(existing_disabled)
     return replaced
+
+
+def _project_reflector_prompt(prompt: str, *, source_split: str) -> str:
+    """Remove operational identifiers from taskwise prompts and bind exact output shape."""
+
+    if type(prompt) is not str or source_split not in _ALLOWED_SOURCE_SPLITS:
+        raise ReflectorBoundaryError("REFLECTOR_WRAPPER_CONFIG_INVALID")
+    if source_split != TASKWISE_SOURCE_SPLIT:
+        return prompt
+    retained = [
+        line for line in prompt.splitlines() if _TASKWISE_OPERATIONAL_LINE_RE.match(line) is None
+    ]
+    projected = "\n".join(retained)
+    projected = _TASKWISE_OPERATIONAL_ID_RE.sub("[sealed]", projected).rstrip()
+    return f"{projected}\n\n{_TASKWISE_PROMPT_CONTRACT}\n"
 
 
 def _reflector_hardening_arguments(

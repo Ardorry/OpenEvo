@@ -307,6 +307,7 @@ def _write_reflector_receipt(
         stderr_tail_codes=stderr_tail_codes,
         protocol_id="taskwise_online_evolution_v1",
         source_split=TASKWISE_SOURCE_SPLIT,
+        projected_prompt_sha256="4" * 64,
     )
     receipt_path = invocation_root / "receipt.json"
     receipt_path.write_text(
