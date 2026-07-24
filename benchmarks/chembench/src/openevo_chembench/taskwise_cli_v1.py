@@ -22,6 +22,10 @@ from openevo_chembench.local_codex_executor import (
     LocalCodexExecutionError,
     _codex_command,
 )
+from openevo_chembench.meeting722_contract_v1 import (
+    issue_meeting722_taskwise_contract_v1,
+    verify_persisted_meeting722_taskwise_contract_v1,
+)
 from openevo_chembench.taskwise_config_v1 import (
     SOURCE_COMMIT_PLACEHOLDER,
     TaskwiseExperimentConfigV1,
@@ -127,9 +131,15 @@ _PRIMARY_SCOPES = ("canary9", *PILOT500_STREAM_SCOPES, *FULL_STREAM_SCOPES)
 _SUITE_RUN_STATUSES = frozenset({"COMPLETED", "INCOMPLETE", "FAILED"})
 _TERMINAL_SECURITY_STATUSES = frozenset(
     {
+        "MEETING_722_TASKWISE_CONTRACT_VIOLATION",
         "SECURITY_TOOL_USE_VIOLATION",
         "TASKWISE_EVOLUTION_UPDATE_FAILED",
         "TASKWISE_CONTEXT_BINDING_VIOLATION",
+    }
+)
+_CONTRACT_FAILURE_CODES = frozenset(
+    {
+        "MEETING_722_TASKWISE_CONTRACT_VIOLATION",
     }
 )
 _ARTIFACT_FAILURE_CODES = frozenset(
@@ -1252,6 +1262,18 @@ def compare(
         or online_state.get("binding") != expected_bindings["online"]
     ):
         raise TaskwiseCLIError("TASKWISE_PAIRED_RUN_BINDING_MISMATCH")
+    _verify_meeting722_run_contract(
+        output_directory=control_output,
+        config=control,
+        state=control_state,
+        episodes=episodes,
+    )
+    _verify_meeting722_run_contract(
+        output_directory=online_output,
+        config=online,
+        state=online_state,
+        episodes=episodes,
+    )
 
     control_rows = load_private_taskwise_results_v1(control_output)
     online_rows = load_private_taskwise_results_v1(online_output)
@@ -1463,6 +1485,9 @@ def compare_pilot500_streams(
             )
         )
     report = build_taskwise_pilot500_stream_report_v1(tuple(streams))
+    report["meeting722_contract_violations"] = 0
+    if type(report.get("go_gate")) is dict:
+        report["go_gate"]["meeting722_contract_violations_required"] = 0
     if persist:
         _persist_pilot_stream_report(
             report,
@@ -1606,6 +1631,7 @@ def compare_full_streams(
             )
         )
     report = build_taskwise_full_stream_report_v1(tuple(streams))
+    report["meeting722_contract_violations"] = 0
     if persist:
         _persist_full_stream_report(
             report,
@@ -1703,6 +1729,7 @@ def _incomplete_full_stream_report(
         "evolution_update_failures": 0,
         "artifact_validation_failures": 0,
         "context_binding_violations": 0,
+        "meeting722_contract_violations": 0,
     }
     terminal = False
     per_stream: list[dict[str, object]] = []
@@ -1728,6 +1755,9 @@ def _incomplete_full_stream_report(
                 counters["artifact_validation_failures"] += 1
                 terminal = True
             elif failure_class == "context":
+                terminal = True
+            elif failure_class == "contract":
+                counters["meeting722_contract_violations"] += 1
                 terminal = True
             context_count = item.get("context_binding_violations")
             if isinstance(context_count, bool) or not isinstance(context_count, int):
@@ -1844,6 +1874,7 @@ def _incomplete_pilot_stream_report(
     evolution_update_failures = 0
     artifact_validation_failures = 0
     context_binding_violations = 0
+    meeting722_contract_violations = 0
     executor_failures = 0
     executor_failure_codes: dict[str, int] = {}
     terminal = False
@@ -1877,6 +1908,9 @@ def _incomplete_pilot_stream_report(
                 artifact_validation_failures += 1
                 terminal = True
             elif failure_class == "context":
+                terminal = True
+            elif failure_class == "contract":
+                meeting722_contract_violations += 1
                 terminal = True
             context_count = item.get("context_binding_violations")
             if isinstance(context_count, bool) or not isinstance(context_count, int):
@@ -1914,6 +1948,7 @@ def _incomplete_pilot_stream_report(
         "evolution_update_failures": evolution_update_failures,
         "artifact_validation_failures": artifact_validation_failures,
         "context_binding_violations": context_binding_violations,
+        "meeting722_contract_violations": meeting722_contract_violations,
         "executor_failures": executor_failures,
         "executor_failure_codes": dict(sorted(executor_failure_codes.items())),
         "go_gate": {
@@ -1921,6 +1956,7 @@ def _incomplete_pilot_stream_report(
             "security_violations_required": 0,
             "artifact_validation_failures_required": 0,
             "context_binding_violations_required": 0,
+            "meeting722_contract_violations_required": 0,
             "mean_stream_delta_minimum": 0.02,
             "stream_block_bootstrap_ci_lower_must_exceed": 0.0,
             "positive_stream_count_minimum": 7,
@@ -2536,6 +2572,7 @@ def _build_run_config(
             task_manifest_sha256=task_manifest_sha256,
             model_identity_sha256=_model_identity_sha256(config),
             executor_policy_sha256=_executor_policy_sha256(config),
+            stream_id=config.scope,
             memory_limits=config.memory_limits,
         )
     except ValueError as exc:
@@ -2908,6 +2945,8 @@ def _closed_suite_failure_code(status: object, value: object) -> str | None:
         )
     if status == TaskwiseRunStatusV1.TASKWISE_CONTEXT_BINDING_VIOLATION.value:
         return "TASKWISE_CONTEXT_BINDING_VIOLATION"
+    if status == TaskwiseRunStatusV1.MEETING_722_TASKWISE_CONTRACT_VIOLATION.value:
+        return "MEETING_722_TASKWISE_CONTRACT_VIOLATION"
     if value in _ARTIFACT_FAILURE_CODES:
         return value
     if status == TaskwiseRunStatusV1.TASKWISE_EVOLUTION_UPDATE_FAILED.value:
@@ -2952,6 +2991,8 @@ def _closed_terminal_exception_code(exc: Exception) -> str | None:
             )
         if value in _CONTEXT_FAILURE_CODES:
             return "TASKWISE_CONTEXT_BINDING_VIOLATION"
+        if value in _CONTRACT_FAILURE_CODES:
+            return "MEETING_722_TASKWISE_CONTRACT_VIOLATION"
         if value in _ARTIFACT_FAILURE_CODES:
             return value
         if value in _EVOLUTION_FAILURE_CODES:
@@ -2965,6 +3006,8 @@ def _orchestration_failure_evidence(exc: Exception) -> dict[str, object]:
         status = TaskwiseRunStatusV1.SECURITY_TOOL_USE_VIOLATION.value
     elif code == "TASKWISE_CONTEXT_BINDING_VIOLATION":
         status = TaskwiseRunStatusV1.TASKWISE_CONTEXT_BINDING_VIOLATION.value
+    elif code == "MEETING_722_TASKWISE_CONTRACT_VIOLATION":
+        status = TaskwiseRunStatusV1.MEETING_722_TASKWISE_CONTRACT_VIOLATION.value
     elif code == "TASKWISE_EVOLUTION_UPDATE_FAILED":
         status = TaskwiseRunStatusV1.TASKWISE_EVOLUTION_UPDATE_FAILED.value
     else:
@@ -3030,6 +3073,9 @@ def _update_suite_totals(state: dict[str, Any]) -> None:
     state["context_binding_violations"] = sum(
         _stream_failure_class(entry) == "context" for entry in entries
     )
+    state["meeting722_contract_violations"] = sum(
+        _stream_failure_class(entry) == "contract" for entry in entries
+    )
     executor_codes = tuple(
         code
         for entry in entries
@@ -3057,6 +3103,11 @@ def _stream_failure_class(entry: object) -> str | None:
         or code == "TASKWISE_CONTEXT_BINDING_VIOLATION"
     ):
         return "context"
+    if (
+        status == TaskwiseRunStatusV1.MEETING_722_TASKWISE_CONTRACT_VIOLATION.value
+        or code == "MEETING_722_TASKWISE_CONTRACT_VIOLATION"
+    ):
+        return "contract"
     if code in _ARTIFACT_FAILURE_CODES:
         return "artifact"
     if (
@@ -3080,6 +3131,65 @@ def _completed_run_state(path: Path, *, expected_arm: str) -> dict[str, Any]:
     if state.get("status") != "COMPLETED":
         raise TaskwiseCLIError("TASKWISE_RUN_NOT_COMPARABLE")
     return state
+
+
+def _verify_meeting722_run_contract(
+    *,
+    output_directory: Path,
+    config: TaskwiseExperimentConfigV1,
+    state: dict[str, Any],
+    episodes: tuple[TaskwiseEpisodeV1, ...],
+) -> str:
+    """Recompute the named meeting contract before any paired statistics."""
+
+    try:
+        public_events = tuple(
+            json.loads(line)
+            for line in (output_directory / "public" / "events.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+            if line
+        )
+        private_evaluations = tuple(
+            json.loads(line)
+            for line in (output_directory / "private" / "evaluations.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+            if line
+        )
+        expected = issue_meeting722_taskwise_contract_v1(
+            protocol_id=(
+                "taskwise_online_evolution_v1"
+                if config.arm == "online"
+                else "repeated_session_control_v1"
+            ),
+            arm=config.arm,
+            run_id=config.run_name,
+            stream_id=config.scope,
+            expected_task_uids=tuple(episode.task.uid for episode in episodes),
+            verified_task_count=len(episodes),
+            public_events=public_events,
+            private_evaluations=private_evaluations,
+            run_state=state,
+        )
+        stored = json.loads(
+            (output_directory / "public" / "meeting722_taskwise_contract_v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        verified = verify_persisted_meeting722_taskwise_contract_v1(
+            stored,
+            expected=expected,
+        )
+        core_state_root = TASKWISE_STATE_ROOT / config.scope / config.run_name
+        if config.arm == "control":
+            if core_state_root.exists() or core_state_root.is_symlink():
+                raise ValueError("control arm unexpectedly has Core state")
+        elif not core_state_root.is_dir() or core_state_root.is_symlink():
+            raise ValueError("online arm Core state is unavailable")
+        return verified.receipt_sha256
+    except Exception as exc:
+        raise TaskwiseCLIError("MEETING_722_TASKWISE_CONTRACT_VIOLATION") from exc
 
 
 def _security_violation_count(state: dict[str, Any]) -> int:

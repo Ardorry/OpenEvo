@@ -26,6 +26,11 @@ from typing import Any
 
 from openevo.evolution.framework import canonical_digest, load_verified_framework_registry
 from openevo_chembench.chembench4k_dataset import ChemBench4KDatasetLoader
+from openevo_chembench.meeting722_contract_v1 import (
+    Meeting722TaskwiseContractViolationV1,
+    issue_meeting722_taskwise_contract_v1,
+    verify_persisted_meeting722_taskwise_contract_v1,
+)
 from openevo_chembench.reflector_execution_boundary_v2 import (
     ReflectorBoundaryStatusV2,
     ReflectorExecutionReceiptV2,
@@ -123,6 +128,7 @@ class TaskwiseCanaryFindingV1(str, Enum):
     CANARY_RUN_INVALID = "CANARY_RUN_INVALID"
     CANARY_RUN_BINDING_INVALID = "CANARY_RUN_BINDING_INVALID"
     CANARY_EVENT_CHAIN_INVALID = "CANARY_EVENT_CHAIN_INVALID"
+    MEETING_722_CONTRACT_INVALID = "MEETING_722_CONTRACT_INVALID"
     CANARY_FIXED_BUDGET_INVALID = "CANARY_FIXED_BUDGET_INVALID"
     CANARY_EXECUTOR_AUDIT_INVALID = "CANARY_EXECUTOR_AUDIT_INVALID"
     CONTROL_TREATMENT_INVALID = "CONTROL_TREATMENT_INVALID"
@@ -591,6 +597,7 @@ def recompute_taskwise_paired_canary_receipt_v1(
                     prefix + "cleanup_residual_root_count": None,
                     prefix + "executor_success_receipt_count": None,
                     prefix + "executor_success_receipts_sha256": None,
+                    prefix + "meeting722_contract_receipt_sha256": None,
                 }
             )
         else:
@@ -618,6 +625,9 @@ def recompute_taskwise_paired_canary_receipt_v1(
                     ),
                     prefix + "executor_success_receipts_sha256": (
                         evidence.executor_success_receipts_sha256
+                    ),
+                    prefix + "meeting722_contract_receipt_sha256": (
+                        evidence.meeting722_contract_receipt_sha256
                     ),
                 }
             )
@@ -813,6 +823,7 @@ class _ArmEvidence:
     cleanup_residual_root_count: int
     executor_success_receipt_count: int
     executor_success_receipts_sha256: str
+    meeting722_contract_receipt_sha256: str
 
 
 class _ArmEvidenceError(RuntimeError):
@@ -879,11 +890,46 @@ def _recompute_arm_evidence(
         task_manifest_sha256=manifest_sha256,
         model_identity_sha256=_model_identity_sha256(config),
         executor_policy_sha256=_executor_policy_sha256(config),
+        stream_id=config.scope,
         memory_limits=config.memory_limits,
     )
     expected_binding = build_taskwise_run_binding_v1(run_config, episodes)
     if state.get("binding") != expected_binding:
         raise _ArmEvidenceError(TaskwiseCanaryFindingV1.CANARY_RUN_BINDING_INVALID)
+    try:
+        expected_meeting_contract = issue_meeting722_taskwise_contract_v1(
+            protocol_id=(
+                "taskwise_online_evolution_v1"
+                if config.arm == "online"
+                else "repeated_session_control_v1"
+            ),
+            arm=config.arm,
+            run_id=config.run_name,
+            stream_id=config.scope,
+            expected_task_uids=tuple(episode.task.uid for episode in episodes),
+            verified_task_count=9,
+            public_events=public_rows,
+            private_evaluations=private_rows,
+            run_state=state,
+        )
+        stored_meeting_contract = json.loads(
+            _read_regular(
+                output / "public" / "meeting722_taskwise_contract_v1.json",
+                mode=0o644,
+            )
+        )
+        verified_meeting_contract = verify_persisted_meeting722_taskwise_contract_v1(
+            stored_meeting_contract,
+            expected=expected_meeting_contract,
+        )
+        if (
+            state.get("meeting722_contract_verified_tasks") != 9
+            or state.get("meeting722_contract_receipt_sha256")
+            != verified_meeting_contract.receipt_sha256
+        ):
+            raise Meeting722TaskwiseContractViolationV1
+    except Exception as exc:
+        raise _ArmEvidenceError(TaskwiseCanaryFindingV1.MEETING_722_CONTRACT_INVALID) from exc
 
     expected_updates = 0 if config.arm == "control" else 18
     if (
@@ -1070,6 +1116,7 @@ def _recompute_arm_evidence(
         cleanup_residual_root_count=sum(item.residual_root_count for item in executor_receipts),
         executor_success_receipt_count=27,
         executor_success_receipts_sha256=executor_digest,
+        meeting722_contract_receipt_sha256=(verified_meeting_contract.receipt_sha256),
     )
 
 
@@ -1191,14 +1238,25 @@ def _recompute_core_evidence(
             or result.trajectory_ids != tuple(item.trajectory_id for item in trajectories)
             or result.trajectory_digest != ordered_taskwise_trajectory_digest(trajectories)
             or result.safe_feedback_digest != ordered_safe_feedback_digest(trajectories)
+            or event.get("task_uid") != result.task_uid
             or event.get("task_ordinal") != result.task_index
             or event.get("update_index") != result.update_index
+            or event.get("global_update_ordinal") != result.global_update_ordinal
+            or event.get("predecessor_artifact_id")
+            != (None if result.predecessor is None else result.predecessor.core_artifact_id)
+            or event.get("predecessor_memory_sha256")
+            != (None if result.predecessor is None else result.predecessor.resolved_memory_sha256)
+            or tuple(event.get("trajectory_ids", ())) != result.trajectory_ids
+            or event.get("trajectory_digest") != result.trajectory_digest
+            or event.get("safe_feedback_digest") != result.safe_feedback_digest
             or event.get("core_job_id") != result.job_id
+            or event.get("evolution_job_id") != result.job_id
             or event.get("core_job_state") != "COMPLETED"
             or event.get("core_context_id") != result.core_context_id
             or event.get("validation_receipt_sha256") != result.validation_receipt_sha256
             or type(output_memory) is not dict
             or output_memory.get("core_artifact_id") != result.core_artifact_id
+            or event.get("artifact_id") != result.core_artifact_id
             or output_memory.get("artifact_payload_sha256") != result.artifact_payload_sha256
             or output_memory.get("context_resolution_digest") != result.context_resolution_digest
             or output_memory.get("resolved_memory_sha256") != result.resolved_memory_sha256

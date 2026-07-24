@@ -33,6 +33,10 @@ from openevo_chembench.frozen_runtime_v2 import (
     FrozenAgentRequestV2,
 )
 from openevo_chembench.models import RawAttempt
+from openevo_chembench.meeting722_contract_v1 import (
+    CONTRACT_VIOLATION as MEETING_722_CONTRACT_VIOLATION,
+    issue_meeting722_taskwise_contract_v1,
+)
 from openevo_chembench.taskwise_feedback_v1 import (
     TaskwiseSafeEvolutionSignalV1,
     safe_signal_from_private_evaluation,
@@ -52,11 +56,16 @@ from openevo_chembench.taskwise_reporting_v1 import (
     PROTOCOL_LABELS,
     PrivateTaskwiseRoundResultV1,
 )
-from openevo_chembench.taskwise_trajectory_v1 import TaskwiseTrajectoryV1
+from openevo_chembench.taskwise_trajectory_v1 import (
+    TaskwiseTrajectoryV1,
+    ordered_safe_feedback_digest,
+    ordered_taskwise_trajectory_digest,
+)
 
 
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _RUNTIME_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{7,127}")
+_STREAM_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{2,127}")
 _ARMS = ("control", "online")
 _ROUNDS_PER_TASK = 3
 _UPDATES_PER_ONLINE_TASK = 2
@@ -122,6 +131,7 @@ _TASKWISE_SECURITY_EVENT_CATEGORIES = frozenset(
 _TASKWISE_INTERNAL_FAILURE_CODES = frozenset(
     {
         CONTEXT_BINDING_VIOLATION,
+        MEETING_722_CONTRACT_VIOLATION,
         "TASKWISE_EVOLUTION_UPDATE_FAILED",
     }
 )
@@ -147,6 +157,7 @@ class TaskwiseRunStatusV1(str, Enum):
     EXECUTION_FAILED = "EXECUTION_FAILED"
     TASKWISE_EVOLUTION_UPDATE_FAILED = "TASKWISE_EVOLUTION_UPDATE_FAILED"
     TASKWISE_CONTEXT_BINDING_VIOLATION = "TASKWISE_CONTEXT_BINDING_VIOLATION"
+    MEETING_722_TASKWISE_CONTRACT_VIOLATION = "MEETING_722_TASKWISE_CONTRACT_VIOLATION"
     SECURITY_TOOL_USE_VIOLATION = "SECURITY_TOOL_USE_VIOLATION"
 
 
@@ -163,6 +174,7 @@ class TaskwiseRunConfigV1:
     task_manifest_sha256: str
     model_identity_sha256: str
     executor_policy_sha256: str
+    stream_id: str | None = None
     memory_limits: TaskwiseMemoryLimitsV1 = TASKWISE_MEMORY_LIMITS_V1
     model: Literal["gpt-5.5"] = "gpt-5.5"
     reasoning_effort: Literal["medium"] = "medium"
@@ -189,6 +201,11 @@ class TaskwiseRunConfigV1:
             or re.fullmatch(r"[0-9a-f]{40}", self.source_commit) is None
         ):
             raise ValueError("source_commit must be a lowercase Git commit")
+        if (
+            type(self.contract_stream_id) is not str
+            or _STREAM_ID.fullmatch(self.contract_stream_id) is None
+        ):
+            raise ValueError("stream_id must be a bounded runtime identifier")
         if self.model != "gpt-5.5" or self.reasoning_effort != "medium":
             raise ValueError("taskwise v1 freezes gpt-5.5 with medium reasoning")
         if self.memory_limits != TASKWISE_MEMORY_LIMITS_V1:
@@ -214,6 +231,7 @@ class TaskwiseRunConfigV1:
                 "task_manifest_sha256": self.task_manifest_sha256,
                 "model_identity_sha256": self.model_identity_sha256,
                 "executor_policy_sha256": self.executor_policy_sha256,
+                "stream_id": self.contract_stream_id,
                 "memory_limits": self.memory_limits.to_payload(),
                 "memory_limits_sha256": self.memory_limits.digest,
                 "model": self.model,
@@ -222,6 +240,10 @@ class TaskwiseRunConfigV1:
                 "updates_per_online_task": self.updates_per_online_task,
             }
         )
+
+    @property
+    def contract_stream_id(self) -> str:
+        return self.output_directory.parent.name if self.stream_id is None else self.stream_id
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -657,6 +679,16 @@ class TaskwiseMemoryPublicAggregateV1:
 class TaskwiseCoreUpdateOutcomeV1:
     """Core job/artifact/context evidence plus its resolved runtime memory."""
 
+    task_uid: str
+    task_index: int
+    update_index: Literal[1, 2]
+    global_update_ordinal: int
+    predecessor_artifact_id: str | None
+    predecessor_memory_sha256: str | None
+    trajectory_ids: tuple[str, ...]
+    trajectory_digest: str
+    safe_feedback_digest: str
+    core_artifact_id: str
     job_id: str
     job_state: Literal["COMPLETED"]
     core_context_id: str
@@ -665,6 +697,47 @@ class TaskwiseCoreUpdateOutcomeV1:
     resolved_text_memory: CoreResolvedTextMemoryV2
 
     def __post_init__(self) -> None:
+        if type(self.task_uid) is not str or _SHA256.fullmatch(self.task_uid) is None:
+            raise ValueError("task_uid must be a lowercase SHA-256")
+        if (
+            isinstance(self.task_index, bool)
+            or not isinstance(self.task_index, int)
+            or self.task_index < 0
+            or type(self.update_index) is not int
+            or self.update_index not in (1, 2)
+            or type(self.global_update_ordinal) is not int
+            or self.global_update_ordinal != self.task_index * 2 + self.update_index
+        ):
+            raise ValueError("Core outcome stream position is invalid")
+        if (
+            not isinstance(self.trajectory_ids, tuple)
+            or len(self.trajectory_ids) != self.update_index
+            or len(set(self.trajectory_ids)) != self.update_index
+            or any(_SHA256.fullmatch(value) is None for value in self.trajectory_ids)
+        ):
+            raise ValueError("Core outcome trajectory identities are invalid")
+        for field_name in (
+            "trajectory_digest",
+            "safe_feedback_digest",
+        ):
+            _require_sha256(getattr(self, field_name), field_name)
+        if (self.predecessor_artifact_id is None) != (self.predecessor_memory_sha256 is None):
+            raise ValueError("Core outcome predecessor identity must be complete")
+        if self.global_update_ordinal == 1:
+            if self.predecessor_artifact_id is not None:
+                raise ValueError("generation-zero update cannot claim a predecessor")
+        elif (
+            type(self.predecessor_artifact_id) is not str
+            or not self.predecessor_artifact_id
+            or "/" in self.predecessor_artifact_id
+            or "\\" in self.predecessor_artifact_id
+        ):
+            raise ValueError("noninitial Core outcome requires a safe predecessor id")
+        if self.predecessor_memory_sha256 is not None:
+            _require_sha256(
+                self.predecessor_memory_sha256,
+                "predecessor_memory_sha256",
+            )
         for field_name in ("job_id", "core_context_id"):
             value = getattr(self, field_name)
             if type(value) is not str or _RUNTIME_ID.fullmatch(value) is None:
@@ -679,6 +752,11 @@ class TaskwiseCoreUpdateOutcomeV1:
             raise TypeError("memory_metrics must be exact TaskwiseMemoryPublicMetricsV1")
         if type(self.resolved_text_memory) is not CoreResolvedTextMemoryV2:
             raise TypeError("resolved_text_memory must be exact CoreResolvedTextMemoryV2")
+        if (
+            type(self.core_artifact_id) is not str
+            or self.core_artifact_id != self.resolved_text_memory.core_artifact_id
+        ):
+            raise ValueError("Core outcome artifact identity differs from resolved memory")
 
 
 class TaskwiseExecutionFailureV1(RuntimeError):
@@ -861,6 +939,9 @@ class TaskwiseOnlineRunnerV1:
         self._private_path = config.output_directory / "private" / "evaluations.jsonl"
         self._private_failures_path = config.output_directory / "private" / "failures.jsonl"
         self._state_path = config.output_directory / "run_state.json"
+        self._meeting_contract_path = (
+            config.output_directory / "public" / "meeting722_taskwise_contract_v1.json"
+        )
 
     def _build_binding(self) -> dict[str, object]:
         return build_taskwise_run_binding_v1(self._config, self._episodes)
@@ -927,7 +1008,16 @@ class TaskwiseOnlineRunnerV1:
                     self._state["carry_memory"] = self._state["active_memory"]
                 self._state["active_memory"] = None
                 self._transition(TaskwiseEpisodeStateV1.TASK_FINALIZED)
+                self._verify_meeting722_contract_prefix(ordinal + 1)
             elif state is TaskwiseEpisodeStateV1.TASK_FINALIZED:
+                verified_tasks = self._state["meeting722_contract_verified_tasks"]
+                if verified_tasks == ordinal:
+                    self._verify_meeting722_contract_prefix(ordinal + 1)
+                elif verified_tasks != ordinal + 1:
+                    raise TaskwiseExecutionFailureV1(
+                        MEETING_722_CONTRACT_VIOLATION,
+                        completion_observed=True,
+                    )
                 self._state["completed_tasks"] += 1
                 self._state["task_ordinal"] += 1
                 if self._state["task_ordinal"] < len(self._episodes):
@@ -948,8 +1038,13 @@ class TaskwiseOnlineRunnerV1:
             or len(self._state["registered_core_job_ids"]) != expected_updates
             or len(self._state["registered_core_artifact_ids"]) != expected_updates
             or self._state["context_binding_violation_count"] != 0
+            or self._state["meeting722_contract_verified_tasks"] != len(self._episodes)
+            or self._state["meeting722_contract_receipt_sha256"] is None
         ):
-            raise RuntimeError("taskwise fixed execution budget was not satisfied")
+            raise TaskwiseExecutionFailureV1(
+                MEETING_722_CONTRACT_VIOLATION,
+                completion_observed=True,
+            )
         self._state["status"] = TaskwiseRunStatusV1.COMPLETED.value
         self._state["resume_allowed"] = False
         self._state["pending_invocation"] = None
@@ -1055,14 +1150,17 @@ class TaskwiseOnlineRunnerV1:
                 "task_ordinal": ordinal,
                 "round_index": round_index,
                 "session_id": session_id,
-                "finding_codes": [CONTEXT_BINDING_VIOLATION],
+                "finding_codes": [
+                    CONTEXT_BINDING_VIOLATION,
+                    MEETING_722_CONTRACT_VIOLATION,
+                ],
             }
             if type(receipt) is TaskwiseContextBindingReceiptV1:
                 event["context_binding"] = receipt.to_public_dict()
             self._append_public(event)
             self._write_state()
             raise TaskwiseExecutionFailureV1(
-                CONTEXT_BINDING_VIOLATION,
+                MEETING_722_CONTRACT_VIOLATION,
                 completion_observed=True,
             ) from exc
 
@@ -1099,8 +1197,33 @@ class TaskwiseOnlineRunnerV1:
             outcome = self._core.update_text_memory(request)
             if type(outcome) is not TaskwiseCoreUpdateOutcomeV1:
                 raise TypeError("Core update port did not return typed Core evidence")
+            expected_trajectory_ids = tuple(item.trajectory_id for item in trajectories)
+            expected_trajectory_digest = ordered_taskwise_trajectory_digest(trajectories)
+            expected_safe_feedback_digest = ordered_safe_feedback_digest(trajectories)
+            if (
+                outcome.task_uid != episode.task.uid
+                or outcome.task_index != ordinal
+                or outcome.update_index != update_index
+                or outcome.global_update_ordinal != ordinal * 2 + update_index
+                or outcome.predecessor_artifact_id
+                != (None if prior is None else prior.core_artifact_id)
+                or outcome.predecessor_memory_sha256
+                != (None if prior is None else prior.resolved_memory_sha256)
+                or outcome.trajectory_ids != expected_trajectory_ids
+                or outcome.trajectory_digest != expected_trajectory_digest
+                or outcome.safe_feedback_digest != expected_safe_feedback_digest
+            ):
+                raise TaskwiseExecutionFailureV1(
+                    MEETING_722_CONTRACT_VIOLATION,
+                    completion_observed=True,
+                )
             memory = outcome.resolved_text_memory
             reference = CoreMemoryReferenceV1.from_memory(memory)
+            if outcome.core_artifact_id != reference.core_artifact_id:
+                raise TaskwiseExecutionFailureV1(
+                    MEETING_722_CONTRACT_VIOLATION,
+                    completion_observed=True,
+                )
             metrics = outcome.memory_metrics
             if metrics.memory_limits_sha256 != self._config.memory_limits.digest:
                 raise ValueError("Core memory metrics do not match the run binding")
@@ -1126,16 +1249,26 @@ class TaskwiseOnlineRunnerV1:
                 "schema_version": "taskwise_online_public_event_v1",
                 "kind": "core_update",
                 "arm": "online",
+                "task_uid": episode.task.uid,
+                "stream_id": self._config.contract_stream_id,
                 "task_ordinal": ordinal,
                 "episode_runtime_id": episode_runtime_id,
                 "update_index": update_index,
                 "source_round_index": update_index - 1,
+                "global_update_ordinal": outcome.global_update_ordinal,
+                "predecessor_artifact_id": outcome.predecessor_artifact_id,
+                "predecessor_memory_sha256": outcome.predecessor_memory_sha256,
                 "input_memory_sha256": (None if prior is None else prior.resolved_memory_sha256),
+                "trajectory_ids": list(outcome.trajectory_ids),
+                "trajectory_digest": outcome.trajectory_digest,
+                "safe_feedback_digest": outcome.safe_feedback_digest,
                 "output_memory": reference.to_dict(),
                 "core_job_id": outcome.job_id,
+                "evolution_job_id": outcome.job_id,
                 "core_job_state": outcome.job_state,
                 "core_context_id": outcome.core_context_id,
                 "context_resolution_digest": memory.context_resolution_digest,
+                "artifact_id": outcome.core_artifact_id,
                 "validation_receipt_sha256": outcome.validation_receipt_sha256,
                 "memory_metrics": metrics.to_dict(),
             }
@@ -1176,6 +1309,8 @@ class TaskwiseOnlineRunnerV1:
             "schema_version": "taskwise_online_public_event_v1",
             "kind": "completion",
             "arm": self._config.arm,
+            "task_uid": episode.task.uid,
+            "stream_id": self._config.contract_stream_id,
             "task_ordinal": ordinal,
             "episode_runtime_id": _episode_runtime_id(self._config.run_id, ordinal),
             "category": episode.task.category,
@@ -1301,8 +1436,41 @@ class TaskwiseOnlineRunnerV1:
             "resume_count": 0,
             "resume_allowed": False,
             "failure": None,
+            "meeting722_contract_verified_tasks": 0,
+            "meeting722_contract_receipt_sha256": None,
         }
         self._write_state()
+
+    def _verify_meeting722_contract_prefix(self, verified_task_count: int) -> None:
+        """Verify and atomically persist every finalized stream prefix."""
+
+        try:
+            receipt = issue_meeting722_taskwise_contract_v1(
+                protocol_id=_protocol_id(self._config.arm),
+                arm=self._config.arm,
+                run_id=self._config.run_id,
+                stream_id=self._config.contract_stream_id,
+                expected_task_uids=tuple(episode.task.uid for episode in self._episodes),
+                verified_task_count=verified_task_count,
+                public_events=tuple(_read_jsonl(self._public_path, private=False)),
+                private_evaluations=tuple(_read_jsonl(self._private_path, private=True)),
+                run_state=self._state,
+            )
+            _atomic_json(
+                self._meeting_contract_path,
+                receipt.to_public_dict(),
+                mode=0o644,
+            )
+            self._state["meeting722_contract_verified_tasks"] = verified_task_count
+            self._state["meeting722_contract_receipt_sha256"] = receipt.receipt_sha256
+            self._write_state()
+        except TaskwiseExecutionFailureV1:
+            raise
+        except Exception as exc:
+            raise TaskwiseExecutionFailureV1(
+                MEETING_722_CONTRACT_VIOLATION,
+                completion_observed=True,
+            ) from exc
 
     def _load_resume_state(self) -> None:
         if not self._config.output_directory.is_dir():
@@ -1654,6 +1822,8 @@ class TaskwiseOnlineRunnerV1:
             status = TaskwiseRunStatusV1.SECURITY_TOOL_USE_VIOLATION
         elif exc.code == CONTEXT_BINDING_VIOLATION:
             status = TaskwiseRunStatusV1.TASKWISE_CONTEXT_BINDING_VIOLATION
+        elif exc.code == MEETING_722_CONTRACT_VIOLATION:
+            status = TaskwiseRunStatusV1.MEETING_722_TASKWISE_CONTRACT_VIOLATION
         elif exc.code == "TASKWISE_EVOLUTION_UPDATE_FAILED":
             status = TaskwiseRunStatusV1.TASKWISE_EVOLUTION_UPDATE_FAILED
         else:

@@ -41,6 +41,10 @@ from openevo_chembench.taskwise_online_runner_v1 import (
 )
 from openevo_chembench.taskwise_sampling_v1 import TaskwiseManifestSet
 from openevo_chembench.taskwise_sampling_v1 import PILOT500_STREAM_SCOPES
+from openevo_chembench.taskwise_trajectory_v1 import (
+    ordered_safe_feedback_digest,
+    ordered_taskwise_trajectory_digest,
+)
 from openevo_chembench.source_identity_v2 import SourceManifestError
 
 
@@ -167,6 +171,24 @@ class _Core:
         )
         self.memories[CoreMemoryReferenceV1.from_memory(memory)] = memory
         return TaskwiseCoreUpdateOutcomeV1(
+            task_uid=request.task_uid,
+            task_index=request.task_index,
+            update_index=request.update_index,
+            global_update_ordinal=request.task_index * 2 + request.update_index,
+            predecessor_artifact_id=(
+                None
+                if request.prior_resolved_text_memory is None
+                else request.prior_resolved_text_memory.core_artifact_id
+            ),
+            predecessor_memory_sha256=(
+                None
+                if request.prior_resolved_text_memory is None
+                else request.prior_resolved_text_memory.resolved_memory_sha256
+            ),
+            trajectory_ids=tuple(item.trajectory_id for item in request.trajectories),
+            trajectory_digest=ordered_taskwise_trajectory_digest(request.trajectories),
+            safe_feedback_digest=ordered_safe_feedback_digest(request.trajectories),
+            core_artifact_id=memory.core_artifact_id,
             job_id=f"core_job_{request.task_index}_{request.update_index}",
             job_state="COMPLETED",
             core_context_id=f"context_{request.task_index}_{request.update_index}",
@@ -566,14 +588,14 @@ def test_manifest_is_bound_to_config_scope_and_path() -> None:
         cli._verify_static_inputs(wrong_scope, path)
 
 
-def test_canary_fix12_uses_fresh_paired_run_namespaces() -> None:
+def test_canary_fix13_uses_fresh_paired_run_namespaces() -> None:
     control = load_taskwise_config_v1(cli.CONFIG_ROOT / "control_canary9_taskwise_online_v1.yaml")
     online = load_taskwise_config_v1(cli.CONFIG_ROOT / "online_canary9_taskwise_online_v1.yaml")
 
-    assert control.run_name == "control_canary9_repeated_session_v1_fix12"
-    assert online.run_name == "online_canary9_taskwise_evolution_v1_fix12"
-    assert control.output_directory.endswith("/canary9/control_fix12")
-    assert online.output_directory.endswith("/canary9/online_fix12")
+    assert control.run_name == "control_canary9_repeated_session_v1_fix13"
+    assert online.run_name == "online_canary9_taskwise_evolution_v1_fix13"
+    assert control.output_directory.endswith("/canary9/control_fix13")
+    assert online.output_directory.endswith("/canary9/online_fix13")
     assert not control.output_directory.endswith("/canary9/control_fix11")
     assert not online.output_directory.endswith("/canary9/online_fix11")
 
@@ -611,6 +633,7 @@ def test_control_online_dispatch_and_private_compare(
     core = _Core()
 
     monkeypatch.setattr(cli, "WORKSPACE_ROOT", tmp_path)
+    monkeypatch.setattr(cli, "TASKWISE_STATE_ROOT", tmp_path / "core-state")
     monkeypatch.setattr(
         cli,
         "load_taskwise_config_v1",
@@ -652,6 +675,7 @@ def test_control_online_dispatch_and_private_compare(
         assert receipt["update_count"] == (0 if config.arm == "control" else 18)
         assert receipt["core_job_count"] == (0 if config.arm == "control" else 18)
         assert receipt["core_artifact_count"] == (0 if config.arm == "control" else 18)
+    (cli.TASKWISE_STATE_ROOT / online.scope / online.run_name).mkdir(parents=True)
 
     assert len(executors["control"].requests) == 27
     assert all(request.resolved_text_memory is None for request in executors["control"].requests)
@@ -670,6 +694,31 @@ def test_control_online_dispatch_and_private_compare(
     assert report["paired_final_round"]["comparison"] == ("online_round_2_vs_control_round_2")
     assert report["canary9_gate"]["passed"] is True
     assert report["canary9_gate"]["performance_gate_applied"] is False
+
+    contract_path = (
+        tmp_path / control.output_directory / "public" / "meeting722_taskwise_contract_v1.json"
+    )
+    tampered_contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    tampered_contract["passed"] = False
+    contract_path.write_text(
+        json.dumps(
+            tampered_contract,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(
+        cli.TaskwiseCLIError,
+        match="MEETING_722_TASKWISE_CONTRACT_VIOLATION",
+    ):
+        cli.compare(
+            scope="canary9",
+            persist=False,
+            source_gate=lambda _config: _SOURCE_COMMIT,
+        )
     assert report["canary9_gate"]["performance_tuning_permitted"] is False
     assert report["canary9_gate"]["labels"] == [
         "NON_PERFORMANCE_SAFETY_CANARY",
@@ -996,6 +1045,11 @@ def test_direct_pilot_run_arm_cannot_bypass_paired_attempt_authority(
             "TASKWISE_CONTEXT_BINDING_VIOLATION",
             "context_binding_violations",
         ),
+        (
+            "MEETING_722_TASKWISE_CONTRACT_VIOLATION",
+            "MEETING_722_TASKWISE_CONTRACT_VIOLATION",
+            "meeting722_contract_violations",
+        ),
     ],
 )
 def test_suite_orchestrator_stops_entire_suite_on_terminal_failure(
@@ -1057,6 +1111,11 @@ def test_suite_orchestrator_stops_entire_suite_on_terminal_failure(
             "EXECUTOR_NONZERO_EXIT",
             "context",
         ),
+        (
+            "MEETING_722_TASKWISE_CONTRACT_VIOLATION",
+            "EXECUTOR_NONZERO_EXIT",
+            "contract",
+        ),
     ],
 )
 def test_terminal_failure_class_precedes_executor_infrastructure_class(
@@ -1107,6 +1166,11 @@ def test_legacy_unclassified_executor_failure_is_closed_at_suite_boundary() -> N
             "TASKWISE_CORE_JOB_FAILED",
             "TASKWISE_EVOLUTION_UPDATE_FAILED",
             "TASKWISE_EVOLUTION_UPDATE_FAILED",
+        ),
+        (
+            "MEETING_722_TASKWISE_CONTRACT_VIOLATION",
+            "MEETING_722_TASKWISE_CONTRACT_VIOLATION",
+            "MEETING_722_TASKWISE_CONTRACT_VIOLATION",
         ),
         (
             "EXECUTOR_TIMEOUT",

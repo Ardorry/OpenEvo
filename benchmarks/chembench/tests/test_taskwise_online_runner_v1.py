@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import stat
+from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -17,6 +19,11 @@ from openevo_chembench.frozen_runtime_v2 import (
     _issue_core_resolved_text_memory_v2,
 )
 from openevo_chembench.models import RawAttempt, TranscriptReference
+from openevo_chembench.meeting722_contract_v1 import (
+    CONTRACT_VIOLATION as MEETING_722_CONTRACT_VIOLATION,
+    Meeting722TaskwiseContractViolationV1,
+    issue_meeting722_taskwise_contract_v1,
+)
 from openevo_chembench.taskwise_config_v1 import TASKWISE_MEMORY_LIMITS_V1
 from openevo_chembench.taskwise_context_binding_v1 import (
     CONTEXT_BINDING_VIOLATION,
@@ -38,6 +45,10 @@ from openevo_chembench.taskwise_online_runner_v1 import (
     TASKWISE_EXECUTOR_FAILURE_CODES_V1,
     _chain_rows,
     load_private_taskwise_results_v1,
+)
+from openevo_chembench.taskwise_trajectory_v1 import (
+    ordered_safe_feedback_digest,
+    ordered_taskwise_trajectory_digest,
 )
 
 
@@ -188,6 +199,24 @@ class _DummyCorePort:
         memory = _memory(f"{request.task_index}_{request.update_index}")
         self.memories[CoreMemoryReferenceV1.from_memory(memory)] = memory
         return TaskwiseCoreUpdateOutcomeV1(
+            task_uid=request.task_uid,
+            task_index=request.task_index,
+            update_index=request.update_index,
+            global_update_ordinal=request.task_index * 2 + request.update_index,
+            predecessor_artifact_id=(
+                None
+                if request.prior_resolved_text_memory is None
+                else request.prior_resolved_text_memory.core_artifact_id
+            ),
+            predecessor_memory_sha256=(
+                None
+                if request.prior_resolved_text_memory is None
+                else request.prior_resolved_text_memory.resolved_memory_sha256
+            ),
+            trajectory_ids=tuple(item.trajectory_id for item in request.trajectories),
+            trajectory_digest=ordered_taskwise_trajectory_digest(request.trajectories),
+            safe_feedback_digest=ordered_safe_feedback_digest(request.trajectories),
+            core_artifact_id=memory.core_artifact_id,
             job_id=f"core_job_{request.task_index}_{request.update_index}",
             job_state="COMPLETED",
             core_context_id=f"context_{request.task_index}_{request.update_index}",
@@ -207,6 +236,14 @@ class _DummyCorePort:
 
 class _CoreSecurityViolation(RuntimeError):
     finding_code = "TASKWISE_REFLECTOR_SECURITY_TOOL_USE_VIOLATION"
+
+
+class _MismatchedTypedOutcomeCorePort(_DummyCorePort):
+    def update_text_memory(
+        self,
+        request: TaskwiseRunnerCoreUpdateRequestV1,
+    ) -> TaskwiseCoreUpdateOutcomeV1:
+        return replace(super().update_text_memory(request), task_uid="f" * 64)
 
 
 class _ExecutorFailure(RuntimeError):
@@ -329,6 +366,24 @@ class _SentinelCorePort(_DummyCorePort):
         )
         self.memories[CoreMemoryReferenceV1.from_memory(memory)] = memory
         return TaskwiseCoreUpdateOutcomeV1(
+            task_uid=request.task_uid,
+            task_index=request.task_index,
+            update_index=request.update_index,
+            global_update_ordinal=request.task_index * 2 + request.update_index,
+            predecessor_artifact_id=(
+                None
+                if request.prior_resolved_text_memory is None
+                else request.prior_resolved_text_memory.core_artifact_id
+            ),
+            predecessor_memory_sha256=(
+                None
+                if request.prior_resolved_text_memory is None
+                else request.prior_resolved_text_memory.resolved_memory_sha256
+            ),
+            trajectory_ids=tuple(item.trajectory_id for item in request.trajectories),
+            trajectory_digest=ordered_taskwise_trajectory_digest(request.trajectories),
+            safe_feedback_digest=ordered_safe_feedback_digest(request.trajectories),
+            core_artifact_id=memory.core_artifact_id,
             job_id=f"core_job_{name}",
             job_state="COMPLETED",
             core_context_id=f"context_{name}",
@@ -529,6 +584,21 @@ def test_control_runs_three_fresh_sessions_per_task_without_memory_or_updates(
     failures_path = result.output_directory / "private" / "failures.jsonl"
     assert failures_path.read_bytes() == b""
     assert stat.S_IMODE(failures_path.stat().st_mode) == 0o600
+    contract = json.loads(
+        (result.output_directory / "public" / "meeting722_taskwise_contract_v1.json").read_text()
+    )
+    assert contract["contract_id"] == "Meeting722TaskwiseContractV1"
+    assert contract["verified_task_count"] == 2
+    assert contract["completion_count"] == 6
+    assert contract["core_job_count"] == contract["core_artifact_count"] == 0
+    assert contract["passed"] is True
+    assert all(
+        binding["evolution_job_id"] is None
+        and binding["artifact_id"] is None
+        and binding["resolved_artifact_id"] is None
+        for task in contract["task_bindings"]
+        for binding in task["round_bindings"]
+    )
 
 
 def test_online_uses_complete_prefixes_and_carries_only_update_two(
@@ -656,6 +726,107 @@ def test_online_uses_complete_prefixes_and_carries_only_update_two(
             assert (
                 binding["context_resolution_digest"] == expected_memory.context_resolution_digest
             )
+    contract_path = result.output_directory / "public" / "meeting722_taskwise_contract_v1.json"
+    contract = json.loads(contract_path.read_text())
+    state = json.loads((result.output_directory / "run_state.json").read_text())
+    assert contract["verified_task_count"] == 2
+    assert contract["completion_count"] == 6
+    assert contract["core_job_count"] == contract["core_artifact_count"] == 4
+    assert state["meeting722_contract_verified_tasks"] == 2
+    assert state["meeting722_contract_receipt_sha256"] == contract["receipt_sha256"]
+    assert [
+        binding["global_update_ordinal"]
+        for task in contract["task_bindings"]
+        for binding in task["round_bindings"]
+        if binding["global_update_ordinal"] is not None
+    ] == [1, 2, 3, 4]
+    assert [
+        binding["resolved_artifact_id"]
+        for task in contract["task_bindings"]
+        for binding in task["round_bindings"]
+    ] == [
+        None,
+        "artifact_0_1",
+        "artifact_0_2",
+        "artifact_0_2",
+        "artifact_1_1",
+        "artifact_1_2",
+    ]
+    serialized_contract = json.dumps(contract, ensure_ascii=False, sort_keys=True)
+    assert '"target"' not in serialized_contract
+    assert "raw_completion" not in serialized_contract
+
+
+def test_meeting722_contract_recomputation_rejects_session_reuse(
+    tmp_path: Path,
+) -> None:
+    episodes = _episodes(1)
+    result = TaskwiseOnlineRunnerV1(
+        config=_config(tmp_path, "online"),
+        episodes=episodes,
+        executor=_DummyExecutor(["A", "A", "A"]),
+        core_update_port=_DummyCorePort(),
+        session_id_factory=_session_factory("meeting-contract"),
+    ).run()
+    public_events = tuple(
+        json.loads(line)
+        for line in (result.output_directory / "public" / "events.jsonl").read_text().splitlines()
+    )
+    private_evaluations = tuple(
+        json.loads(line)
+        for line in (result.output_directory / "private" / "evaluations.jsonl")
+        .read_text()
+        .splitlines()
+    )
+    state = json.loads((result.output_directory / "run_state.json").read_text())
+    mutations = []
+    reused_session = list(deepcopy(public_events))
+    reused_session[2]["session_id"] = reused_session[0]["session_id"]
+    mutations.append(reused_session)
+    wrong_task = list(deepcopy(public_events))
+    wrong_task[0]["task_uid"] = "f" * 64
+    mutations.append(wrong_task)
+    wrong_stream = list(deepcopy(public_events))
+    wrong_stream[0]["stream_id"] = "other_stream"
+    mutations.append(wrong_stream)
+    boolean_ordinal = list(deepcopy(public_events))
+    boolean_ordinal[0]["task_ordinal"] = False
+    mutations.append(boolean_ordinal)
+
+    for tampered in mutations:
+        with pytest.raises(Meeting722TaskwiseContractViolationV1) as caught:
+            issue_meeting722_taskwise_contract_v1(
+                protocol_id="taskwise_online_evolution_v1",
+                arm="online",
+                run_id="taskwise_online_run",
+                stream_id="meeting_contract_stream",
+                expected_task_uids=(episodes[0].task.uid,),
+                verified_task_count=1,
+                public_events=tuple(tampered),
+                private_evaluations=private_evaluations,
+                run_state=state,
+            )
+
+        assert caught.value.finding_code == MEETING_722_CONTRACT_VIOLATION
+
+
+def test_typed_core_outcome_mismatch_is_a_meeting_contract_violation(
+    tmp_path: Path,
+) -> None:
+    executor = _DummyExecutor(["A", "A", "A"])
+    result = TaskwiseOnlineRunnerV1(
+        config=_config(tmp_path, "online"),
+        episodes=_episodes(1),
+        executor=executor,
+        core_update_port=_MismatchedTypedOutcomeCorePort(),
+        session_id_factory=_session_factory("typed-outcome-mismatch"),
+    ).run()
+
+    assert result.status is TaskwiseRunStatusV1.MEETING_722_TASKWISE_CONTRACT_VIOLATION
+    assert result.finding_codes == (MEETING_722_CONTRACT_VIOLATION,)
+    assert result.completion_count == 1
+    assert result.update_count == 0
+    assert len(executor.requests) == 1
 
 
 @pytest.mark.parametrize(
@@ -674,8 +845,8 @@ def test_context_binding_mismatch_fails_closed_before_private_evaluation(
         session_id_factory=_session_factory("binding-violation"),
     ).run()
 
-    assert result.status is TaskwiseRunStatusV1.TASKWISE_CONTEXT_BINDING_VIOLATION
-    assert result.finding_codes == (CONTEXT_BINDING_VIOLATION,)
+    assert result.status is TaskwiseRunStatusV1.MEETING_722_TASKWISE_CONTRACT_VIOLATION
+    assert result.finding_codes == (MEETING_722_CONTRACT_VIOLATION,)
     assert result.resume_allowed is False
     assert result.completion_count == 0
     assert result.session_attempt_count == 1
@@ -688,7 +859,10 @@ def test_context_binding_mismatch_fails_closed_before_private_evaluation(
     ]
     assert len(public_rows) == 1
     assert public_rows[0]["kind"] == "context_binding_violation"
-    assert public_rows[0]["finding_codes"] == [CONTEXT_BINDING_VIOLATION]
+    assert public_rows[0]["finding_codes"] == [
+        CONTEXT_BINDING_VIOLATION,
+        MEETING_722_CONTRACT_VIOLATION,
+    ]
     assert "target" not in json.dumps(public_rows[0], sort_keys=True)
 
 

@@ -37,6 +37,10 @@ from openevo_chembench.taskwise_online_runner_v1 import (
     TaskwiseCoreUpdateOutcomeV1,
     TaskwiseMemoryPublicMetricsV1,
 )
+from openevo_chembench.taskwise_trajectory_v1 import (
+    ordered_safe_feedback_digest,
+    ordered_taskwise_trajectory_digest,
+)
 
 
 def _sha(value: str) -> str:
@@ -182,6 +186,24 @@ class _FakeCore:
         if self.update_error is not None:
             raise self.update_error
         return TaskwiseCoreUpdateOutcomeV1(
+            task_uid=request.task_uid,
+            task_index=request.task_index,
+            update_index=request.update_index,
+            global_update_ordinal=request.task_index * 2 + request.update_index,
+            predecessor_artifact_id=(
+                None
+                if request.prior_resolved_text_memory is None
+                else request.prior_resolved_text_memory.core_artifact_id
+            ),
+            predecessor_memory_sha256=(
+                None
+                if request.prior_resolved_text_memory is None
+                else request.prior_resolved_text_memory.resolved_memory_sha256
+            ),
+            trajectory_ids=tuple(item.trajectory_id for item in request.trajectories),
+            trajectory_digest=ordered_taskwise_trajectory_digest(request.trajectories),
+            safe_feedback_digest=ordered_safe_feedback_digest(request.trajectories),
+            core_artifact_id=self.memory.core_artifact_id,
             job_id="job_update1_smoke_0001",
             job_state="COMPLETED",
             core_context_id="context_update1_smoke_0001",

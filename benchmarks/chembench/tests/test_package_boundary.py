@@ -58,6 +58,7 @@ class PackageBoundaryTests(unittest.TestCase):
             "frozen_runtime_v2.py",
             "local_codex_executor.py",
             "local_preflight.py",
+            "meeting722_contract_v1.py",
             "models.py",
             "paired_statistics_v2.py",
             "preflight.py",

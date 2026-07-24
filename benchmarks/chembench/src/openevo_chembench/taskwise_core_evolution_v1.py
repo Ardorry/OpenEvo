@@ -2355,6 +2355,20 @@ class TaskwiseCoreUpdatePortAdapterV1:
         )
         memory = self._bridge.issue_runtime_memory(result)
         return TaskwiseCoreUpdateOutcomeV1(
+            task_uid=result.task_uid,
+            task_index=result.task_index,
+            update_index=result.update_index,
+            global_update_ordinal=result.global_update_ordinal,
+            predecessor_artifact_id=(
+                None if result.predecessor is None else result.predecessor.core_artifact_id
+            ),
+            predecessor_memory_sha256=(
+                None if result.predecessor is None else result.predecessor.resolved_memory_sha256
+            ),
+            trajectory_ids=result.trajectory_ids,
+            trajectory_digest=result.trajectory_digest,
+            safe_feedback_digest=result.safe_feedback_digest,
+            core_artifact_id=result.core_artifact_id,
             job_id=result.job_id,
             job_state="COMPLETED",
             core_context_id=result.core_context_id,
