@@ -151,6 +151,9 @@ def test_each_pilot_stream_has_independent_output_and_core_namespace() -> None:
     assert "run-pilot-stream-suite --arm control" in control_script
     assert "fresh runner" in online_script
     assert "generation-zero memory" in online_script
+    assert "selectively resumes" not in online_script
+    assert '"$@"' in online_script
+    assert '"$@"' in control_script
 
 
 def test_dry_run_performs_manifest_and_config_validation_without_model_calls() -> None:

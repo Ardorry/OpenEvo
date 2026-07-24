@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from dataclasses import fields
 from pathlib import Path
 
@@ -21,9 +22,11 @@ from openevo_chembench.taskwise_canary_receipt_v1 import (
     verify_taskwise_paired_canary_receipt_v1,
     write_taskwise_paired_canary_receipt_v1,
 )
+from openevo_chembench.taskwise_config_v1 import load_taskwise_config_v1
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+_GENERATION_ID = f"gen_{'1' * 64}"
 
 
 def _inputs(tmp_path: Path) -> TaskwisePairedCanaryReceiptInputsV1:
@@ -43,6 +46,7 @@ def _positive_receipt(*, marker: str = "a") -> TaskwisePairedCanaryReceiptV1:
         fields={
             "source_commit": marker * 40,
             "pilot_binding_sha256": marker * 64,
+            "paired_canary_generation_id": _GENERATION_ID,
             "control_completion_count": 27,
             "online_completion_count": 27,
             "online_core_job_count": 18,
@@ -114,6 +118,7 @@ def test_pilot_authorization_constructor_is_not_publicly_forgeable() -> None:
             evidence_digest="b" * 64,
             source_commit="c" * 40,
             pilot_binding_sha256="d" * 64,
+            paired_canary_generation_id=_GENERATION_ID,
         )
 
 
@@ -138,6 +143,7 @@ def test_positive_receipt_requires_exact_recomputation(
     assert authorization.evidence_digest == stored.evidence_digest
     assert authorization.source_commit == "a" * 40
     assert authorization.pilot_binding_sha256 == "a" * 64
+    assert authorization.paired_canary_generation_id == _GENERATION_ID
     directly_verified = stored.to_payload()["directly_verified_fields"]
     assert "control_cleanup_residual_root_count" in directly_verified
     assert "online_cleanup_residual_root_count" in directly_verified
@@ -191,11 +197,15 @@ def test_blocked_recomputation_is_never_frozen(
 
 def test_default_receipt_location_is_outside_results_and_private_manifests() -> None:
     inputs = default_taskwise_canary_receipt_inputs_v1(PACKAGE_ROOT)
-    receipt_path = default_taskwise_canary_receipt_path_v1(PACKAGE_ROOT)
+    receipt_path = default_taskwise_canary_receipt_path_v1(
+        PACKAGE_ROOT,
+        _GENERATION_ID,
+    )
     assert inputs.control_config_path.name == ("control_canary9_taskwise_online_v1.yaml")
     assert inputs.online_config_path.name == "online_canary9_taskwise_online_v1.yaml"
     assert receipt_path.relative_to(PACKAGE_ROOT).as_posix() == (
-        "state/taskwise_online_v1/canary9/paired_canary_receipt_v1.json"
+        "state/taskwise_online_v1/canary9/generations/"
+        f"{_GENERATION_ID}/paired_canary_receipt_v1.json"
     )
     assert "results" not in receipt_path.parts
     assert "private_manifests" not in receipt_path.parts
@@ -215,3 +225,38 @@ def test_current_incomplete_or_dirty_evidence_cannot_authorize_paid_pilot() -> N
     assert payload["performance_gate_disclaimer"] == PERFORMANCE_GATE_DISCLAIMER
     assert "target" not in encoded.casefold()
     assert "raw_completion" not in encoded.casefold()
+
+
+def test_success_gate_rejects_any_private_core_failure_receipt(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    config = replace(
+        load_taskwise_config_v1(
+            PACKAGE_ROOT / "configs" / "online_canary9_taskwise_online_v1.yaml"
+        ),
+        run_name="online_failure_diagnostic_test",
+    )
+    failure_root = (
+        inputs.package_root
+        / "state"
+        / "taskwise_online_v1"
+        / config.scope
+        / config.run_name
+        / "private_core_failure_diagnostics"
+    )
+    failure_root.mkdir(parents=True, mode=0o700)
+    receipt = failure_root / f"taskwise_core_failure_{'a' * 32}.json"
+    receipt.write_text("{}\n", encoding="utf-8")
+    receipt.chmod(0o600)
+
+    with pytest.raises(receipt_module._CoreEvidenceError) as captured:
+        receipt_module._recompute_core_evidence(
+            inputs=inputs,
+            config=config,
+            registry=object(),
+            public_rows=(),
+            private_rows=(),
+        )
+
+    assert captured.value.findings == frozenset(
+        {TaskwiseCanaryFindingV1.CORE_FAILURE_DIAGNOSTICS_PRESENT}
+    )

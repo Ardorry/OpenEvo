@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import importlib.metadata as importlib_metadata
 import json
@@ -11,7 +12,7 @@ import pytest
 
 from openevo import __version__
 import openevo.evolution.methods as core_methods
-from openevo.evolution.framework import DistributionArtifactExpectation
+from openevo.evolution.framework import DistributionArtifactExpectation, canonical_digest
 from openevo.evolution.framework import builtins as core_builtins
 from openevo.evolution.framework.builtins import load_verified_builtin_registry
 from openevo.evolution.framework.loading import _verify_distribution_install
@@ -28,6 +29,7 @@ from openevo_chembench.taskwise_core_evolution_v1 import (
     TaskwiseArtifactLineageReceiptV1,
     TaskwiseCoreEvolutionBridgeV1,
     TaskwiseCoreEvolutionError,
+    TaskwiseCoreFailureReceiptV1,
     TaskwiseCorePredecessorV1,
     TaskwiseCoreUpdateRequestV1,
     TaskwiseCoreUpdatePortAdapterV1,
@@ -210,6 +212,15 @@ def _memory_with_do_items(items: tuple[str, ...]) -> str:
 ## Retired Or Superseded
 - Retire advice only when a general validation rule supersedes it.
 """
+
+
+def _load_only_core_failure_receipt(tmp_path: Path) -> tuple[Path, dict[str, object]]:
+    root = tmp_path / "core" / "private_core_failure_diagnostics"
+    paths = list(root.glob("taskwise_core_failure_*.json"))
+    assert len(paths) == 1
+    path = paths[0]
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    return path, json.loads(path.read_text(encoding="utf-8"))
 
 
 @pytest.fixture
@@ -800,6 +811,7 @@ def test_jump_fork_and_global_rollback_fail_before_writes(
 def test_leaking_candidate_is_rejected_and_never_promoted(
     bridge: TaskwiseCoreEvolutionBridgeV1,
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     leaking = _memory(1).replace(
         "Classify the reasoning mode",
@@ -826,11 +838,37 @@ def test_leaking_candidate_is_rejected_and_never_promoted(
     with pytest.raises(
         TaskwiseCoreEvolutionError,
         match="TASKWISE_ARTIFACT_VALIDATION_FAILED",
-    ):
+    ) as raised:
         bridge.apply_update(
             _request(task_index=0, update_index=1, predecessor=None),
             test_only_allow_synthetic_reflector=True,
         )
+    path, receipt = _load_only_core_failure_receipt(tmp_path)
+    assert raised.value.diagnostic_receipt == path.name
+    assert receipt["stage"] == "ARTIFACT_VALIDATION"
+    assert receipt["finding_code"] == "TASKWISE_ARTIFACT_VALIDATION_FAILED"
+    assert receipt["exception_class"] == "TASKWISE_CORE_EVOLUTION_ERROR"
+    assert receipt["errno"] is None
+    assert receipt["job_id"]
+    assert receipt["artifact_id"]
+    for digest_key in (
+        "trajectory_digest",
+        "safe_feedback_digest",
+        "validator_input_digest",
+        "dataset_manifest_sha256",
+        "plan_digest",
+        "reflector_input_digest",
+        "artifact_payload_sha256",
+        "artifact_lineage_sha256",
+        "memory_inspection_sha256",
+        "validation_receipt_sha256",
+    ):
+        assert len(receipt[digest_key]) == 64
+    receipt_text = path.read_text(encoding="utf-8")
+    assert "private-public-question-0" not in receipt_text
+    assert "private-option-alpha" not in receipt_text
+    assert "correct" not in receipt_text.casefold()
+    assert "target" not in receipt_text.casefold()
     with bridge._store.connect() as connection:  # noqa: SLF001
         promoted = connection.execute(
             "SELECT promoted FROM artifacts WHERE type = 'text_memory'"
@@ -841,6 +879,276 @@ def test_leaking_candidate_is_rejected_and_never_promoted(
             _request(task_index=0, update_index=1, predecessor=None),
             test_only_allow_synthetic_reflector=True,
         )
+
+
+def test_promotion_oserror_writes_closed_private_failure_receipt(
+    bridge: TaskwiseCoreEvolutionBridgeV1,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        core_methods,
+        "_generate_reflector_markdown",
+        lambda *_args, **_kwargs: _memory(1),
+    )
+
+    def _promotion_failure(*_args, **_kwargs):
+        raise OSError(errno.EIO, "PRIVATE_PROMOTION_BODY_SENTINEL")
+
+    monkeypatch.setattr(bridge._store, "update_artifact_promotion", _promotion_failure)
+    with pytest.raises(
+        TaskwiseCoreEvolutionError,
+        match="TASKWISE_ARTIFACT_PROMOTION_FAILED",
+    ) as raised:
+        bridge.apply_update(
+            _request(task_index=0, update_index=1, predecessor=None),
+            test_only_allow_synthetic_reflector=True,
+        )
+
+    path, receipt = _load_only_core_failure_receipt(tmp_path)
+    assert raised.value.diagnostic_receipt == path.name
+    assert receipt["stage"] == "ARTIFACT_PROMOTION"
+    assert receipt["finding_code"] == "TASKWISE_ARTIFACT_PROMOTION_FAILED"
+    assert receipt["exception_class"] == "OS_ERROR"
+    assert receipt["errno"] == errno.EIO
+    assert len(receipt["artifact_payload_sha256"]) == 64
+    assert len(receipt["artifact_lineage_sha256"]) == 64
+    assert len(receipt["validation_receipt_sha256"]) == 64
+    assert "PRIVATE_PROMOTION_BODY_SENTINEL" not in path.read_text(encoding="utf-8")
+
+
+def test_regex_valid_unknown_core_finding_collapses_to_stage_default(
+    bridge: TaskwiseCoreEvolutionBridgeV1,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        core_methods,
+        "_generate_reflector_markdown",
+        lambda *_args, **_kwargs: _memory(1),
+    )
+
+    def _unknown_finding(*_args, **_kwargs):
+        raise TaskwiseCoreEvolutionError("MALICIOUS_BUT_REGEX_VALID")
+
+    monkeypatch.setattr(bridge._store, "update_artifact_promotion", _unknown_finding)
+    with pytest.raises(
+        TaskwiseCoreEvolutionError,
+        match="TASKWISE_ARTIFACT_PROMOTION_FAILED",
+    ) as raised:
+        bridge.apply_update(
+            _request(task_index=0, update_index=1, predecessor=None),
+            test_only_allow_synthetic_reflector=True,
+        )
+
+    path, receipt = _load_only_core_failure_receipt(tmp_path)
+    assert raised.value.finding_code == "TASKWISE_ARTIFACT_PROMOTION_FAILED"
+    assert raised.value.diagnostic_receipt == path.name
+    assert receipt["stage"] == "ARTIFACT_PROMOTION"
+    assert receipt["finding_code"] == "TASKWISE_ARTIFACT_PROMOTION_FAILED"
+    assert "MALICIOUS_BUT_REGEX_VALID" not in path.read_text(encoding="utf-8")
+
+
+def test_context_failure_writes_closed_private_failure_receipt(
+    bridge: TaskwiseCoreEvolutionBridgeV1,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        core_methods,
+        "_generate_reflector_markdown",
+        lambda *_args, **_kwargs: _memory(1),
+    )
+
+    def _context_failure(*_args, **_kwargs):
+        raise RuntimeError("PRIVATE_CONTEXT_BODY_SENTINEL")
+
+    monkeypatch.setattr(bridge._store, "resolve_materialized_context", _context_failure)
+    with pytest.raises(
+        TaskwiseCoreEvolutionError,
+        match="TASKWISE_CONTEXT_RESOLUTION_FAILED",
+    ) as raised:
+        bridge.apply_update(
+            _request(task_index=0, update_index=1, predecessor=None),
+            test_only_allow_synthetic_reflector=True,
+        )
+
+    path, receipt = _load_only_core_failure_receipt(tmp_path)
+    assert raised.value.diagnostic_receipt == path.name
+    assert receipt["stage"] == "CONTEXT_RESOLUTION"
+    assert receipt["finding_code"] == "TASKWISE_CONTEXT_RESOLUTION_FAILED"
+    assert receipt["exception_class"] == "RUNTIME_ERROR"
+    assert receipt["errno"] is None
+    assert len(receipt["core_artifact_manifest_sha256"]) == 64
+    assert receipt["context_resolution_digest"] is None
+    assert "PRIVATE_CONTEXT_BODY_SENTINEL" not in path.read_text(encoding="utf-8")
+
+
+def test_checkpoint_oserror_has_digest_only_receipt_and_never_advances_head(
+    bridge: TaskwiseCoreEvolutionBridgeV1,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        core_methods,
+        "_generate_reflector_markdown",
+        lambda *_args, **_kwargs: _memory(1),
+    )
+
+    def _checkpoint_failure(*_args, **_kwargs):
+        raise OSError(errno.ENOSPC, "PRIVATE_CHECKPOINT_BODY_SENTINEL")
+
+    monkeypatch.setattr(bridge, "_append_private_checkpoint", _checkpoint_failure)
+    with pytest.raises(
+        TaskwiseCoreEvolutionError,
+        match="TASKWISE_PRIVATE_CHECKPOINT_FAILED",
+    ) as raised:
+        bridge.apply_update(
+            _request(task_index=0, update_index=1, predecessor=None),
+            test_only_allow_synthetic_reflector=True,
+        )
+
+    path, receipt = _load_only_core_failure_receipt(tmp_path)
+    assert raised.value.diagnostic_receipt == path.name
+    assert receipt["stage"] == "PRIVATE_CHECKPOINT"
+    assert receipt["finding_code"] == "TASKWISE_PRIVATE_CHECKPOINT_FAILED"
+    assert receipt["exception_class"] == "OS_ERROR"
+    assert receipt["errno"] == errno.ENOSPC
+    for digest_key in (
+        "artifact_payload_sha256",
+        "artifact_lineage_sha256",
+        "memory_inspection_sha256",
+        "validation_receipt_sha256",
+        "core_artifact_manifest_sha256",
+        "context_resolution_digest",
+    ):
+        assert len(receipt[digest_key]) == 64
+    receipt_text = path.read_text(encoding="utf-8")
+    assert "PRIVATE_CHECKPOINT_BODY_SENTINEL" not in receipt_text
+    assert "General Chemistry Memory" not in receipt_text
+    assert "private-public-question" not in receipt_text
+    assert bridge.current_head() is None
+    with bridge._store.connect() as connection:  # noqa: SLF001
+        before = (
+            connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0],
+            connection.execute("SELECT COUNT(*) FROM contexts").fetchone()[0],
+        )
+    assert before == (1, 1)
+    with pytest.raises(TaskwiseCoreEvolutionError, match="TASKWISE_STREAM_TERMINAL"):
+        bridge.apply_update(
+            _request(task_index=0, update_index=1, predecessor=None),
+            test_only_allow_synthetic_reflector=True,
+        )
+    with bridge._store.connect() as connection:  # noqa: SLF001
+        after = (
+            connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0],
+            connection.execute("SELECT COUNT(*) FROM contexts").fetchone()[0],
+        )
+    assert after == before
+
+
+def test_unsafe_checkpoint_has_private_receipt_and_is_not_overwritten(
+    bridge: TaskwiseCoreEvolutionBridgeV1,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        core_methods,
+        "_generate_reflector_markdown",
+        lambda *_args, **_kwargs: _memory(1),
+    )
+    checkpoint = bridge._checkpoint_path  # noqa: SLF001
+    preserved = b"PRIVATE_UNSAFE_CHECKPOINT_EVIDENCE\n"
+    checkpoint.write_bytes(preserved)
+    checkpoint.chmod(0o644)
+
+    with pytest.raises(
+        TaskwiseCoreEvolutionError,
+        match="TASKWISE_PRIVATE_CHECKPOINT_UNSAFE",
+    ) as raised:
+        bridge.apply_update(
+            _request(task_index=0, update_index=1, predecessor=None),
+            test_only_allow_synthetic_reflector=True,
+        )
+
+    path, receipt = _load_only_core_failure_receipt(tmp_path)
+    assert raised.value.diagnostic_receipt == path.name
+    assert receipt["stage"] == "PRIVATE_CHECKPOINT"
+    assert receipt["finding_code"] == "TASKWISE_PRIVATE_CHECKPOINT_UNSAFE"
+    assert receipt["exception_class"] == "TASKWISE_CORE_EVOLUTION_ERROR"
+    assert checkpoint.read_bytes() == preserved
+    assert stat.S_IMODE(checkpoint.stat().st_mode) == 0o644
+    assert "PRIVATE_UNSAFE_CHECKPOINT_EVIDENCE" not in path.read_text(encoding="utf-8")
+    assert bridge.current_head() is None
+
+
+def test_existing_same_name_failure_receipt_is_never_deleted_or_modified(
+    bridge: TaskwiseCoreEvolutionBridgeV1,
+) -> None:
+    request = _request(task_index=0, update_index=1, predecessor=None)
+    receipt = TaskwiseCoreFailureReceiptV1(
+        stage="ARTIFACT_PROMOTION",
+        finding_code="TASKWISE_ARTIFACT_PROMOTION_FAILED",
+        exception_class="OS_ERROR",
+        errno=errno.EIO,
+        task_index=0,
+        round_index=0,
+        update_index=1,
+        job_id="job_existing_receipt",
+        artifact_id="art_existing_receipt",
+        predecessor_artifact_id=None,
+        trajectory_digest="1" * 64,
+        safe_feedback_digest="2" * 64,
+        validator_input_digest="3" * 64,
+        dataset_manifest_sha256="4" * 64,
+        plan_digest="5" * 64,
+        reflector_input_digest="6" * 64,
+        reflector_receipt_digest=None,
+        reflector_event_stream_digest=None,
+        artifact_payload_sha256="7" * 64,
+        artifact_lineage_sha256="8" * 64,
+        memory_inspection_sha256="9" * 64,
+        validation_receipt_sha256="a" * 64,
+        core_artifact_manifest_sha256=None,
+        context_resolution_digest=None,
+    )
+    basename = f"taskwise_core_failure_{canonical_digest(receipt)[:32]}.json"
+    path = bridge._private_failure_root / basename  # noqa: SLF001
+    preserved = b"IMMUTABLE_PREEXISTING_CORE_FAILURE_EVIDENCE\n"
+    path.write_bytes(preserved)
+    path.chmod(0o600)
+
+    with pytest.raises(
+        TaskwiseCoreEvolutionError,
+        match="TASKWISE_CORE_DIAGNOSTICS_FAILED",
+    ) as raised:
+        bridge._raise_private_core_failure(  # noqa: SLF001
+            stage=receipt.stage,
+            default_finding=receipt.finding_code,
+            cause=OSError(errno.EIO, "PRIVATE_DUPLICATE_BODY_SENTINEL"),
+            request=request,
+            job_id=receipt.job_id,
+            artifact_id=receipt.artifact_id,
+            trajectory_digest=receipt.trajectory_digest,
+            safe_feedback_digest=receipt.safe_feedback_digest,
+            validator_input_digest=receipt.validator_input_digest,
+            dataset_manifest_sha256=receipt.dataset_manifest_sha256,
+            plan_digest=receipt.plan_digest,
+            reflector_input_digest=receipt.reflector_input_digest,
+            reflector_receipt_digest=receipt.reflector_receipt_digest,
+            reflector_event_stream_digest=receipt.reflector_event_stream_digest,
+            artifact_payload_sha256=receipt.artifact_payload_sha256,
+            artifact_lineage_sha256=receipt.artifact_lineage_sha256,
+            memory_inspection_sha256=receipt.memory_inspection_sha256,
+            validation_receipt_sha256=receipt.validation_receipt_sha256,
+            core_artifact_manifest_sha256=receipt.core_artifact_manifest_sha256,
+            context_resolution_digest=receipt.context_resolution_digest,
+        )
+
+    assert raised.value.diagnostic_receipt is None
+    assert path.read_bytes() == preserved
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert list(path.parent.glob("taskwise_core_failure_*.json")) == [path]
 
 
 def test_over_limit_candidate_is_rejected_without_truncation_or_fallback(

@@ -10,4 +10,4 @@ ONLINE_CONFIG="$(taskwise_config_path online_pilot500_stream_00_taskwise_online_
 run_taskwise_manifest_tool verify
 require_taskwise_source_commit "${CONTROL_CONFIG}"
 require_taskwise_source_commit "${ONLINE_CONFIG}"
-run_taskwise_cli compare-pilot-streams
+run_taskwise_cli compare-pilot-streams "$@"

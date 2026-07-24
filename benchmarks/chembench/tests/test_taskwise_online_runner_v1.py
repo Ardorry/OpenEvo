@@ -273,6 +273,27 @@ class _UpdateTwoFailingCorePort(_DummyCorePort):
         return super().update_text_memory(request)
 
 
+class _CoreUpdateFailureWithReceipt(RuntimeError):
+    diagnostic_receipt = f"taskwise_core_failure_{'a' * 32}.json"
+
+    def __init__(self) -> None:
+        super().__init__("PRIVATE_CORE_FAILURE_BODY_SENTINEL")
+
+
+class _CorePortWithPrivateFailureReceipt:
+    def update_text_memory(
+        self,
+        _request: TaskwiseRunnerCoreUpdateRequestV1,
+    ) -> TaskwiseCoreUpdateOutcomeV1:
+        raise _CoreUpdateFailureWithReceipt
+
+    def resolve_text_memory(
+        self,
+        _reference: CoreMemoryReferenceV1,
+    ) -> CoreResolvedTextMemoryV2:
+        raise AssertionError("failed Core update cannot resolve memory")
+
+
 class _SentinelCorePort(_DummyCorePort):
     memory_sentinel = "PRIVATE_MEMORY_BODY_SENTINEL_71F4C2"
 
@@ -1180,6 +1201,46 @@ def test_update_two_failure_does_not_start_round_two_or_fallback(
             resume=True,
             session_id_factory=_session_factory("update-two-resume-forbidden"),
         ).run()
+
+
+def test_core_failure_receipt_is_referenced_only_as_safe_metadata(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path, "online")
+    executor = _DummyExecutor(["B", "A", "A"])
+    result = TaskwiseOnlineRunnerV1(
+        config=config,
+        episodes=_episodes(1),
+        executor=executor,
+        core_update_port=_CorePortWithPrivateFailureReceipt(),
+        session_id_factory=_session_factory("core-private-receipt"),
+    ).run()
+
+    assert result.status is TaskwiseRunStatusV1.TASKWISE_EVOLUTION_UPDATE_FAILED
+    assert result.finding_codes == ("TASKWISE_EVOLUTION_UPDATE_FAILED",)
+    assert result.completion_count == 1
+    assert result.update_count == 0
+    assert [request.round_index for request in executor.requests] == [0]
+    state = json.loads((config.output_directory / "run_state.json").read_text())
+    assert state["failure"]["code"] == "TASKWISE_EVOLUTION_UPDATE_FAILED"
+    assert state["active_memory"] is None
+    assert state["carry_memory"] is None
+    assert state["registered_core_artifact_ids"] == []
+    assert (
+        state["failure"]["diagnostic_receipt"] == _CoreUpdateFailureWithReceipt.diagnostic_receipt
+    )
+    private_failure = json.loads(
+        (config.output_directory / "private" / "failures.jsonl").read_text()
+    )
+    assert private_failure["code"] == "TASKWISE_EVOLUTION_UPDATE_FAILED"
+    assert (
+        private_failure["diagnostic_receipt"] == _CoreUpdateFailureWithReceipt.diagnostic_receipt
+    )
+    encoded = json.dumps(
+        {"state": state, "private_failure": private_failure},
+        sort_keys=True,
+    )
+    assert "PRIVATE_CORE_FAILURE_BODY_SENTINEL" not in encoded
 
 
 def test_resume_rejects_binding_or_history_tampering(tmp_path: Path) -> None:

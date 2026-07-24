@@ -43,6 +43,13 @@ from openevo_chembench.taskwise_core_evolution_v1 import (
     TaskwiseCoreEvolutionBridgeV1,
     TaskwiseCoreUpdateResultV1,
 )
+from openevo_chembench.taskwise_generation_v1 import (
+    derive_taskwise_generation_id_v1,
+    taskwise_canary_comparison_path_v1,
+    taskwise_canary_receipt_path_v1,
+    taskwise_pilot_runtime_config_v1,
+    validate_taskwise_generation_id_v1,
+)
 from openevo_chembench.taskwise_online_runner_v1 import (
     TaskwiseMemoryPublicAggregateV1,
     TaskwiseMemoryPublicMetricsV1,
@@ -105,6 +112,7 @@ class TaskwiseCanaryFindingV1(str, Enum):
     CORE_SOURCE_DIRTY = "CORE_SOURCE_DIRTY"
     DATASET_INVALID = "DATASET_INVALID"
     CANARY_CONFIG_INVALID = "CANARY_CONFIG_INVALID"
+    CANARY_GENERATION_INVALID = "CANARY_GENERATION_INVALID"
     CANARY_MANIFEST_INVALID = "CANARY_MANIFEST_INVALID"
     PILOT_BINDING_INVALID = "PILOT_BINDING_INVALID"
     CODEX_IDENTITY_INVALID = "CODEX_IDENTITY_INVALID"
@@ -116,6 +124,7 @@ class TaskwiseCanaryFindingV1(str, Enum):
     CANARY_EXECUTOR_AUDIT_INVALID = "CANARY_EXECUTOR_AUDIT_INVALID"
     CONTROL_TREATMENT_INVALID = "CONTROL_TREATMENT_INVALID"
     CORE_PRIVATE_CHECKPOINT_INVALID = "CORE_PRIVATE_CHECKPOINT_INVALID"
+    CORE_FAILURE_DIAGNOSTICS_PRESENT = "CORE_FAILURE_DIAGNOSTICS_PRESENT"
     CORE_DATASET_INVALID = "CORE_DATASET_INVALID"
     CORE_JOB_INVALID = "CORE_JOB_INVALID"
     CORE_ARTIFACT_INVALID = "CORE_ARTIFACT_INVALID"
@@ -214,6 +223,7 @@ class TaskwisePilotAuthorizationV1:
     evidence_digest: str
     source_commit: str
     pilot_binding_sha256: str
+    paired_canary_generation_id: str
 
     def __init__(
         self,
@@ -222,6 +232,7 @@ class TaskwisePilotAuthorizationV1:
         evidence_digest: str,
         source_commit: str,
         pilot_binding_sha256: str,
+        paired_canary_generation_id: str,
         _issuer_token: object | None = None,
     ) -> None:
         if not _authorization_token_is_valid(_issuer_token):
@@ -231,10 +242,16 @@ class TaskwisePilotAuthorizationV1:
                 raise ValueError("authorization digests must be SHA-256")
         if type(source_commit) is not str or re.fullmatch(r"[0-9a-f]{40}", source_commit) is None:
             raise ValueError("authorization source_commit must be a Git commit")
+        validate_taskwise_generation_id_v1(paired_canary_generation_id)
         object.__setattr__(self, "receipt_sha256", receipt_sha256)
         object.__setattr__(self, "evidence_digest", evidence_digest)
         object.__setattr__(self, "source_commit", source_commit)
         object.__setattr__(self, "pilot_binding_sha256", pilot_binding_sha256)
+        object.__setattr__(
+            self,
+            "paired_canary_generation_id",
+            paired_canary_generation_id,
+        )
 
 
 def _make_authorization_issuer() -> tuple[Any, Any]:
@@ -275,14 +292,62 @@ def default_taskwise_canary_receipt_inputs_v1(
     )
 
 
-def default_taskwise_canary_receipt_path_v1(package_root: Path) -> Path:
-    return (
-        package_root.resolve()
-        / "state"
-        / "taskwise_online_v1"
-        / "canary9"
-        / "paired_canary_receipt_v1.json"
+def current_taskwise_canary_generation_id_v1(
+    inputs: TaskwisePairedCanaryReceiptInputsV1,
+) -> str:
+    """Derive the current paired generation without consulting run outcomes."""
+
+    if type(inputs) is not TaskwisePairedCanaryReceiptInputsV1:
+        raise TypeError("inputs must be exact TaskwisePairedCanaryReceiptInputsV1")
+    source_commit = _git(inputs.repository_root, "rev-parse", "HEAD")
+    if re.fullmatch(r"[0-9a-f]{40}", source_commit) is None:
+        raise RuntimeError("current source commit is invalid")
+    source_manifest_sha256 = verify_source_manifest(
+        inputs.package_root,
+        inputs.source_manifest_path,
     )
+    configs = {
+        "control": load_taskwise_config_v1(inputs.control_config_path),
+        "online": load_taskwise_config_v1(inputs.online_config_path),
+    }
+    if (
+        configs["control"].scope != "canary9"
+        or configs["online"].scope != "canary9"
+        or taskwise_arm_parity_findings(configs["control"], configs["online"])
+    ):
+        raise RuntimeError("paired canary configs are invalid")
+    public = _workspace_path(
+        inputs.repository_root.parent,
+        configs["control"].task_manifest,
+    )
+    summary = public.with_name(public.name.replace("_public_manifest.jsonl", "_summary.json"))
+    authority = {
+        "source_commit": source_commit,
+        "source_manifest_sha256": source_manifest_sha256,
+        "dataset_manifest_sha256": sha256_file(
+            inputs.dataset_root / "chembench4k_dataset_manifest_v2.json"
+        ),
+        "control_config_sha256": configs["control"].config_sha256(),
+        "online_config_sha256": configs["online"].config_sha256(),
+        "control_run_id": configs["control"].run_name,
+        "online_run_id": configs["online"].run_name,
+        "canary_public_manifest_sha256": sha256_file(public),
+        "canary_summary_sha256": sha256_file(summary),
+    }
+    return derive_taskwise_generation_id_v1(authority)
+
+
+def default_taskwise_canary_receipt_path_v1(
+    package_root: Path,
+    generation_id: str | None = None,
+) -> Path:
+    package = package_root.resolve()
+    generation = generation_id
+    if generation is None:
+        generation = current_taskwise_canary_generation_id_v1(
+            default_taskwise_canary_receipt_inputs_v1(package)
+        )
+    return taskwise_canary_receipt_path_v1(package, generation)
 
 
 def recompute_taskwise_paired_canary_receipt_v1(
@@ -422,6 +487,14 @@ def recompute_taskwise_paired_canary_receipt_v1(
             findings.add(TaskwiseCanaryFindingV1.CANARY_MANIFEST_INVALID)
         canary_manifest = None
 
+    paired_generation_id: str | None = None
+    try:
+        paired_generation_id = current_taskwise_canary_generation_id_v1(inputs)
+        fields["paired_canary_generation_id"] = paired_generation_id
+    except Exception:
+        fields["paired_canary_generation_id"] = None
+        findings.add(TaskwiseCanaryFindingV1.CANARY_GENERATION_INVALID)
+
     try:
         fields["codex_cli_version"] = _actual_codex_version(inputs.repository_root)
         if (
@@ -461,7 +534,13 @@ def recompute_taskwise_paired_canary_receipt_v1(
         findings.add(TaskwiseCanaryFindingV1.METHOD_REGISTRY_INVALID)
 
     try:
-        pilot_binding = _recompute_pilot_binding(inputs, loader)
+        if paired_generation_id is None:
+            raise RuntimeError
+        pilot_binding = _recompute_pilot_binding(
+            inputs,
+            loader,
+            generation_id=paired_generation_id,
+        )
         fields.update(pilot_binding)
     except Exception:
         fields["pilot_binding_sha256"] = None
@@ -600,13 +679,11 @@ def recompute_taskwise_paired_canary_receipt_v1(
             )
             gate = report["canary9_gate"]
             expected_report = _canonical_bytes(report)
-            report_path = (
-                inputs.repository_root
-                / "results"
-                / "chembench4k_taskwise_online_v1"
-                / "canary9"
-                / "private"
-                / "taskwise_comparison_v1.json"
+            if paired_generation_id is None:
+                raise ValueError("paired canary generation is unavailable")
+            report_path = taskwise_canary_comparison_path_v1(
+                inputs.repository_root,
+                paired_generation_id,
             )
             persisted_report = _read_regular(report_path, mode=0o600)
             if persisted_report != expected_report:
@@ -686,13 +763,19 @@ def verify_taskwise_paired_canary_receipt_v1(
         raise RuntimeError("taskwise paid pilot is blocked by paired canary findings")
     source_commit = current.fields.get("source_commit")
     pilot_binding = current.fields.get("pilot_binding_sha256")
-    if type(source_commit) is not str or type(pilot_binding) is not str:
+    generation_id = current.fields.get("paired_canary_generation_id")
+    if (
+        type(source_commit) is not str
+        or type(pilot_binding) is not str
+        or type(generation_id) is not str
+    ):
         raise RuntimeError("taskwise paired canary authorization fields are unavailable")
     return _issue_taskwise_pilot_authorization_v1(
         receipt_sha256=hashlib.sha256(stored_bytes).hexdigest(),
         evidence_digest=current.evidence_digest,
         source_commit=source_commit,
         pilot_binding_sha256=pilot_binding,
+        paired_canary_generation_id=generation_id,
     )
 
 
@@ -987,6 +1070,21 @@ def _recompute_core_evidence(
     state_root = (
         inputs.package_root / "state" / "taskwise_online_v1" / config.scope / config.run_name
     )
+    failure_root = state_root / "private_core_failure_diagnostics"
+    try:
+        if failure_root.exists() or failure_root.is_symlink():
+            metadata = failure_root.lstat()
+            if (
+                failure_root.is_symlink()
+                or not stat.S_ISDIR(metadata.st_mode)
+                or stat.S_IMODE(metadata.st_mode) != 0o700
+                or any(failure_root.iterdir())
+            ):
+                raise ValueError
+    except OSError as exc:
+        raise _CoreEvidenceError(TaskwiseCanaryFindingV1.CORE_FAILURE_DIAGNOSTICS_PRESENT) from exc
+    except ValueError as exc:
+        raise _CoreEvidenceError(TaskwiseCanaryFindingV1.CORE_FAILURE_DIAGNOSTICS_PRESENT) from exc
     checkpoint_path = state_root / "private_lineage_checkpoints.jsonl"
     checkpoint_sha256 = sha256_file(checkpoint_path)
     rows = _read_jsonl(checkpoint_path, mode=0o600)
@@ -1231,9 +1329,12 @@ def _verify_reflector_receipts(
 def _recompute_pilot_binding(
     inputs: TaskwisePairedCanaryReceiptInputsV1,
     loader: ChemBench4KDatasetLoader | None,
+    *,
+    generation_id: str,
 ) -> dict[str, Any]:
     if loader is None:
         raise RuntimeError
+    validate_taskwise_generation_id_v1(generation_id)
     config_root = inputs.package_root / "configs"
     manifests = []
     config_payload: list[dict[str, str]] = []
@@ -1259,11 +1360,21 @@ def _recompute_pilot_binding(
             summary_path=summary,
         )
         manifests.append(manifest)
+        runtime = {
+            arm: taskwise_pilot_runtime_config_v1(paired[arm], generation_id)
+            for arm in ("control", "online")
+        }
         config_payload.append(
             {
                 "scope": scope,
                 "control_config_sha256": paired["control"].config_sha256(),
                 "online_config_sha256": paired["online"].config_sha256(),
+                "control_runtime_config_sha256": runtime["control"].config_sha256(),
+                "online_runtime_config_sha256": runtime["online"].config_sha256(),
+                "control_run_id": runtime["control"].run_name,
+                "online_run_id": runtime["online"].run_name,
+                "control_output_directory": runtime["control"].output_directory,
+                "online_output_directory": runtime["online"].output_directory,
                 "public_manifest_sha256": manifest.public_sha256,
                 "private_manifest_sha256": manifest.private_sha256,
                 "ordered_uid_sha256": manifest.ordered_uid_sha256,
@@ -1288,6 +1399,7 @@ def _recompute_pilot_binding(
         raise RuntimeError
     binding = {
         "schema_version": "taskwise_pilot500_binding_v1",
+        "generation_id": generation_id,
         "suite_summary_sha256": hashlib.sha256(expected_summary).hexdigest(),
         "ordered_uid_sha256": summary["global_ordered_uid_sha256"],
         "stream_configs": config_payload,
@@ -1438,6 +1550,7 @@ __all__ = [
     "TaskwisePairedCanaryReceiptInputsV1",
     "TaskwisePairedCanaryReceiptV1",
     "TaskwisePilotAuthorizationV1",
+    "current_taskwise_canary_generation_id_v1",
     "default_taskwise_canary_receipt_inputs_v1",
     "default_taskwise_canary_receipt_path_v1",
     "recompute_taskwise_paired_canary_receipt_v1",

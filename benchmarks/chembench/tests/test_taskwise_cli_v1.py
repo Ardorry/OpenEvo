@@ -46,6 +46,24 @@ from openevo_chembench.source_identity_v2 import SourceManifestError
 
 _DATASET_SHA256 = "d" * 64
 _SOURCE_COMMIT = "a" * 40
+_GENERATION_ID = f"gen_{'1' * 64}"
+
+
+def _allow_test_pilot_generation(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        cli,
+        "require_taskwise_pilot_authorization_v1",
+        lambda: SimpleNamespace(
+            paired_canary_generation_id=_GENERATION_ID,
+            receipt_sha256="2" * 64,
+            pilot_binding_sha256="3" * 64,
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_authorized_pilot_generation_v1",
+        lambda _authorization, requested: requested or _GENERATION_ID,
+    )
 
 
 def _sha256(value: str) -> str:
@@ -548,14 +566,14 @@ def test_manifest_is_bound_to_config_scope_and_path() -> None:
         cli._verify_static_inputs(wrong_scope, path)
 
 
-def test_canary_fix3_uses_fresh_paired_run_namespaces() -> None:
+def test_canary_fix4_uses_fresh_paired_run_namespaces() -> None:
     control = load_taskwise_config_v1(cli.CONFIG_ROOT / "control_canary9_taskwise_online_v1.yaml")
     online = load_taskwise_config_v1(cli.CONFIG_ROOT / "online_canary9_taskwise_online_v1.yaml")
 
-    assert control.run_name == "control_canary9_repeated_session_v1_fix3"
-    assert online.run_name == "online_canary9_taskwise_evolution_v1_fix3"
-    assert control.output_directory.endswith("/canary9/control_fix3")
-    assert online.output_directory.endswith("/canary9/online_fix3")
+    assert control.run_name == "control_canary9_repeated_session_v1_fix4"
+    assert online.run_name == "online_canary9_taskwise_evolution_v1_fix4"
+    assert control.output_directory.endswith("/canary9/control_fix4")
+    assert online.output_directory.endswith("/canary9/online_fix4")
     assert "fix1" not in control.output_directory
     assert "fix1" not in online.output_directory
 
@@ -584,6 +602,11 @@ def test_control_online_dispatch_and_private_compare(
         cli,
         "_build_episodes",
         lambda _loader, scope: tuple(_episode(index) for index in range(9)),
+    )
+    monkeypatch.setattr(
+        cli,
+        "current_taskwise_canary_generation_id_v1",
+        lambda _inputs: _GENERATION_ID,
     )
 
     def executor_factory(config):
@@ -823,78 +846,48 @@ def _write_public_run_state(
     (output / "run_state.json").write_bytes(cli._canonical_bytes(payload))
 
 
-def test_suite_orchestrator_skips_resumes_and_starts_per_stream(
+def test_suite_orchestrator_rejects_existing_stream_without_resume_or_stitch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(cli, "WORKSPACE_ROOT", tmp_path)
     monkeypatch.setattr(cli, "_verify_static_inputs", lambda *_args: None)
-    monkeypatch.setattr(cli, "require_taskwise_pilot_authorization_v1", lambda: object())
+    _allow_test_pilot_generation(monkeypatch)
     suite_state = tmp_path / "suite" / "control.json"
-    calls: list[tuple[str, bool]] = []
+    calls: list[tuple[str, bool, str | None]] = []
 
-    completed_config = load_taskwise_config_v1(
+    template = load_taskwise_config_v1(
         cli.CONFIG_ROOT / "control_pilot500_stream_00_taskwise_online_v1.yaml"
     )
-    running_config = load_taskwise_config_v1(
-        cli.CONFIG_ROOT / "control_pilot500_stream_01_taskwise_online_v1.yaml"
-    )
-    resumable_config = load_taskwise_config_v1(
-        cli.CONFIG_ROOT / "control_pilot500_stream_02_taskwise_online_v1.yaml"
-    )
+    completed_config = cli.taskwise_pilot_runtime_config_v1(template, _GENERATION_ID)
     _write_public_run_state(
         tmp_path / completed_config.output_directory,
         arm="control",
         status="COMPLETED",
     )
-    _write_public_run_state(
-        tmp_path / running_config.output_directory,
-        arm="control",
-        status="RUNNING",
-    )
-    _write_public_run_state(
-        tmp_path / resumable_config.output_directory,
-        arm="control",
-        status="EXECUTION_FAILED",
-        resume_allowed=True,
-        pending_invocation={
-            "completion_observed": False,
-            "round_index": 0,
-            "session_id": "session_pending",
-            "task_ordinal": 0,
-        },
-        failure_code="INFRASTRUCTURE_TRANSPORT_FAILURE",
-    )
 
-    def fake_runner(config_path: Path, *, resume: bool) -> dict[str, object]:
-        config = load_taskwise_config_v1(config_path)
-        calls.append((config.scope, resume))
-        _write_public_run_state(
-            tmp_path / config.output_directory,
+    def fake_runner(
+        config_path: Path,
+        *,
+        resume: bool,
+        generation_id: str | None,
+    ) -> dict[str, object]:
+        calls.append((config_path.name, resume, generation_id))
+        pytest.fail("an existing stream must stop the whole fresh generation")
+
+    with pytest.raises(cli.TaskwiseCLIError, match="SUITE_TERMINAL_FAILURE"):
+        cli.run_pilot500_stream_suite(
             arm="control",
-            status="COMPLETED",
+            arm_runner=fake_runner,
+            suite_state_path=suite_state,
+            source_gate=lambda _config: _SOURCE_COMMIT,
         )
-        return {
-            "status": "COMPLETED",
-            "resume_allowed": False,
-            "finding_codes": [],
-        }
 
-    result = cli.run_pilot500_stream_suite(
-        arm="control",
-        arm_runner=fake_runner,
-        suite_state_path=suite_state,
-        source_gate=lambda _config: _SOURCE_COMMIT,
-    )
-
-    assert result["status"] == "COMPLETED"
-    assert result["completed_streams"] == 10
-    assert calls[0] == ("pilot500_stream_01", True)
-    assert calls[1] == ("pilot500_stream_02", True)
-    assert calls[2:] == [(f"pilot500_stream_{index:02d}", False) for index in range(3, 10)]
-    assert result["streams"]["pilot500_stream_00"]["action"] == "SKIPPED_COMPLETED"
-    assert result["streams"]["pilot500_stream_01"]["action"] == "COMPLETED"
-    assert json.loads(suite_state.read_text(encoding="utf-8")) == result
+    assert calls == []
+    state = json.loads(suite_state.read_text(encoding="utf-8"))
+    assert state["status"] == "FAILED"
+    assert state["generation_id"] == _GENERATION_ID
+    assert state["streams"]["pilot500_stream_00"]["action"] == "TERMINAL_FAILURE"
 
 
 @pytest.mark.parametrize(
@@ -926,11 +919,12 @@ def test_suite_orchestrator_stops_entire_suite_on_terminal_failure(
 ) -> None:
     monkeypatch.setattr(cli, "WORKSPACE_ROOT", tmp_path)
     monkeypatch.setattr(cli, "_verify_static_inputs", lambda *_args: None)
-    monkeypatch.setattr(cli, "require_taskwise_pilot_authorization_v1", lambda: object())
+    _allow_test_pilot_generation(monkeypatch)
     suite_state = tmp_path / "suite" / "online.json"
-    config = load_taskwise_config_v1(
+    template = load_taskwise_config_v1(
         cli.CONFIG_ROOT / "online_pilot500_stream_00_taskwise_online_v1.yaml"
     )
+    config = cli.taskwise_pilot_runtime_config_v1(template, _GENERATION_ID)
     _write_public_run_state(
         tmp_path / config.output_directory,
         arm="online",
@@ -1009,11 +1003,17 @@ def test_suite_records_config_policy_failure_without_arbitrary_exception_text(
 ) -> None:
     monkeypatch.setattr(cli, "WORKSPACE_ROOT", tmp_path)
     monkeypatch.setattr(cli, "_verify_static_inputs", lambda *_args: None)
-    monkeypatch.setattr(cli, "require_taskwise_pilot_authorization_v1", lambda: object())
+    _allow_test_pilot_generation(monkeypatch)
     suite_state = tmp_path / "suite" / "control.json"
 
-    def blocked_runner(_config_path: Path, *, resume: bool) -> dict[str, object]:
+    def blocked_runner(
+        _config_path: Path,
+        *,
+        resume: bool,
+        generation_id: str | None,
+    ) -> dict[str, object]:
         assert resume is False
+        assert generation_id == _GENERATION_ID
         raise cli.TaskwiseCLIError("EXECUTOR_CONFIG_POLICY_AGENTS_ENABLED_FORBIDDEN")
 
     with pytest.raises(
@@ -1038,19 +1038,25 @@ def test_suite_records_config_policy_failure_without_arbitrary_exception_text(
     assert "stderr" not in json.dumps(state).casefold()
 
 
-def test_suite_orchestrator_records_resumable_infrastructure_failure(
+def test_suite_records_infrastructure_failure_but_never_resumes_generation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(cli, "WORKSPACE_ROOT", tmp_path)
     monkeypatch.setattr(cli, "_verify_static_inputs", lambda *_args: None)
-    monkeypatch.setattr(cli, "require_taskwise_pilot_authorization_v1", lambda: object())
+    _allow_test_pilot_generation(monkeypatch)
     calls = 0
 
-    def fake_runner(_config_path: Path, *, resume: bool) -> dict[str, object]:
+    def fake_runner(
+        _config_path: Path,
+        *,
+        resume: bool,
+        generation_id: str | None,
+    ) -> dict[str, object]:
         nonlocal calls
         calls += 1
         assert resume is False
+        assert generation_id == _GENERATION_ID
         return {
             "status": "EXECUTION_FAILED",
             "resume_allowed": True,
@@ -1074,6 +1080,14 @@ def test_suite_orchestrator_records_resumable_infrastructure_failure(
         == "EXECUTOR_MODEL_TRANSPORT_FAILED"
     )
     assert result["streams"]["pilot500_stream_01"]["action"] == "NOT_STARTED"
+    with pytest.raises(cli.TaskwiseCLIError, match="SUITE_STATE_EXISTS"):
+        cli.run_pilot500_stream_suite(
+            arm="control",
+            arm_runner=fake_runner,
+            suite_state_path=tmp_path / "suite" / "control.json",
+            source_gate=lambda _config: _SOURCE_COMMIT,
+        )
+    assert calls == 1
 
 
 def test_incomplete_stream_comparison_uses_only_public_state(
@@ -1082,6 +1096,7 @@ def test_incomplete_stream_comparison_uses_only_public_state(
 ) -> None:
     monkeypatch.setattr(cli, "WORKSPACE_ROOT", tmp_path)
     monkeypatch.setattr(cli, "_verify_static_inputs", lambda *_args: None)
+    _allow_test_pilot_generation(monkeypatch)
     monkeypatch.setattr(
         cli,
         "load_private_taskwise_results_v1",
@@ -1108,6 +1123,7 @@ def test_failed_stream_comparison_reports_all_public_failure_counts(
 ) -> None:
     monkeypatch.setattr(cli, "WORKSPACE_ROOT", tmp_path)
     monkeypatch.setattr(cli, "_verify_static_inputs", lambda *_args: None)
+    _allow_test_pilot_generation(monkeypatch)
     monkeypatch.setattr(
         cli,
         "load_private_taskwise_results_v1",
@@ -1146,9 +1162,10 @@ def test_failed_stream_comparison_reports_all_public_failure_counts(
         ),
     )
     for stream_index, status, failure_code, context_count in failures:
-        config = load_taskwise_config_v1(
+        template = load_taskwise_config_v1(
             cli.CONFIG_ROOT / f"online_pilot500_stream_{stream_index:02d}_taskwise_online_v1.yaml"
         )
+        config = cli.taskwise_pilot_runtime_config_v1(template, _GENERATION_ID)
         _write_public_run_state(
             tmp_path / config.output_directory,
             arm="online",

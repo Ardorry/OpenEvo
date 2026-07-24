@@ -29,6 +29,7 @@ from openevo_chembench.taskwise_config_v1 import (
 )
 from openevo_chembench.taskwise_canary_receipt_v1 import (
     TaskwisePilotAuthorizationV1,
+    current_taskwise_canary_generation_id_v1,
     default_taskwise_canary_receipt_inputs_v1,
     default_taskwise_canary_receipt_path_v1,
     verify_taskwise_paired_canary_receipt_v1,
@@ -36,6 +37,13 @@ from openevo_chembench.taskwise_canary_receipt_v1 import (
 )
 from openevo_chembench.taskwise_core_evolution_v1 import (
     build_taskwise_core_port_at_roots_v1,
+)
+from openevo_chembench.taskwise_generation_v1 import (
+    taskwise_canary_comparison_path_v1,
+    taskwise_pilot_comparison_path_v1,
+    taskwise_pilot_runtime_config_v1,
+    taskwise_pilot_suite_state_path_v1,
+    validate_taskwise_generation_id_v1,
 )
 from openevo_chembench.taskwise_online_runner_v1 import (
     TaskwiseCoreUpdatePortV1,
@@ -214,6 +222,8 @@ _CLI_PUBLIC_FAILURE_CODES = (
             "TASKWISE_PAIRED_CONFIG_UNAVAILABLE",
             "TASKWISE_PAIRED_CANARY_RECEIPT_EXISTS",
             "TASKWISE_PAIRED_CANARY_RECEIPT_INVALID",
+            "TASKWISE_GENERATION_ID_INVALID",
+            "TASKWISE_PILOT_RESUME_FORBIDDEN",
             "TASKWISE_PAIRED_RUN_BINDING_MISMATCH",
             "TASKWISE_PUBLIC_EVENT_EVIDENCE_INVALID",
             "TASKWISE_RESUME_OUTPUT_MISSING",
@@ -229,6 +239,7 @@ _CLI_PUBLIC_FAILURE_CODES = (
             "TASKWISE_SUITE_EVIDENCE_INVALID",
             "TASKWISE_SUITE_RESULT_INVALID",
             "TASKWISE_SUITE_STATE_INVALID",
+            "TASKWISE_SUITE_STATE_EXISTS",
             "TASKWISE_SUITE_TERMINAL_FAILURE",
             "TASKWISE_VERIFIED_FRAMEWORK_LOCK_MISSING",
         }
@@ -450,10 +461,28 @@ def verify_taskwise_codex_policy_v1(
     return receipt
 
 
+def _authorized_pilot_generation_v1(
+    authorization: TaskwisePilotAuthorizationV1,
+    requested_generation_id: str | None,
+) -> str:
+    if type(authorization) is not TaskwisePilotAuthorizationV1:
+        raise TaskwiseCLIError("TASKWISE_PAIRED_CANARY_RECEIPT_INVALID")
+    candidate = (
+        authorization.paired_canary_generation_id
+        if requested_generation_id is None
+        else requested_generation_id
+    )
+    try:
+        return validate_taskwise_generation_id_v1(candidate)
+    except (TypeError, ValueError) as exc:
+        raise TaskwiseCLIError("TASKWISE_GENERATION_ID_INVALID") from exc
+
+
 def run_arm(
     config_path: Path,
     *,
     resume: bool = False,
+    generation_id: str | None = None,
     executor_factory: ExecutorFactoryV1 | None = None,
     core_port_factory: CorePortFactoryV1 | None = None,
     source_gate: SourceGateV1 | None = None,
@@ -461,12 +490,33 @@ def run_arm(
 ) -> dict[str, object]:
     """Validate every frozen input before constructing paid runtime objects."""
 
-    config = load_taskwise_config_v1(config_path.resolve())
-    if config.scope in PILOT500_STREAM_SCOPES:
-        require_taskwise_pilot_authorization_v1()
+    template_config = load_taskwise_config_v1(config_path.resolve())
+    authorization: TaskwisePilotAuthorizationV1 | None = None
+    if template_config.scope in PILOT500_STREAM_SCOPES:
+        if resume:
+            raise TaskwiseCLIError("TASKWISE_PILOT_RESUME_FORBIDDEN")
+        authorization = require_taskwise_pilot_authorization_v1()
+        generation_id = _authorized_pilot_generation_v1(
+            authorization,
+            generation_id,
+        )
+    elif generation_id is not None:
+        raise TaskwiseCLIError("TASKWISE_GENERATION_ID_INVALID")
     gate = source_gate or verify_taskwise_source_gate_v1
-    current_commit = gate(config)
-    loader, manifest, paired_configs = _verify_static_inputs(config, config_path)
+    current_commit = gate(template_config)
+    loader, manifest, paired_templates = _verify_static_inputs(
+        template_config,
+        config_path,
+    )
+    if generation_id is None:
+        config = template_config
+        paired_configs = paired_templates
+    else:
+        config = taskwise_pilot_runtime_config_v1(template_config, generation_id)
+        paired_configs = {
+            arm: taskwise_pilot_runtime_config_v1(paired_templates[arm], generation_id)
+            for arm in ("control", "online")
+        }
     episodes = _build_episodes(loader, scope=config.scope)
     if len(episodes) != manifest.item_count:
         raise TaskwiseCLIError("TASKWISE_EPISODE_COUNT_MISMATCH")
@@ -518,48 +568,42 @@ def run_arm(
 def run_pilot500_stream_suite(
     *,
     arm: str,
+    generation_id: str | None = None,
     arm_runner: Callable[..., dict[str, object]] | None = None,
     suite_state_path: Path | None = None,
     source_gate: SourceGateV1 | None = None,
 ) -> dict[str, object]:
-    """Start, resume, or skip each isolated stream from its public run state."""
+    """Start every stream once inside one fresh immutable arm generation."""
 
     if arm not in {"control", "online"}:
         raise TaskwiseCLIError("TASKWISE_SUITE_ARM_INVALID")
-    require_taskwise_pilot_authorization_v1()
+    authorization = require_taskwise_pilot_authorization_v1()
+    generation = _authorized_pilot_generation_v1(authorization, generation_id)
     runner = arm_runner or run_arm
-    state_path = suite_state_path or _resolve_workspace_path(
-        (
-            "OpenEvo/results/chembench4k_taskwise_online_v1/"
-            f"pilot500_streams/{arm}_suite_state.json"
-        ),
-        field_name="pilot500 suite state",
-        must_exist=False,
+    state_path = suite_state_path or taskwise_pilot_suite_state_path_v1(
+        REPOSITORY_ROOT,
+        generation_id=generation,
+        arm=arm,
     )
     state = _load_or_initialize_suite_state(state_path, arm=arm)
-    if state["status"] == "FAILED":
-        raise TaskwiseCLIError("TASKWISE_SUITE_TERMINAL_FAILURE")
+    state["generation_id"] = generation
+    state["paired_canary_generation_id"] = authorization.paired_canary_generation_id
+    state["canary_receipt_sha256"] = authorization.receipt_sha256
+    state["pilot_binding_sha256"] = authorization.pilot_binding_sha256
 
     gate = source_gate or verify_taskwise_source_gate_v1
     for scope in PILOT500_STREAM_SCOPES:
         config_path = CONFIG_ROOT / f"{arm}_{scope}_taskwise_online_v1.yaml"
-        config = load_taskwise_config_v1(config_path)
-        gate(config)
-        _verify_static_inputs(config, config_path)
+        template_config = load_taskwise_config_v1(config_path)
+        gate(template_config)
+        _verify_static_inputs(template_config, config_path)
+        config = taskwise_pilot_runtime_config_v1(template_config, generation)
         output = _resolve_workspace_path(
             config.output_directory,
             field_name="stream output_directory",
             must_exist=False,
         )
         action, evidence = _suite_stream_action(output, expected_arm=arm)
-        if action == "skip":
-            state["streams"][scope] = {
-                "action": "SKIPPED_COMPLETED",
-                **evidence,
-            }
-            _update_suite_totals(state)
-            _write_suite_state(state_path, state)
-            continue
         if action == "terminal":
             state["streams"][scope] = {
                 "action": "TERMINAL_FAILURE",
@@ -570,16 +614,19 @@ def run_pilot500_stream_suite(
             _write_suite_state(state_path, state)
             raise TaskwiseCLIError("TASKWISE_SUITE_TERMINAL_FAILURE")
 
-        resume = action == "resume"
         state["status"] = "INCOMPLETE"
         state["streams"][scope] = {
-            "action": "RESUMING" if resume else "STARTING",
+            "action": "STARTING",
             **evidence,
         }
         _update_suite_totals(state)
         _write_suite_state(state_path, state)
         try:
-            result = runner(config_path, resume=resume)
+            result = runner(
+                config_path,
+                resume=False,
+                generation_id=generation,
+            )
         except Exception as exc:
             state["streams"][scope] = {
                 "action": "ORCHESTRATION_ERROR",
@@ -595,7 +642,7 @@ def run_pilot500_stream_suite(
             raise
         result_evidence = _suite_result_evidence(result)
         state["streams"][scope] = {
-            "action": "RESUMED" if resume else "STARTED",
+            "action": "STARTED",
             **result_evidence,
         }
         if result_evidence["completed"]:
@@ -667,6 +714,7 @@ def dry_run(
 def compare(
     *,
     scope: str,
+    generation_id: str | None = None,
     persist: bool = True,
     source_gate: SourceGateV1 | None = None,
 ) -> dict[str, Any]:
@@ -675,10 +723,37 @@ def compare(
     if scope not in _SCOPES:
         raise TaskwiseCLIError("TASKWISE_SCOPE_INVALID")
     control_path = CONFIG_ROOT / f"control_{scope}_taskwise_online_v1.yaml"
-    control = load_taskwise_config_v1(control_path)
+    control_template = load_taskwise_config_v1(control_path)
+    if scope == "canary9":
+        current_generation = current_taskwise_canary_generation_id_v1(
+            default_taskwise_canary_receipt_inputs_v1(PACKAGE_ROOT)
+        )
+        if generation_id is not None and generation_id != current_generation:
+            raise TaskwiseCLIError("TASKWISE_GENERATION_ID_INVALID")
+        generation_id = current_generation
+    elif scope in PILOT500_STREAM_SCOPES:
+        authorization = require_taskwise_pilot_authorization_v1()
+        generation_id = _authorized_pilot_generation_v1(
+            authorization,
+            generation_id,
+        )
+    elif generation_id is not None:
+        raise TaskwiseCLIError("TASKWISE_GENERATION_ID_INVALID")
     gate = source_gate or verify_taskwise_source_gate_v1
-    current_commit = gate(control)
-    loader, manifest, paired = _verify_static_inputs(control, control_path)
+    current_commit = gate(control_template)
+    loader, manifest, paired_templates = _verify_static_inputs(
+        control_template,
+        control_path,
+    )
+    if scope in PILOT500_STREAM_SCOPES:
+        assert generation_id is not None
+        paired = {
+            arm: taskwise_pilot_runtime_config_v1(paired_templates[arm], generation_id)
+            for arm in ("control", "online")
+        }
+    else:
+        paired = paired_templates
+    control = paired["control"]
     online = paired["online"]
     control_output = _resolve_workspace_path(
         control.output_directory,
@@ -768,15 +843,22 @@ def compare(
             online_artifact_validation_failures=(_artifact_validation_failure_count(online_state)),
         )
     if persist:
-        path = (
-            _resolve_workspace_path(
-                f"OpenEvo/results/chembench4k_taskwise_online_v1/{scope}",
-                field_name="comparison output root",
-                must_exist=True,
+        if scope == "canary9":
+            assert generation_id is not None
+            path = taskwise_canary_comparison_path_v1(
+                REPOSITORY_ROOT,
+                generation_id,
             )
-            / "private"
-            / "taskwise_comparison_v1.json"
-        )
+        else:
+            path = (
+                _resolve_workspace_path(
+                    f"OpenEvo/results/chembench4k_taskwise_online_v1/{scope}",
+                    field_name="comparison output root",
+                    must_exist=True,
+                )
+                / "private"
+                / "taskwise_comparison_v1.json"
+            )
         path.parent.mkdir(mode=0o700, exist_ok=True)
         if path.exists():
             raise TaskwiseCLIError("TASKWISE_COMPARISON_OUTPUT_EXISTS")
@@ -791,32 +873,47 @@ def compare(
 
 def compare_pilot500_streams(
     *,
+    generation_id: str | None = None,
     persist: bool = True,
     source_gate: SourceGateV1 | None = None,
 ) -> dict[str, Any]:
     """Aggregate ten separately executed paired streams without joining memory."""
 
-    run_evidence = _pilot_stream_run_evidence(source_gate=source_gate)
+    authorization = require_taskwise_pilot_authorization_v1()
+    generation = _authorized_pilot_generation_v1(authorization, generation_id)
+    run_evidence = _pilot_stream_run_evidence(
+        source_gate=source_gate,
+        generation_id=generation,
+    )
     if any(not item["completed"] for item in run_evidence):
         report = _incomplete_pilot_stream_report(run_evidence)
         if persist:
-            _persist_pilot_stream_report(report)
+            _persist_pilot_stream_report(report, generation_id=generation)
         return report
 
     streams: list[PrivateTaskwisePairedStreamV1] = []
     for scope in PILOT500_STREAM_SCOPES:
         paired_report = compare(
             scope=scope,
+            generation_id=generation,
             persist=False,
             source_gate=source_gate,
         )
         if paired_report["task_count"] != PILOT500_TASKS_PER_STREAM:
             raise TaskwiseCLIError("TASKWISE_STREAM_TASK_COUNT_MISMATCH")
         control_path = CONFIG_ROOT / f"control_{scope}_taskwise_online_v1.yaml"
-        control = load_taskwise_config_v1(control_path)
+        control_template = load_taskwise_config_v1(control_path)
         gate = source_gate or verify_taskwise_source_gate_v1
-        gate(control)
-        _loader, _manifest, paired = _verify_static_inputs(control, control_path)
+        gate(control_template)
+        _loader, _manifest, paired_templates = _verify_static_inputs(
+            control_template,
+            control_path,
+        )
+        paired = {
+            arm: taskwise_pilot_runtime_config_v1(paired_templates[arm], generation)
+            for arm in ("control", "online")
+        }
+        control = paired["control"]
         online = paired["online"]
         control_output = _resolve_workspace_path(
             control.output_directory,
@@ -862,13 +959,14 @@ def compare_pilot500_streams(
         )
     report = build_taskwise_pilot500_stream_report_v1(tuple(streams))
     if persist:
-        _persist_pilot_stream_report(report)
+        _persist_pilot_stream_report(report, generation_id=generation)
     return report
 
 
 def _pilot_stream_run_evidence(
     *,
     source_gate: SourceGateV1 | None,
+    generation_id: str,
 ) -> tuple[dict[str, object], ...]:
     """Collect only public run-state evidence before any private result read."""
 
@@ -877,9 +975,13 @@ def _pilot_stream_run_evidence(
     for scope in PILOT500_STREAM_SCOPES:
         for arm in ("control", "online"):
             config_path = CONFIG_ROOT / f"{arm}_{scope}_taskwise_online_v1.yaml"
-            config = load_taskwise_config_v1(config_path)
-            gate(config)
-            _verify_static_inputs(config, config_path)
+            template_config = load_taskwise_config_v1(config_path)
+            gate(template_config)
+            _verify_static_inputs(template_config, config_path)
+            config = taskwise_pilot_runtime_config_v1(
+                template_config,
+                generation_id,
+            )
             output = _resolve_workspace_path(
                 config.output_directory,
                 field_name=f"{arm} output_directory",
@@ -1032,13 +1134,15 @@ def _incomplete_pilot_stream_report(
     }
 
 
-def _persist_pilot_stream_report(report: dict[str, Any]) -> None:
-    root = _resolve_workspace_path(
-        "OpenEvo/results/chembench4k_taskwise_online_v1/pilot500_streams",
-        field_name="pilot500 stream comparison output root",
-        must_exist=False,
+def _persist_pilot_stream_report(
+    report: dict[str, Any],
+    *,
+    generation_id: str,
+) -> None:
+    path = taskwise_pilot_comparison_path_v1(
+        REPOSITORY_ROOT,
+        generation_id,
     )
-    path = root / "private" / "taskwise_stream_comparison_v1.json"
     path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
     if path.exists():
         raise TaskwiseCLIError("TASKWISE_COMPARISON_OUTPUT_EXISTS")
@@ -1073,11 +1177,30 @@ def verify_taskwise_source_gate_v1(config: TaskwiseExperimentConfigV1) -> str:
     return head
 
 
-def freeze_taskwise_paired_canary_receipt_v1() -> dict[str, object]:
+def _current_canary_generation_v1(requested: str | None = None) -> str:
+    inputs = default_taskwise_canary_receipt_inputs_v1(PACKAGE_ROOT)
+    try:
+        current = current_taskwise_canary_generation_id_v1(inputs)
+        if requested is not None:
+            validate_taskwise_generation_id_v1(requested)
+            if requested != current:
+                raise ValueError
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise TaskwiseCLIError("TASKWISE_GENERATION_ID_INVALID") from exc
+    return current
+
+
+def freeze_taskwise_paired_canary_receipt_v1(
+    generation_id: str | None = None,
+) -> dict[str, object]:
     """Freeze the fixed paired-canary receipt after recomputing every gate."""
 
     inputs = default_taskwise_canary_receipt_inputs_v1(PACKAGE_ROOT)
-    receipt_path = default_taskwise_canary_receipt_path_v1(PACKAGE_ROOT)
+    generation = _current_canary_generation_v1(generation_id)
+    receipt_path = default_taskwise_canary_receipt_path_v1(
+        PACKAGE_ROOT,
+        generation,
+    )
     if receipt_path.exists() or receipt_path.is_symlink():
         raise TaskwiseCLIError("TASKWISE_PAIRED_CANARY_RECEIPT_EXISTS")
     try:
@@ -1094,26 +1217,32 @@ def freeze_taskwise_paired_canary_receipt_v1() -> dict[str, object]:
         "receipt_sha256": receipt_sha256,
         "evidence_digest": receipt.evidence_digest,
         "receipt_path": receipt_path.relative_to(REPOSITORY_ROOT).as_posix(),
+        "paired_canary_generation_id": generation,
         "model_calls": 0,
     }
 
 
-def require_taskwise_pilot_authorization_v1() -> TaskwisePilotAuthorizationV1:
+def require_taskwise_pilot_authorization_v1(
+    paired_canary_generation_id: str | None = None,
+) -> TaskwisePilotAuthorizationV1:
     """Recompute the fixed current receipt and issue the pilot capability."""
 
+    generation = _current_canary_generation_v1(paired_canary_generation_id)
     try:
         return verify_taskwise_paired_canary_receipt_v1(
             default_taskwise_canary_receipt_inputs_v1(PACKAGE_ROOT),
-            default_taskwise_canary_receipt_path_v1(PACKAGE_ROOT),
+            default_taskwise_canary_receipt_path_v1(PACKAGE_ROOT, generation),
         )
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
         raise TaskwiseCLIError("TASKWISE_PAIRED_CANARY_RECEIPT_INVALID") from exc
 
 
-def verify_taskwise_pilot_receipt_v1() -> dict[str, object]:
+def verify_taskwise_pilot_receipt_v1(
+    paired_canary_generation_id: str | None = None,
+) -> dict[str, object]:
     """Expose only content-free authorization digests to the CLI."""
 
-    authorization = require_taskwise_pilot_authorization_v1()
+    authorization = require_taskwise_pilot_authorization_v1(paired_canary_generation_id)
     return {
         "schema_version": "taskwise_pilot_authorization_verification_v1",
         "status": "PASS",
@@ -1121,6 +1250,7 @@ def verify_taskwise_pilot_receipt_v1() -> dict[str, object]:
         "evidence_digest": authorization.evidence_digest,
         "source_commit": authorization.source_commit,
         "pilot_binding_sha256": authorization.pilot_binding_sha256,
+        "paired_canary_generation_id": authorization.paired_canary_generation_id,
         "model_calls": 0,
     }
 
@@ -1446,53 +1576,35 @@ def _default_codex_policy_probe_runner_v1(
 
 
 def _load_or_initialize_suite_state(path: Path, *, arm: str) -> dict[str, Any]:
-    if not path.exists():
-        return {
-            "schema_version": "taskwise_pilot500_stream_suite_state_v1",
-            "arm": arm,
-            "status": "INCOMPLETE",
-            "stream_count": PILOT500_STREAM_COUNT,
-            "tasks_per_stream": PILOT500_TASKS_PER_STREAM,
-            "reset_memory_between_streams": True,
-            "completed_streams": 0,
-            "infrastructure_failures": 0,
-            "security_violations": 0,
-            "evolution_update_failures": 0,
-            "artifact_validation_failures": 0,
-            "context_binding_violations": 0,
-            "executor_failures": 0,
-            "executor_failure_codes": {},
-            "streams": {
-                scope: {
-                    "action": "NOT_STARTED",
-                    "run_status": "MISSING",
-                    "resume_allowed": False,
-                    "failure_code": None,
-                    "completed": False,
-                    "missing": True,
-                }
-                for scope in PILOT500_STREAM_SCOPES
-            },
-        }
-    try:
-        raw = path.read_bytes()
-        state = json.loads(raw)
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise TaskwiseCLIError("TASKWISE_SUITE_STATE_INVALID") from exc
-    if (
-        type(state) is not dict
-        or raw != _canonical_bytes(state)
-        or state.get("schema_version") != "taskwise_pilot500_stream_suite_state_v1"
-        or state.get("arm") != arm
-        or state.get("status") not in _SUITE_RUN_STATUSES
-        or state.get("stream_count") != PILOT500_STREAM_COUNT
-        or state.get("tasks_per_stream") != PILOT500_TASKS_PER_STREAM
-        or state.get("reset_memory_between_streams") is not True
-        or type(state.get("streams")) is not dict
-        or tuple(state["streams"]) != PILOT500_STREAM_SCOPES
-    ):
-        raise TaskwiseCLIError("TASKWISE_SUITE_STATE_INVALID")
-    return state
+    if path.exists() or path.is_symlink():
+        raise TaskwiseCLIError("TASKWISE_SUITE_STATE_EXISTS")
+    return {
+        "schema_version": "taskwise_pilot500_stream_suite_state_v1",
+        "arm": arm,
+        "status": "INCOMPLETE",
+        "stream_count": PILOT500_STREAM_COUNT,
+        "tasks_per_stream": PILOT500_TASKS_PER_STREAM,
+        "reset_memory_between_streams": True,
+        "completed_streams": 0,
+        "infrastructure_failures": 0,
+        "security_violations": 0,
+        "evolution_update_failures": 0,
+        "artifact_validation_failures": 0,
+        "context_binding_violations": 0,
+        "executor_failures": 0,
+        "executor_failure_codes": {},
+        "streams": {
+            scope: {
+                "action": "NOT_STARTED",
+                "run_status": "MISSING",
+                "resume_allowed": False,
+                "failure_code": None,
+                "completed": False,
+                "missing": True,
+            }
+            for scope in PILOT500_STREAM_SCOPES
+        },
+    }
 
 
 def _write_suite_state(path: Path, state: dict[str, Any]) -> None:
@@ -1554,37 +1666,18 @@ def _suite_stream_action(
         )
     try:
         state = _read_public_run_state(output, expected_arm=expected_arm)
+        evidence = _suite_state_evidence(state)
     except TaskwiseCLIError:
-        return (
-            "terminal",
-            {
-                "run_status": "EXECUTION_FAILED",
-                "resume_allowed": False,
-                "failure_code": "EXECUTOR_PUBLIC_STATE_UNAVAILABLE",
-                "completed": False,
-                "missing": False,
-            },
-        )
-    evidence = _suite_state_evidence(state)
-    status = evidence["run_status"]
-    if status == TaskwiseRunStatusV1.COMPLETED.value:
-        return "skip", evidence
-    if status in _TERMINAL_SECURITY_STATUSES:
-        return "terminal", evidence
-    pending = state.get("pending_invocation")
-    safely_checkpointed = (
-        status == TaskwiseRunStatusV1.RUNNING.value
-        and pending is None
-        and state.get("resume_allowed") is False
-    )
-    explicitly_resumable = (
-        status == TaskwiseRunStatusV1.EXECUTION_FAILED.value
-        and evidence["resume_allowed"] is True
-        and type(pending) is dict
-        and pending.get("completion_observed") is False
-    )
-    if safely_checkpointed or explicitly_resumable:
-        return "resume", evidence
+        evidence = {
+            "run_status": "EXECUTION_FAILED",
+            "resume_allowed": False,
+            "failure_code": "EXECUTOR_PUBLIC_STATE_UNAVAILABLE",
+            "completed": False,
+            "missing": False,
+        }
+    # A generation is an all-or-nothing arm namespace.  Existing stream
+    # evidence is immutable and can never be resumed, skipped, or stitched
+    # into another suite invocation.
     return "terminal", evidence
 
 
@@ -1919,29 +2012,47 @@ def main(argv: list[str] | None = None) -> int:
     run_parser = commands.add_parser("run-arm")
     run_parser.add_argument("--config", type=Path, required=True)
     run_parser.add_argument("--resume", action="store_true")
+    run_parser.add_argument("--generation-id")
     suite_parser = commands.add_parser("run-pilot-stream-suite")
     suite_parser.add_argument("--arm", choices=("control", "online"), required=True)
+    suite_parser.add_argument("--generation-id")
     compare_parser = commands.add_parser("compare")
     compare_parser.add_argument("--scope", choices=_SCOPES, required=True)
-    commands.add_parser("compare-pilot-streams")
-    commands.add_parser("freeze-canary-receipt")
-    commands.add_parser("verify-canary-receipt")
+    compare_parser.add_argument("--generation-id")
+    compare_pilot_parser = commands.add_parser("compare-pilot-streams")
+    compare_pilot_parser.add_argument("--generation-id")
+    freeze_parser = commands.add_parser("freeze-canary-receipt")
+    freeze_parser.add_argument("--generation-id")
+    verify_parser = commands.add_parser("verify-canary-receipt")
+    verify_parser.add_argument("--generation-id")
     commands.add_parser("dry-run")
     arguments = parser.parse_args(argv)
 
     try:
         if arguments.command == "run-arm":
-            payload = run_arm(arguments.config, resume=arguments.resume)
+            payload = run_arm(
+                arguments.config,
+                resume=arguments.resume,
+                generation_id=arguments.generation_id,
+            )
         elif arguments.command == "run-pilot-stream-suite":
-            payload = run_pilot500_stream_suite(arm=arguments.arm)
+            payload = run_pilot500_stream_suite(
+                arm=arguments.arm,
+                generation_id=arguments.generation_id,
+            )
         elif arguments.command == "compare":
-            payload = compare(scope=arguments.scope)
+            payload = compare(
+                scope=arguments.scope,
+                generation_id=arguments.generation_id,
+            )
         elif arguments.command == "compare-pilot-streams":
-            payload = compare_pilot500_streams()
+            payload = compare_pilot500_streams(
+                generation_id=arguments.generation_id,
+            )
         elif arguments.command == "freeze-canary-receipt":
-            payload = freeze_taskwise_paired_canary_receipt_v1()
+            payload = freeze_taskwise_paired_canary_receipt_v1(arguments.generation_id)
         elif arguments.command == "verify-canary-receipt":
-            payload = verify_taskwise_pilot_receipt_v1()
+            payload = verify_taskwise_pilot_receipt_v1(arguments.generation_id)
         else:
             payload = dry_run()
     except (TaskwiseCLIError, RuntimeError, ValueError, TypeError) as exc:

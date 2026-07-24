@@ -23,7 +23,7 @@ from pathlib import Path
 import re
 import stat
 import tempfile
-from typing import Any, Literal
+from typing import Any, Literal, NoReturn
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -99,8 +99,52 @@ _EVENT_SOURCE = "chembench4k.taskwise_core.v1"
 _DATASET_PURPOSE = "chembench4k_taskwise_trajectory_v1"
 _JOB_PREFIX = "chembench4k.taskwise.text_memory.v1"
 _PRIVATE_INPUT_DIRECTORY = "private_taskwise_reflector_inputs"
+_PRIVATE_FAILURE_DIRECTORY = "private_core_failure_diagnostics"
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _CLOSED_CODE_RE = re.compile(r"[A-Z][A-Z0-9_]{0,95}\Z", re.ASCII)
+_CORE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}\Z", re.ASCII)
+_DIAGNOSTIC_BASENAME_RE = re.compile(
+    r"taskwise_core_failure_[0-9a-f]{32}\.json\Z",
+    re.ASCII,
+)
+_CORE_FAILURE_STAGES = frozenset(
+    {
+        "TYPED_ARTIFACT",
+        "ARTIFACT_LINEAGE",
+        "ARTIFACT_VALIDATION",
+        "ARTIFACT_PROMOTION",
+        "CONTEXT_RESOLUTION",
+        "PRIVATE_CHECKPOINT",
+    }
+)
+_CORE_STAGE_ALLOWED_FINDINGS = {
+    "TYPED_ARTIFACT": frozenset({"TASKWISE_TYPED_ARTIFACT_INVALID"}),
+    "ARTIFACT_LINEAGE": frozenset(
+        {
+            "TASKWISE_CORE_LINEAGE_INVALID",
+            "TASKWISE_PREDECESSOR_BINDING_INVALID",
+        }
+    ),
+    "ARTIFACT_VALIDATION": frozenset({"TASKWISE_ARTIFACT_VALIDATION_FAILED"}),
+    "ARTIFACT_PROMOTION": frozenset({"TASKWISE_ARTIFACT_PROMOTION_FAILED"}),
+    "CONTEXT_RESOLUTION": frozenset({"TASKWISE_CONTEXT_RESOLUTION_FAILED"}),
+    "PRIVATE_CHECKPOINT": frozenset(
+        {
+            "TASKWISE_PRIVATE_CHECKPOINT_FAILED",
+            "TASKWISE_PRIVATE_CHECKPOINT_UNSAFE",
+        }
+    ),
+}
+_CORE_EXCEPTION_CLASSES = frozenset(
+    {
+        "TASKWISE_CORE_EVOLUTION_ERROR",
+        "OS_ERROR",
+        "TYPE_ERROR",
+        "VALUE_ERROR",
+        "RUNTIME_ERROR",
+        "OTHER_ERROR",
+    }
+)
 _MEMORY_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+|[^\x00-\x7f]|\S", re.ASCII)
 _MEMORY_H1 = "# General Chemistry Memory"
 _MEMORY_H2_RE = re.compile(r"## ([^\r\n]+)\Z", re.ASCII)
@@ -123,15 +167,122 @@ _ANSWER_MAP_RE = re.compile(
 class TaskwiseCoreEvolutionError(RuntimeError):
     """Closed failure carrying no benchmark or artifact content."""
 
-    def __init__(self, finding_code: str) -> None:
+    def __init__(
+        self,
+        finding_code: str,
+        *,
+        diagnostic_receipt: str | None = None,
+    ) -> None:
         if _CLOSED_CODE_RE.fullmatch(finding_code) is None:
             raise ValueError("finding_code must use the closed taskwise vocabulary")
+        if diagnostic_receipt is not None and (
+            type(diagnostic_receipt) is not str
+            or _DIAGNOSTIC_BASENAME_RE.fullmatch(diagnostic_receipt) is None
+            or "/" in diagnostic_receipt
+            or "\\" in diagnostic_receipt
+        ):
+            raise ValueError("diagnostic_receipt must be a safe basename or None")
         self.finding_code = finding_code
+        self.diagnostic_receipt = diagnostic_receipt
         super().__init__(finding_code)
 
 
 class _FrozenModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, validate_default=True)
+
+
+class TaskwiseCoreFailureReceiptV1(_FrozenModel):
+    """Private content-free evidence for a failed Core update stage."""
+
+    schema_version: Literal["chembench4k_taskwise_core_failure_v1"] = (
+        "chembench4k_taskwise_core_failure_v1"
+    )
+    protocol_id: Literal["taskwise_online_evolution_v1"] = PROTOCOL_ID
+    bridge_id: Literal["openevo_core_taskwise_text_memory_v1"] = BRIDGE_ID
+    stage: str
+    finding_code: str
+    exception_class: str
+    errno: int | None
+    task_index: int = Field(ge=0)
+    round_index: Literal[0, 1]
+    update_index: Literal[1, 2]
+    job_id: str = Field(min_length=1, max_length=256)
+    artifact_id: str | None = Field(default=None, min_length=1, max_length=256)
+    predecessor_artifact_id: str | None = Field(default=None, min_length=1, max_length=256)
+    trajectory_digest: str
+    safe_feedback_digest: str
+    validator_input_digest: str
+    dataset_manifest_sha256: str
+    plan_digest: str
+    reflector_input_digest: str | None
+    reflector_receipt_digest: str | None
+    reflector_event_stream_digest: str | None
+    artifact_payload_sha256: str | None
+    artifact_lineage_sha256: str | None
+    memory_inspection_sha256: str | None
+    validation_receipt_sha256: str | None
+    core_artifact_manifest_sha256: str | None
+    context_resolution_digest: str | None
+
+    @field_validator(
+        "trajectory_digest",
+        "safe_feedback_digest",
+        "validator_input_digest",
+        "dataset_manifest_sha256",
+        "plan_digest",
+        "reflector_input_digest",
+        "reflector_receipt_digest",
+        "reflector_event_stream_digest",
+        "artifact_payload_sha256",
+        "artifact_lineage_sha256",
+        "memory_inspection_sha256",
+        "validation_receipt_sha256",
+        "core_artifact_manifest_sha256",
+        "context_resolution_digest",
+    )
+    @classmethod
+    def _digests(cls, value: str | None) -> str | None:
+        if value is not None and _SHA256_RE.fullmatch(value) is None:
+            raise ValueError("Core failure receipt digest must be SHA-256")
+        return value
+
+    @field_validator("stage")
+    @classmethod
+    def _stage(cls, value: str) -> str:
+        if value not in _CORE_FAILURE_STAGES:
+            raise ValueError("Core failure stage is outside the closed vocabulary")
+        return value
+
+    @field_validator("job_id", "artifact_id", "predecessor_artifact_id")
+    @classmethod
+    def _core_identifiers(cls, value: str | None) -> str | None:
+        if value is not None and _CORE_ID_RE.fullmatch(value) is None:
+            raise ValueError("Core failure identifier is outside the safe vocabulary")
+        return value
+
+    @field_validator("finding_code")
+    @classmethod
+    def _finding(cls, value: str) -> str:
+        if _CLOSED_CODE_RE.fullmatch(value) is None:
+            raise ValueError("Core failure finding is outside the closed vocabulary")
+        return value
+
+    @field_validator("exception_class")
+    @classmethod
+    def _exception_class(cls, value: str) -> str:
+        if value not in _CORE_EXCEPTION_CLASSES:
+            raise ValueError("Core exception class is outside the closed vocabulary")
+        return value
+
+    @model_validator(mode="after")
+    def _sequence(self) -> TaskwiseCoreFailureReceiptV1:
+        if self.update_index != self.round_index + 1:
+            raise ValueError("Core failure receipt update does not match its round")
+        if self.finding_code not in _CORE_STAGE_ALLOWED_FINDINGS[self.stage]:
+            raise ValueError("Core failure finding is invalid for its stage")
+        if self.errno is not None and self.errno < 0:
+            raise ValueError("Core failure errno must be non-negative")
+        return self
 
 
 class TaskwiseMemoryInspectionV1(_FrozenModel):
@@ -768,6 +919,8 @@ class TaskwiseCoreEvolutionBridgeV1:
         db = Path(db_path).resolve()
         db.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         db.parent.chmod(0o700)
+        self._private_failure_root = db.parent / _PRIVATE_FAILURE_DIRECTORY
+        _prepare_private_directory(self._private_failure_root)
         self._stream_lock_path = db.with_name("taskwise_core_stream_v1.lock")
         self._stream_lock_fd: int | None = self._acquire_stream_lock(self._stream_lock_path)
         self._closed = False
@@ -947,14 +1100,40 @@ class TaskwiseCoreEvolutionBridgeV1:
             validator_input_digest=validator_input_digest,
         )
         try:
-            execution = self._run_and_register(
-                request=request,
-                job_id=plan["job_id"],
-                job_type=plan["job_type"],
-                trajectory_digest=trajectory_digest,
-                lease_seconds=lease_seconds,
-                test_only_allow_synthetic_reflector=(test_only_allow_synthetic_reflector),
-            )
+            try:
+                execution = self._run_and_register(
+                    request=request,
+                    job_id=plan["job_id"],
+                    job_type=plan["job_type"],
+                    trajectory_digest=trajectory_digest,
+                    lease_seconds=lease_seconds,
+                    test_only_allow_synthetic_reflector=(test_only_allow_synthetic_reflector),
+                )
+            except TaskwiseCoreEvolutionError as exc:
+                if exc.finding_code == "TASKWISE_TYPED_ARTIFACT_INVALID":
+                    self._raise_private_core_failure(
+                        stage="TYPED_ARTIFACT",
+                        default_finding="TASKWISE_TYPED_ARTIFACT_INVALID",
+                        cause=exc,
+                        request=request,
+                        job_id=plan["job_id"],
+                        artifact_id=None,
+                        trajectory_digest=trajectory_digest,
+                        safe_feedback_digest=safe_feedback_digest,
+                        validator_input_digest=validator_input_digest,
+                        dataset_manifest_sha256=dataset_manifest_sha256,
+                        plan_digest=plan["plan_digest"],
+                        reflector_input_digest=None,
+                        reflector_receipt_digest=None,
+                        reflector_event_stream_digest=None,
+                        artifact_payload_sha256=None,
+                        artifact_lineage_sha256=None,
+                        memory_inspection_sha256=None,
+                        validation_receipt_sha256=None,
+                        core_artifact_manifest_sha256=None,
+                        context_resolution_digest=None,
+                    )
+                raise
             result = self._validate_promote_resolve(
                 request=request,
                 global_update_ordinal=global_update_ordinal,
@@ -982,9 +1161,30 @@ class TaskwiseCoreEvolutionBridgeV1:
                 result=result,
                 validator_forbidden_literals=forbidden_literals,
             )
-        except Exception:
+        except Exception as exc:
             self._terminal_finding = "TASKWISE_PRIVATE_CHECKPOINT_FAILED"
-            raise
+            self._raise_private_core_failure(
+                stage="PRIVATE_CHECKPOINT",
+                default_finding="TASKWISE_PRIVATE_CHECKPOINT_FAILED",
+                cause=exc,
+                request=request,
+                job_id=result.job_id,
+                artifact_id=result.core_artifact_id,
+                trajectory_digest=result.trajectory_digest,
+                safe_feedback_digest=result.safe_feedback_digest,
+                validator_input_digest=result.validator_input_digest,
+                dataset_manifest_sha256=result.dataset_manifest_sha256,
+                plan_digest=result.plan_digest,
+                reflector_input_digest=result.reflector_input_digest,
+                reflector_receipt_digest=result.reflector_execution_receipt_sha256,
+                reflector_event_stream_digest=result.reflector_event_stream_sha256,
+                artifact_payload_sha256=result.artifact_payload_sha256,
+                artifact_lineage_sha256=result.artifact_lineage_sha256,
+                memory_inspection_sha256=result.memory_inspection.digest,
+                validation_receipt_sha256=result.validation_receipt_sha256,
+                core_artifact_manifest_sha256=result.core_artifact_manifest_sha256,
+                context_resolution_digest=result.context_resolution_digest,
+            )
         self._accept_verified_checkpoint(
             result=result,
             validator_forbidden_literals=forbidden_literals,
@@ -1689,119 +1889,278 @@ class TaskwiseCoreEvolutionBridgeV1:
         reflector_receipt_digest: str | None,
         reflector_event_stream_digest: str | None,
     ) -> TaskwiseCoreUpdateResultV1:
-        if artifact_id is None or reflector_input_digest is None:
-            raise TaskwiseCoreEvolutionError("TASKWISE_TYPED_ARTIFACT_INVALID")
-        artifact = self._store.get_artifact(artifact_id)
-        if (
-            artifact.type is not ArtifactType.TEXT_MEMORY
-            or artifact.state is not ArtifactState.ACTIVE
-            or artifact.promoted
-        ):
-            raise TaskwiseCoreEvolutionError("TASKWISE_TYPED_ARTIFACT_INVALID")
-        lineage = self._artifact_lineage(artifact_id)
-        execution = lineage.get("openevo_execution")
-        if (
-            not isinstance(execution, dict)
-            or execution.get("job_id") != job_id
-            or execution.get("plan_id") != plan_id
-            or execution.get("method_id") != METHOD_ID
-            or execution.get("method_identity_digest") != self._method_identity_digest()
-        ):
-            raise TaskwiseCoreEvolutionError("TASKWISE_CORE_LINEAGE_INVALID")
-        expected_input_ids = [
-            dataset_artifact_id,
-            *([] if request.predecessor is None else [request.predecessor.core_artifact_id]),
-        ]
-        if lineage.get("input_artifact_ids") != expected_input_ids:
-            raise TaskwiseCoreEvolutionError("TASKWISE_PREDECESSOR_BINDING_INVALID")
-        payload_path = _safe_core_file_path(
-            artifact.uri,
-            allowed_root=self._store.files.root,
-        )
-        payload = _read_bounded_regular_file(
-            payload_path,
-            maximum=ABSOLUTE_MAX_MEMORY_FILE_BYTES,
-        )
-        payload_sha256 = _sha256_bytes(payload)
-        inspection = inspect_taskwise_text_memory_v1(payload, limits=self._memory_limits)
-        validator = TaskwiseTextMemoryValidatorV1(
-            expected_lineage=expected_lineage,
-            expected_record_count=request.update_index,
-            forbidden_literals=forbidden_literals,
-            memory_limits=self._memory_limits,
-        )
-        receipt = validator.validate(
-            artifact=artifact,
-            payload=payload,
-            payload_sha256=payload_sha256,
-            lineage=lineage,
-        )
-        if not receipt.passed or receipt.finding_codes:
-            raise TaskwiseCoreEvolutionError("TASKWISE_ARTIFACT_VALIDATION_FAILED")
-        promoted = self._store.update_artifact_promotion(
-            artifact_id,
-            promoted=True,
-        )
-        if not promoted.promoted:
-            raise TaskwiseCoreEvolutionError("TASKWISE_ARTIFACT_PROMOTION_FAILED")
-        manifest_path = self._store.files.artifact_manifest_path(
-            str(ArtifactType.TEXT_MEMORY),
-            artifact_id,
-        )
-        core_artifact_manifest_sha256 = _sha256_bytes(
-            _read_bounded_regular_file(
-                manifest_path,
-                maximum=MAX_MANIFEST_BYTES,
+        failure_metadata = {
+            "request": request,
+            "job_id": job_id,
+            "artifact_id": artifact_id,
+            "trajectory_digest": trajectory_digest,
+            "safe_feedback_digest": safe_feedback_digest,
+            "validator_input_digest": validator_input_digest,
+            "dataset_manifest_sha256": dataset_manifest_sha256,
+            "plan_digest": plan_digest,
+            "reflector_input_digest": reflector_input_digest,
+            "reflector_receipt_digest": reflector_receipt_digest,
+            "reflector_event_stream_digest": reflector_event_stream_digest,
+            "artifact_payload_sha256": None,
+            "artifact_lineage_sha256": None,
+            "memory_inspection_sha256": None,
+            "validation_receipt_sha256": None,
+            "core_artifact_manifest_sha256": None,
+            "context_resolution_digest": None,
+        }
+        try:
+            if artifact_id is None or reflector_input_digest is None:
+                raise TaskwiseCoreEvolutionError("TASKWISE_TYPED_ARTIFACT_INVALID")
+            artifact = self._store.get_artifact(artifact_id)
+            if (
+                artifact.type is not ArtifactType.TEXT_MEMORY
+                or artifact.state is not ArtifactState.ACTIVE
+                or artifact.promoted
+            ):
+                raise TaskwiseCoreEvolutionError("TASKWISE_TYPED_ARTIFACT_INVALID")
+        except Exception as exc:
+            self._raise_private_core_failure(
+                stage="TYPED_ARTIFACT",
+                default_finding="TASKWISE_TYPED_ARTIFACT_INVALID",
+                cause=exc,
+                **failure_metadata,
             )
-        )
-        context = self._store.resolve_materialized_context(
-            self._context_request(
-                artifact_id=artifact_id,
+
+        try:
+            lineage = self._artifact_lineage(artifact_id)
+            failure_metadata["artifact_lineage_sha256"] = canonical_digest(lineage)
+            execution = lineage.get("openevo_execution")
+            if (
+                not isinstance(execution, dict)
+                or execution.get("job_id") != job_id
+                or execution.get("plan_id") != plan_id
+                or execution.get("method_id") != METHOD_ID
+                or execution.get("method_identity_digest") != self._method_identity_digest()
+            ):
+                raise TaskwiseCoreEvolutionError("TASKWISE_CORE_LINEAGE_INVALID")
+            expected_input_ids = [
+                dataset_artifact_id,
+                *([] if request.predecessor is None else [request.predecessor.core_artifact_id]),
+            ]
+            if lineage.get("input_artifact_ids") != expected_input_ids:
+                raise TaskwiseCoreEvolutionError("TASKWISE_PREDECESSOR_BINDING_INVALID")
+        except Exception as exc:
+            self._raise_private_core_failure(
+                stage="ARTIFACT_LINEAGE",
+                default_finding="TASKWISE_CORE_LINEAGE_INVALID",
+                cause=exc,
+                **failure_metadata,
+            )
+
+        try:
+            payload_path = _safe_core_file_path(
+                artifact.uri,
+                allowed_root=self._store.files.root,
+            )
+            payload = _read_bounded_regular_file(
+                payload_path,
+                maximum=ABSOLUTE_MAX_MEMORY_FILE_BYTES,
+            )
+            payload_sha256 = _sha256_bytes(payload)
+            inspection = inspect_taskwise_text_memory_v1(payload, limits=self._memory_limits)
+            failure_metadata["artifact_payload_sha256"] = payload_sha256
+            failure_metadata["memory_inspection_sha256"] = inspection.digest
+            validator = TaskwiseTextMemoryValidatorV1(
+                expected_lineage=expected_lineage,
+                expected_record_count=request.update_index,
+                forbidden_literals=forbidden_literals,
+                memory_limits=self._memory_limits,
+            )
+            receipt = validator.validate(
+                artifact=artifact,
+                payload=payload,
+                payload_sha256=payload_sha256,
+                lineage=lineage,
+            )
+            failure_metadata["validation_receipt_sha256"] = receipt.digest
+            if not receipt.passed or receipt.finding_codes:
+                raise TaskwiseCoreEvolutionError("TASKWISE_ARTIFACT_VALIDATION_FAILED")
+        except Exception as exc:
+            self._raise_private_core_failure(
+                stage="ARTIFACT_VALIDATION",
+                default_finding="TASKWISE_ARTIFACT_VALIDATION_FAILED",
+                cause=exc,
+                **failure_metadata,
+            )
+
+        try:
+            promoted = self._store.update_artifact_promotion(
+                artifact_id,
+                promoted=True,
+            )
+            if not promoted.promoted:
+                raise TaskwiseCoreEvolutionError("TASKWISE_ARTIFACT_PROMOTION_FAILED")
+            manifest_path = self._store.files.artifact_manifest_path(
+                str(ArtifactType.TEXT_MEMORY),
+                artifact_id,
+            )
+            core_artifact_manifest_sha256 = _sha256_bytes(
+                _read_bounded_regular_file(
+                    manifest_path,
+                    maximum=MAX_MANIFEST_BYTES,
+                )
+            )
+            failure_metadata["core_artifact_manifest_sha256"] = core_artifact_manifest_sha256
+        except Exception as exc:
+            self._raise_private_core_failure(
+                stage="ARTIFACT_PROMOTION",
+                default_finding="TASKWISE_ARTIFACT_PROMOTION_FAILED",
+                cause=exc,
+                **failure_metadata,
+            )
+
+        try:
+            context = self._store.resolve_materialized_context(
+                self._context_request(
+                    artifact_id=artifact_id,
+                    task_index=request.task_index,
+                    update_index=request.update_index,
+                )
+            )
+            failure_metadata["context_resolution_digest"] = canonical_digest(context)
+            resolved_memory = _resolved_text_memory(
+                context,
+                expected_artifact_id=artifact_id,
+            )
+            return TaskwiseCoreUpdateResultV1(
+                task_uid=request.task_uid,
                 task_index=request.task_index,
+                round_index=request.round_index,
                 update_index=request.update_index,
+                global_update_ordinal=global_update_ordinal,
+                predecessor=request.predecessor,
+                trajectory_ids=tuple(
+                    trajectory.trajectory_id for trajectory in request.trajectories
+                ),
+                trajectory_digest=trajectory_digest,
+                safe_feedback_digest=safe_feedback_digest,
+                validator_input_digest=validator_input_digest,
+                memory_limits_sha256=self._memory_limits.digest,
+                memory_inspection=inspection,
+                dataset_id=dataset_id,
+                dataset_artifact_id=dataset_artifact_id,
+                dataset_manifest_sha256=dataset_manifest_sha256,
+                configured_max_records=request.update_index,
+                records_visible_to_reflector=request.update_index,
+                reflector_input_digest=reflector_input_digest,
+                plan_id=plan_id,
+                plan_digest=plan_digest,
+                job_id=job_id,
+                method_descriptor_digest=canonical_digest(
+                    self._registry.snapshot.methods[METHOD_ID]
+                ),
+                method_identity_digest=self._method_identity_digest(),
+                core_artifact_id=artifact_id,
+                core_artifact_manifest_sha256=core_artifact_manifest_sha256,
+                artifact_payload_sha256=payload_sha256,
+                artifact_lineage_sha256=canonical_digest(lineage),
+                validation_receipt=receipt,
+                validation_receipt_sha256=receipt.digest,
+                reflector_execution_receipt_sha256=reflector_receipt_digest,
+                reflector_event_stream_sha256=reflector_event_stream_digest,
+                core_context_id=context.context_id,
+                context_resolution_digest=canonical_digest(context),
+                resolved_memory=resolved_memory,
+                resolved_memory_sha256=_sha256_bytes(resolved_memory.encode("utf-8")),
             )
+        except Exception as exc:
+            self._raise_private_core_failure(
+                stage="CONTEXT_RESOLUTION",
+                default_finding="TASKWISE_CONTEXT_RESOLUTION_FAILED",
+                cause=exc,
+                **failure_metadata,
+            )
+
+    def _raise_private_core_failure(
+        self,
+        *,
+        stage: str,
+        default_finding: str,
+        cause: Exception,
+        request: TaskwiseCoreUpdateRequestV1,
+        job_id: str,
+        artifact_id: str | None,
+        trajectory_digest: str,
+        safe_feedback_digest: str,
+        validator_input_digest: str,
+        dataset_manifest_sha256: str,
+        plan_digest: str,
+        reflector_input_digest: str | None,
+        reflector_receipt_digest: str | None,
+        reflector_event_stream_digest: str | None,
+        artifact_payload_sha256: str | None,
+        artifact_lineage_sha256: str | None,
+        memory_inspection_sha256: str | None,
+        validation_receipt_sha256: str | None,
+        core_artifact_manifest_sha256: str | None,
+        context_resolution_digest: str | None,
+    ) -> NoReturn:
+        """Persist closed stage evidence and re-raise a content-free error."""
+
+        allowed_findings = _CORE_STAGE_ALLOWED_FINDINGS.get(stage, frozenset())
+        if default_finding not in allowed_findings:
+            raise TaskwiseCoreEvolutionError("TASKWISE_CORE_DIAGNOSTICS_FAILED")
+        candidate_finding = (
+            cause.finding_code if type(cause) is TaskwiseCoreEvolutionError else None
         )
-        resolved_memory = _resolved_text_memory(
-            context,
-            expected_artifact_id=artifact_id,
-        )
-        return TaskwiseCoreUpdateResultV1(
-            task_uid=request.task_uid,
+        finding = candidate_finding if candidate_finding in allowed_findings else default_finding
+        receipt = TaskwiseCoreFailureReceiptV1(
+            stage=stage,
+            finding_code=finding,
+            exception_class=_closed_exception_class(cause),
+            errno=(cause.errno if isinstance(cause, OSError) else None),
             task_index=request.task_index,
             round_index=request.round_index,
             update_index=request.update_index,
-            global_update_ordinal=global_update_ordinal,
-            predecessor=request.predecessor,
-            trajectory_ids=tuple(trajectory.trajectory_id for trajectory in request.trajectories),
+            job_id=job_id,
+            artifact_id=artifact_id,
+            predecessor_artifact_id=(
+                None if request.predecessor is None else request.predecessor.core_artifact_id
+            ),
             trajectory_digest=trajectory_digest,
             safe_feedback_digest=safe_feedback_digest,
             validator_input_digest=validator_input_digest,
-            memory_limits_sha256=self._memory_limits.digest,
-            memory_inspection=inspection,
-            dataset_id=dataset_id,
-            dataset_artifact_id=dataset_artifact_id,
             dataset_manifest_sha256=dataset_manifest_sha256,
-            configured_max_records=request.update_index,
-            records_visible_to_reflector=request.update_index,
-            reflector_input_digest=reflector_input_digest,
-            plan_id=plan_id,
             plan_digest=plan_digest,
-            job_id=job_id,
-            method_descriptor_digest=canonical_digest(self._registry.snapshot.methods[METHOD_ID]),
-            method_identity_digest=self._method_identity_digest(),
-            core_artifact_id=artifact_id,
+            reflector_input_digest=reflector_input_digest,
+            reflector_receipt_digest=reflector_receipt_digest,
+            reflector_event_stream_digest=reflector_event_stream_digest,
+            artifact_payload_sha256=artifact_payload_sha256,
+            artifact_lineage_sha256=artifact_lineage_sha256,
+            memory_inspection_sha256=memory_inspection_sha256,
+            validation_receipt_sha256=validation_receipt_sha256,
             core_artifact_manifest_sha256=core_artifact_manifest_sha256,
-            artifact_payload_sha256=payload_sha256,
-            artifact_lineage_sha256=canonical_digest(lineage),
-            validation_receipt=receipt,
-            validation_receipt_sha256=receipt.digest,
-            reflector_execution_receipt_sha256=reflector_receipt_digest,
-            reflector_event_stream_sha256=reflector_event_stream_digest,
-            core_context_id=context.context_id,
-            context_resolution_digest=canonical_digest(context),
-            resolved_memory=resolved_memory,
-            resolved_memory_sha256=_sha256_bytes(resolved_memory.encode("utf-8")),
+            context_resolution_digest=context_resolution_digest,
         )
+        encoded = (_canonical_json(receipt.model_dump(mode="json")) + "\n").encode("utf-8")
+        basename = f"taskwise_core_failure_{canonical_digest(receipt)[:32]}.json"
+        path = self._private_failure_root / basename
+        created_by_this_call = False
+        try:
+            _exclusive_private_write(path, encoded)
+            created_by_this_call = True
+            metadata = path.lstat()
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+                or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
+            ):
+                raise OSError("private Core failure receipt permissions are unsafe")
+        except Exception as diagnostics_error:
+            if created_by_this_call:
+                path.unlink(missing_ok=True)
+            raise TaskwiseCoreEvolutionError(
+                "TASKWISE_CORE_DIAGNOSTICS_FAILED"
+            ) from diagnostics_error
+        raise TaskwiseCoreEvolutionError(
+            finding,
+            diagnostic_receipt=basename,
+        ) from cause
 
     def _artifact_lineage(self, artifact_id: str) -> dict[str, Any]:
         with self._store.connect() as connection:
@@ -2091,6 +2450,37 @@ def _prepare_private_state_root(path: Path) -> None:
         raise TaskwiseCoreEvolutionError("TASKWISE_CORE_STATE_ROOT_UNSAFE")
 
 
+def _prepare_private_directory(path: Path) -> None:
+    """Create one owner-private non-symlink diagnostic directory."""
+
+    if path.exists():
+        metadata = path.lstat()
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            raise TaskwiseCoreEvolutionError("TASKWISE_CORE_DIAGNOSTICS_UNSAFE")
+    else:
+        path.mkdir(mode=0o700)
+    path.chmod(0o700)
+    metadata = path.lstat()
+    if stat.S_IMODE(metadata.st_mode) != 0o700 or (
+        hasattr(os, "getuid") and metadata.st_uid != os.getuid()
+    ):
+        raise TaskwiseCoreEvolutionError("TASKWISE_CORE_DIAGNOSTICS_UNSAFE")
+
+
+def _closed_exception_class(exc: Exception) -> str:
+    if type(exc) is TaskwiseCoreEvolutionError:
+        return "TASKWISE_CORE_EVOLUTION_ERROR"
+    if isinstance(exc, OSError):
+        return "OS_ERROR"
+    if isinstance(exc, TypeError):
+        return "TYPE_ERROR"
+    if isinstance(exc, ValueError):
+        return "VALUE_ERROR"
+    if isinstance(exc, RuntimeError):
+        return "RUNTIME_ERROR"
+    return "OTHER_ERROR"
+
+
 def _trajectory_forbidden_literals(
     trajectory: TaskwiseTrajectoryV1,
 ) -> tuple[str, ...]:
@@ -2191,6 +2581,7 @@ __all__ = [
     "TaskwiseArtifactLineageReceiptV1",
     "TaskwiseCoreEvolutionBridgeV1",
     "TaskwiseCoreEvolutionError",
+    "TaskwiseCoreFailureReceiptV1",
     "TaskwiseCorePredecessorV1",
     "TaskwiseCoreUpdatePortAdapterV1",
     "TaskwiseCoreUpdateRequestV1",

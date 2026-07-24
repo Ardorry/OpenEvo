@@ -1113,10 +1113,7 @@ class TaskwiseOnlineRunnerV1:
             # Validation and reflector-security failures are update failures too.
             # Their side effects are ambiguous, so the whole run is terminal and
             # the update must never be replayed or replaced.
-            raise TaskwiseExecutionFailureV1(
-                "TASKWISE_EVOLUTION_UPDATE_FAILED",
-                completion_observed=True,
-            ) from exc
+            raise _taskwise_evolution_failure(exc) from exc
         try:
             aggregate = TaskwiseMemoryPublicAggregateV1.from_dict(self._state["memory_aggregate"])
             next_aggregate = aggregate.include(metrics)
@@ -1158,10 +1155,7 @@ class TaskwiseOnlineRunnerV1:
         except Exception as exc:
             if _is_security_violation(exc):
                 raise _taskwise_failure_from_executor(exc) from exc
-            raise TaskwiseExecutionFailureV1(
-                "TASKWISE_EVOLUTION_UPDATE_FAILED",
-                completion_observed=True,
-            ) from exc
+            raise _taskwise_evolution_failure(exc) from exc
 
     def _append_round_result(
         self,
@@ -1909,6 +1903,23 @@ def _taskwise_failure_from_executor(exc: Exception) -> TaskwiseExecutionFailureV
             ),
             completion_observed=completion_observed,
             executor_stage="INTERNAL",
+        )
+
+
+def _taskwise_evolution_failure(exc: Exception) -> TaskwiseExecutionFailureV1:
+    """Retain only a validated private Core receipt basename."""
+
+    diagnostic_receipt = getattr(exc, "diagnostic_receipt", None)
+    try:
+        return TaskwiseExecutionFailureV1(
+            "TASKWISE_EVOLUTION_UPDATE_FAILED",
+            completion_observed=True,
+            diagnostic_receipt=diagnostic_receipt,
+        )
+    except (TypeError, ValueError):
+        return TaskwiseExecutionFailureV1(
+            "TASKWISE_EVOLUTION_UPDATE_FAILED",
+            completion_observed=True,
         )
 
 
