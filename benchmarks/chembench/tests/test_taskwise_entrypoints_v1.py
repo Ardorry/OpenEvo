@@ -79,17 +79,25 @@ def test_paid_entrypoints_dispatch_only_through_the_taskwise_cli() -> None:
         assert f'exec "${{SCRIPT_DIR}}/{target}" "$@"' in text
 
 
-def test_current_paid_entrypoint_stops_at_dirty_source_gate_without_model_call() -> None:
-    completed = subprocess.run(
-        (os.fspath(SCRIPTS_ROOT / "run_repeated_control_canary9_v1.sh"),),
-        cwd=PACKAGE_ROOT.parents[1],
-        check=False,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        timeout=30,
-    )
+def test_current_paid_entrypoint_stops_at_dirty_source_gate_without_model_call(
+    tmp_path: Path,
+) -> None:
+    dirty_probe = PACKAGE_ROOT / f"paid_entrypoint_dirty_probe_{tmp_path.name}.txt"
+    descriptor = os.open(dirty_probe, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    os.close(descriptor)
+    try:
+        completed = subprocess.run(
+            (os.fspath(SCRIPTS_ROOT / "run_repeated_control_canary9_v1.sh"),),
+            cwd=PACKAGE_ROOT.parents[1],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=30,
+        )
+    finally:
+        dirty_probe.unlink(missing_ok=True)
 
     assert completed.returncode != 0
     assert "TASKWISE_PACKAGE_SOURCE_DIRTY" in completed.stderr

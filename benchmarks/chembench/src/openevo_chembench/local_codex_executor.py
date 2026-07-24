@@ -35,7 +35,10 @@ from openevo_chembench.runtime_context import (
     AgentArtifactContext,
     AgentRoundRequest,
 )
-from openevo_chembench.taskwise_config_v1 import TaskwiseExperimentConfigV1
+from openevo_chembench.taskwise_config_v1 import (
+    TaskwiseExperimentConfigV1,
+    canonical_taskwise_config_bytes,
+)
 from openevo_chembench.taskwise_context_binding_v1 import (
     TaskwiseContextBindingReceiptV1,
     TaskwiseSessionContextBindingV1,
@@ -46,6 +49,7 @@ from openevo_chembench.v2_config import FrozenExperimentConfigV2
 
 
 _CODEX_VERSION = re.compile(r"codex-cli ([0-9A-Za-z.+-]+)")
+_TASKWISE_RUNTIME_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{7,127}\Z", re.ASCII)
 _FORBIDDEN_PAYLOAD_KEYS = frozenset(
     {
         "answer_mapping",
@@ -126,21 +130,22 @@ _EXECUTOR_STAGES = frozenset(
         "INTERNAL",
     }
 )
-_SAFE_ENV_KEYS = (
+_MODEL_TRANSPORT_ENV_KEYS = (
     "ALL_PROXY",
     "HTTPS_PROXY",
     "HTTP_PROXY",
-    "LANG",
-    "LC_ALL",
     "NO_PROXY",
-    "PATH",
     "SSL_CERT_DIR",
     "SSL_CERT_FILE",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
     "all_proxy",
     "https_proxy",
     "http_proxy",
     "no_proxy",
 )
+_SAFE_ENV_KEYS = (*_MODEL_TRANSPORT_ENV_KEYS, "LANG", "LC_ALL", "PATH")
 _ISOLATION_PREFIX = "openevo-chembench-local-codex-"
 _DIAGNOSTIC_DIRECTORY_NAME = "openevo-chembench-codex-diagnostics"
 _CLEANUP_RETRY_DELAYS_SECONDS = (
@@ -265,6 +270,164 @@ class _InvocationDiagnosticContext:
     task_index: int | None = None
     round_index: int | None = None
     session_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TaskwiseExecutorSuccessReceiptV1:
+    """Content-free private evidence for one completed Codex invocation."""
+
+    run_id: str | None
+    task_uid: str | None
+    task_index: int | None
+    round_index: int | None
+    session_id: str | None
+    event_stream_sha256: str
+    event_count: int
+    tool_event_count: int
+    completion_observed: bool
+    process_return_code: int
+    process_signal: int | None
+    cleanup_status: str
+    residual_root_count: int
+    codex_cli_version: str
+    model: str
+    executor_policy_sha256: str
+    created_at_utc: str
+
+    def to_payload(self) -> dict[str, object]:
+        """Return the closed, content-free serialization schema."""
+
+        return {
+            "schema_version": "taskwise_executor_private_success_v1",
+            "status": "COMPLETED",
+            "run_id": self.run_id,
+            "task_uid": self.task_uid,
+            "task_index": self.task_index,
+            "round_index": self.round_index,
+            "session_id": self.session_id,
+            "event_stream_sha256": self.event_stream_sha256,
+            "event_count": self.event_count,
+            "tool_event_count": self.tool_event_count,
+            "completion_observed": self.completion_observed,
+            "process_return_code": self.process_return_code,
+            "process_signal": self.process_signal,
+            "cleanup_status": self.cleanup_status,
+            "residual_root_count": self.residual_root_count,
+            "codex_cli_version": self.codex_cli_version,
+            "model": self.model,
+            "executor_policy_sha256": self.executor_policy_sha256,
+            "created_at_utc": self.created_at_utc,
+        }
+
+    @classmethod
+    def from_payload(
+        cls,
+        payload: Mapping[str, object],
+    ) -> TaskwiseExecutorSuccessReceiptV1:
+        """Parse a success receipt without accepting schema extensions."""
+
+        expected = {
+            "schema_version",
+            "status",
+            "run_id",
+            "task_uid",
+            "task_index",
+            "round_index",
+            "session_id",
+            "event_stream_sha256",
+            "event_count",
+            "tool_event_count",
+            "completion_observed",
+            "process_return_code",
+            "process_signal",
+            "cleanup_status",
+            "residual_root_count",
+            "codex_cli_version",
+            "model",
+            "executor_policy_sha256",
+            "created_at_utc",
+        }
+        if (
+            not isinstance(payload, Mapping)
+            or set(payload) != expected
+            or payload["schema_version"] != "taskwise_executor_private_success_v1"
+            or payload["status"] != "COMPLETED"
+        ):
+            raise ValueError("taskwise executor success receipt schema is invalid")
+        optional_text = ("run_id", "task_uid", "session_id")
+        if any(
+            value is not None and (type(value) is not str or not value)
+            for key in optional_text
+            if (value := payload[key]) is not None
+        ):
+            raise ValueError("taskwise executor success receipt identity is invalid")
+        if (
+            payload["task_uid"] is not None
+            and re.fullmatch(r"[0-9a-f]{64}", str(payload["task_uid"])) is None
+        ) or any(
+            payload[key] is not None and _TASKWISE_RUNTIME_ID.fullmatch(str(payload[key])) is None
+            for key in ("run_id", "session_id")
+        ):
+            raise ValueError("taskwise executor success receipt identity is invalid")
+        optional_indices = ("task_index", "round_index")
+        if any(
+            value is not None
+            and (isinstance(value, bool) or not isinstance(value, int) or value < 0)
+            for key in optional_indices
+            if (value := payload[key]) is not None
+        ):
+            raise ValueError("taskwise executor success receipt index is invalid")
+        if payload["round_index"] is not None and payload["round_index"] not in (0, 1, 2):
+            raise ValueError("taskwise executor success receipt index is invalid")
+        digest_fields = ("event_stream_sha256", "executor_policy_sha256")
+        if any(
+            type(payload[key]) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", str(payload[key])) is None
+            for key in digest_fields
+        ):
+            raise ValueError("taskwise executor success receipt digest is invalid")
+        if (
+            isinstance(payload["event_count"], bool)
+            or not isinstance(payload["event_count"], int)
+            or payload["event_count"] <= 0
+            or payload["tool_event_count"] != 0
+            or payload["completion_observed"] is not True
+            or payload["process_return_code"] != 0
+            or payload["process_signal"] is not None
+            or payload["cleanup_status"] != "COMPLETE"
+            or payload["residual_root_count"] != 0
+        ):
+            raise ValueError("taskwise executor success receipt outcome is invalid")
+        if any(
+            type(payload[key]) is not str or not payload[key]
+            for key in ("codex_cli_version", "model", "created_at_utc")
+        ):
+            raise ValueError("taskwise executor success receipt metadata is invalid")
+        try:
+            created_at = datetime.fromisoformat(str(payload["created_at_utc"]))
+        except ValueError as exc:
+            raise ValueError("taskwise executor success receipt timestamp is invalid") from exc
+        if created_at.tzinfo is None:
+            raise ValueError("taskwise executor success receipt timestamp is invalid")
+        return cls(
+            run_id=payload["run_id"],  # type: ignore[arg-type]
+            task_uid=payload["task_uid"],  # type: ignore[arg-type]
+            task_index=payload["task_index"],  # type: ignore[arg-type]
+            round_index=payload["round_index"],  # type: ignore[arg-type]
+            session_id=payload["session_id"],  # type: ignore[arg-type]
+            event_stream_sha256=str(payload["event_stream_sha256"]),
+            event_count=int(payload["event_count"]),
+            tool_event_count=0,
+            completion_observed=True,
+            process_return_code=0,
+            process_signal=None,
+            cleanup_status="COMPLETE",
+            residual_root_count=0,
+            codex_cli_version=str(payload["codex_cli_version"]),
+            model=str(payload["model"]),
+            executor_policy_sha256=str(payload["executor_policy_sha256"]),
+            created_at_utc=str(payload["created_at_utc"]),
+        )
 
 
 CommandRunner = Callable[
@@ -465,6 +628,7 @@ class LocalCodexCLIExecutor:
         "_command_runner",
         "_config",
         "_diagnostic_root",
+        "_executor_policy_sha256",
         "_isolation_parent",
         "_model",
         "_pending_cleanup",
@@ -556,6 +720,7 @@ class LocalCodexCLIExecutor:
 
         self._config = config
         self._model = model
+        self._executor_policy_sha256 = _executor_policy_sha256(config)
         self._reasoning_effort = reasoning_effort
         self._v2_mode = v2_mode
         self._taskwise_mode = taskwise_mode
@@ -1161,6 +1326,65 @@ class LocalCodexCLIExecutor:
             raise failure
         if response is None or usage is None or transcript_digest is None:
             raise AssertionError("successful local Codex execution is incomplete")
+        if result is None or result.returncode != 0:
+            raise AssertionError("successful local Codex process result is incomplete")
+        event_summary = _event_stream_summary(result.stdout)
+        context = diagnostic_context or _InvocationDiagnosticContext()
+        success_receipt = TaskwiseExecutorSuccessReceiptV1(
+            run_id=context.run_id,
+            task_uid=context.task_uid,
+            task_index=context.task_index,
+            round_index=context.round_index,
+            session_id=context.session_id,
+            event_stream_sha256=transcript_digest,
+            event_count=int(event_summary["event_count"]),
+            tool_event_count=int(event_summary["tool_event_count"]),
+            completion_observed=True,
+            process_return_code=0,
+            process_signal=None,
+            cleanup_status="COMPLETE",
+            residual_root_count=0,
+            codex_cli_version=self._codex_version,
+            model=self._model,
+            executor_policy_sha256=self._executor_policy_sha256,
+            created_at_utc=datetime.now(UTC).isoformat(timespec="milliseconds"),
+        )
+        try:
+            success_reference = _persist_success_receipt(
+                self._diagnostic_root,
+                success_receipt,
+            )
+        except (TypeError, ValueError):
+            success_reference = None
+        if success_reference is None:
+            persistence_failure = LocalCodexExecutionError(
+                LocalCodexExecutionErrorCode.ISOLATION_SETUP_FAILED,
+                taskwise_failure_code="EXECUTOR_PRIVATE_DIAGNOSTICS_FAILED",
+                executor_stage="PRIVATE_EVENT_PERSISTENCE",
+                completion_observed=True,
+            )
+            persistence_failure.diagnostic_receipt = self._write_diagnostic_receipt(
+                phase="PRIVATE_EVENT_PERSISTENCE",
+                error_code=persistence_failure.code,
+                result=result,
+                error_errno=None,
+                plugin_activity=False,
+                cleanup_outcome=cleanup_outcome,
+                timed_out=False,
+                diagnostic_context=diagnostic_context,
+                exception_class=type(persistence_failure).__name__,
+                exception_message="success receipt persistence failed",
+                command=command,
+                invocation_root_id=invocation_root_id,
+                output_last_message_exists=output_last_message_exists,
+                output_last_message_sha256=output_last_message_sha256,
+                taskwise_failure_code=persistence_failure.taskwise_failure_code,
+                completion_observed=True,
+                retry_allowed=False,
+                resume_allowed=False,
+                replacement_completion_allowed=False,
+            )
+            raise persistence_failure
         duration_ms = (time.monotonic() - started) * 1000.0
         return RawAttempt(
             response=response,
@@ -1385,6 +1609,20 @@ def _base_environment() -> dict[str, str]:
     return environment
 
 
+def _sanitized_model_transport_environment() -> dict[str, str]:
+    """Return only non-empty values from the closed model-transport allowlist."""
+
+    environment: dict[str, str] = {}
+    for key in _MODEL_TRANSPORT_ENV_KEYS:
+        value = os.environ.get(key)
+        if not value:
+            continue
+        if "\x00" in value:
+            raise ValueError("model transport environment contains NUL")
+        environment[key] = value
+    return environment
+
+
 def _sanitized_execution_environment() -> dict[str, str]:
     """Return the minimal model-transport environment without benchmark paths."""
 
@@ -1398,6 +1636,31 @@ def _sanitized_execution_environment() -> dict[str, str]:
     ]
     environment["PATH"] = os.pathsep.join(safe_path_entries) or os.defpath
     return environment
+
+
+def _executor_policy_sha256(
+    config: ExperimentConfig | FrozenExperimentConfigV2 | TaskwiseExperimentConfigV1,
+) -> str:
+    if type(config) is TaskwiseExperimentConfigV1:
+        payload = config.to_payload()["executor"]
+    elif type(config) is FrozenExperimentConfigV2:
+        payload = config.to_payload()["executor"]
+    elif type(config) is ExperimentConfig:
+        payload = {
+            "backend": config.execution_backend,
+            "harness": config.agent.harness,
+            "model": config.agent.model,
+            "runtime": {
+                "browser_enabled": config.runtime.browser_enabled,
+                "external_web_enabled": config.runtime.external_web_enabled,
+                "mcp_servers": list(config.runtime.mcp_servers),
+                "network_enabled": config.runtime.network_enabled,
+                "network_tools_enabled": config.runtime.network_tools_enabled,
+            },
+        }
+    else:
+        raise TypeError("unsupported executor config")
+    return hashlib.sha256(canonical_taskwise_config_bytes(payload)).hexdigest()
 
 
 def _create_isolation_root(parent: Path) -> Path:
@@ -1733,6 +1996,121 @@ def _persist_diagnostic_receipt(
         return receipt_name
     except OSError:
         return None
+
+
+def _persist_success_receipt(
+    diagnostic_root: Path,
+    receipt: TaskwiseExecutorSuccessReceiptV1,
+) -> str | None:
+    """Persist one mode-600 content-free success receipt, or fail closed."""
+
+    if type(receipt) is not TaskwiseExecutorSuccessReceiptV1:
+        raise TypeError("receipt must be exact TaskwiseExecutorSuccessReceiptV1")
+    TaskwiseExecutorSuccessReceiptV1.from_payload(receipt.to_payload())
+    try:
+        diagnostic_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        metadata = diagnostic_root.lstat()
+        if (
+            stat.S_ISLNK(metadata.st_mode)
+            or not stat.S_ISDIR(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) != 0o700
+            or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
+        ):
+            return None
+        receipt_name = f"success_{uuid.uuid4().hex}.json"
+        target = diagnostic_root / receipt_name
+        encoded = (
+            json.dumps(
+                receipt.to_payload(),
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+        ).encode("utf-8")
+        descriptor = os.open(
+            target,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+        return receipt_name
+    except OSError:
+        return None
+
+
+def load_taskwise_success_receipts_v1(
+    diagnostic_root: Path,
+    *,
+    expected_session_ids: Sequence[str] | None = None,
+) -> tuple[TaskwiseExecutorSuccessReceiptV1, ...]:
+    """Load private success evidence with strict schema, mode, and identity checks."""
+
+    if not isinstance(diagnostic_root, Path):
+        raise TypeError("diagnostic_root must be pathlib.Path")
+    try:
+        root_metadata = diagnostic_root.lstat()
+    except OSError as exc:
+        raise ValueError("taskwise executor success receipt directory is unavailable") from exc
+    if (
+        stat.S_ISLNK(root_metadata.st_mode)
+        or not stat.S_ISDIR(root_metadata.st_mode)
+        or stat.S_IMODE(root_metadata.st_mode) != 0o700
+        or (hasattr(os, "getuid") and root_metadata.st_uid != os.getuid())
+    ):
+        raise ValueError("taskwise executor success receipt directory is unsafe")
+    malformed_names = tuple(
+        path.name
+        for path in diagnostic_root.iterdir()
+        if path.name.startswith("success_")
+        and re.fullmatch(r"success_[0-9a-f]{32}\.json", path.name) is None
+    )
+    if malformed_names:
+        raise ValueError("taskwise executor success receipt filename is invalid")
+    receipts: list[TaskwiseExecutorSuccessReceiptV1] = []
+    for path in sorted(diagnostic_root.glob("success_*.json")):
+        try:
+            metadata = path.lstat()
+            if (
+                stat.S_ISLNK(metadata.st_mode)
+                or not stat.S_ISREG(metadata.st_mode)
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+                or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
+            ):
+                raise OSError
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError("taskwise executor success receipt is unreadable") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("taskwise executor success receipt schema is invalid")
+        receipts.append(TaskwiseExecutorSuccessReceiptV1.from_payload(payload))
+    session_ids = [receipt.session_id for receipt in receipts]
+    non_null_session_ids = [session_id for session_id in session_ids if session_id is not None]
+    if len(non_null_session_ids) != len(set(non_null_session_ids)):
+        raise ValueError("taskwise executor success receipt session is duplicated")
+    if expected_session_ids is not None:
+        if (
+            isinstance(expected_session_ids, (str, bytes))
+            or any(type(value) is not str or not value for value in expected_session_ids)
+            or len(expected_session_ids) != len(set(expected_session_ids))
+        ):
+            raise TypeError("expected_session_ids must be a unique string sequence")
+        if len(receipts) != len(expected_session_ids) or set(non_null_session_ids) != set(
+            expected_session_ids
+        ):
+            raise ValueError("taskwise executor success receipt set does not match sessions")
+    return tuple(
+        sorted(
+            receipts,
+            key=lambda receipt: (
+                -1 if receipt.task_index is None else receipt.task_index,
+                -1 if receipt.round_index is None else receipt.round_index,
+                "" if receipt.session_id is None else receipt.session_id,
+            ),
+        )
+    )
 
 
 def _codex_command(
@@ -2412,4 +2790,6 @@ __all__ = [
     "LocalCodexExecutionError",
     "LocalCodexExecutionErrorCode",
     "LocalCommandResult",
+    "TaskwiseExecutorSuccessReceiptV1",
+    "load_taskwise_success_receipts_v1",
 ]

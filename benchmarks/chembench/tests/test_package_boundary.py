@@ -72,6 +72,7 @@ class PackageBoundaryTests(unittest.TestCase):
             "security.py",
             "source_identity_v2.py",
             "taskwise_cli_v1.py",
+            "taskwise_canary_receipt_v1.py",
             "taskwise_config_v1.py",
             "taskwise_context_binding_v1.py",
             "taskwise_core_evolution_v1.py",
@@ -82,6 +83,7 @@ class PackageBoundaryTests(unittest.TestCase):
             "taskwise_sampling_v1.py",
             "taskwise_stream_statistics_v1.py",
             "taskwise_trajectory_v1.py",
+            "taskwise_update1_smoke_v1.py",
             "v2_cli.py",
             "v2_config.py",
         }

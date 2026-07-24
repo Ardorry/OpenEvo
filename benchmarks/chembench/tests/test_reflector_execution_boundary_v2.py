@@ -18,10 +18,10 @@ from openevo_chembench.reflector_execution_boundary_v2 import (
     TASKWISE_SOURCE_SPLIT,
     _bubblewrap_base_command,
     _create_layout,
+    _materialize_reflector_transport_environment,
     _reflector_hardening_arguments,
     _replace_upstream_paths,
     _run_process_group,
-    _sanitized_execution_environment,
     inspect_reflector_codex_policy_v2,
 )
 
@@ -383,7 +383,38 @@ def test_reflector_codex_receives_only_sanitized_transport_environment(
 ) -> None:
     proxy_sentinel = "http://proxy-sentinel.invalid:8080"
     private_sentinel = "private-environment-sentinel"
-    monkeypatch.setenv("https_proxy", proxy_sentinel)
+    proxy_keys = (
+        "ALL_PROXY",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "NO_PROXY",
+        "all_proxy",
+        "https_proxy",
+        "http_proxy",
+        "no_proxy",
+    )
+    for key in proxy_keys:
+        monkeypatch.setenv(key, f"{proxy_sentinel}/{key}")
+    ca_content = (
+        b"-----BEGIN CERTIFICATE-----\nZmFrZS1jZXJ0aWZpY2F0ZQ==\n-----END CERTIFICATE-----\n"
+    )
+    ca_sources: dict[str, Path] = {}
+    for key in (
+        "SSL_CERT_FILE",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "NODE_EXTRA_CA_CERTS",
+    ):
+        source = tmp_path / f"{key}.pem"
+        source.write_bytes(ca_content)
+        source.chmod(0o600)
+        ca_sources[key] = source
+        monkeypatch.setenv(key, os.fspath(source))
+    ca_directory = tmp_path / "ca-directory"
+    ca_directory.mkdir(mode=0o700)
+    (ca_directory / "01234567.0").write_bytes(ca_content)
+    (ca_directory / "01234567.0").chmod(0o600)
+    monkeypatch.setenv("SSL_CERT_DIR", os.fspath(ca_directory))
     monkeypatch.setenv("CHEMBENCH_PRIVATE_SENTINEL", private_sentinel)
     layout_root = tmp_path / "layout"
     layout_root.mkdir()
@@ -391,7 +422,20 @@ def test_reflector_codex_receives_only_sanitized_transport_environment(
     (layout["inputs"] / "dev_loo_dataset.jsonl").write_text("{}\n", encoding="utf-8")
     fake = tmp_path / "fake-codex"
     fake.write_text(
-        '#!/bin/sh\nprintf \'%s|%s\' "${https_proxy:-}" "${CHEMBENCH_PRIVATE_SENTINEL:-}"\n',
+        """#!/bin/sh
+set -eu
+for key in ALL_PROXY HTTPS_PROXY HTTP_PROXY NO_PROXY all_proxy https_proxy http_proxy no_proxy SSL_CERT_DIR SSL_CERT_FILE REQUESTS_CA_BUNDLE CURL_CA_BUNDLE NODE_EXTRA_CA_CERTS; do
+  eval "value=\\${$key:-}"
+  [ -n "$value" ]
+done
+[ -r "$SSL_CERT_FILE" ]
+[ -r "$REQUESTS_CA_BUNDLE" ]
+[ -r "$CURL_CA_BUNDLE" ]
+[ -r "$NODE_EXTRA_CA_CERTS" ]
+[ -r "$SSL_CERT_DIR/01234567.0" ]
+[ -z "${CHEMBENCH_PRIVATE_SENTINEL:-}" ]
+printf 'transport-ok'
+""",
         encoding="utf-8",
     )
     fake.chmod(0o700)
@@ -402,12 +446,25 @@ def test_reflector_codex_receives_only_sanitized_transport_environment(
         executable_command=("/opt/codex-bin",),
         include_codex=True,
     )
-    environment = _sanitized_execution_environment()
-    assert environment["https_proxy"] == proxy_sentinel
+    environment = _materialize_reflector_transport_environment(layout)
+    assert set(environment) == {
+        *proxy_keys,
+        "SSL_CERT_DIR",
+        "SSL_CERT_FILE",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "NODE_EXTRA_CA_CERTS",
+    }
+    assert environment["https_proxy"] == f"{proxy_sentinel}/https_proxy"
     assert "CHEMBENCH_PRIVATE_SENTINEL" not in environment
+    for key in ca_sources:
+        assert environment[key] == f"/transport-ca/{key}.pem"
+    assert environment["SSL_CERT_DIR"] == "/transport-ca/SSL_CERT_DIR"
     assert "--clearenv" not in command
     assert proxy_sentinel not in command
     assert private_sentinel not in command
+    assert all(os.fspath(source) not in command for source in ca_sources.values())
+    assert os.fspath(ca_directory) not in command
 
     completed = _run_process_group(
         command,
@@ -417,7 +474,7 @@ def test_reflector_codex_receives_only_sanitized_transport_environment(
     )
 
     assert completed.returncode == 0
-    assert completed.stdout == f"{proxy_sentinel}|"
+    assert completed.stdout == "transport-ok"
     assert private_sentinel not in completed.stdout
     assert proxy_sentinel not in completed.stderr
     assert private_sentinel not in completed.stderr
@@ -449,11 +506,70 @@ def test_reflector_process_rejects_non_transport_environment() -> None:
             input_text="",
             timeout_seconds=10.0,
             environment={
-                "LANG": "C.UTF-8",
-                "PATH": "/usr/bin:/bin",
                 "PRIVATE_SECRET": "forbidden",
             },
         )
+
+
+def test_reflector_transport_environment_ignores_empty_values(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for key in (
+        "ALL_PROXY",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "NO_PROXY",
+        "all_proxy",
+        "https_proxy",
+        "http_proxy",
+        "no_proxy",
+        "SSL_CERT_DIR",
+        "SSL_CERT_FILE",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "NODE_EXTRA_CA_CERTS",
+    ):
+        monkeypatch.setenv(key, "")
+    layout_root = tmp_path / "layout"
+    layout_root.mkdir()
+    layout = _create_layout(layout_root)
+
+    assert _materialize_reflector_transport_environment(layout) == {}
+
+
+@pytest.mark.parametrize(
+    "ca_key",
+    (
+        "SSL_CERT_FILE",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "NODE_EXTRA_CA_CERTS",
+    ),
+)
+def test_reflector_rejects_unsafe_ca_file_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    ca_key: str,
+) -> None:
+    real = tmp_path / "ca.pem"
+    real.write_text(
+        "-----BEGIN CERTIFICATE-----\nZmFrZQ==\n-----END CERTIFICATE-----\n",
+        encoding="utf-8",
+    )
+    real.chmod(0o600)
+    link = tmp_path / "ca-link.pem"
+    link.symlink_to(real)
+    monkeypatch.setenv(ca_key, os.fspath(link))
+    layout_root = tmp_path / "layout"
+    layout_root.mkdir()
+    layout = _create_layout(layout_root)
+
+    with pytest.raises(
+        ReflectorBoundaryError,
+        match="REFLECTOR_MODEL_TRANSPORT_ENV_INVALID",
+    ):
+        _materialize_reflector_transport_environment(layout)
 
 
 def test_safe_assistant_event_creates_private_log_and_cleans_root(

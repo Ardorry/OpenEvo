@@ -211,11 +211,15 @@ def test_dirty_uncommitted_source_rejected_before_paid_objects() -> None:
         calls["core"] += 1
         raise AssertionError("Core must not be instantiated")
 
+    def dirty_source_gate(_config):
+        raise cli.TaskwiseCLIError("TASKWISE_PACKAGE_SOURCE_DIRTY")
+
     with pytest.raises(cli.TaskwiseCLIError, match="TASKWISE_PACKAGE_SOURCE_DIRTY"):
         cli.run_arm(
             cli.CONFIG_ROOT / "online_canary9_taskwise_online_v1.yaml",
             executor_factory=executor_factory,
             core_port_factory=core_factory,
+            source_gate=dirty_source_gate,
         )
     assert calls == {"executor": 0, "core": 0}
 
@@ -544,14 +548,14 @@ def test_manifest_is_bound_to_config_scope_and_path() -> None:
         cli._verify_static_inputs(wrong_scope, path)
 
 
-def test_canary_fix2_uses_fresh_paired_run_namespaces() -> None:
+def test_canary_fix3_uses_fresh_paired_run_namespaces() -> None:
     control = load_taskwise_config_v1(cli.CONFIG_ROOT / "control_canary9_taskwise_online_v1.yaml")
     online = load_taskwise_config_v1(cli.CONFIG_ROOT / "online_canary9_taskwise_online_v1.yaml")
 
-    assert control.run_name == "control_canary9_repeated_session_v1_fix2"
-    assert online.run_name == "online_canary9_taskwise_evolution_v1_fix2"
-    assert control.output_directory.endswith("/canary9/control_fix2")
-    assert online.output_directory.endswith("/canary9/online_fix2")
+    assert control.run_name == "control_canary9_repeated_session_v1_fix3"
+    assert online.run_name == "online_canary9_taskwise_evolution_v1_fix3"
+    assert control.output_directory.endswith("/canary9/control_fix3")
+    assert online.output_directory.endswith("/canary9/online_fix3")
     assert "fix1" not in control.output_directory
     assert "fix1" not in online.output_directory
 
@@ -756,28 +760,14 @@ def test_each_stream_constructs_a_fresh_scope_specific_core_namespace(
     framework_lock.write_text("{}\n", encoding="utf-8")
     captured: list[dict[str, object]] = []
 
-    class FakeBoundary:
-        @staticmethod
-        def detect_capability():
-            return SimpleNamespace(available=True)
-
-        def __init__(self, **_kwargs):
-            pass
-
-        def preflight(self):
-            return SimpleNamespace(available=True)
-
-    class FakeBridge:
-        def __init__(self, **kwargs):
-            captured.append(kwargs)
+    def fake_builder(**kwargs):
+        captured.append(kwargs)
+        return object()
 
     monkeypatch.setattr(cli, "FRAMEWORK_LOCK", framework_lock)
     monkeypatch.setattr(cli, "TASKWISE_STATE_ROOT", tmp_path / "state")
     monkeypatch.setattr(cli, "WORKSPACE_ROOT", tmp_path)
-    monkeypatch.setattr(cli, "ReflectorExecutionBoundaryV2", FakeBoundary)
-    monkeypatch.setattr(cli, "load_verified_framework_registry", lambda _path: object())
-    monkeypatch.setattr(cli, "TaskwiseCoreEvolutionBridgeV1", FakeBridge)
-    monkeypatch.setattr(cli, "TaskwiseCoreUpdatePortAdapterV1", lambda bridge: bridge)
+    monkeypatch.setattr(cli, "build_taskwise_core_port_at_roots_v1", fake_builder)
 
     for index in (0, 1):
         scope = f"pilot500_stream_{index:02d}"
@@ -788,7 +778,7 @@ def test_each_stream_constructs_a_fresh_scope_specific_core_namespace(
         cli.build_default_taskwise_core_port_v1(config)
 
     assert len(captured) == 2
-    roots = [Path(item["db_path"]).parent for item in captured]
+    roots = [Path(item["state_root"]) for item in captured]
     assert roots[0] != roots[1]
     assert roots[0].parts[-2:] == (
         "pilot500_stream_00",
@@ -798,6 +788,7 @@ def test_each_stream_constructs_a_fresh_scope_specific_core_namespace(
         "pilot500_stream_01",
         "online_pilot500_stream_01_taskwise_evolution_v1",
     )
+    assert all(item["framework_lock"] == framework_lock for item in captured)
     assert all(not (root / "private_lineage_checkpoints.jsonl").exists() for root in roots)
 
 
@@ -838,6 +829,7 @@ def test_suite_orchestrator_skips_resumes_and_starts_per_stream(
 ) -> None:
     monkeypatch.setattr(cli, "WORKSPACE_ROOT", tmp_path)
     monkeypatch.setattr(cli, "_verify_static_inputs", lambda *_args: None)
+    monkeypatch.setattr(cli, "require_taskwise_pilot_authorization_v1", lambda: object())
     suite_state = tmp_path / "suite" / "control.json"
     calls: list[tuple[str, bool]] = []
 
@@ -934,6 +926,7 @@ def test_suite_orchestrator_stops_entire_suite_on_terminal_failure(
 ) -> None:
     monkeypatch.setattr(cli, "WORKSPACE_ROOT", tmp_path)
     monkeypatch.setattr(cli, "_verify_static_inputs", lambda *_args: None)
+    monkeypatch.setattr(cli, "require_taskwise_pilot_authorization_v1", lambda: object())
     suite_state = tmp_path / "suite" / "online.json"
     config = load_taskwise_config_v1(
         cli.CONFIG_ROOT / "online_pilot500_stream_00_taskwise_online_v1.yaml"
@@ -1016,6 +1009,7 @@ def test_suite_records_config_policy_failure_without_arbitrary_exception_text(
 ) -> None:
     monkeypatch.setattr(cli, "WORKSPACE_ROOT", tmp_path)
     monkeypatch.setattr(cli, "_verify_static_inputs", lambda *_args: None)
+    monkeypatch.setattr(cli, "require_taskwise_pilot_authorization_v1", lambda: object())
     suite_state = tmp_path / "suite" / "control.json"
 
     def blocked_runner(_config_path: Path, *, resume: bool) -> dict[str, object]:
@@ -1050,6 +1044,7 @@ def test_suite_orchestrator_records_resumable_infrastructure_failure(
 ) -> None:
     monkeypatch.setattr(cli, "WORKSPACE_ROOT", tmp_path)
     monkeypatch.setattr(cli, "_verify_static_inputs", lambda *_args: None)
+    monkeypatch.setattr(cli, "require_taskwise_pilot_authorization_v1", lambda: object())
     calls = 0
 
     def fake_runner(_config_path: Path, *, resume: bool) -> dict[str, object]:

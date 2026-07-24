@@ -35,9 +35,10 @@ import uuid
 
 from openevo_chembench.local_codex_executor import (
     _DISABLED_CODEX_FEATURES,
-    _SAFE_ENV_KEYS,
+    _MODEL_TRANSPORT_ENV_KEYS,
     _find_security_tool_use,
-    _sanitized_execution_environment,
+    _path_is_inside_any_protected_root,
+    _sanitized_model_transport_environment,
 )
 
 
@@ -61,6 +62,16 @@ _ROOT_PREFIX = "openevo-chembench-reflector-v2-"
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _MAX_EVENT_BYTES = 16 * 1024 * 1024
 _MAX_LAST_MESSAGE_BYTES = 64 * 1024
+_MAX_TRANSPORT_CA_FILE_BYTES = 8 * 1024 * 1024
+_MAX_TRANSPORT_CA_DIRECTORY_BYTES = 32 * 1024 * 1024
+_MAX_TRANSPORT_CA_DIRECTORY_ENTRIES = 2048
+_TRANSPORT_CA_FILE_KEYS = (
+    "SSL_CERT_FILE",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
+)
+_TRANSPORT_CA_DIRECTORY_KEY = "SSL_CERT_DIR"
 _CODEX_POLICY_PROBE_TIMEOUT_SECONDS = 15.0
 _EXPECTED_CODEX_VERSION = "codex-cli 0.144.6"
 _WRAPPER_EXIT_INVALID = 80
@@ -738,6 +749,7 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
         ):
             raise ReflectorBoundaryError("REFLECTOR_DEV_ARTIFACT_BINDING_INVALID")
         rewritten = _replace_upstream_paths(rewritten)
+        transport_environment = _materialize_reflector_transport_environment(layout)
         command = _bubblewrap_base_command(
             bwrap_binary=Path(config["bwrap_binary"]),
             layout=layout,
@@ -753,7 +765,7 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
             command,
             input_text=prompt,
             timeout_seconds=float(config["timeout_seconds"]),
-            environment=_sanitized_execution_environment(),
+            environment=transport_environment,
         )
         codex_returncode = completed.returncode
         event_stream = completed.stdout
@@ -1169,6 +1181,160 @@ def _sandboxed_codex_command(
     return ("/opt/codex-bin", *arguments)
 
 
+def _materialize_reflector_transport_environment(
+    layout: Mapping[str, Path],
+) -> dict[str, str]:
+    """Copy approved CA material and return the exact transport-only environment."""
+
+    try:
+        transport_root = layout["transport_ca"]
+        metadata = transport_root.lstat()
+    except (KeyError, OSError) as exc:
+        raise ReflectorBoundaryError("REFLECTOR_MODEL_TRANSPORT_ENV_INVALID") from exc
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or not stat.S_ISDIR(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+        or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
+    ):
+        raise ReflectorBoundaryError("REFLECTOR_MODEL_TRANSPORT_ENV_INVALID")
+    try:
+        if any(transport_root.iterdir()):
+            raise OSError
+    except OSError as exc:
+        raise ReflectorBoundaryError("REFLECTOR_MODEL_TRANSPORT_ENV_INVALID") from exc
+    try:
+        source_environment = _sanitized_model_transport_environment()
+    except ValueError as exc:
+        raise ReflectorBoundaryError("REFLECTOR_MODEL_TRANSPORT_ENV_INVALID") from exc
+    environment = {
+        key: value
+        for key, value in source_environment.items()
+        if key not in {*_TRANSPORT_CA_FILE_KEYS, _TRANSPORT_CA_DIRECTORY_KEY}
+    }
+    for key in _TRANSPORT_CA_FILE_KEYS:
+        value = source_environment.get(key)
+        if value is None:
+            continue
+        destination_name = f"{key}.pem"
+        content = _read_safe_transport_ca_file(Path(value), allow_symlink=False)
+        try:
+            _exclusive_write(
+                transport_root / destination_name,
+                content,
+                mode=0o400,
+            )
+        except OSError as exc:
+            raise ReflectorBoundaryError("REFLECTOR_MODEL_TRANSPORT_ENV_INVALID") from exc
+        environment[key] = f"/transport-ca/{destination_name}"
+    directory_value = source_environment.get(_TRANSPORT_CA_DIRECTORY_KEY)
+    if directory_value is not None:
+        destination = transport_root / _TRANSPORT_CA_DIRECTORY_KEY
+        try:
+            destination.mkdir(mode=0o700)
+            _copy_safe_transport_ca_directory(
+                Path(directory_value),
+                destination,
+            )
+        except OSError as exc:
+            raise ReflectorBoundaryError("REFLECTOR_MODEL_TRANSPORT_ENV_INVALID") from exc
+        environment[_TRANSPORT_CA_DIRECTORY_KEY] = f"/transport-ca/{_TRANSPORT_CA_DIRECTORY_KEY}"
+    return {key: environment[key] for key in _MODEL_TRANSPORT_ENV_KEYS if key in environment}
+
+
+def _read_safe_transport_ca_file(
+    source: Path,
+    *,
+    allow_symlink: bool,
+) -> bytes:
+    if not source.is_absolute():
+        raise ReflectorBoundaryError("REFLECTOR_MODEL_TRANSPORT_ENV_INVALID")
+    try:
+        source_metadata = source.lstat()
+        if stat.S_ISLNK(source_metadata.st_mode):
+            if not allow_symlink:
+                raise OSError
+            resolved = source.resolve(strict=True)
+        else:
+            resolved = source.resolve(strict=True)
+        metadata = resolved.lstat()
+        if (
+            stat.S_ISLNK(metadata.st_mode)
+            or not stat.S_ISREG(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) & 0o022
+            or metadata.st_size > _MAX_TRANSPORT_CA_FILE_BYTES
+            or _path_is_inside_any_protected_root(resolved)
+        ):
+            raise OSError
+        flags = os.O_RDONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = os.open(resolved, flags)
+        try:
+            opened_metadata = os.fstat(descriptor)
+            if (
+                opened_metadata.st_dev != metadata.st_dev
+                or opened_metadata.st_ino != metadata.st_ino
+                or not stat.S_ISREG(opened_metadata.st_mode)
+            ):
+                raise OSError
+            with os.fdopen(descriptor, "rb") as stream:
+                descriptor = -1
+                content = stream.read(_MAX_TRANSPORT_CA_FILE_BYTES + 1)
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+    except OSError as exc:
+        raise ReflectorBoundaryError("REFLECTOR_MODEL_TRANSPORT_ENV_INVALID") from exc
+    if (
+        not content
+        or len(content) > _MAX_TRANSPORT_CA_FILE_BYTES
+        or b"-----BEGIN CERTIFICATE-----" not in content
+        or b"-----END CERTIFICATE-----" not in content
+    ):
+        raise ReflectorBoundaryError("REFLECTOR_MODEL_TRANSPORT_ENV_INVALID")
+    return content
+
+
+def _copy_safe_transport_ca_directory(source: Path, destination: Path) -> None:
+    if not source.is_absolute():
+        raise ReflectorBoundaryError("REFLECTOR_MODEL_TRANSPORT_ENV_INVALID")
+    try:
+        source_metadata = source.lstat()
+        resolved = source.resolve(strict=True)
+        metadata = resolved.lstat()
+        if (
+            stat.S_ISLNK(source_metadata.st_mode)
+            or stat.S_ISLNK(metadata.st_mode)
+            or not stat.S_ISDIR(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) & 0o022
+            or _path_is_inside_any_protected_root(resolved)
+        ):
+            raise OSError
+        entries = tuple(sorted(resolved.iterdir(), key=lambda path: path.name))
+    except OSError as exc:
+        raise ReflectorBoundaryError("REFLECTOR_MODEL_TRANSPORT_ENV_INVALID") from exc
+    if not entries or len(entries) > _MAX_TRANSPORT_CA_DIRECTORY_ENTRIES:
+        raise ReflectorBoundaryError("REFLECTOR_MODEL_TRANSPORT_ENV_INVALID")
+    total_bytes = 0
+    copied = 0
+    for entry in entries:
+        try:
+            entry_metadata = entry.lstat()
+        except OSError as exc:
+            raise ReflectorBoundaryError("REFLECTOR_MODEL_TRANSPORT_ENV_INVALID") from exc
+        if stat.S_ISDIR(entry_metadata.st_mode):
+            continue
+        content = _read_safe_transport_ca_file(entry, allow_symlink=True)
+        total_bytes += len(content)
+        copied += 1
+        if total_bytes > _MAX_TRANSPORT_CA_DIRECTORY_BYTES:
+            raise ReflectorBoundaryError("REFLECTOR_MODEL_TRANSPORT_ENV_INVALID")
+        _exclusive_write(destination / entry.name, content, mode=0o400)
+    if copied == 0:
+        raise ReflectorBoundaryError("REFLECTOR_MODEL_TRANSPORT_ENV_INVALID")
+
+
 def _bubblewrap_base_command(
     *,
     bwrap_binary: Path,
@@ -1268,6 +1434,13 @@ def _bubblewrap_base_command(
     )
     if include_codex:
         resolved = executable_source.resolve()
+        command.extend(
+            (
+                "--ro-bind",
+                os.fspath(layout["transport_ca"]),
+                "/transport-ca",
+            )
+        )
         command.extend(("--ro-bind", os.fspath(resolved), "/opt/codex-bin"))
     command.extend(("--", *executable_command))
     return command
@@ -1292,9 +1465,8 @@ def _run_process_group(
     ):
         raise TypeError("environment must be a string mapping")
     if (
-        not set(environment).issubset(_SAFE_ENV_KEYS)
-        or not environment.get("PATH")
-        or not environment.get("LANG")
+        not set(environment).issubset(_MODEL_TRANSPORT_ENV_KEYS)
+        or any(not value for value in environment.values())
         or any("\x00" in value for value in environment.values())
     ):
         raise ReflectorBoundaryError("REFLECTOR_MODEL_TRANSPORT_ENV_INVALID")
@@ -1370,6 +1542,7 @@ def _create_layout(root: Path) -> dict[str, Path]:
         "inputs",
         "output",
         "private_events",
+        "transport_ca",
     ):
         path = root / name
         path.mkdir(mode=0o700)

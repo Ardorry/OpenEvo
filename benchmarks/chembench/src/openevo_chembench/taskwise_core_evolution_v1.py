@@ -37,6 +37,7 @@ from openevo.evolution.framework import (
     TargetConsumptionLimits,
     canonical_digest,
     canonical_json,
+    load_verified_framework_registry,
 )
 from openevo.evolution.framework.builtins import (
     VerifiedExecutableRegistry,
@@ -1986,6 +1987,110 @@ class TaskwiseCoreUpdatePortAdapterV1:
         self._bridge.close()
 
 
+def build_taskwise_core_port_at_roots_v1(
+    *,
+    state_root: Path,
+    framework_lock: Path,
+    timeout_seconds: int,
+    memory_limits: TaskwiseMemoryLimitsV1 = TASKWISE_MEMORY_LIMITS_V1,
+) -> TaskwiseCoreUpdatePortAdapterV1:
+    """Build the production Core port at caller-owned, explicit private roots.
+
+    Output-directory parity and new-run/resume policy remain controller
+    responsibilities.  This helper owns only the Core state subtree and keeps
+    both the formal taskwise CLI and bounded infrastructure smokes on the same
+    registered-method, reflector-boundary, artifact, and context path.
+    """
+
+    if (
+        not isinstance(state_root, Path)
+        or not state_root.is_absolute()
+        or not isinstance(framework_lock, Path)
+        or not framework_lock.is_absolute()
+    ):
+        raise TypeError("Core state and framework lock roots must be absolute Paths")
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, int)
+        or not 0 < timeout_seconds <= 86_400
+    ):
+        raise ValueError("Core reflector timeout must be positive and bounded")
+    if type(memory_limits) is not TaskwiseMemoryLimitsV1:
+        raise TypeError("memory_limits must be exact TaskwiseMemoryLimitsV1")
+    if not framework_lock.is_file():
+        raise TaskwiseCoreEvolutionError("TASKWISE_VERIFIED_FRAMEWORK_LOCK_MISSING")
+
+    capability = ReflectorExecutionBoundaryV2.detect_capability()
+    if not capability.available:
+        raise TaskwiseCoreEvolutionError("REFLECTOR_FILESYSTEM_ISOLATION_MISSING")
+    _prepare_private_state_root(state_root)
+    private_audit_root = state_root / "private_reflector_events"
+
+    probe_record = {
+        "uid": "0" * 64,
+        "source_split": TASKWISE_SOURCE_SPLIT,
+    }
+    probe_digest = canonical_digest([probe_record])
+    with tempfile.TemporaryDirectory(
+        prefix=".taskwise-reflector-preflight-",
+        dir=state_root,
+    ) as temporary:
+        probe_path = Path(temporary) / "records.jsonl"
+        _exclusive_private_write(probe_path, (_canonical_json(probe_record) + "\n").encode())
+        boundary = ReflectorExecutionBoundaryV2(
+            dev_artifact_path=probe_path,
+            expected_records_sha256=probe_digest,
+            expected_record_count=1,
+            expected_source_split=TASKWISE_SOURCE_SPLIT,
+            private_audit_root=private_audit_root,
+            timeout_seconds=timeout_seconds,
+        )
+        if not boundary.preflight().available:
+            raise TaskwiseCoreEvolutionError("REFLECTOR_FILESYSTEM_ISOLATION_MISSING")
+
+    def boundary_factory(
+        artifact_path: Path,
+        records_sha256: str,
+        record_count: int,
+    ) -> ReflectorExecutionBoundaryV2:
+        return ReflectorExecutionBoundaryV2(
+            dev_artifact_path=artifact_path,
+            expected_records_sha256=records_sha256,
+            expected_record_count=record_count,
+            expected_source_split=TASKWISE_SOURCE_SPLIT,
+            private_audit_root=private_audit_root,
+            timeout_seconds=timeout_seconds,
+        )
+
+    bridge = TaskwiseCoreEvolutionBridgeV1(
+        db_path=state_root / "evolution.sqlite3",
+        artifact_root=state_root / "artifacts",
+        executable_registry=load_verified_framework_registry(framework_lock),
+        reflector_boundary_factory=boundary_factory,
+        checkpoint_path=state_root / "private_lineage_checkpoints.jsonl",
+        memory_limits=memory_limits,
+    )
+    return TaskwiseCoreUpdatePortAdapterV1(bridge)
+
+
+def _prepare_private_state_root(path: Path) -> None:
+    """Create or validate one non-symlink, owner-private Core state root."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        metadata = path.lstat()
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            raise TaskwiseCoreEvolutionError("TASKWISE_CORE_STATE_ROOT_UNSAFE")
+    else:
+        path.mkdir(mode=0o700)
+    path.chmod(0o700)
+    metadata = path.lstat()
+    if stat.S_IMODE(metadata.st_mode) != 0o700 or (
+        hasattr(os, "getuid") and metadata.st_uid != os.getuid()
+    ):
+        raise TaskwiseCoreEvolutionError("TASKWISE_CORE_STATE_ROOT_UNSAFE")
+
+
 def _trajectory_forbidden_literals(
     trajectory: TaskwiseTrajectoryV1,
 ) -> tuple[str, ...]:
@@ -2078,6 +2183,7 @@ def _validator_input_digest(values: tuple[str, ...]) -> str:
 
 
 __all__ = [
+    "build_taskwise_core_port_at_roots_v1",
     "BRIDGE_ID",
     "METHOD_ID",
     "PROTOCOL_ID",

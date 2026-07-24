@@ -1,0 +1,52 @@
+schema_version: chembench4k_taskwise_update1_smoke_config_v1
+protocol_id: taskwise_update1_infrastructure_smoke_v1
+classification:
+  - NON_PERFORMANCE_INFRASTRUCTURE_SMOKE
+  - ONLINE_UPDATE_PATH_ONLY
+  - ROUND_0_PLUS_UPDATE_1
+  - STOP_BEFORE_ROUND_1
+  - NOT_A_STANDARD_CHEMBENCH4K_SCORE
+scope: update1_smoke
+arm: online
+dataset:
+  repository: AI4Chem/ChemBench4K
+  revision: f8ad41a980170f4c5d0cc97e57722d06887c8f53
+  root: data/chembench4k/AI4Chem_ChemBench4K/f8ad41a980170f4c5d0cc97e57722d06887c8f53
+  manifest: data/chembench4k/AI4Chem_ChemBench4K/f8ad41a980170f4c5d0cc97e57722d06887c8f53/chembench4k_dataset_manifest_v2.json
+  source_public_task_manifest: OpenEvo/benchmarks/chembench/manifests/taskwise_online_v1/smoke1_public_manifest.jsonl
+  source_private_task_manifest: OpenEvo/benchmarks/chembench/private_manifests/taskwise_online_v1/smoke1_private_manifest.jsonl
+  source_manifest_summary: OpenEvo/benchmarks/chembench/manifests/taskwise_online_v1/smoke1_summary.json
+model: gpt-5.5
+reasoning_effort: medium
+codex_cli_version: 0.144.6
+prompt_renderer_id: chembench4k_official_five_shot_v2
+parser_id: official_first_capital_parser_v2
+evaluator_id: chembench4k_accuracy_v2
+tasks: 1
+task_sessions: 1
+rounds_completed: 1
+evolution_updates: 1
+core_jobs: 1
+core_artifacts: 1
+core_context_resolutions: 1
+round_1_sessions: 0
+memory_injected_into_task_session: false
+resume_enabled: false
+executor:
+  backend: local_codex_cli
+  harness: codex_cli
+  timeout_seconds: 600
+  concurrency: 1
+  infrastructure_retries: 0
+  tools_enabled: false
+  mcp_enabled: false
+  web_enabled: false
+  network_enabled: false
+  subagents_enabled: false
+output_root: OpenEvo/results/chembench4k_taskwise_online_v1/update1_smoke
+state_root: OpenEvo/benchmarks/chembench/state/taskwise_online_v1/update1_smoke
+diagnostic_root: OpenEvo/benchmarks/chembench/state/taskwise_online_v1/private_executor_events/update1_smoke
+framework_lock: OpenEvo/benchmarks/chembench/state/v2/framework/framework-lock.json
+source_manifest: OpenEvo/benchmarks/chembench/manifests/chembench_source_manifest_v2.json
+online_executor_compat_config: OpenEvo/benchmarks/chembench/configs/online_canary9_taskwise_online_v1.yaml
+source_commit: BIND_CLEAN_HEAD_AT_LAUNCH

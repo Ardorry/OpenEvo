@@ -11,3 +11,5 @@ run_taskwise_manifest_tool verify
 require_taskwise_source_commit "${CONTROL_CONFIG}"
 require_taskwise_source_commit "${ONLINE_CONFIG}"
 run_taskwise_cli compare --scope canary9
+run_taskwise_cli freeze-canary-receipt
+run_taskwise_cli verify-canary-receipt

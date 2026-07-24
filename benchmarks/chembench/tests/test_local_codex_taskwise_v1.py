@@ -3,9 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import stat
+from unittest.mock import patch
 
 import pytest
 
+import openevo_chembench.local_codex_executor as executor_module
 from openevo_chembench.frozen_runtime_v2 import (
     _issue_core_resolved_text_memory_v2,
 )
@@ -13,6 +16,7 @@ from openevo_chembench.local_codex_executor import (
     LocalCodexCLIExecutor,
     LocalCodexExecutionError,
     LocalCommandResult,
+    load_taskwise_success_receipts_v1,
 )
 from openevo_chembench.taskwise_config_v1 import (
     ONLINE_PROTOCOL_ID,
@@ -97,6 +101,8 @@ def _request(
     task_ordinal: int,
     round_index: int,
     memory=None,
+    run_id: str | None = None,
+    task_uid: str | None = None,
 ) -> TaskwiseAgentRequestV1:
     return TaskwiseAgentRequestV1(
         rendered_public_prompt=(
@@ -110,6 +116,8 @@ def _request(
         arm="online",
         task_ordinal=task_ordinal,
         round_index=round_index,  # type: ignore[arg-type]
+        run_id=run_id,
+        task_uid=task_uid,
     )
 
 
@@ -248,3 +256,164 @@ def test_three_taskwise_rounds_use_three_independent_invocation_roots(
     assert len({path.name for path in invocation_roots}) == 3
     assert all(not path.exists() for path in invocation_roots)
     executor.close()
+
+
+def test_successful_taskwise_invocation_writes_content_free_private_receipt(
+    tmp_path: Path,
+) -> None:
+    executor = _executor(
+        tmp_path,
+        lambda *_args: LocalCommandResult(returncode=0, stdout=_transcript(), stderr=""),
+    )
+    request = _request(
+        session_id="session-task-000-round-0",
+        task_ordinal=0,
+        round_index=0,
+        run_id="receipt_run_0001",
+        task_uid="d" * 64,
+    )
+
+    attempt = executor.execute_taskwise(request)
+
+    receipts = load_taskwise_success_receipts_v1(
+        tmp_path / "diagnostics",
+        expected_session_ids=(request.session_id,),
+    )
+    assert len(receipts) == 1
+    receipt = receipts[0]
+    assert receipt.run_id == request.run_id
+    assert receipt.task_uid == request.task_uid
+    assert receipt.task_index == request.task_ordinal
+    assert receipt.round_index == request.round_index
+    assert receipt.session_id == request.session_id
+    assert receipt.event_stream_sha256 == attempt.transcript_reference.reference.removeprefix(
+        "local-codex-jsonl:sha256:"
+    )
+    assert receipt.event_count == 4
+    assert receipt.tool_event_count == 0
+    assert receipt.process_return_code == 0
+    assert receipt.completion_observed is True
+    assert receipt.cleanup_status == "COMPLETE"
+    assert receipt.residual_root_count == 0
+    path = next((tmp_path / "diagnostics").glob("success_*.json"))
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    serialized = path.read_text(encoding="utf-8")
+    for forbidden in (
+        "public sentinel",
+        "target_scores",
+        '"response"',
+        '"stdout"',
+        '"stderr"',
+        '"prompt"',
+    ):
+        assert forbidden not in serialized
+
+
+def test_success_receipt_loader_rejects_unknown_fields_and_duplicate_sessions(
+    tmp_path: Path,
+) -> None:
+    executor = _executor(
+        tmp_path,
+        lambda *_args: LocalCommandResult(returncode=0, stdout=_transcript(), stderr=""),
+    )
+    request = _request(
+        session_id="session-task-000-round-0",
+        task_ordinal=0,
+        round_index=0,
+        run_id="receipt_run_0002",
+        task_uid="e" * 64,
+    )
+    executor.execute_taskwise(request)
+    diagnostic_root = tmp_path / "diagnostics"
+    first = next(diagnostic_root.glob("success_*.json"))
+    payload = json.loads(first.read_text(encoding="utf-8"))
+    duplicate = diagnostic_root / f"success_{'f' * 32}.json"
+    duplicate.write_text(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    duplicate.chmod(0o600)
+    with pytest.raises(ValueError, match="session is duplicated"):
+        load_taskwise_success_receipts_v1(diagnostic_root)
+
+    duplicate.unlink()
+    payload["unexpected_private_field"] = "forbidden"
+    first.write_text(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    first.chmod(0o600)
+    with pytest.raises(ValueError, match="schema is invalid"):
+        load_taskwise_success_receipts_v1(diagnostic_root)
+
+
+def test_success_receipt_write_failure_fails_closed_after_completion(
+    tmp_path: Path,
+) -> None:
+    executor = _executor(
+        tmp_path,
+        lambda *_args: LocalCommandResult(returncode=0, stdout=_transcript(), stderr=""),
+    )
+    request = _request(
+        session_id="session-task-000-round-0",
+        task_ordinal=0,
+        round_index=0,
+        run_id="receipt_run_0003",
+        task_uid="a" * 64,
+    )
+
+    with patch.object(executor_module, "_persist_success_receipt", return_value=None):
+        with pytest.raises(LocalCodexExecutionError) as raised:
+            executor.execute_taskwise(request)
+
+    assert raised.value.taskwise_failure_code == "EXECUTOR_PRIVATE_DIAGNOSTICS_FAILED"
+    assert raised.value.executor_stage == "PRIVATE_EVENT_PERSISTENCE"
+    assert raised.value.completion_observed is True
+    assert raised.value.retry_allowed is False
+    assert raised.value.resume_allowed is False
+    assert raised.value.replacement_completion_allowed is False
+    assert tuple((tmp_path / "diagnostics").glob("success_*.json")) == ()
+
+
+def test_success_receipt_loader_rejects_missing_unsafe_and_extra_evidence(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="directory is unavailable"):
+        load_taskwise_success_receipts_v1(tmp_path / "missing")
+
+    executor = _executor(
+        tmp_path,
+        lambda *_args: LocalCommandResult(returncode=0, stdout=_transcript(), stderr=""),
+    )
+    request = _request(
+        session_id="session-task-000-round-0",
+        task_ordinal=0,
+        round_index=0,
+        run_id="receipt_run_0004",
+        task_uid="b" * 64,
+    )
+    executor.execute_taskwise(request)
+    diagnostic_root = tmp_path / "diagnostics"
+    receipt = next(diagnostic_root.glob("success_*.json"))
+
+    receipt.chmod(0o644)
+    with pytest.raises(ValueError, match="receipt is unreadable"):
+        load_taskwise_success_receipts_v1(diagnostic_root)
+    receipt.chmod(0o600)
+
+    with pytest.raises(ValueError, match="set does not match sessions"):
+        load_taskwise_success_receipts_v1(
+            diagnostic_root,
+            expected_session_ids=("unexpected-session",),
+        )
+
+    malformed = diagnostic_root / "success_not-a-valid-id.json"
+    malformed.symlink_to(receipt)
+    with pytest.raises(ValueError, match="filename is invalid"):
+        load_taskwise_success_receipts_v1(diagnostic_root)
+    malformed.unlink()
+
+    symlink = diagnostic_root / f"success_{'c' * 32}.json"
+    symlink.symlink_to(receipt)
+    with pytest.raises(ValueError, match="receipt is unreadable"):
+        load_taskwise_success_receipts_v1(diagnostic_root)

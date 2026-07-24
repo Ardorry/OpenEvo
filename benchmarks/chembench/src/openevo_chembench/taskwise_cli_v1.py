@@ -13,10 +13,6 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from openevo.evolution.framework import (
-    canonical_digest,
-    load_verified_framework_registry,
-)
 from openevo_chembench.chembench4k_dataset import ChemBench4KDatasetLoader
 from openevo_chembench.chembench4k_models import CHEMBENCH4K_CATEGORIES
 from openevo_chembench.chembench4k_prompt import render_official_five_shot_prompt
@@ -31,9 +27,15 @@ from openevo_chembench.taskwise_config_v1 import (
     load_taskwise_config_v1,
     taskwise_arm_parity_findings,
 )
+from openevo_chembench.taskwise_canary_receipt_v1 import (
+    TaskwisePilotAuthorizationV1,
+    default_taskwise_canary_receipt_inputs_v1,
+    default_taskwise_canary_receipt_path_v1,
+    verify_taskwise_paired_canary_receipt_v1,
+    write_taskwise_paired_canary_receipt_v1,
+)
 from openevo_chembench.taskwise_core_evolution_v1 import (
-    TaskwiseCoreEvolutionBridgeV1,
-    TaskwiseCoreUpdatePortAdapterV1,
+    build_taskwise_core_port_at_roots_v1,
 )
 from openevo_chembench.taskwise_online_runner_v1 import (
     TaskwiseCoreUpdatePortV1,
@@ -64,10 +66,6 @@ from openevo_chembench.taskwise_sampling_v1 import (
 from openevo_chembench.taskwise_stream_statistics_v1 import (
     PrivateTaskwisePairedStreamV1,
     build_taskwise_pilot500_stream_report_v1,
-)
-from openevo_chembench.reflector_execution_boundary_v2 import (
-    ReflectorExecutionBoundaryV2,
-    TASKWISE_SOURCE_SPLIT,
 )
 from openevo_chembench.source_identity_v2 import (
     SourceManifestError,
@@ -207,12 +205,15 @@ _CLI_PUBLIC_FAILURE_CODES = (
             "TASKWISE_COMPARISON_OUTPUT_EXISTS",
             "TASKWISE_CONFIG_PATH_BINDING_MISMATCH",
             "TASKWISE_CONTROL_MEMORY_EVIDENCE_INVALID",
+            "TASKWISE_CORE_PREFLIGHT_FAILED",
             "TASKWISE_CORE_RUN_STATE_MISMATCH",
             "TASKWISE_EPISODE_COUNT_MISMATCH",
             "TASKWISE_GIT_IDENTITY_UNAVAILABLE",
             "TASKWISE_OUTPUT_TARGET_EXISTS",
             "TASKWISE_PACKAGE_SOURCE_DIRTY",
             "TASKWISE_PAIRED_CONFIG_UNAVAILABLE",
+            "TASKWISE_PAIRED_CANARY_RECEIPT_EXISTS",
+            "TASKWISE_PAIRED_CANARY_RECEIPT_INVALID",
             "TASKWISE_PAIRED_RUN_BINDING_MISMATCH",
             "TASKWISE_PUBLIC_EVENT_EVIDENCE_INVALID",
             "TASKWISE_RESUME_OUTPUT_MISSING",
@@ -461,6 +462,8 @@ def run_arm(
     """Validate every frozen input before constructing paid runtime objects."""
 
     config = load_taskwise_config_v1(config_path.resolve())
+    if config.scope in PILOT500_STREAM_SCOPES:
+        require_taskwise_pilot_authorization_v1()
     gate = source_gate or verify_taskwise_source_gate_v1
     current_commit = gate(config)
     loader, manifest, paired_configs = _verify_static_inputs(config, config_path)
@@ -523,6 +526,7 @@ def run_pilot500_stream_suite(
 
     if arm not in {"control", "online"}:
         raise TaskwiseCLIError("TASKWISE_SUITE_ARM_INVALID")
+    require_taskwise_pilot_authorization_v1()
     runner = arm_runner or run_arm
     state_path = suite_state_path or _resolve_workspace_path(
         (
@@ -1069,6 +1073,58 @@ def verify_taskwise_source_gate_v1(config: TaskwiseExperimentConfigV1) -> str:
     return head
 
 
+def freeze_taskwise_paired_canary_receipt_v1() -> dict[str, object]:
+    """Freeze the fixed paired-canary receipt after recomputing every gate."""
+
+    inputs = default_taskwise_canary_receipt_inputs_v1(PACKAGE_ROOT)
+    receipt_path = default_taskwise_canary_receipt_path_v1(PACKAGE_ROOT)
+    if receipt_path.exists() or receipt_path.is_symlink():
+        raise TaskwiseCLIError("TASKWISE_PAIRED_CANARY_RECEIPT_EXISTS")
+    try:
+        receipt = write_taskwise_paired_canary_receipt_v1(inputs, receipt_path)
+        receipt_sha256 = hashlib.sha256(receipt_path.read_bytes()).hexdigest()
+    except FileExistsError as exc:
+        raise TaskwiseCLIError("TASKWISE_PAIRED_CANARY_RECEIPT_EXISTS") from exc
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise TaskwiseCLIError("TASKWISE_PAIRED_CANARY_RECEIPT_INVALID") from exc
+    return {
+        "schema_version": "taskwise_paired_canary_receipt_freeze_v1",
+        "status": "PASS",
+        "paid_pilot_allowed": receipt.paid_pilot_allowed,
+        "receipt_sha256": receipt_sha256,
+        "evidence_digest": receipt.evidence_digest,
+        "receipt_path": receipt_path.relative_to(REPOSITORY_ROOT).as_posix(),
+        "model_calls": 0,
+    }
+
+
+def require_taskwise_pilot_authorization_v1() -> TaskwisePilotAuthorizationV1:
+    """Recompute the fixed current receipt and issue the pilot capability."""
+
+    try:
+        return verify_taskwise_paired_canary_receipt_v1(
+            default_taskwise_canary_receipt_inputs_v1(PACKAGE_ROOT),
+            default_taskwise_canary_receipt_path_v1(PACKAGE_ROOT),
+        )
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise TaskwiseCLIError("TASKWISE_PAIRED_CANARY_RECEIPT_INVALID") from exc
+
+
+def verify_taskwise_pilot_receipt_v1() -> dict[str, object]:
+    """Expose only content-free authorization digests to the CLI."""
+
+    authorization = require_taskwise_pilot_authorization_v1()
+    return {
+        "schema_version": "taskwise_pilot_authorization_verification_v1",
+        "status": "PASS",
+        "receipt_sha256": authorization.receipt_sha256,
+        "evidence_digest": authorization.evidence_digest,
+        "source_commit": authorization.source_commit,
+        "pilot_binding_sha256": authorization.pilot_binding_sha256,
+        "model_calls": 0,
+    }
+
+
 def build_default_taskwise_executor_v1(
     config: TaskwiseExperimentConfigV1,
 ) -> TaskwiseExecutorV1:
@@ -1092,15 +1148,10 @@ def build_default_taskwise_executor_v1(
 def build_default_taskwise_core_port_v1(
     config: TaskwiseExperimentConfigV1,
 ) -> TaskwiseCoreUpdatePortV1:
-    """Construct the registered-method Core port after no-model preflight."""
+    """Construct the shared registered-method Core port at the formal run root."""
 
     if type(config) is not TaskwiseExperimentConfigV1 or config.arm != "online":
         raise TypeError("default Core port requires the online taskwise config")
-    if not FRAMEWORK_LOCK.is_file():
-        raise TaskwiseCLIError("TASKWISE_VERIFIED_FRAMEWORK_LOCK_MISSING")
-    capability = ReflectorExecutionBoundaryV2.detect_capability()
-    if not capability.available:
-        raise TaskwiseCLIError("REFLECTOR_FILESYSTEM_ISOLATION_MISSING")
     state_root = TASKWISE_STATE_ROOT / config.scope / config.run_name
     output_root = _resolve_workspace_path(
         config.output_directory,
@@ -1109,58 +1160,15 @@ def build_default_taskwise_core_port_v1(
     )
     if output_root.exists() != state_root.exists():
         raise TaskwiseCLIError("TASKWISE_CORE_RUN_STATE_MISMATCH")
-    if not state_root.exists():
-        state_root.mkdir(parents=True, mode=0o700)
-    state_root.chmod(0o700)
-    private_audit_root = state_root / "private_reflector_events"
-
-    # Validate the real Codex/auth/bubblewrap inputs before the first task call.
-    probe_record = {
-        "uid": "0" * 64,
-        "source_split": TASKWISE_SOURCE_SPLIT,
-    }
-    probe_digest = canonical_digest([probe_record])
-    with tempfile.TemporaryDirectory(
-        prefix=".taskwise-reflector-preflight-",
-        dir=state_root,
-    ) as temporary:
-        probe_path = Path(temporary) / "records.jsonl"
-        probe_path.write_bytes(_canonical_bytes(probe_record))
-        probe_path.chmod(0o600)
-        boundary = ReflectorExecutionBoundaryV2(
-            dev_artifact_path=probe_path,
-            expected_records_sha256=probe_digest,
-            expected_record_count=1,
-            expected_source_split=TASKWISE_SOURCE_SPLIT,
-            private_audit_root=private_audit_root,
+    try:
+        return build_taskwise_core_port_at_roots_v1(
+            state_root=state_root,
+            framework_lock=FRAMEWORK_LOCK,
             timeout_seconds=config.executor.timeout_seconds,
+            memory_limits=config.memory_limits,
         )
-        if not boundary.preflight().available:
-            raise TaskwiseCLIError("REFLECTOR_FILESYSTEM_ISOLATION_MISSING")
-
-    def boundary_factory(
-        artifact_path: Path,
-        records_sha256: str,
-        record_count: int,
-    ) -> ReflectorExecutionBoundaryV2:
-        return ReflectorExecutionBoundaryV2(
-            dev_artifact_path=artifact_path,
-            expected_records_sha256=records_sha256,
-            expected_record_count=record_count,
-            expected_source_split=TASKWISE_SOURCE_SPLIT,
-            private_audit_root=private_audit_root,
-            timeout_seconds=config.executor.timeout_seconds,
-        )
-
-    bridge = TaskwiseCoreEvolutionBridgeV1(
-        db_path=state_root / "evolution.sqlite3",
-        artifact_root=state_root / "artifacts",
-        executable_registry=load_verified_framework_registry(FRAMEWORK_LOCK),
-        reflector_boundary_factory=boundary_factory,
-        checkpoint_path=state_root / "private_lineage_checkpoints.jsonl",
-        memory_limits=config.memory_limits,
-    )
-    return TaskwiseCoreUpdatePortAdapterV1(bridge)
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise TaskwiseCLIError("TASKWISE_CORE_PREFLIGHT_FAILED") from exc
 
 
 def _verify_static_inputs(
@@ -1916,6 +1924,8 @@ def main(argv: list[str] | None = None) -> int:
     compare_parser = commands.add_parser("compare")
     compare_parser.add_argument("--scope", choices=_SCOPES, required=True)
     commands.add_parser("compare-pilot-streams")
+    commands.add_parser("freeze-canary-receipt")
+    commands.add_parser("verify-canary-receipt")
     commands.add_parser("dry-run")
     arguments = parser.parse_args(argv)
 
@@ -1928,6 +1938,10 @@ def main(argv: list[str] | None = None) -> int:
             payload = compare(scope=arguments.scope)
         elif arguments.command == "compare-pilot-streams":
             payload = compare_pilot500_streams()
+        elif arguments.command == "freeze-canary-receipt":
+            payload = freeze_taskwise_paired_canary_receipt_v1()
+        elif arguments.command == "verify-canary-receipt":
+            payload = verify_taskwise_pilot_receipt_v1()
         else:
             payload = dry_run()
     except (TaskwiseCLIError, RuntimeError, ValueError, TypeError) as exc:
