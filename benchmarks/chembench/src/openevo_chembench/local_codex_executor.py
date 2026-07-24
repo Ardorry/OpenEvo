@@ -69,7 +69,11 @@ _FORBIDDEN_PROMPT_MARKERS = (
     "uuid",
     "canary",
 )
-_ALLOWED_ITEM_TYPES = frozenset({"agent_message", "reasoning"})
+_ALLOWED_ITEM_TYPES = frozenset({"agent_message", "reasoning", "todo_list"})
+_TODO_LIST_ITEM_KEYS = frozenset({"id", "items", "type"})
+_TODO_LIST_ENTRY_KEYS = frozenset({"completed", "text"})
+_MAX_TODO_LIST_ITEMS = 100
+_MAX_TODO_LIST_TEXT_BYTES = 4096
 _SECURITY_TOOL_USE_VIOLATION = "SECURITY_TOOL_USE_VIOLATION"
 _SECURITY_EVENT_CATEGORIES = (
     "app",
@@ -2526,16 +2530,9 @@ def _security_event_category(event_name: str) -> str | None:
     if "file" in tokens and {"read", "open", "fetch"} & tokens:
         return "file_read"
     if (
-        "file" in tokens
-        and {
-            "write",
-            "edit",
-            "patch",
-            "change",
-            "create",
-            "delete",
-        }
-        & tokens
+        ("file" in tokens and {"write", "edit", "patch", "change", "create", "delete"} & tokens)
+        or "patch" in tokens
+        or normalized in {"apply_patch", "unified_exec"}
     ):
         return "file_write"
     if "shell" in tokens:
@@ -2554,7 +2551,11 @@ def _security_event_category(event_name: str) -> str | None:
         return "app"
     if "external" in tokens:
         return "external_tool"
-    if "tool" in tokens:
+    if (
+        "tool" in tokens
+        or "function" in tokens
+        or normalized in {"function_call", "image_generation", "dynamic_tool_call"}
+    ):
         return "unknown_tool"
     return None
 
@@ -2597,6 +2598,11 @@ def _parse_jsonl_transcript(
             item_type = str(item["type"]).casefold()
             if item_type not in _ALLOWED_ITEM_TYPES:
                 raise LocalCodexExecutionError(LocalCodexExecutionErrorCode.TRANSCRIPT_INVALID)
+            if item_type == "todo_list" and not _is_valid_todo_list_item(
+                item,
+                event_type=event_type,
+            ):
+                raise LocalCodexExecutionError(LocalCodexExecutionErrorCode.TRANSCRIPT_INVALID)
             if event_type == "item.completed" and item_type == "agent_message":
                 text = item.get("text")
                 if type(text) is str and text.strip():
@@ -2624,6 +2630,34 @@ def _parse_jsonl_transcript(
     if not responses:
         raise LocalCodexExecutionError(LocalCodexExecutionErrorCode.RESPONSE_MISSING)
     return responses[-1], usage, digest
+
+
+def _is_valid_todo_list_item(
+    item: Mapping[str, object],
+    *,
+    event_type: str,
+) -> bool:
+    """Accept only Codex's inert planning lifecycle schema, never arbitrary item payloads."""
+
+    if (
+        event_type not in {"item.started", "item.completed"}
+        or set(item) != _TODO_LIST_ITEM_KEYS
+        or type(item.get("id")) is not str
+        or not str(item["id"]).strip()
+        or type(item.get("items")) is not list
+        or len(item["items"]) > _MAX_TODO_LIST_ITEMS
+    ):
+        return False
+    for entry in item["items"]:
+        if (
+            not isinstance(entry, Mapping)
+            or set(entry) != _TODO_LIST_ENTRY_KEYS
+            or type(entry.get("completed")) is not bool
+            or type(entry.get("text")) is not str
+            or len(str(entry["text"]).encode("utf-8")) > _MAX_TODO_LIST_TEXT_BYTES
+        ):
+            return False
+    return True
 
 
 def _run_local_command(

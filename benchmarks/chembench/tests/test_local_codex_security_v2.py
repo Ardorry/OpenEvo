@@ -24,6 +24,7 @@ from openevo_chembench.local_codex_executor import (
     LocalCommandResult,
     _attest_invocation,
     _create_invocation_layout,
+    _event_stream_summary,
     _parse_jsonl_transcript,
 )
 from openevo_chembench.reflector import SafeEvolutionReflector
@@ -89,6 +90,52 @@ def _tool_transcript(item_type: str) -> str:
                         "id": "tool-private",
                         "type": item_type,
                         "payload": _SENSITIVE_EVENT_PAYLOAD,
+                    },
+                },
+            )
+        )
+        + "\n"
+    )
+
+
+def _todo_list_transcript(
+    *,
+    started_item: dict[str, object] | None = None,
+    completed_item: dict[str, object] | None = None,
+) -> str:
+    todo = {
+        "id": "todo-safe",
+        "type": "todo_list",
+        "items": [{"text": "Check the public task.", "completed": False}],
+    }
+    completed = {
+        "id": "todo-safe",
+        "type": "todo_list",
+        "items": [{"text": "Check the public task.", "completed": True}],
+    }
+    return (
+        "\n".join(
+            json.dumps(event, sort_keys=True)
+            for event in (
+                {"type": "thread.started", "thread_id": "thread-safe"},
+                {"type": "turn.started"},
+                {"type": "item.started", "item": started_item or todo},
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "id": "message-safe",
+                        "type": "agent_message",
+                        "text": "A",
+                    },
+                },
+                {"type": "item.completed", "item": completed_item or completed},
+                {
+                    "type": "turn.completed",
+                    "usage": {
+                        "input_tokens": 10,
+                        "cached_input_tokens": 0,
+                        "output_tokens": 1,
+                        "reasoning_output_tokens": 0,
                     },
                 },
             )
@@ -234,6 +281,8 @@ def _executor(
         ("file_read", "file_read"),
         ("file_write", "file_write"),
         ("file_change", "file_write"),
+        ("apply_patch", "file_write"),
+        ("unified_exec", "file_write"),
         ("mcp_tool_call", "mcp"),
         ("network_call", "network"),
         ("web_search", "web"),
@@ -243,6 +292,9 @@ def _executor(
         ("subagent_call", "subagent"),
         ("collab_tool_call", "subagent"),
         ("external_tool_call", "external_tool"),
+        ("function_call", "unknown_tool"),
+        ("image_generation", "unknown_tool"),
+        ("dynamic_tool_call", "unknown_tool"),
         ("future_tool_kind", "unknown_tool"),
     ),
 )
@@ -264,6 +316,105 @@ def test_reasoning_and_message_events_do_not_false_positive() -> None:
     assert response == "A"
     assert usage["output_tokens"] == 1
     assert len(digest) == 64
+
+
+def test_strict_codex_todo_list_lifecycle_is_not_a_tool_or_parse_failure() -> None:
+    transcript = _todo_list_transcript()
+    response, usage, digest = _parse_jsonl_transcript(transcript)
+    summary = _event_stream_summary(transcript)
+
+    assert response == "A"
+    assert usage["output_tokens"] == 1
+    assert len(digest) == 64
+    assert summary == {
+        "event_count": 6,
+        "tool_event_count": 0,
+        "last_event_type": "turn.completed",
+    }
+
+
+@pytest.mark.parametrize(
+    "malformed_item",
+    (
+        {
+            "id": "todo-safe",
+            "type": "todo_list",
+            "items": [{"text": "Check.", "completed": False, "command": "forbidden"}],
+        },
+        {
+            "id": "todo-safe",
+            "type": "todo_list",
+            "items": [{"text": "Check.", "completed": 0}],
+        },
+        {
+            "id": "todo-safe",
+            "type": "todo_list",
+            "items": "not-a-list",
+        },
+        {
+            "id": "todo-safe",
+            "type": "todo_list",
+            "items": [],
+            "payload": "unexpected",
+        },
+    ),
+)
+def test_malformed_todo_list_lifecycle_remains_fail_closed(
+    malformed_item: dict[str, object],
+) -> None:
+    with pytest.raises(LocalCodexExecutionError) as raised:
+        _parse_jsonl_transcript(_todo_list_transcript(started_item=malformed_item))
+
+    assert raised.value.code is LocalCodexExecutionErrorCode.TRANSCRIPT_INVALID
+    assert raised.value.taskwise_failure_code == "EXECUTOR_EVENT_STREAM_INVALID"
+    assert raised.value.event_counts == {}
+
+
+def test_unobserved_todo_list_update_event_remains_fail_closed() -> None:
+    transcript = _todo_list_transcript().replace(
+        '"type": "item.started"',
+        '"type": "item.updated"',
+        1,
+    )
+
+    with pytest.raises(LocalCodexExecutionError) as raised:
+        _parse_jsonl_transcript(transcript)
+
+    assert raised.value.code is LocalCodexExecutionErrorCode.TRANSCRIPT_INVALID
+
+
+def test_todo_list_does_not_mask_a_real_tool_event() -> None:
+    lines = _todo_list_transcript().splitlines()
+    lines.insert(
+        3,
+        json.dumps(
+            {
+                "type": "item.started",
+                "item": {"id": "tool-private", "type": "file_read"},
+            },
+            sort_keys=True,
+        ),
+    )
+
+    with pytest.raises(LocalCodexExecutionError) as raised:
+        _parse_jsonl_transcript("\n".join(lines) + "\n")
+
+    assert raised.value.code is LocalCodexExecutionErrorCode.SECURITY_TOOL_USE_VIOLATION
+    assert raised.value.event_counts == {"file_read": 1}
+
+
+def test_executor_accepts_strict_todo_lifecycle_and_cleans_isolation() -> None:
+    runner = _RecordingRunner(_todo_list_transcript())
+    with tempfile.TemporaryDirectory() as temporary:
+        outer = Path(temporary)
+        executor = _executor(outer, arm="baseline", runner=runner)
+        attempt = executor.execute_frozen(
+            FrozenAgentRequestV2(rendered_public_prompt=_OFFICIAL_PROMPT)
+        )
+        executor.close()
+
+        assert attempt.response == "A"
+        assert list((outer / "isolation").iterdir()) == []
 
 
 def test_violation_is_terminal_retained_privately_and_public_safe() -> None:
