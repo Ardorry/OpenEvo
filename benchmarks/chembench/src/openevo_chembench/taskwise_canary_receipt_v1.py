@@ -42,6 +42,8 @@ from openevo_chembench.taskwise_core_evolution_v1 import (
     TaskwiseArtifactLineageReceiptV1,
     TaskwiseCoreEvolutionBridgeV1,
     TaskwiseCoreUpdateResultV1,
+    _merge_checkpoint_literal_delta,
+    _validator_input_digest,
 )
 from openevo_chembench.taskwise_generation_v1 import (
     derive_taskwise_generation_id_v1,
@@ -1104,6 +1106,7 @@ def _recompute_core_evidence(
         raise _CoreEvidenceError(TaskwiseCanaryFindingV1.CORE_PRIVATE_CHECKPOINT_INVALID)
     results: list[TaskwiseCoreUpdateResultV1] = []
     forbidden_by_result: list[tuple[str, ...]] = []
+    cumulative_forbidden: tuple[str, ...] = ()
     for ordinal, row in enumerate(rows, start=1):
         if (
             set(row)
@@ -1112,22 +1115,33 @@ def _recompute_core_evidence(
                 "result",
                 "required_lineage",
                 "required_lineage_sha256",
-                "validator_forbidden_literals",
+                "validator_forbidden_literals_delta",
+                "validator_input_digest",
             }
-            or row.get("schema_version") != "taskwise_core_private_checkpoint_v1"
+            or row.get("schema_version") != "taskwise_core_private_checkpoint_v2"
         ):
             raise _CoreEvidenceError(TaskwiseCanaryFindingV1.CORE_PRIVATE_CHECKPOINT_INVALID)
-        result = TaskwiseCoreUpdateResultV1.model_validate(row["result"])
-        lineage = TaskwiseArtifactLineageReceiptV1.model_validate(row["required_lineage"])
-        forbidden = tuple(row["validator_forbidden_literals"])
+        try:
+            result = TaskwiseCoreUpdateResultV1.model_validate(row["result"])
+            lineage = TaskwiseArtifactLineageReceiptV1.model_validate(row["required_lineage"])
+            cumulative_forbidden = _merge_checkpoint_literal_delta(
+                cumulative_forbidden,
+                row["validator_forbidden_literals_delta"],
+            )
+        except (TypeError, ValueError) as exc:
+            raise _CoreEvidenceError(
+                TaskwiseCanaryFindingV1.CORE_PRIVATE_CHECKPOINT_INVALID
+            ) from exc
         if (
             result.global_update_ordinal != ordinal
             or lineage != result.required_lineage_receipt()
             or row["required_lineage_sha256"] != lineage.digest
+            or row["validator_input_digest"] != result.validator_input_digest
+            or _validator_input_digest(cumulative_forbidden) != result.validator_input_digest
         ):
             raise _CoreEvidenceError(TaskwiseCanaryFindingV1.CORE_PRIVATE_CHECKPOINT_INVALID)
         results.append(result)
-        forbidden_by_result.append(forbidden)
+        forbidden_by_result.append(cumulative_forbidden)
 
     bridge = TaskwiseCoreEvolutionBridgeV1(
         db_path=state_root / "evolution.sqlite3",
