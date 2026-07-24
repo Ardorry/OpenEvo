@@ -40,6 +40,8 @@ from openevo_chembench.local_codex_executor import (
 
 PROTOCOL_ID = "chembench4k_frozen_generalization_v2"
 EXPECTED_RECORDS = 45
+TASKWISE_SOURCE_SPLIT = "taskwise_safe_signal"
+_ALLOWED_SOURCE_SPLITS = frozenset({"dev", TASKWISE_SOURCE_SPLIT})
 CONFIG_ENV = "OPENEVO_CHEMBENCH_REFLECTOR_BOUNDARY_CONFIG_V2"
 WRAPPER_STATUS_ENV = "OPENEVO_CHEMBENCH_REFLECTOR_WRAPPER_V2"
 ISOLATION_FINDING = "REFLECTOR_FILESYSTEM_ISOLATION_MISSING"
@@ -279,6 +281,8 @@ class ReflectorExecutionBoundaryV2:
         *,
         dev_artifact_path: str | Path,
         expected_records_sha256: str,
+        expected_record_count: int = EXPECTED_RECORDS,
+        expected_source_split: str = "dev",
         private_audit_root: str | Path,
         real_codex_binary: str | Path | None = None,
         auth_source: str | Path | None = None,
@@ -288,6 +292,8 @@ class ReflectorExecutionBoundaryV2:
     ) -> None:
         self.dev_artifact_path = Path(dev_artifact_path).resolve()
         self.expected_records_sha256 = expected_records_sha256
+        self.expected_record_count = expected_record_count
+        self.expected_source_split = expected_source_split
         self.private_audit_root = Path(private_audit_root).resolve()
         resolved_codex = real_codex_binary or shutil.which("codex")
         resolved_bwrap = bwrap_binary or shutil.which("bwrap")
@@ -305,6 +311,14 @@ class ReflectorExecutionBoundaryV2:
         )
         if _SHA256_RE.fullmatch(expected_records_sha256) is None:
             raise ValueError("expected_records_sha256 must be a lowercase SHA-256")
+        if (
+            isinstance(expected_record_count, bool)
+            or not isinstance(expected_record_count, int)
+            or not 1 <= expected_record_count <= EXPECTED_RECORDS
+        ):
+            raise ValueError("expected_record_count must be between 1 and 45")
+        if expected_source_split not in _ALLOWED_SOURCE_SPLITS:
+            raise ValueError("expected_source_split is outside the closed allowlist")
         if not 0 < timeout_seconds <= 86_400:
             raise ValueError("timeout_seconds must be positive and bounded")
 
@@ -367,8 +381,12 @@ class ReflectorExecutionBoundaryV2:
             return capability
         _require_owned_regular_file(self.real_codex_binary, executable=True)
         _require_owned_regular_file(self.auth_source, exact_mode=0o600)
-        records, digest = _read_and_validate_records(self.dev_artifact_path)
-        if len(records) != EXPECTED_RECORDS or digest != self.expected_records_sha256:
+        records, digest = _read_and_validate_records(
+            self.dev_artifact_path,
+            expected_record_count=self.expected_record_count,
+            expected_source_split=self.expected_source_split,
+        )
+        if len(records) != self.expected_record_count or digest != self.expected_records_sha256:
             raise ReflectorBoundaryError("REFLECTOR_DEV_ARTIFACT_BINDING_INVALID")
         return capability
 
@@ -412,7 +430,8 @@ class ReflectorExecutionBoundaryV2:
                 "dev_artifact_source": os.fspath(self.dev_artifact_path),
                 "dev_artifact_sha256": dev_artifact_sha256,
                 "ordered_records_sha256": self.expected_records_sha256,
-                "record_count": EXPECTED_RECORDS,
+                "record_count": self.expected_record_count,
+                "source_split": self.expected_source_split,
                 "private_audit_directory": os.fspath(audit_directory),
                 "receipt_path": os.fspath(receipt_path),
                 "timeout_seconds": self.timeout_seconds,
@@ -437,7 +456,7 @@ class ReflectorExecutionBoundaryV2:
                 wrapper_path=wrapper_path,
                 receipt_path=receipt_path,
                 expected_records_sha256=self.expected_records_sha256,
-                expected_record_count=EXPECTED_RECORDS,
+                expected_record_count=self.expected_record_count,
                 expected_real_codex_sha256=real_codex_sha256,
             )
             try:
@@ -597,7 +616,9 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
             mode=0o400,
         )
         records, records_digest = _read_and_validate_records(
-            layout["inputs"] / "dev_loo_dataset.jsonl"
+            layout["inputs"] / "dev_loo_dataset.jsonl",
+            expected_record_count=int(config["record_count"]),
+            expected_source_split=str(config["source_split"]),
         )
         if (
             len(records) != config["record_count"]
@@ -724,6 +745,7 @@ def _load_wrapper_config(path: Path) -> dict[str, Any]:
         "dev_artifact_sha256",
         "ordered_records_sha256",
         "record_count",
+        "source_split",
         "private_audit_directory",
         "receipt_path",
         "timeout_seconds",
@@ -734,7 +756,10 @@ def _load_wrapper_config(path: Path) -> dict[str, Any]:
         or set(payload) != expected
         or payload["schema_version"] != _CONFIG_SCHEMA
         or payload["protocol_id"] != PROTOCOL_ID
-        or payload["record_count"] != EXPECTED_RECORDS
+        or isinstance(payload["record_count"], bool)
+        or not isinstance(payload["record_count"], int)
+        or not 1 <= payload["record_count"] <= EXPECTED_RECORDS
+        or payload["source_split"] not in _ALLOWED_SOURCE_SPLITS
     ):
         raise ReflectorBoundaryError("REFLECTOR_WRAPPER_CONFIG_INVALID")
     for key in ("real_codex_sha256", "dev_artifact_sha256", "ordered_records_sha256"):
@@ -1017,7 +1042,19 @@ def _create_layout(root: Path) -> dict[str, Path]:
     return layout
 
 
-def _read_and_validate_records(path: Path) -> tuple[list[dict[str, Any]], str]:
+def _read_and_validate_records(
+    path: Path,
+    *,
+    expected_record_count: int = EXPECTED_RECORDS,
+    expected_source_split: str = "dev",
+) -> tuple[list[dict[str, Any]], str]:
+    if (
+        isinstance(expected_record_count, bool)
+        or not isinstance(expected_record_count, int)
+        or not 1 <= expected_record_count <= EXPECTED_RECORDS
+        or expected_source_split not in _ALLOWED_SOURCE_SPLITS
+    ):
+        raise ReflectorBoundaryError("REFLECTOR_DEV_ARTIFACT_INVALID")
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeError) as exc:
@@ -1028,14 +1065,14 @@ def _read_and_validate_records(path: Path) -> tuple[list[dict[str, Any]], str]:
             value = json.loads(line)
         except json.JSONDecodeError as exc:
             raise ReflectorBoundaryError("REFLECTOR_DEV_ARTIFACT_INVALID") from exc
-        if not isinstance(value, dict) or value.get("source_split") != "dev":
+        if not isinstance(value, dict) or value.get("source_split") != expected_source_split:
             raise ReflectorBoundaryError("REFLECTOR_DEV_ARTIFACT_INVALID")
         records.append(value)
     uids = [record.get("uid") for record in records]
     if (
-        len(records) != EXPECTED_RECORDS
+        len(records) != expected_record_count
         or any(type(uid) is not str for uid in uids)
-        or len(set(uids)) != EXPECTED_RECORDS
+        or len(set(uids)) != expected_record_count
     ):
         raise ReflectorBoundaryError("REFLECTOR_DEV_ARTIFACT_INVALID")
     return records, _canonical_sha256(records)

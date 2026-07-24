@@ -13,6 +13,7 @@ import pytest
 from openevo_chembench.reflector_execution_boundary_v2 import (
     ReflectorBoundaryStatusV2,
     ReflectorExecutionBoundaryV2,
+    TASKWISE_SOURCE_SPLIT,
     _bubblewrap_base_command,
     _create_layout,
     _replace_upstream_paths,
@@ -264,6 +265,64 @@ def test_safe_assistant_event_creates_private_log_and_cleans_root(
     assert stat.S_IMODE(event_log.stat().st_mode) == 0o600
     assert "private-memory" in event_log.read_text(encoding="utf-8")
     assert not list(temporary_parent.glob("openevo-chembench-reflector-v2-*"))
+
+
+def test_taskwise_two_record_boundary_uses_same_isolated_wrapper(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "private-taskwise.jsonl"
+    records = [
+        {
+            "uid": hashlib.sha256(f"taskwise-{index}".encode()).hexdigest(),
+            "source_split": TASKWISE_SOURCE_SPLIT,
+            "round_index": index,
+            "safe_feedback": {"signals": ["incorrect"]},
+        }
+        for index in range(2)
+    ]
+    source.write_text(
+        "".join(
+            json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n" for record in records
+        ),
+        encoding="utf-8",
+    )
+    source.chmod(0o600)
+    auth = tmp_path / "auth.json"
+    auth.write_text("{}\n", encoding="utf-8")
+    auth.chmod(0o600)
+    fake = tmp_path / "fake-codex"
+    _fake_codex(
+        fake,
+        {"type": "item.completed", "item": {"type": "agent_message", "text": "safe"}},
+    )
+    temporary_parent = tmp_path / "temporary"
+    temporary_parent.mkdir(mode=0o700)
+    boundary = ReflectorExecutionBoundaryV2(
+        dev_artifact_path=source,
+        expected_records_sha256=_canonical_sha256(records),
+        expected_record_count=2,
+        expected_source_split=TASKWISE_SOURCE_SPLIT,
+        private_audit_root=tmp_path / "audit",
+        real_codex_binary=fake,
+        auth_source=auth,
+        timeout_seconds=30,
+        temporary_parent=temporary_parent,
+    )
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    with boundary.activate() as activation:
+        completed = subprocess.run(
+            _upstream_args(upstream),
+            input="synthetic taskwise prompt",
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+    assert completed.returncode == 0
+    receipt = activation.require_receipt()
+    assert receipt.record_count == 2
+    assert receipt.ordered_records_sha256 == _canonical_sha256(records)
 
 
 def test_malformed_event_is_unknown_tool_violation(tmp_path: Path) -> None:

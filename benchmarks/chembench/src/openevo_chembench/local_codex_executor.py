@@ -22,7 +22,10 @@ from pathlib import Path
 
 from openevo_chembench.artifacts import ArtifactKind
 from openevo_chembench.config import ExperimentConfig
-from openevo_chembench.frozen_runtime_v2 import FrozenAgentRequestV2
+from openevo_chembench.frozen_runtime_v2 import (
+    CoreResolvedTextMemoryV2,
+    FrozenAgentRequestV2,
+)
 from openevo_chembench.models import (
     AgentRuntimeMetadata,
     RawAttempt,
@@ -32,6 +35,13 @@ from openevo_chembench.runtime_context import (
     AgentArtifactContext,
     AgentRoundRequest,
 )
+from openevo_chembench.taskwise_config_v1 import TaskwiseExperimentConfigV1
+from openevo_chembench.taskwise_context_binding_v1 import (
+    TaskwiseContextBindingReceiptV1,
+    TaskwiseSessionContextBindingV1,
+    issue_taskwise_context_binding_receipt_v1,
+)
+from openevo_chembench.taskwise_online_runner_v1 import TaskwiseAgentRequestV1
 from openevo_chembench.v2_config import FrozenExperimentConfigV2
 
 
@@ -333,13 +343,16 @@ class LocalCodexCLIExecutor:
         "_reasoning_effort",
         "_security_violation",
         "_task_timeout_seconds",
+        "_taskwise_mode",
+        "_taskwise_context_receipts",
+        "_taskwise_session_ids",
         "_v2_mode",
     )
 
     def __init__(
         self,
         *,
-        config: ExperimentConfig | FrozenExperimentConfigV2,
+        config: ExperimentConfig | FrozenExperimentConfigV2 | TaskwiseExperimentConfigV1,
         task_timeout_seconds: float = 600.0,
         codex_executable: Path | None = None,
         auth_file: Path | None = None,
@@ -375,15 +388,28 @@ class LocalCodexCLIExecutor:
             expected_codex_version = config.codex_cli_version
             reasoning_effort = None
             v2_mode = False
+            taskwise_mode = False
         elif type(config) is FrozenExperimentConfigV2:
             model = config.model
             expected_codex_version = config.codex_cli_version
             reasoning_effort = config.reasoning_effort
             v2_mode = True
+            taskwise_mode = False
             if float(task_timeout_seconds) != float(config.executor.timeout_seconds):
                 raise ValueError("task_timeout_seconds must match the frozen v2 executor policy")
+        elif type(config) is TaskwiseExperimentConfigV1:
+            model = config.model
+            expected_codex_version = config.codex_cli_version
+            reasoning_effort = config.reasoning_effort
+            v2_mode = False
+            taskwise_mode = True
+            if float(task_timeout_seconds) != float(config.executor.timeout_seconds):
+                raise ValueError("task_timeout_seconds must match the taskwise executor policy")
         else:
-            raise TypeError("config must be exact ExperimentConfig or FrozenExperimentConfigV2")
+            raise TypeError(
+                "config must be exact ExperimentConfig, FrozenExperimentConfigV2, "
+                "or TaskwiseExperimentConfigV1"
+            )
         resolved_executable = codex_executable
         if resolved_executable is None:
             discovered = shutil.which("codex")
@@ -404,6 +430,12 @@ class LocalCodexCLIExecutor:
         self._model = model
         self._reasoning_effort = reasoning_effort
         self._v2_mode = v2_mode
+        self._taskwise_mode = taskwise_mode
+        self._taskwise_context_receipts: dict[
+            str,
+            TaskwiseContextBindingReceiptV1,
+        ] = {}
+        self._taskwise_session_ids: set[str] = set()
         self._task_timeout_seconds = float(task_timeout_seconds)
         self._codex_executable = resolved_executable
         self._auth_file = resolved_auth
@@ -507,8 +539,8 @@ class LocalCodexCLIExecutor:
     def execute(self, request: AgentRoundRequest) -> RawAttempt:
         """Call ``codex exec`` exactly once; failures never fall back."""
 
-        if self._v2_mode:
-            raise TypeError("v2 executor mode requires execute_frozen")
+        if self._v2_mode or self._taskwise_mode:
+            raise TypeError("formal executor mode requires its strong execution method")
         if type(request) is not AgentRoundRequest:
             raise TypeError("LocalCodexCLIExecutor.execute requires exact AgentRoundRequest")
         return self._execute_prompt_once(self.build_prompt(request))
@@ -565,6 +597,100 @@ class LocalCodexCLIExecutor:
         if type(request) is not FrozenAgentRequestV2:
             raise TypeError("execute_frozen requires exact FrozenAgentRequestV2")
         return self._execute_prompt_once(self.build_frozen_prompt(request))
+
+    def build_taskwise_prompt(self, request: TaskwiseAgentRequestV1) -> str:
+        """Compile one new-session online/control request without runtime IDs."""
+
+        if not self._taskwise_mode:
+            raise TypeError("build_taskwise_prompt requires taskwise executor mode")
+        if type(request) is not TaskwiseAgentRequestV1:
+            raise TypeError("build_taskwise_prompt requires exact TaskwiseAgentRequestV1")
+        config = self._config
+        if type(config) is not TaskwiseExperimentConfigV1:
+            raise AssertionError("taskwise executor config type changed")
+        if request.arm != config.arm:
+            raise LocalCodexExecutionError(LocalCodexExecutionErrorCode.PROMPT_AUDIT_FAILED)
+        memory = request.resolved_text_memory
+        if config.arm == "control":
+            if memory is not None:
+                raise LocalCodexExecutionError(LocalCodexExecutionErrorCode.PROMPT_AUDIT_FAILED)
+        elif request.task_ordinal == 0 and request.round_index == 0:
+            if memory is not None:
+                raise LocalCodexExecutionError(LocalCodexExecutionErrorCode.PROMPT_AUDIT_FAILED)
+        elif type(memory) is not CoreResolvedTextMemoryV2:
+            raise LocalCodexExecutionError(LocalCodexExecutionErrorCode.PROMPT_AUDIT_FAILED)
+
+        projected = request.to_frozen_agent_request()
+        _audit_runtime_payload(projected.to_runtime_payload())
+        sections = [
+            (
+                "Runtime policy:\n"
+                "- Solve only from the supplied public prompt and, when present, "
+                "the approved Core-resolved text memory.\n"
+                "- Do not use shell, commands, files, network, web, browser, "
+                "MCP, plugins, apps, subagents, or external tools.\n"
+                "- Reply exactly as required by the public prompt."
+            )
+        ]
+        if memory is not None:
+            sections.append("Approved Core-resolved text memory:\n" + memory.markdown)
+        sections.append(request.rendered_public_prompt)
+        prompt = "\n\n".join(sections)
+        if not prompt.endswith(request.rendered_public_prompt):
+            raise AssertionError("official rendered prompt was not preserved")
+        _audit_compiled_prompt(prompt)
+        return prompt
+
+    def execute_taskwise(self, request: TaskwiseAgentRequestV1) -> RawAttempt:
+        """Execute one immutable taskwise session exactly once."""
+
+        if not self._taskwise_mode:
+            raise TypeError("execute_taskwise requires taskwise executor mode")
+        if type(request) is not TaskwiseAgentRequestV1:
+            raise TypeError("execute_taskwise requires exact TaskwiseAgentRequestV1")
+        if request.session_id in self._taskwise_session_ids:
+            raise LocalCodexExecutionError(LocalCodexExecutionErrorCode.PROMPT_AUDIT_FAILED)
+        self._taskwise_session_ids.add(request.session_id)
+        prompt = self.build_taskwise_prompt(request)
+        expected = TaskwiseSessionContextBindingV1.from_memory(
+            session_id=request.session_id,
+            memory=request.resolved_text_memory,
+        )
+        # ``actual`` is deliberately derived at the final prompt-execution
+        # boundary, separately from the runner's expected view.
+        memory = request.resolved_text_memory
+        actual = TaskwiseSessionContextBindingV1.from_injected_markdown(
+            session_id=request.session_id,
+            resolved_artifact_id=(None if memory is None else memory.core_artifact_id),
+            artifact_payload_sha256=(None if memory is None else memory.artifact_payload_sha256),
+            context_resolution_digest=(
+                None if memory is None else memory.context_resolution_digest
+            ),
+            injected_markdown=None if memory is None else memory.markdown,
+        )
+        receipt = issue_taskwise_context_binding_receipt_v1(
+            expected=expected,
+            actual=actual,
+        )
+        receipt.require_match()
+        attempt = self._execute_prompt_once(prompt)
+        if request.session_id in self._taskwise_context_receipts:
+            raise RuntimeError("taskwise context receipt was issued twice")
+        self._taskwise_context_receipts[request.session_id] = receipt
+        return attempt
+
+    def consume_taskwise_context_receipt(
+        self,
+        session_id: str,
+    ) -> TaskwiseContextBindingReceiptV1:
+        """Return the one-shot receipt for one completed taskwise session."""
+
+        if type(session_id) is not str:
+            raise TypeError("session_id must be a string")
+        try:
+            return self._taskwise_context_receipts.pop(session_id)
+        except KeyError as exc:
+            raise RuntimeError("taskwise context receipt is unavailable") from exc
 
     def _execute_prompt_once(self, prompt: str) -> RawAttempt:
         if type(prompt) is not str or not prompt:

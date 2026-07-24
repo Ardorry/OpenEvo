@@ -1,0 +1,822 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+import openevo_chembench.taskwise_cli_v1 as cli
+from openevo_chembench.chembench4k_models import (
+    CHEMBENCH4K_REVISION,
+    PrivateChemBench4KTask,
+    RenderedChemBench4KPrompt,
+)
+from openevo_chembench.frozen_runtime_v2 import (
+    _issue_core_resolved_text_memory_v2,
+)
+from openevo_chembench.models import RawAttempt, TranscriptReference
+from openevo_chembench.taskwise_config_v1 import (
+    TASKWISE_MEMORY_LIMITS_V1,
+    load_taskwise_config_v1,
+)
+from openevo_chembench.taskwise_context_binding_v1 import (
+    TaskwiseContextBindingReceiptV1,
+    TaskwiseSessionContextBindingV1,
+    issue_taskwise_context_binding_receipt_v1,
+)
+from openevo_chembench.taskwise_online_runner_v1 import (
+    CoreMemoryReferenceV1,
+    TaskwiseCoreUpdateOutcomeV1,
+    TaskwiseEpisodeV1,
+    TaskwiseMemoryPublicMetricsV1,
+)
+from openevo_chembench.taskwise_sampling_v1 import TaskwiseManifestSet
+from openevo_chembench.taskwise_sampling_v1 import PILOT500_STREAM_SCOPES
+from openevo_chembench.source_identity_v2 import SourceManifestError
+
+
+_DATASET_SHA256 = "d" * 64
+_SOURCE_COMMIT = "a" * 40
+
+
+def _sha256(value: str) -> str:
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+def _episode(index: int = 0) -> TaskwiseEpisodeV1:
+    uid = _sha256(f"taskwise-cli-task-{index}")
+    task = PrivateChemBench4KTask(
+        uid=uid,
+        category="Name_Conversion",
+        source_split="test",
+        source_index=index,
+        question=f"Public question {index}?",
+        A="choice-a",
+        B="choice-b",
+        C="choice-c",
+        D="choice-d",
+        target="A",
+        dataset_revision=CHEMBENCH4K_REVISION,
+        dataset_sha256=_DATASET_SHA256,
+    )
+    return TaskwiseEpisodeV1(
+        task=task,
+        prompt=RenderedChemBench4KPrompt(
+            uid=uid,
+            category=task.category,
+            dataset_revision=CHEMBENCH4K_REVISION,
+            demonstration_uids=(),
+            text=f"Public prompt {index}\nAnswer:",
+        ),
+    )
+
+
+class _Executor:
+    def __init__(self) -> None:
+        self.requests = []
+        self.closed = False
+        self.context_receipts: dict[str, TaskwiseContextBindingReceiptV1] = {}
+
+    def execute_taskwise(self, request):
+        self.requests.append(request)
+        binding = TaskwiseSessionContextBindingV1.from_memory(
+            session_id=request.session_id,
+            memory=request.resolved_text_memory,
+        )
+        self.context_receipts[request.session_id] = issue_taskwise_context_binding_receipt_v1(
+            expected=binding,
+            actual=binding,
+        )
+        return RawAttempt(
+            response=("B" if request.round_index == 0 else "A"),
+            transcript_reference=TranscriptReference(reference=f"transcript-{request.session_id}"),
+        )
+
+    def consume_taskwise_context_receipt(
+        self,
+        session_id: str,
+    ) -> TaskwiseContextBindingReceiptV1:
+        return self.context_receipts.pop(session_id)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _Core:
+    def __init__(self) -> None:
+        self.requests = []
+        self.memories = {}
+
+    def update_text_memory(self, request):
+        self.requests.append(request)
+        version = f"{request.task_index}-{request.update_index}"
+        markdown = f"""# General Chemistry Memory
+
+## Do
+- Apply a general reasoning checklist, revision {version}.
+
+## Avoid
+- Avoid choosing before verifying the governing chemistry.
+
+## Validate
+- Verify units, conservation, structure, and output format.
+
+## When Applicable
+- Apply dimensional checks to numerical reasoning.
+
+## Retired Or Superseded
+- Retire a rule only when a safer general rule supersedes it.
+"""
+        memory = _issue_core_resolved_text_memory_v2(
+            core_artifact_id=f"artifact_{request.task_index}_{request.update_index}",
+            artifact_payload_sha256=_sha256(
+                f"payload:{request.task_index}:{request.update_index}"
+            ),
+            context_resolution_digest=_sha256(
+                f"context:{request.task_index}:{request.update_index}"
+            ),
+            resolved_memory_sha256=_sha256(markdown),
+            markdown=markdown,
+        )
+        self.memories[CoreMemoryReferenceV1.from_memory(memory)] = memory
+        return TaskwiseCoreUpdateOutcomeV1(
+            job_id=f"core_job_{request.task_index}_{request.update_index}",
+            job_state="COMPLETED",
+            core_context_id=f"context_{request.task_index}_{request.update_index}",
+            validation_receipt_sha256=_sha256(
+                f"receipt:{request.task_index}:{request.update_index}"
+            ),
+            memory_metrics=TaskwiseMemoryPublicMetricsV1(
+                memory_limits_sha256=TASKWISE_MEMORY_LIMITS_V1.digest,
+                inspection_sha256=_sha256(f"inspection:{version}"),
+                token_estimator_id=TASKWISE_MEMORY_LIMITS_V1.token_estimator_id,
+                parser_id=TASKWISE_MEMORY_LIMITS_V1.parser_id,
+                utf8_byte_count=len(markdown.encode("utf-8")),
+                estimated_token_count=64,
+                section_item_counts=(1, 1, 1, 1, 1),
+                total_section_items=5,
+                max_section_items=1,
+            ),
+            resolved_text_memory=memory,
+        )
+
+    def resolve_text_memory(self, reference):
+        return self.memories[reference]
+
+
+def _paired_configs(tmp_path: Path, *, item_count: int = 1):
+    control = replace(
+        load_taskwise_config_v1(cli.CONFIG_ROOT / "control_canary9_taskwise_online_v1.yaml"),
+        source_commit=_SOURCE_COMMIT,
+        output_directory="control",
+        run_name="control_synthetic_cli",
+    )
+    online = replace(
+        load_taskwise_config_v1(cli.CONFIG_ROOT / "online_canary9_taskwise_online_v1.yaml"),
+        source_commit=_SOURCE_COMMIT,
+        output_directory="online",
+        run_name="online_synthetic_cli",
+    )
+    manifest = TaskwiseManifestSet(
+        public_path=tmp_path / "public.jsonl",
+        private_path=tmp_path / "private.jsonl",
+        summary_path=tmp_path / "summary.json",
+        public_sha256="1" * 64,
+        private_sha256="2" * 64,
+        summary_sha256="3" * 64,
+        ordered_uid_sha256="4" * 64,
+        item_count=item_count,
+    )
+    loader = SimpleNamespace(manifest=SimpleNamespace(combined_sha256=_DATASET_SHA256))
+    return control, online, loader, manifest
+
+
+def test_dirty_uncommitted_source_rejected_before_paid_objects() -> None:
+    calls = {"executor": 0, "core": 0}
+
+    def executor_factory(_config):
+        calls["executor"] += 1
+        raise AssertionError("executor must not be instantiated")
+
+    def core_factory(_config):
+        calls["core"] += 1
+        raise AssertionError("Core must not be instantiated")
+
+    with pytest.raises(cli.TaskwiseCLIError, match="TASKWISE_PACKAGE_SOURCE_DIRTY"):
+        cli.run_arm(
+            cli.CONFIG_ROOT / "online_canary9_taskwise_online_v1.yaml",
+            executor_factory=executor_factory,
+            core_port_factory=core_factory,
+        )
+    assert calls == {"executor": 0, "core": 0}
+
+
+def test_source_gate_recomputes_the_source_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = load_taskwise_config_v1(cli.CONFIG_ROOT / "online_canary9_taskwise_online_v1.yaml")
+
+    def fake_git(*arguments: str) -> str:
+        return "a" * 40 + "\n" if arguments == ("rev-parse", "HEAD") else ""
+
+    monkeypatch.setattr(cli, "_git", fake_git)
+    monkeypatch.setattr(
+        cli,
+        "verify_source_manifest",
+        lambda *_args: (_ for _ in ()).throw(SourceManifestError("drift")),
+    )
+
+    with pytest.raises(cli.TaskwiseCLIError, match="TASKWISE_SOURCE_MANIFEST_MISMATCH"):
+        cli.verify_taskwise_source_gate_v1(config)
+
+
+def test_dry_run_recomputes_manifest_binding_without_paid_objects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        cli,
+        "build_default_taskwise_executor_v1",
+        lambda _config: pytest.fail("dry-run instantiated executor"),
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_default_taskwise_core_port_v1",
+        lambda _config: pytest.fail("dry-run instantiated Core"),
+    )
+
+    receipt = cli.dry_run()
+
+    assert receipt["status"] == "PASS"
+    assert receipt["model_calls"] == 0
+    assert receipt["executor_instantiated"] is False
+    assert receipt["core_port_instantiated"] is False
+    assert receipt["scopes"]["canary9"]["item_count"] == 9
+    assert all(receipt["scopes"][scope]["item_count"] == 50 for scope in PILOT500_STREAM_SCOPES)
+    assert receipt["pilot500_stream_design"] == {
+        "stream_count": 10,
+        "tasks_per_stream": 50,
+        "total_item_count": 500,
+        "generation_zero_reset_between_streams": True,
+        "legacy_single_chain_scope": "pilot500",
+    }
+
+
+def test_manifest_is_bound_to_config_scope_and_path() -> None:
+    path = cli.CONFIG_ROOT / "control_canary9_taskwise_online_v1.yaml"
+    config = load_taskwise_config_v1(path)
+    loader, manifest, paired = cli._verify_static_inputs(config, path)
+
+    assert manifest.item_count == 9
+    assert (
+        manifest.public_sha256
+        == hashlib.sha256(
+            cli._resolve_workspace_path(
+                config.task_manifest,
+                field_name="task manifest",
+                must_exist=True,
+            ).read_bytes()
+        ).hexdigest()
+    )
+    assert (
+        loader.manifest.combined_sha256
+        == "cb6c17c54d4c0cf103b38f12e9ce05663515b05bfdc342d83e3245d39f3a4b3a"
+    )
+    assert paired["control"].task_manifest == paired["online"].task_manifest
+
+    wrong_scope = replace(
+        config,
+        task_manifest=paired["control"].task_manifest.replace(
+            "canary9",
+            "pilot500",
+        ),
+    )
+    with pytest.raises(cli.TaskwiseCLIError, match="CONFIG_PATH_BINDING"):
+        cli._verify_static_inputs(wrong_scope, path)
+
+
+def test_control_online_dispatch_and_private_compare(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    control, online, loader, manifest = _paired_configs(tmp_path, item_count=9)
+    paired = {"control": control, "online": online}
+    executors: dict[str, _Executor] = {}
+    core = _Core()
+
+    monkeypatch.setattr(cli, "WORKSPACE_ROOT", tmp_path)
+    monkeypatch.setattr(
+        cli,
+        "load_taskwise_config_v1",
+        lambda path: online if path.name.startswith("online_") else control,
+    )
+    monkeypatch.setattr(
+        cli,
+        "_verify_static_inputs",
+        lambda _config, _path: (loader, manifest, paired),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_build_episodes",
+        lambda _loader, scope: tuple(_episode(index) for index in range(9)),
+    )
+
+    def executor_factory(config):
+        executor = _Executor()
+        executors[config.arm] = executor
+        return executor
+
+    for config, path in (
+        (control, tmp_path / "control_canary9_taskwise_online_v1.yaml"),
+        (online, tmp_path / "online_canary9_taskwise_online_v1.yaml"),
+    ):
+        receipt = cli.run_arm(
+            path,
+            executor_factory=executor_factory,
+            core_port_factory=lambda _config: core,
+            source_gate=lambda _config: _SOURCE_COMMIT,
+        )
+        assert receipt["status"] == "COMPLETED"
+        assert receipt["completion_count"] == 27
+        assert receipt["update_count"] == (0 if config.arm == "control" else 18)
+        assert receipt["core_job_count"] == (0 if config.arm == "control" else 18)
+        assert receipt["core_artifact_count"] == (0 if config.arm == "control" else 18)
+
+    assert len(executors["control"].requests) == 27
+    assert all(request.resolved_text_memory is None for request in executors["control"].requests)
+    assert len(executors["online"].requests) == 27
+    assert len(core.requests) == 18
+    assert executors["control"].closed is True
+    assert executors["online"].closed is True
+
+    report = cli.compare(
+        scope="canary9",
+        persist=False,
+        source_gate=lambda _config: _SOURCE_COMMIT,
+    )
+    assert report["task_count"] == 9
+    assert report["protocol_id"] == "taskwise_online_evolution_v1"
+    assert report["paired_final_round"]["comparison"] == ("online_round_2_vs_control_round_2")
+    assert report["canary9_gate"]["passed"] is True
+    assert report["canary9_gate"]["performance_gate_applied"] is False
+    assert report["canary9_gate"]["performance_tuning_permitted"] is False
+    assert report["canary9_gate"]["labels"] == [
+        "NON_PERFORMANCE_SAFETY_CANARY",
+        "MECHANISM_AND_SECURITY_VALIDATION_ONLY",
+        "DO_NOT_USE_FOR_ARTIFACT_OR_PROMPT_TUNING",
+    ]
+    assert report["canary_labels"] == report["canary9_gate"]["labels"]
+    assert report["canary9_gate"]["observed"] == {
+        "control_completion_count": 27,
+        "online_completion_count": 27,
+        "control_core_job_count": 0,
+        "control_core_artifact_count": 0,
+        "online_core_job_count": 18,
+        "online_core_artifact_count": 18,
+        "control_context_binding_violations": 0,
+        "online_context_binding_violations": 0,
+        "control_security_violations": 0,
+        "online_security_violations": 0,
+        "online_artifact_validation_failures": 0,
+    }
+    safe_payload = cli._safe_cli_payload("compare", report)
+    assert safe_payload["canary9_gate"] == {
+        "labels": report["canary_labels"],
+        "passed": True,
+        "finding_codes": [],
+    }
+
+    for directory in (tmp_path / "control", tmp_path / "online"):
+        state_path = directory / "run_state.json"
+        state = json.loads(state_path.read_bytes())
+        state["binding"]["model_identity_sha256"] = "f" * 64
+        state_path.write_bytes(cli._canonical_bytes(state))
+    with pytest.raises(cli.TaskwiseCLIError, match="PAIRED_RUN_BINDING_MISMATCH"):
+        cli.compare(
+            scope="canary9",
+            persist=False,
+            source_gate=lambda _config: _SOURCE_COMMIT,
+        )
+
+
+def test_stream_public_evidence_binds_context_injection_and_memory_metrics(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "online"
+    public = output / "public"
+    public.mkdir(parents=True)
+    rows: list[dict[str, object]] = []
+    prior: dict[str, str] | None = None
+    byte_counts: list[int] = []
+    for task_index in range(50):
+        rows.append(
+            {
+                "kind": "completion",
+                "arm": "online",
+                "task_ordinal": task_index,
+                "round_index": 0,
+                "memory": prior,
+            }
+        )
+        for update_index in (1, 2):
+            context = _sha256(f"context-{task_index}-{update_index}")
+            memory = {
+                "core_artifact_id": f"artifact_{task_index}_{update_index}",
+                "artifact_payload_sha256": _sha256(f"payload-{task_index}-{update_index}"),
+                "context_resolution_digest": context,
+                "resolved_memory_sha256": _sha256(f"memory-{task_index}-{update_index}"),
+            }
+            byte_count = 100 + task_index + update_index
+            byte_counts.append(byte_count)
+            metrics = TaskwiseMemoryPublicMetricsV1(
+                memory_limits_sha256=TASKWISE_MEMORY_LIMITS_V1.digest,
+                inspection_sha256=_sha256(f"inspection-{task_index}-{update_index}"),
+                token_estimator_id=TASKWISE_MEMORY_LIMITS_V1.token_estimator_id,
+                parser_id=TASKWISE_MEMORY_LIMITS_V1.parser_id,
+                utf8_byte_count=byte_count,
+                estimated_token_count=50,
+                section_item_counts=(1, 1, 1, 1, 1),
+                total_section_items=5,
+                max_section_items=1,
+            )
+            rows.append(
+                {
+                    "kind": "core_update",
+                    "arm": "online",
+                    "task_ordinal": task_index,
+                    "update_index": update_index,
+                    "core_job_state": "COMPLETED",
+                    "context_resolution_digest": context,
+                    "output_memory": memory,
+                    "memory_metrics": metrics.to_dict(),
+                }
+            )
+            rows.append(
+                {
+                    "kind": "completion",
+                    "arm": "online",
+                    "task_ordinal": task_index,
+                    "round_index": update_index,
+                    "memory": memory,
+                }
+            )
+            prior = memory
+    (public / "events.jsonl").write_bytes(b"".join(cli._canonical_bytes(row) for row in rows))
+    state = {
+        "memory_aggregate": {
+            "approved_artifact_count": 100,
+            "max_utf8_byte_count": max(byte_counts),
+        }
+    }
+
+    observed, findings = cli._stream_public_evidence(
+        output,
+        expected_arm="online",
+        state=state,
+    )
+    assert observed == tuple(byte_counts)
+    assert findings == 0
+
+    rows[1]["context_resolution_digest"] = "f" * 64
+    (public / "events.jsonl").write_bytes(b"".join(cli._canonical_bytes(row) for row in rows))
+    _observed, findings = cli._stream_public_evidence(
+        output,
+        expected_arm="online",
+        state=state,
+    )
+    assert findings == 1
+
+
+def test_each_stream_constructs_a_fresh_scope_specific_core_namespace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    framework_lock = tmp_path / "framework-lock.json"
+    framework_lock.write_text("{}\n", encoding="utf-8")
+    captured: list[dict[str, object]] = []
+
+    class FakeBoundary:
+        @staticmethod
+        def detect_capability():
+            return SimpleNamespace(available=True)
+
+        def __init__(self, **_kwargs):
+            pass
+
+        def preflight(self):
+            return SimpleNamespace(available=True)
+
+    class FakeBridge:
+        def __init__(self, **kwargs):
+            captured.append(kwargs)
+
+    monkeypatch.setattr(cli, "FRAMEWORK_LOCK", framework_lock)
+    monkeypatch.setattr(cli, "TASKWISE_STATE_ROOT", tmp_path / "state")
+    monkeypatch.setattr(cli, "WORKSPACE_ROOT", tmp_path)
+    monkeypatch.setattr(cli, "ReflectorExecutionBoundaryV2", FakeBoundary)
+    monkeypatch.setattr(cli, "load_verified_framework_registry", lambda _path: object())
+    monkeypatch.setattr(cli, "TaskwiseCoreEvolutionBridgeV1", FakeBridge)
+    monkeypatch.setattr(cli, "TaskwiseCoreUpdatePortAdapterV1", lambda bridge: bridge)
+
+    for index in (0, 1):
+        scope = f"pilot500_stream_{index:02d}"
+        config = replace(
+            load_taskwise_config_v1(cli.CONFIG_ROOT / f"online_{scope}_taskwise_online_v1.yaml"),
+            output_directory=f"results/{scope}",
+        )
+        cli.build_default_taskwise_core_port_v1(config)
+
+    assert len(captured) == 2
+    roots = [Path(item["db_path"]).parent for item in captured]
+    assert roots[0] != roots[1]
+    assert roots[0].parts[-2:] == (
+        "pilot500_stream_00",
+        "online_pilot500_stream_00_taskwise_evolution_v1",
+    )
+    assert roots[1].parts[-2:] == (
+        "pilot500_stream_01",
+        "online_pilot500_stream_01_taskwise_evolution_v1",
+    )
+    assert all(not (root / "private_lineage_checkpoints.jsonl").exists() for root in roots)
+
+
+def _write_public_run_state(
+    output: Path,
+    *,
+    arm: str,
+    status: str,
+    resume_allowed: bool = False,
+    pending_invocation: object = None,
+    failure_code: str | None = None,
+    context_binding_violations: int = 0,
+) -> None:
+    output.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": "taskwise_online_run_state_v1",
+        "arm": arm,
+        "status": status,
+        "standard_chembench4k_score_claimed": False,
+        "resume_allowed": resume_allowed,
+        "pending_invocation": pending_invocation,
+        "failure": (
+            None
+            if failure_code is None
+            else {
+                "code": failure_code,
+                "completion_observed": not resume_allowed,
+            }
+        ),
+        "context_binding_violation_count": context_binding_violations,
+    }
+    (output / "run_state.json").write_bytes(cli._canonical_bytes(payload))
+
+
+def test_suite_orchestrator_skips_resumes_and_starts_per_stream(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cli, "WORKSPACE_ROOT", tmp_path)
+    monkeypatch.setattr(cli, "_verify_static_inputs", lambda *_args: None)
+    suite_state = tmp_path / "suite" / "control.json"
+    calls: list[tuple[str, bool]] = []
+
+    completed_config = load_taskwise_config_v1(
+        cli.CONFIG_ROOT / "control_pilot500_stream_00_taskwise_online_v1.yaml"
+    )
+    running_config = load_taskwise_config_v1(
+        cli.CONFIG_ROOT / "control_pilot500_stream_01_taskwise_online_v1.yaml"
+    )
+    resumable_config = load_taskwise_config_v1(
+        cli.CONFIG_ROOT / "control_pilot500_stream_02_taskwise_online_v1.yaml"
+    )
+    _write_public_run_state(
+        tmp_path / completed_config.output_directory,
+        arm="control",
+        status="COMPLETED",
+    )
+    _write_public_run_state(
+        tmp_path / running_config.output_directory,
+        arm="control",
+        status="RUNNING",
+    )
+    _write_public_run_state(
+        tmp_path / resumable_config.output_directory,
+        arm="control",
+        status="EXECUTION_FAILED",
+        resume_allowed=True,
+        pending_invocation={
+            "completion_observed": False,
+            "round_index": 0,
+            "session_id": "session_pending",
+            "task_ordinal": 0,
+        },
+        failure_code="INFRASTRUCTURE_TRANSPORT_FAILURE",
+    )
+
+    def fake_runner(config_path: Path, *, resume: bool) -> dict[str, object]:
+        config = load_taskwise_config_v1(config_path)
+        calls.append((config.scope, resume))
+        _write_public_run_state(
+            tmp_path / config.output_directory,
+            arm="control",
+            status="COMPLETED",
+        )
+        return {
+            "status": "COMPLETED",
+            "resume_allowed": False,
+            "finding_codes": [],
+        }
+
+    result = cli.run_pilot500_stream_suite(
+        arm="control",
+        arm_runner=fake_runner,
+        suite_state_path=suite_state,
+        source_gate=lambda _config: _SOURCE_COMMIT,
+    )
+
+    assert result["status"] == "COMPLETED"
+    assert result["completed_streams"] == 10
+    assert calls[0] == ("pilot500_stream_01", True)
+    assert calls[1] == ("pilot500_stream_02", True)
+    assert calls[2:] == [(f"pilot500_stream_{index:02d}", False) for index in range(3, 10)]
+    assert result["streams"]["pilot500_stream_00"]["action"] == "SKIPPED_COMPLETED"
+    assert result["streams"]["pilot500_stream_01"]["action"] == "COMPLETED"
+    assert json.loads(suite_state.read_text(encoding="utf-8")) == result
+
+
+@pytest.mark.parametrize(
+    ("run_status", "failure_code", "counter_name"),
+    [
+        (
+            "SECURITY_TOOL_USE_VIOLATION",
+            "SECURITY_TOOL_USE_VIOLATION",
+            "security_violations",
+        ),
+        (
+            "TASKWISE_EVOLUTION_UPDATE_FAILED",
+            "TASKWISE_EVOLUTION_UPDATE_FAILED",
+            "evolution_update_failures",
+        ),
+        (
+            "TASKWISE_CONTEXT_BINDING_VIOLATION",
+            "TASKWISE_CONTEXT_BINDING_VIOLATION",
+            "context_binding_violations",
+        ),
+    ],
+)
+def test_suite_orchestrator_stops_entire_suite_on_terminal_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    run_status: str,
+    failure_code: str,
+    counter_name: str,
+) -> None:
+    monkeypatch.setattr(cli, "WORKSPACE_ROOT", tmp_path)
+    monkeypatch.setattr(cli, "_verify_static_inputs", lambda *_args: None)
+    suite_state = tmp_path / "suite" / "online.json"
+    config = load_taskwise_config_v1(
+        cli.CONFIG_ROOT / "online_pilot500_stream_00_taskwise_online_v1.yaml"
+    )
+    _write_public_run_state(
+        tmp_path / config.output_directory,
+        arm="online",
+        status=run_status,
+        failure_code=failure_code,
+        context_binding_violations=int(run_status == "TASKWISE_CONTEXT_BINDING_VIOLATION"),
+    )
+
+    with pytest.raises(cli.TaskwiseCLIError, match="SUITE_TERMINAL_FAILURE"):
+        cli.run_pilot500_stream_suite(
+            arm="online",
+            arm_runner=lambda *_args, **_kwargs: pytest.fail(
+                "terminal suite invoked another stream"
+            ),
+            suite_state_path=suite_state,
+            source_gate=lambda _config: _SOURCE_COMMIT,
+        )
+
+    state = json.loads(suite_state.read_text(encoding="utf-8"))
+    assert state["status"] == "FAILED"
+    assert state[counter_name] == 1
+    assert state["completed_streams"] == 0
+
+
+def test_suite_orchestrator_records_resumable_infrastructure_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cli, "WORKSPACE_ROOT", tmp_path)
+    monkeypatch.setattr(cli, "_verify_static_inputs", lambda *_args: None)
+    calls = 0
+
+    def fake_runner(_config_path: Path, *, resume: bool) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        assert resume is False
+        return {
+            "status": "EXECUTION_FAILED",
+            "resume_allowed": True,
+            "finding_codes": ["INFRASTRUCTURE_TRANSPORT_FAILURE"],
+        }
+
+    result = cli.run_pilot500_stream_suite(
+        arm="control",
+        arm_runner=fake_runner,
+        suite_state_path=tmp_path / "suite" / "control.json",
+        source_gate=lambda _config: _SOURCE_COMMIT,
+    )
+
+    assert calls == 1
+    assert result["status"] == "INCOMPLETE"
+    assert result["infrastructure_failures"] == 1
+    assert result["streams"]["pilot500_stream_01"]["action"] == "NOT_STARTED"
+
+
+def test_incomplete_stream_comparison_uses_only_public_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cli, "WORKSPACE_ROOT", tmp_path)
+    monkeypatch.setattr(cli, "_verify_static_inputs", lambda *_args: None)
+    monkeypatch.setattr(
+        cli,
+        "load_private_taskwise_results_v1",
+        lambda *_args: pytest.fail("incomplete comparison read private results"),
+    )
+
+    report = cli.compare_pilot500_streams(
+        persist=False,
+        source_gate=lambda _config: _SOURCE_COMMIT,
+    )
+
+    assert report["status"] == "INCOMPLETE"
+    assert report["decision"] == "NO_GO"
+    assert report["completed_streams"] == 0
+    assert report["infrastructure_failures"] == 20
+    assert report["private_results_read"] is False
+
+
+def test_failed_stream_comparison_reports_all_public_failure_counts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cli, "WORKSPACE_ROOT", tmp_path)
+    monkeypatch.setattr(cli, "_verify_static_inputs", lambda *_args: None)
+    monkeypatch.setattr(
+        cli,
+        "load_private_taskwise_results_v1",
+        lambda *_args: pytest.fail("failed comparison read private results"),
+    )
+    failures = (
+        (
+            0,
+            "SECURITY_TOOL_USE_VIOLATION",
+            "SECURITY_TOOL_USE_VIOLATION",
+            0,
+        ),
+        (
+            1,
+            "TASKWISE_EVOLUTION_UPDATE_FAILED",
+            "TASKWISE_EVOLUTION_UPDATE_FAILED",
+            0,
+        ),
+        (
+            2,
+            "EXECUTION_FAILED",
+            "TASKWISE_ARTIFACT_VALIDATION_FAILED",
+            0,
+        ),
+        (
+            3,
+            "TASKWISE_CONTEXT_BINDING_VIOLATION",
+            "TASKWISE_CONTEXT_BINDING_VIOLATION",
+            1,
+        ),
+    )
+    for stream_index, status, failure_code, context_count in failures:
+        config = load_taskwise_config_v1(
+            cli.CONFIG_ROOT / f"online_pilot500_stream_{stream_index:02d}_taskwise_online_v1.yaml"
+        )
+        _write_public_run_state(
+            tmp_path / config.output_directory,
+            arm="online",
+            status=status,
+            failure_code=failure_code,
+            context_binding_violations=context_count,
+        )
+
+    report = cli.compare_pilot500_streams(
+        persist=False,
+        source_gate=lambda _config: _SOURCE_COMMIT,
+    )
+
+    assert report["status"] == "FAILED"
+    assert report["decision"] == "NO_GO"
+    assert report["security_violations"] == 1
+    assert report["evolution_update_failures"] == 1
+    assert report["artifact_validation_failures"] == 1
+    assert report["context_binding_violations"] == 1
+    assert report["infrastructure_failures"] == 16
+    assert report["private_results_read"] is False

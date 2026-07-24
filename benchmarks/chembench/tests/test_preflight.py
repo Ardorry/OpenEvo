@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from openevo_chembench.config import load_debug_config
 from openevo_chembench.preflight import (
@@ -34,15 +35,19 @@ class RealExecutionPreflightTests(unittest.TestCase):
             auth_file.write_text("{}\n", encoding="utf-8")
             auth_file.chmod(0o600)
 
-            receipt = run_real_execution_preflight(
-                config=loaded.experiment,
-                execution=loaded.execution,
-                repository_root=REPOSITORY_ROOT,
-                auth_file=auth_file,
-                docker_probe=lambda: True,
-                managed_runtime_probe=lambda: True,
-                rollout_health_probe=_healthy_rollout,
-            )
+            with patch(
+                "openevo_chembench.preflight._git_head",
+                return_value=loaded.experiment.openevo_revision,
+            ):
+                receipt = run_real_execution_preflight(
+                    config=loaded.experiment,
+                    execution=loaded.execution,
+                    repository_root=REPOSITORY_ROOT,
+                    auth_file=auth_file,
+                    docker_probe=lambda: True,
+                    managed_runtime_probe=lambda: True,
+                    rollout_health_probe=_healthy_rollout,
+                )
 
         self.assertFalse(receipt.passed)
         self.assertEqual(

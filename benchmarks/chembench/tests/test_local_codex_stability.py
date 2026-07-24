@@ -466,7 +466,9 @@ class LocalCodexStabilityTests(unittest.TestCase):
             fake_codex.chmod(0o700)
             executor = LocalCodexCLIExecutor(
                 config=_config(),
-                task_timeout_seconds=0.05,
+                # Leave enough startup budget for a loaded CI host to execute
+                # the sentinel write before the bounded timeout fires.
+                task_timeout_seconds=0.5,
                 codex_executable=fake_codex,
                 auth_file=auth_file,
                 verified_codex_version="0.144.6",

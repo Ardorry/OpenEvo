@@ -24,6 +24,11 @@ SOURCE_IDENTITY_INPUTS = (
     "manifests/v2/*_public_manifest.jsonl",
     "manifests/v2/*_manifest_summary.json",
     "manifests/v2/public_artifact_metadata_v2.json",
+    "manifests/taskwise_online_v1/*_public_manifest.jsonl",
+    "manifests/taskwise_online_v1/*_summary.json",
+    "manifests/taskwise_online_v1/streams/*_public_manifest.jsonl",
+    "manifests/taskwise_online_v1/streams/*_summary.json",
+    "manifests/taskwise_online_v1/legacy_single_stream/*",
 )
 
 # These are generated evidence, private data, runtime state, or local tooling
@@ -150,12 +155,33 @@ def _matches_source_identity_input(relative: PurePosixPath) -> bool:
         return True
     if relative.parts[0] in {"configs", "scripts", "src", "tests"}:
         return True
-    if len(relative.parts) != 3 or relative.parts[:2] != ("manifests", "v2"):
+    if (
+        len(relative.parts) < 2
+        or relative.parts[0] != "manifests"
+        or relative.parts[1]
+        not in {
+            "taskwise_online_v1",
+            "v2",
+        }
+    ):
+        return False
+    if (
+        relative.parts[1] == "taskwise_online_v1"
+        and len(relative.parts) == 4
+        and relative.parts[2] in {"streams", "legacy_single_stream"}
+    ):
+        return (
+            relative.name.endswith("_public_manifest.jsonl")
+            or relative.name.endswith("_summary.json")
+            or (relative.parts[2] == "legacy_single_stream" and relative.name == "provenance.json")
+        )
+    if len(relative.parts) != 3:
         return False
     return (
         relative.name.endswith("_public_manifest.jsonl")
         or relative.name.endswith("_manifest_summary.json")
-        or relative.name == "public_artifact_metadata_v2.json"
+        or (relative.parts[1] == "taskwise_online_v1" and relative.name.endswith("_summary.json"))
+        or (relative.parts[1] == "v2" and relative.name == "public_artifact_metadata_v2.json")
     )
 
 

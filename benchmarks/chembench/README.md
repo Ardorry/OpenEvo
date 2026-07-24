@@ -1,13 +1,71 @@
-# ChemBench4K frozen generalization benchmark
+# ChemBench4K taskwise online evolution benchmark
 
-The formal protocol in this package is
-`chembench4k_frozen_generalization_v2`, a standalone OpenEvo maintainer
-benchmark over the immutable `AI4Chem/ChemBench4K` revision
+The primary comparison in this package is the paired taskwise online stream:
+
+1. `repeated_session_control_v1` repeats each task for a fixed three-attempt
+   budget without creating an evolution job or artifact.
+2. `taskwise_online_evolution_v1` uses the same tasks, order, three-attempt
+   budget, and no-early-stop rule, with two registered text-memory updates and
+   memory carried through the ordered stream.
+3. `chembench4k_frozen_generalization_v2` remains the third, offline
+   generalization comparator.  Its frozen dev-only artifact and one-completion
+   test semantics are unchanged.
+
+All three use the immutable `AI4Chem/ChemBench4K` revision
 `f8ad41a980170f4c5d0cc97e57722d06887c8f53`.
 
 > **STANDALONE_MAINTAINER_BENCHMARK_EVIDENCE**
 >
 > **NOT_OPENEVO_PRODUCT_RELEASE_ATTESTATION**
+
+The taskwise arms must be displayed with all four markers:
+
+```text
+ONLINE_TASKWISE_EVOLUTION
+TEST_TIME_ADAPTATION
+NON_STANDARD_CHEMBENCH4K_PROTOCOL
+NOT_A_STANDARD_LEADERBOARD_SCORE
+```
+
+Their repeated-round and test-time-adaptation metrics are research outcomes,
+not standard ChemBench4K accuracy and not leaderboard-comparable.
+
+The operational checklist, fail-closed states, capacity contract, and cost
+inventory are documented in
+[`TASKWISE_ONLINE_RUNBOOK_V1.md`](TASKWISE_ONLINE_RUNBOOK_V1.md).
+
+## Primary taskwise online lifecycle
+
+Both arms use a deterministic `canary9`.  The primary pilot uses ten
+independent, stratified `pilot500_stream_00` through `pilot500_stream_09`
+streams with 50 tasks each and identical paired ordering.  Each stream starts
+from generation-zero memory and owns a separate runner, result root, Core
+database, checkpoint, and artifact namespace.  Each task always receives
+attempts 0, 1, and 2;
+`stop_when_correct=false`, and the reported final-round metric is round 2.
+The control has zero evolution updates and no cross-task memory carry.  The
+online arm has two real Core evolution updates per task and carries approved
+text memory into the next task.  Control must never create a placeholder
+update, job, or artifact.
+
+The public stream manifests contain no target.  Their paired private manifests
+are evaluator-only, mode `0600`, ignored by Git, and excluded from source
+identity.  The online stream has a separate protocol family, seeds, manifest
+paths, result roots, and statistics from frozen-generalization v2.
+
+The former single 500-task memory chain is preserved byte-for-byte under
+`manifests/taskwise_online_v1/legacy_single_stream/` and marked
+`LEGACY_SINGLE_STREAM_PILOT_MANIFEST` and
+`NOT_PRIMARY_STATISTICAL_PROTOCOL`.  It is not used by the primary pilot
+entrypoints or stream-clustered inference.
+
+The tracked taskwise configs use the non-self-referential source marker
+`BIND_CLEAN_HEAD_AT_LAUNCH`.  Before constructing either the executor or Core
+port, the CLI requires a clean benchmark package and binds the actual current
+commit into run state.  This avoids a config/commit hash cycle while preserving
+strict source-commit verification on resume.
+
+## Offline frozen-generalization comparator
 
 The evaluated model is `gpt-5.5` with reasoning effort `medium`.  The
 baseline and evolved test arms each make one completion per selected test
@@ -15,7 +73,7 @@ item.  The only treatment difference is a single, pre-approved, frozen Core
 `text_memory` artifact.  No test label, score, completion, or error signal is
 fed into evolution or a later test item.
 
-## Formal v2 lifecycle
+### Frozen v2 lifecycle
 
 ```text
 45 category-local dev leave-one-out trajectories

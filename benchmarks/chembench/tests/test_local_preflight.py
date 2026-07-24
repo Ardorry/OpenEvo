@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from openevo_chembench.config import load_debug_config
 from openevo_chembench.local_preflight import (
@@ -26,16 +27,20 @@ class LocalCodexPreflightTests(unittest.TestCase):
             auth_file.chmod(0o600)
             output_target = temporary_root / "results" / "single_task"
 
-            receipt = run_local_codex_preflight(
-                config=loaded.experiment,
-                execution=loaded.execution,
-                repository_root=REPOSITORY_ROOT,
-                output_target=output_target,
-                auth_file=auth_file,
-                codex_version_probe=lambda: "0.144.6",
-                codex_login_probe=lambda: True,
-                dataset_revision_probe=lambda _repo, _revision: True,
-            )
+            with patch(
+                "openevo_chembench.local_preflight._git_head",
+                return_value=loaded.experiment.openevo_revision,
+            ):
+                receipt = run_local_codex_preflight(
+                    config=loaded.experiment,
+                    execution=loaded.execution,
+                    repository_root=REPOSITORY_ROOT,
+                    output_target=output_target,
+                    auth_file=auth_file,
+                    codex_version_probe=lambda: "0.144.6",
+                    codex_login_probe=lambda: True,
+                    dataset_revision_probe=lambda _repo, _revision: True,
+                )
 
         self.assertTrue(receipt.passed)
         self.assertEqual(receipt.finding_codes, ())

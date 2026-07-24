@@ -1,0 +1,48 @@
+schema_version: chembench4k_taskwise_online_config_v1
+protocol_id: taskwise_online_evolution_v1
+execution_mode: standalone_openevo_maintainer_benchmark
+protocol_markers: [ONLINE_TASKWISE_EVOLUTION, TEST_TIME_ADAPTATION, NON_STANDARD_CHEMBENCH4K_PROTOCOL, NOT_A_STANDARD_LEADERBOARD_SCORE]
+arm: online
+scope: pilot500_stream_07
+run_name: online_pilot500_stream_07_taskwise_evolution_v1
+output_directory: OpenEvo/results/chembench4k_taskwise_online_v1/pilot500_stream_07/online
+dataset:
+  repository: AI4Chem/ChemBench4K
+  revision: f8ad41a980170f4c5d0cc97e57722d06887c8f53
+  root: data/chembench4k/AI4Chem_ChemBench4K/f8ad41a980170f4c5d0cc97e57722d06887c8f53
+  manifest: data/chembench4k/AI4Chem_ChemBench4K/f8ad41a980170f4c5d0cc97e57722d06887c8f53/chembench4k_dataset_manifest_v2.json
+  task_manifest: OpenEvo/benchmarks/chembench/manifests/taskwise_online_v1/streams/stream_07_public_manifest.jsonl
+  private_task_manifest: OpenEvo/benchmarks/chembench/private_manifests/taskwise_online_v1/streams/stream_07_private_manifest.jsonl
+model: gpt-5.5
+reasoning_effort: medium
+codex_cli_version: 0.144.6
+prompt_renderer_id: chembench4k_official_five_shot_v2
+parser_id: official_first_capital_parser_v2
+evaluator_id: chembench4k_accuracy_v2
+attempts_per_task: 3
+inter_round_slots: 2
+evolution_updates_per_task: 2
+carry_memory_across_tasks: true
+fixed_round_budget: true
+stop_when_correct: false
+final_score_round: 2
+memory_limits:
+  max_utf8_bytes: 16384
+  max_estimated_tokens: 4096
+  max_items_per_section: 24
+  required_sections: [Do, Avoid, Validate, When Applicable, Retired Or Superseded]
+  token_estimator_id: ascii_word_or_unicode_codepoint_v1
+  parser_id: exact_markdown_sections_v1
+evolution: {enabled: true, target: text_memory, method_id: text_memory_expel_reflector}
+executor:
+  backend: local_codex_cli
+  harness: codex_cli
+  timeout_seconds: 600
+  concurrency: 1
+  infrastructure_retries_before_completion: 0
+  tools_enabled: false
+  mcp_enabled: false
+  web_enabled: false
+  network_enabled: false
+  subagents_enabled: false
+source_commit: BIND_CLEAN_HEAD_AT_LAUNCH
