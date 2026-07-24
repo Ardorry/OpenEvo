@@ -12,6 +12,7 @@ from openevo_chembench.taskwise_generation_v1 import (
     derive_taskwise_generation_id_v1,
     taskwise_canary_comparison_path_v1,
     taskwise_canary_receipt_path_v1,
+    taskwise_full_runtime_config_v1,
     taskwise_pilot_comparison_path_v1,
     taskwise_pilot_runtime_config_v1,
     taskwise_pilot_suite_state_path_v1,
@@ -88,6 +89,23 @@ def test_pilot_runtime_namespace_is_generation_private() -> None:
     assert runtime_first.output_directory != runtime_second.output_directory
     assert first in runtime_first.run_name
     assert first in runtime_first.output_directory
+    assert len(runtime_first.run_name) <= 127
+
+
+def test_pilot_and_full_runtime_names_fit_runner_identifier_contract() -> None:
+    generation = derive_taskwise_generation_id_v1({"runtime": "bounded"})
+    for scope in ("pilot500_stream_00", "full_stream_00"):
+        template = load_taskwise_config_v1(
+            PACKAGE_ROOT / "configs" / f"online_{scope}_taskwise_online_v1.yaml"
+        )
+        runtime = (
+            taskwise_pilot_runtime_config_v1(template, generation)
+            if scope.startswith("pilot500_")
+            else taskwise_full_runtime_config_v1(template, generation)
+        )
+
+        assert runtime.run_name == (f"taskwise_online_{scope}_{generation}_attempt_000001")
+        assert 8 <= len(runtime.run_name) <= 127
 
 
 @pytest.mark.parametrize(

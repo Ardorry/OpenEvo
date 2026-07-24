@@ -282,6 +282,7 @@ _CLI_PUBLIC_FAILURE_CODES = (
             "TASKWISE_PUBLIC_EVENT_EVIDENCE_INVALID",
             "TASKWISE_RESUME_OUTPUT_MISSING",
             "TASKWISE_RUN_EVIDENCE_INVALID",
+            "TASKWISE_RUNTIME_ID_INVALID",
             "TASKWISE_RUN_NOT_COMPARABLE",
             "TASKWISE_RUN_STATE_INVALID",
             "TASKWISE_RUN_STATE_UNAVAILABLE",
@@ -2345,18 +2346,23 @@ def _build_run_config(
     dataset_sha256: str,
     task_manifest_sha256: str,
 ) -> TaskwiseRunConfigV1:
-    return TaskwiseRunConfigV1(
-        arm=config.arm,
-        run_id=config.run_name,
-        output_directory=output_directory,
-        protocol_sha256=_protocol_sha256(paired_configs),
-        source_commit=current_commit,
-        dataset_sha256=dataset_sha256,
-        task_manifest_sha256=task_manifest_sha256,
-        model_identity_sha256=_model_identity_sha256(config),
-        executor_policy_sha256=_executor_policy_sha256(config),
-        memory_limits=config.memory_limits,
-    )
+    try:
+        return TaskwiseRunConfigV1(
+            arm=config.arm,
+            run_id=config.run_name,
+            output_directory=output_directory,
+            protocol_sha256=_protocol_sha256(paired_configs),
+            source_commit=current_commit,
+            dataset_sha256=dataset_sha256,
+            task_manifest_sha256=task_manifest_sha256,
+            model_identity_sha256=_model_identity_sha256(config),
+            executor_policy_sha256=_executor_policy_sha256(config),
+            memory_limits=config.memory_limits,
+        )
+    except ValueError as exc:
+        if str(exc) == "run_id must be a bounded runtime identifier":
+            raise TaskwiseCLIError("TASKWISE_RUNTIME_ID_INVALID") from exc
+        raise
 
 
 def _protocol_sha256(

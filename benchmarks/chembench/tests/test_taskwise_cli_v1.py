@@ -566,16 +566,39 @@ def test_manifest_is_bound_to_config_scope_and_path() -> None:
         cli._verify_static_inputs(wrong_scope, path)
 
 
-def test_canary_fix7_uses_fresh_paired_run_namespaces() -> None:
+def test_canary_fix9_uses_fresh_paired_run_namespaces() -> None:
     control = load_taskwise_config_v1(cli.CONFIG_ROOT / "control_canary9_taskwise_online_v1.yaml")
     online = load_taskwise_config_v1(cli.CONFIG_ROOT / "online_canary9_taskwise_online_v1.yaml")
 
-    assert control.run_name == "control_canary9_repeated_session_v1_fix8"
-    assert online.run_name == "online_canary9_taskwise_evolution_v1_fix8"
-    assert control.output_directory.endswith("/canary9/control_fix8")
-    assert online.output_directory.endswith("/canary9/online_fix8")
+    assert control.run_name == "control_canary9_repeated_session_v1_fix9"
+    assert online.run_name == "online_canary9_taskwise_evolution_v1_fix9"
+    assert control.output_directory.endswith("/canary9/control_fix9")
+    assert online.output_directory.endswith("/canary9/online_fix9")
     assert "fix1" not in control.output_directory
     assert "fix1" not in online.output_directory
+
+
+def test_invalid_runtime_id_maps_to_closed_cli_finding(tmp_path: Path) -> None:
+    template = load_taskwise_config_v1(
+        cli.CONFIG_ROOT / "control_pilot500_stream_00_taskwise_online_v1.yaml"
+    )
+    invalid = replace(template, run_name="x" * 129)
+    paired = {"control": invalid, "online": invalid}
+
+    with pytest.raises(cli.TaskwiseCLIError, match="TASKWISE_RUNTIME_ID_INVALID"):
+        cli._build_run_config(
+            config=invalid,
+            output_directory=tmp_path.resolve(),
+            paired_configs=paired,
+            current_commit=_SOURCE_COMMIT,
+            dataset_sha256="a" * 64,
+            task_manifest_sha256="b" * 64,
+        )
+
+    assert (
+        cli._closed_cli_error_code(cli.TaskwiseCLIError("TASKWISE_RUNTIME_ID_INVALID"))
+        == "TASKWISE_RUNTIME_ID_INVALID"
+    )
 
 
 def test_control_online_dispatch_and_private_compare(
