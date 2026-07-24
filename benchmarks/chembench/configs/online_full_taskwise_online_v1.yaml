@@ -1,0 +1,21 @@
+schema_version: chembench4k_taskwise_full_stream_suite_config_v1
+protocol_id: taskwise_online_evolution_v1
+arm: online
+stream_design: ten_independent_memory_chains_complete_test
+stream_count: 10
+stream_task_counts: [401, 401, 401, 401, 401, 401, 401, 401, 401, 400]
+total_item_count: 4009
+reset_memory_between_streams: true
+suite_summary: OpenEvo/benchmarks/chembench/manifests/taskwise_online_v1/online_full_summary.json
+source_commit: BIND_CLEAN_HEAD_AT_LAUNCH
+stream_configs:
+  - online_full_stream_00_taskwise_online_v1.yaml
+  - online_full_stream_01_taskwise_online_v1.yaml
+  - online_full_stream_02_taskwise_online_v1.yaml
+  - online_full_stream_03_taskwise_online_v1.yaml
+  - online_full_stream_04_taskwise_online_v1.yaml
+  - online_full_stream_05_taskwise_online_v1.yaml
+  - online_full_stream_06_taskwise_online_v1.yaml
+  - online_full_stream_07_taskwise_online_v1.yaml
+  - online_full_stream_08_taskwise_online_v1.yaml
+  - online_full_stream_09_taskwise_online_v1.yaml

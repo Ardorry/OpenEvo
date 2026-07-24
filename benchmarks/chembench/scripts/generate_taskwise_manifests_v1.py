@@ -13,9 +13,15 @@ import yaml
 from openevo_chembench.chembench4k_dataset import ChemBench4KDatasetLoader
 from openevo_chembench.chembench4k_models import CHEMBENCH4K_REVISION
 from openevo_chembench.taskwise_sampling_v1 import (
+    FULL_SIZE,
+    FULL_STREAM_COUNT,
+    FULL_STREAM_DESIGN,
+    FULL_STREAM_SCOPES,
+    FULL_STREAM_TASK_COUNTS,
     LEGACY_SINGLE_CHAIN_CLASSIFICATION,
     PILOT500_SCOPE,
     PILOT500_STREAM_SCOPES,
+    full_stream_suite_summary_bytes,
     generate_taskwise_manifests,
     legacy_single_chain_provenance_bytes,
     pilot500_stream_suite_summary_bytes,
@@ -38,9 +44,12 @@ PUBLIC_ROOT = PACKAGE_ROOT / "manifests" / "taskwise_online_v1"
 PRIVATE_ROOT = PACKAGE_ROOT / "private_manifests" / "taskwise_online_v1"
 PUBLIC_STREAM_ROOT = PUBLIC_ROOT / "streams"
 PRIVATE_STREAM_ROOT = PRIVATE_ROOT / "streams"
+PUBLIC_FULL_STREAM_ROOT = PUBLIC_ROOT / "full_streams"
+PRIVATE_FULL_STREAM_ROOT = PRIVATE_ROOT / "full_streams"
 LEGACY_PUBLIC_ROOT = PUBLIC_ROOT / "legacy_single_stream"
 LEGACY_PRIVATE_ROOT = PRIVATE_ROOT / "legacy_single_stream"
 STREAM_SUITE_SUMMARY = PUBLIC_ROOT / "online_pilot500_summary.json"
+FULL_STREAM_SUITE_SUMMARY = PUBLIC_ROOT / "online_full_summary.json"
 LEGACY_PROVENANCE = LEGACY_PUBLIC_ROOT / "provenance.json"
 
 
@@ -57,6 +66,13 @@ def _paths(scope: str) -> tuple[Path, Path, Path]:
             PUBLIC_STREAM_ROOT / f"{stream_id}_public_manifest.jsonl",
             PRIVATE_STREAM_ROOT / f"{stream_id}_private_manifest.jsonl",
             PUBLIC_STREAM_ROOT / f"{stream_id}_summary.json",
+        )
+    if scope in FULL_STREAM_SCOPES:
+        stream_id = scope.removeprefix("full_")
+        return (
+            PUBLIC_FULL_STREAM_ROOT / f"{stream_id}_public_manifest.jsonl",
+            PRIVATE_FULL_STREAM_ROOT / f"{stream_id}_private_manifest.jsonl",
+            PUBLIC_FULL_STREAM_ROOT / f"{stream_id}_summary.json",
         )
     return (
         PUBLIC_ROOT / f"online_{scope}_public_manifest.jsonl",
@@ -164,11 +180,75 @@ def _validate_suite_configs() -> dict[str, object]:
     }
 
 
+def _validate_full_suite_configs() -> dict[str, object]:
+    expected_keys = {
+        "schema_version",
+        "protocol_id",
+        "arm",
+        "stream_design",
+        "stream_count",
+        "stream_task_counts",
+        "total_item_count",
+        "reset_memory_between_streams",
+        "suite_summary",
+        "source_commit",
+        "stream_configs",
+    }
+    loaded: dict[str, dict[str, object]] = {}
+    for arm in ("control", "online"):
+        path = PACKAGE_ROOT / "configs" / f"{arm}_full_taskwise_online_v1.yaml"
+        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if type(payload) is not dict or set(payload) != expected_keys:
+            raise RuntimeError("full stream suite config schema is invalid")
+        expected_configs = [
+            f"{arm}_{scope}_taskwise_online_v1.yaml" for scope in FULL_STREAM_SCOPES
+        ]
+        if (
+            payload["arm"] != arm
+            or payload["stream_design"] != FULL_STREAM_DESIGN
+            or payload["stream_count"] != FULL_STREAM_COUNT
+            or tuple(payload["stream_task_counts"]) != FULL_STREAM_TASK_COUNTS
+            or payload["total_item_count"] != FULL_SIZE
+            or payload["reset_memory_between_streams"] is not True
+            or payload["stream_configs"] != expected_configs
+            or payload["source_commit"] != SOURCE_COMMIT_PLACEHOLDER
+        ):
+            raise RuntimeError("full stream suite config binding is invalid")
+        for scope, config_name in zip(
+            FULL_STREAM_SCOPES,
+            expected_configs,
+            strict=True,
+        ):
+            config = load_taskwise_config_v1(PACKAGE_ROOT / "configs" / config_name)
+            if config.scope != scope or config.arm != arm:
+                raise RuntimeError("full expanded stream config is invalid")
+        loaded[arm] = payload
+    for key in (
+        "schema_version",
+        "stream_design",
+        "stream_count",
+        "stream_task_counts",
+        "total_item_count",
+        "reset_memory_between_streams",
+        "suite_summary",
+        "source_commit",
+    ):
+        if loaded["control"][key] != loaded["online"][key]:
+            raise RuntimeError("full suite arm parity is invalid")
+    return {
+        "stream_count": FULL_STREAM_COUNT,
+        "stream_task_counts": list(FULL_STREAM_TASK_COUNTS),
+        "total_item_count": FULL_SIZE,
+        "reset_memory_between_streams": True,
+        "arm_parity": "PASS",
+    }
+
+
 def _run(command: str) -> dict[str, object]:
     loader = ChemBench4KDatasetLoader(snapshot_root=DATASET_ROOT)
     output: dict[str, object] = {}
     function = generate_taskwise_manifests if command == "generate" else verify_taskwise_manifests
-    for scope in ("canary9", *PILOT500_STREAM_SCOPES):
+    for scope in ("canary9", *PILOT500_STREAM_SCOPES, *FULL_STREAM_SCOPES):
         public, private, summary = _paths(scope)
         result = function(
             loader,
@@ -232,6 +312,31 @@ def _run(command: str) -> dict[str, object]:
         "provenance_sha256": hashlib.sha256(legacy_bytes).hexdigest(),
     }
     output["pilot500_stream_suite"]["config"] = _validate_suite_configs()
+    full_manifests = tuple(
+        verify_taskwise_manifests(
+            loader,
+            scope=scope,
+            public_path=_paths(scope)[0],
+            private_path=_paths(scope)[1],
+            summary_path=_paths(scope)[2],
+        )
+        for scope in FULL_STREAM_SCOPES
+    )
+    full_suite_bytes = full_stream_suite_summary_bytes(
+        loader,
+        stream_manifests=full_manifests,
+    )
+    if command == "generate":
+        FULL_STREAM_SUITE_SUMMARY.write_bytes(full_suite_bytes)
+    elif FULL_STREAM_SUITE_SUMMARY.read_bytes() != full_suite_bytes:
+        raise RuntimeError("full stream suite summary is not frozen")
+    output["full_stream_suite"] = {
+        "stream_count": len(FULL_STREAM_SCOPES),
+        "stream_task_counts": list(FULL_STREAM_TASK_COUNTS),
+        "total_item_count": sum(manifest.item_count for manifest in full_manifests),
+        "summary_sha256": hashlib.sha256(full_suite_bytes).hexdigest(),
+        "config": _validate_full_suite_configs(),
+    }
     return {
         "status": "PASS",
         "operation": command,

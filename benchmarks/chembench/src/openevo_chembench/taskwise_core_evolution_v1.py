@@ -90,6 +90,7 @@ from openevo_chembench.taskwise_trajectory_v1 import (
 PROTOCOL_ID = "taskwise_online_evolution_v1"
 BRIDGE_ID = "openevo_core_taskwise_text_memory_v1"
 METHOD_ID = "text_memory_expel_reflector"
+REFLECTOR_PROJECTION_ID = "taskwise_reflector_trajectory_projection_v1"
 TARGET_ID = "text_memory"
 MODEL = "gpt-5.5"
 ABSOLUTE_MAX_MEMORY_FILE_BYTES = 64 * 1024
@@ -150,11 +151,25 @@ _MEMORY_H1 = "# General Chemistry Memory"
 _MEMORY_H2_RE = re.compile(r"## ([^\r\n]+)\Z", re.ASCII)
 _MEMORY_BULLET_RE = re.compile(r"- \S", re.ASCII)
 _MEMORY_CONTINUATION_RE = re.compile(r" {2,}\S", re.ASCII)
+_REFLECTOR_PROJECTED_PROMPT = (
+    "Task text is sealed. Derive reusable strategy only from the closed "
+    "evolution-feedback taxonomy and the general chemistry category."
+)
+_REFLECTOR_PROJECTED_RESPONSE = (
+    "Attempt content is sealed. Outcome evidence is represented only by the "
+    "closed taxonomy and reward."
+)
 _PATH_OR_BENCHMARK_RE = re.compile(
     r"(?:chembench(?:4k)?|ai4chem|opencompass|"
     r"(?:^|[\\/])(?:dev|test|results?)[\\/]|"
     r"\.(?:json|jsonl|parquet|sqlite3?)\b)",
     re.IGNORECASE | re.MULTILINE,
+)
+_OPERATIONAL_IDENTIFIER_RE = re.compile(
+    r"(?:\b(?:job|art|ds)_[A-Za-z0-9_.:-]{6,}\b|"
+    r"\btaskwise[-_. ](?:reflector|safe_signal|safe|core|online)\b|"
+    r"\bopenevo_core_taskwise\b)",
+    re.IGNORECASE,
 )
 _EXPLICIT_OPTION_TOKEN_RE = r"[ABCDabcd]\b"
 _IMPLICIT_OPTION_TOKEN_RE = r"(?:[ABCD]\b|[bcd]\b|a(?=\s*(?:\Z|[^\w\s])))"
@@ -489,6 +504,9 @@ class TaskwiseArtifactLineageReceiptV1(_FrozenModel):
         "chembench4k_taskwise_artifact_lineage_v1"
     )
     protocol_id: Literal["taskwise_online_evolution_v1"] = PROTOCOL_ID
+    reflector_projection_id: Literal["taskwise_reflector_trajectory_projection_v1"] = (
+        REFLECTOR_PROJECTION_ID
+    )
     task_uid: str
     task_index: int = Field(ge=0)
     round_index: Literal[0, 1]
@@ -713,6 +731,7 @@ class TaskwiseCoreUpdateResultV1(_FrozenModel):
 
         return TaskwiseArtifactLineageReceiptV1(
             protocol_id=self.protocol_id,
+            reflector_projection_id=REFLECTOR_PROJECTION_ID,
             task_uid=self.task_uid,
             task_index=self.task_index,
             round_index=self.round_index,
@@ -891,6 +910,8 @@ class TaskwiseTextMemoryValidatorV1:
                 findings.add("leak_literal_ngram")
         if _PATH_OR_BENCHMARK_RE.search(text):
             findings.add("leak_path_or_benchmark_marker")
+        if _OPERATIONAL_IDENTIFIER_RE.search(text):
+            findings.add("leak_operational_identifier")
         if _ANSWER_MAP_RE.search(text):
             findings.add("leak_answer_map")
         finding_codes = tuple(sorted(findings))
@@ -1042,10 +1063,7 @@ class TaskwiseCoreEvolutionBridgeV1:
             )
         dataset = self._store.create_dataset(
             DatasetCreateRequest(
-                name=(
-                    f"Taskwise trajectory prefix task {request.task_index} "
-                    f"update {request.update_index}"
-                ),
+                name="Taskwise safe trajectory prefix",
                 purpose=_DATASET_PURPOSE,
                 query={
                     "event_types": [_EVENT_TYPE],
@@ -1382,7 +1400,7 @@ class TaskwiseCoreEvolutionBridgeV1:
             not isinstance(job_config, dict)
             or not isinstance(job_config.get("lineage"), dict)
             or job_config["lineage"].get("validator_input_digest") != result.validator_input_digest
-            or job_config.get("forbidden_literals") != {"taskwise_public_input": list(forbidden)}
+            or "forbidden_literals" in job_config
             or job_config["lineage"].get("memory_limits") != self._memory_limits.to_payload()
             or result.memory_limits_sha256 != self._memory_limits.digest
             or _validator_input_digest(forbidden) != result.validator_input_digest
@@ -1533,33 +1551,42 @@ class TaskwiseCoreEvolutionBridgeV1:
         policy_version: str,
     ) -> EventIngestRequest:
         safe_feedback = trajectory.safe_feedback.to_evolution_payload()
+        reflector_projection = trajectory.to_reflector_projection()
         satisfactory = TaskwiseSafeSignalCodeV1.CORRECT in trajectory.safe_feedback.codes
         reward = 1.0 if satisfactory else 0.0
-        task_id = f"task-{trajectory.task_index:08d}"
-        session_id = f"task-{trajectory.task_index:08d}-round-{trajectory.round_index}"
+        task_id = "taskwise-current-task"
+        session_id = f"taskwise-current-round-{trajectory.round_index}"
         trajectory_payload = {
             "status": "COMPLETED",
             "metadata": {
                 "builder": BRIDGE_ID,
-                "capture_mode": "transcript",
+                "capture_mode": "safe_taxonomy_projection",
                 "token_level_metrics_available": False,
-                "trajectory_id": trajectory.trajectory_id,
-                "safe_feedback_digest": trajectory.safe_feedback.digest,
+                "reflector_projection": reflector_projection,
             },
             "traces": [
                 {
                     "prompt_ids": [],
                     "response_ids": [],
                     "loss_mask": [],
-                    "prompt_messages": [{"role": "user", "content": trajectory.public_prompt}],
-                    "response_messages": [
-                        {"role": "assistant", "content": trajectory.raw_completion}
+                    "prompt_messages": [
+                        {
+                            "role": "user",
+                            "content": (
+                                f"{_REFLECTOR_PROJECTED_PROMPT}\n"
+                                f"Category: {trajectory.category}\n"
+                                f"Round: {trajectory.round_index}"
+                            ),
+                        }
                     ],
-                    "finish_reason": "transcript",
+                    "response_messages": [
+                        {"role": "assistant", "content": _REFLECTOR_PROJECTED_RESPONSE}
+                    ],
+                    "finish_reason": "safe_taxonomy_projection",
                     "response_logprobs": None,
                     "reward": reward,
                     "metadata": {
-                        "capture_mode": "transcript",
+                        "capture_mode": "safe_taxonomy_projection",
                         "token_level_metrics_available": False,
                         "verifier": {
                             "summary": {code.value: 1 for code in trajectory.safe_feedback.codes}
@@ -1589,10 +1616,8 @@ class TaskwiseCoreEvolutionBridgeV1:
                     "metadata": {
                         "protocol_id": PROTOCOL_ID,
                         "bridge_id": BRIDGE_ID,
-                        "task_index": trajectory.task_index,
                         "round_index": trajectory.round_index,
-                        "trajectory_id": trajectory.trajectory_id,
-                        "safe_feedback_digest": trajectory.safe_feedback.digest,
+                        "reflector_projection": reflector_projection,
                         "evolution_feedback": safe_feedback,
                     },
                     "evolution_feedback": safe_feedback,
@@ -1615,6 +1640,7 @@ class TaskwiseCoreEvolutionBridgeV1:
         return {
             "protocol_id": PROTOCOL_ID,
             "bridge_id": BRIDGE_ID,
+            "reflector_projection_id": REFLECTOR_PROJECTION_ID,
             "task_uid": request.task_uid,
             "task_index": request.task_index,
             "round_index": request.round_index,
@@ -1652,6 +1678,7 @@ class TaskwiseCoreEvolutionBridgeV1:
         return {
             "protocol_id": PROTOCOL_ID,
             "bridge_id": BRIDGE_ID,
+            "reflector_projection_id": REFLECTOR_PROJECTION_ID,
             "task_uid": result.task_uid,
             "task_index": result.task_index,
             "round_index": result.round_index,
@@ -1738,10 +1765,7 @@ class TaskwiseCoreEvolutionBridgeV1:
                     ),
                 ),
                 core_config={
-                    "name": (
-                        f"Taskwise text memory task {request.task_index} "
-                        f"update {request.update_index}"
-                    ),
+                    "name": "Taskwise safe text memory update",
                     "promoted": False,
                     "lineage": expected_lineage,
                     "compatibility": {
@@ -1753,12 +1777,8 @@ class TaskwiseCoreEvolutionBridgeV1:
                     "tags": [
                         PROTOCOL_ID,
                         BRIDGE_ID,
-                        f"task-{request.task_index}",
-                        f"update-{request.update_index}",
+                        "taskwise-safe-projection",
                     ],
-                    "forbidden_literals": {
-                        "taskwise_public_input": list(forbidden_literals),
-                    },
                 },
             ),
             snapshot=self._registry.snapshot,
@@ -1795,14 +1815,7 @@ class TaskwiseCoreEvolutionBridgeV1:
                 executable_registry=self._registry,
             )
         else:
-            records = [
-                {
-                    "uid": trajectory.trajectory_id,
-                    "source_split": TASKWISE_SOURCE_SPLIT,
-                    **trajectory.to_core_record(),
-                }
-                for trajectory in request.trajectories
-            ]
+            records = _taskwise_reflector_records(request.trajectories)
             reflector_input_digest = canonical_digest(records)
             private_parent = self._store.files.root / _PRIVATE_INPUT_DIRECTORY
             private_parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -2507,6 +2520,22 @@ def _trajectory_forbidden_literals(
                 if remainder:
                     values.append(remainder)
     return _deduplicate_literals(values)
+
+
+def _taskwise_reflector_records(
+    trajectories: tuple[TaskwiseTrajectoryV1, ...],
+) -> list[dict[str, object]]:
+    """Build the only trajectory projection mounted inside the reflector boundary."""
+
+    ordered_taskwise_trajectory_digest(trajectories)
+    return [
+        {
+            "uid": f"taskwise-reflector-record-{trajectory.round_index}",
+            "source_split": TASKWISE_SOURCE_SPLIT,
+            **trajectory.to_reflector_projection(),
+        }
+        for trajectory in trajectories
+    ]
 
 
 def _deduplicate_literals(values: tuple[str, ...] | list[str]) -> tuple[str, ...]:

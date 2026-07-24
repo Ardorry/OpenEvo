@@ -12,6 +12,12 @@ from openevo_chembench.chembench4k_models import (
 from openevo_chembench.source_identity_v2 import build_source_manifest
 from openevo_chembench.taskwise_sampling_v1 import (
     CONTROL_PROTOCOL_ID,
+    FULL_INTERLEAVING,
+    FULL_SIZE,
+    FULL_STREAM_COUNT,
+    FULL_STREAM_DESIGN,
+    FULL_STREAM_SCOPES,
+    FULL_STREAM_TASK_COUNTS,
     LEGACY_SINGLE_CHAIN_CLASSIFICATION,
     ONLINE_PROTOCOL_ID,
     PILOT500_INTERLEAVING,
@@ -21,10 +27,12 @@ from openevo_chembench.taskwise_sampling_v1 import (
     PILOT500_TASKS_PER_STREAM,
     PROTOCOL_CLASSIFICATION,
     PROTOCOL_FAMILY,
+    full_stream_suite_summary_bytes,
     generate_taskwise_manifests,
     legacy_single_chain_provenance_bytes,
     pilot500_stream_suite_summary_bytes,
     select_taskwise_pilot_streams,
+    select_taskwise_full_streams,
     select_taskwise_stream,
     verify_taskwise_manifests,
 )
@@ -95,6 +103,102 @@ def test_pilot500_is_ten_disjoint_category_interleaved_streams() -> None:
             for left, right in zip(stream, stream[1:], strict=False)
         )
         assert set(task.category for task in stream) == set(CHEMBENCH4K_CATEGORIES)
+
+
+def test_full_is_ten_disjoint_category_interleaved_complete_test_streams() -> None:
+    suite = select_taskwise_full_streams(_loader())
+    all_tasks = [
+        task
+        for category in CHEMBENCH4K_CATEGORIES
+        for task in _loader().load_category(category, split="test")
+    ]
+
+    assert len(suite.streams) == FULL_STREAM_COUNT == 10
+    assert tuple(len(stream) for stream in suite.streams) == FULL_STREAM_TASK_COUNTS
+    assert sum(FULL_STREAM_TASK_COUNTS) == FULL_SIZE == _loader().manifest.test_count == 4009
+    assert {task.uid for stream in suite.streams for task in stream} == {
+        task.uid for task in all_tasks
+    }
+    assert len({task.uid for stream in suite.streams for task in stream}) == FULL_SIZE
+    for stream in suite.streams:
+        assert all(
+            left.category != right.category
+            for left, right in zip(stream, stream[1:], strict=False)
+        )
+        assert set(task.category for task in stream) == set(CHEMBENCH4K_CATEGORIES)
+    for category in CHEMBENCH4K_CATEGORIES:
+        per_stream = [
+            sum(task.category == category for task in stream) for stream in suite.streams
+        ]
+        assert max(per_stream) - min(per_stream) <= 1
+
+
+def test_full_stream_manifests_are_byte_deterministic_private_and_bound_to_suite(
+    tmp_path: Path,
+) -> None:
+    first_manifests = tuple(
+        _generate(tmp_path / "first" / scope, scope) for scope in FULL_STREAM_SCOPES
+    )
+    second_manifests = tuple(
+        _generate(tmp_path / "second" / scope, scope) for scope in FULL_STREAM_SCOPES
+    )
+
+    assert all(
+        left.public_path.read_bytes() == right.public_path.read_bytes()
+        and left.private_path.read_bytes() == right.private_path.read_bytes()
+        and left.summary_path.read_bytes() == right.summary_path.read_bytes()
+        for left, right in zip(first_manifests, second_manifests, strict=True)
+    )
+    assert tuple(manifest.item_count for manifest in first_manifests) == (FULL_STREAM_TASK_COUNTS)
+    assert all(manifest.private_path.stat().st_mode & 0o077 == 0 for manifest in first_manifests)
+
+    summaries = [
+        json.loads(manifest.summary_path.read_text(encoding="utf-8"))
+        for manifest in first_manifests
+    ]
+    assert [summary["stream_id"] for summary in summaries] == list(FULL_STREAM_SCOPES)
+    assert all(summary["stream_design"] == FULL_STREAM_DESIGN for summary in summaries)
+    assert all(summary["category_interleaving"] == FULL_INTERLEAVING for summary in summaries)
+    assert all(summary["complete_test_set"] is True for summary in summaries)
+    assert len({summary["global_ordered_uid_sha256"] for summary in summaries}) == 1
+
+    suite_bytes = full_stream_suite_summary_bytes(
+        _loader(),
+        stream_manifests=first_manifests,
+    )
+    suite_summary = json.loads(suite_bytes)
+    assert suite_summary["stream_count"] == FULL_STREAM_COUNT
+    assert suite_summary["stream_task_counts"] == list(FULL_STREAM_TASK_COUNTS)
+    assert suite_summary["total_item_count"] == FULL_SIZE
+    assert suite_summary["exact_test_count"] == FULL_SIZE
+    assert suite_summary["reset_memory_between_streams"] is True
+    assert suite_summary["complete_test_set"] is True
+    assert sum(suite_summary["category_sample_count"].values()) == FULL_SIZE
+    assert sum(suite_summary["per_stream_item_count"].values()) == FULL_SIZE
+    assert set(suite_summary["per_stream_ordered_uid_sha256"]) == set(FULL_STREAM_SCOPES)
+    assert set(suite_summary["per_stream_category_counts"]) == set(FULL_STREAM_SCOPES)
+
+
+def test_full_public_streams_never_serialize_private_fields(tmp_path: Path) -> None:
+    for scope in FULL_STREAM_SCOPES:
+        manifest = _generate(tmp_path / scope, scope)
+        rows = [
+            json.loads(line)
+            for line in manifest.public_path.read_text(encoding="utf-8").splitlines()
+        ]
+        assert len(rows) == manifest.item_count
+        assert all(
+            not {
+                "target",
+                "answer",
+                "source_index",
+                "source_split",
+                "dataset_sha256",
+            }
+            & set(row)
+            for row in rows
+        )
+        assert manifest.private_path.stat().st_mode & 0o077 == 0
 
 
 def test_each_pilot_stream_manifest_is_deterministic_private_and_bound_to_suite(
@@ -260,6 +364,7 @@ def test_source_identity_tracks_public_stream_manifests_but_not_private() -> Non
             not in paths
         )
     assert "manifests/taskwise_online_v1/online_pilot500_summary.json" in paths
+    assert "manifests/taskwise_online_v1/online_full_summary.json" in paths
     for stream_index in range(10):
         assert (
             f"manifests/taskwise_online_v1/streams/stream_{stream_index:02d}_public_manifest.jsonl"
@@ -270,6 +375,17 @@ def test_source_identity_tracks_public_stream_manifests_but_not_private() -> Non
         assert not any(
             path.startswith("private_manifests/taskwise_online_v1/streams/") for path in paths
         )
+    for stream_index in range(10):
+        assert (
+            f"manifests/taskwise_online_v1/full_streams/"
+            f"stream_{stream_index:02d}_public_manifest.jsonl"
+        ) in paths
+        assert (
+            f"manifests/taskwise_online_v1/full_streams/stream_{stream_index:02d}_summary.json"
+        ) in paths
+    assert not any(
+        path.startswith("private_manifests/taskwise_online_v1/full_streams/") for path in paths
+    )
     assert (
         "manifests/taskwise_online_v1/legacy_single_stream/online_pilot500_public_manifest.jsonl"
     ) in paths

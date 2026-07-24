@@ -30,6 +30,9 @@ _INTERNAL_ENTRYPOINTS = (
     "run_control_pilot500_streams_taskwise_online_v1.sh",
     "run_online_pilot500_streams_taskwise_online_v1.sh",
     "compare_pilot500_streams_taskwise_online_v1.sh",
+    "run_repeated_control_full_taskwise_v1.sh",
+    "run_online_evolution_full_taskwise_v1.sh",
+    "compare_online_full_taskwise_v1.sh",
 )
 _LEGACY_INTERNAL_ENTRYPOINTS = (
     "run_control_pilot500_taskwise_online_v1.sh",
@@ -65,6 +68,37 @@ def test_taskwise_scripts_are_executable_and_syntactically_valid() -> None:
             text=True,
             timeout=10,
         )
+
+
+def test_manifest_wrapper_forwards_explicit_read_only_command() -> None:
+    text = (SCRIPTS_ROOT / "generate_taskwise_manifests_v1.sh").read_text(encoding="utf-8")
+    assert 'command="${1:-generate}"' in text
+    assert 'run_taskwise_manifest_tool "${command}" "$@"' in text
+    assert "run_taskwise_manifest_tool generate" not in text
+
+
+def test_manifest_wrapper_dry_run_is_read_only() -> None:
+    public_manifest = (
+        PACKAGE_ROOT / "manifests" / "taskwise_online_v1" / "online_canary9_public_manifest.jsonl"
+    )
+    before_bytes = public_manifest.read_bytes()
+    before_mtime_ns = public_manifest.stat().st_mtime_ns
+    completed = subprocess.run(
+        (os.fspath(SCRIPTS_ROOT / "generate_taskwise_manifests_v1.sh"), "dry-run"),
+        cwd=PACKAGE_ROOT.parents[1],
+        check=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=30,
+    )
+    payload = json.loads(completed.stdout)
+    assert payload["operation"] == "dry-run"
+    assert payload["model_calls"] == 0
+    assert public_manifest.read_bytes() == before_bytes
+    assert public_manifest.stat().st_mtime_ns == before_mtime_ns
+    assert completed.stderr == ""
 
 
 def test_paid_entrypoints_dispatch_only_through_the_taskwise_cli() -> None:

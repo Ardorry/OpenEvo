@@ -4,9 +4,11 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+import yaml
 
 from openevo_chembench.taskwise_config_v1 import (
     CONTROL_PROTOCOL_ID,
+    FULL_STREAM_SCOPES,
     ONLINE_PROTOCOL_ID,
     PILOT500_STREAM_SCOPES,
     PROTOCOL_MARKERS,
@@ -163,3 +165,48 @@ def test_all_ten_pilot_stream_configs_are_closed_and_paired() -> None:
         assert control.output_directory not in outputs
         assert online.output_directory not in outputs
         outputs.update((control.output_directory, online.output_directory))
+
+
+def test_all_ten_full_stream_configs_are_closed_variable_length_and_paired() -> None:
+    config_root = Path(__file__).resolve().parents[1] / "configs"
+    outputs: set[str] = set()
+    for scope in FULL_STREAM_SCOPES:
+        control = load_taskwise_config_v1(config_root / f"control_{scope}_taskwise_online_v1.yaml")
+        online = load_taskwise_config_v1(config_root / f"online_{scope}_taskwise_online_v1.yaml")
+        assert taskwise_arm_parity_findings(control, online) == ()
+        assert control.scope == online.scope == scope
+        assert control.task_manifest == online.task_manifest
+        assert control.private_task_manifest == online.private_task_manifest
+        assert control.output_directory not in outputs
+        assert online.output_directory not in outputs
+        outputs.update((control.output_directory, online.output_directory))
+
+
+def test_full_suite_configs_bind_all_streams_and_exact_4009_task_count() -> None:
+    config_root = Path(__file__).resolve().parents[1] / "configs"
+    suites = {
+        arm: yaml.safe_load(
+            (config_root / f"{arm}_full_taskwise_online_v1.yaml").read_text(encoding="utf-8")
+        )
+        for arm in ("control", "online")
+    }
+    expected_counts = [401, 401, 401, 401, 401, 401, 401, 401, 401, 400]
+    for arm, suite in suites.items():
+        assert suite["stream_count"] == 10
+        assert suite["stream_task_counts"] == expected_counts
+        assert sum(suite["stream_task_counts"]) == suite["total_item_count"] == 4009
+        assert suite["reset_memory_between_streams"] is True
+        assert suite["stream_configs"] == [
+            f"{arm}_{scope}_taskwise_online_v1.yaml" for scope in FULL_STREAM_SCOPES
+        ]
+    for field_name in (
+        "schema_version",
+        "stream_design",
+        "stream_count",
+        "stream_task_counts",
+        "total_item_count",
+        "reset_memory_between_streams",
+        "suite_summary",
+        "source_commit",
+    ):
+        assert suites["control"][field_name] == suites["online"][field_name]

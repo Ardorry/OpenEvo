@@ -32,6 +32,11 @@ PILOT500_STREAMS_SEED = "openevo-chembench4k-taskwise-online-v1-pilot500-ten-ind
 PILOT500_STREAM_SCOPES = tuple(
     f"pilot500_stream_{index:02d}" for index in range(PILOT500_STREAM_COUNT)
 )
+FULL_SIZE = 4009
+FULL_STREAM_COUNT = 10
+FULL_STREAM_TASK_COUNTS = (401, 401, 401, 401, 401, 401, 401, 401, 401, 400)
+FULL_STREAMS_SEED = "openevo-chembench4k-taskwise-online-v1-full-ten-independent-streams"
+FULL_STREAM_SCOPES = tuple(f"full_stream_{index:02d}" for index in range(FULL_STREAM_COUNT))
 LEGACY_SINGLE_CHAIN_CLASSIFICATION = (
     "LEGACY_SINGLE_STREAM_PILOT_MANIFEST",
     "NOT_PRIMARY_STATISTICAL_PROTOCOL",
@@ -41,6 +46,8 @@ LEGACY_SINGLE_CHAIN_CLASSIFICATION = (
 )
 PILOT500_STREAM_DESIGN = "ten_independent_memory_chains_x_50"
 PILOT500_INTERLEAVING = "weighted_deficit_category_interleave_v1"
+FULL_STREAM_DESIGN = "ten_independent_memory_chains_complete_test"
+FULL_INTERLEAVING = "weighted_deficit_category_interleave_v1"
 PROTOCOL_CLASSIFICATION = (
     "ONLINE_TASKWISE_EVOLUTION",
     "TEST_TIME_ADAPTATION",
@@ -87,6 +94,25 @@ class TaskwisePilotStreamSuite:
             raise TaskwiseManifestError("pilot streams must contain 500 unique tasks")
 
 
+@dataclass(frozen=True, slots=True)
+class TaskwiseFullStreamSuite:
+    """The complete deterministic ten-stream full-test layout."""
+
+    streams: tuple[tuple[PrivateChemBench4KTask, ...], ...]
+    category_population: dict[str, int]
+    ordered_uid_sha256: str
+    uid_set_sha256: str
+
+    def __post_init__(self) -> None:
+        if len(self.streams) != FULL_STREAM_COUNT:
+            raise TaskwiseManifestError("full stream suite must contain ten streams")
+        if tuple(len(stream) for stream in self.streams) != FULL_STREAM_TASK_COUNTS:
+            raise TaskwiseManifestError("full stream suite has invalid stream lengths")
+        uids = [task.uid for stream in self.streams for task in stream]
+        if len(uids) != FULL_SIZE or len(set(uids)) != FULL_SIZE:
+            raise TaskwiseManifestError("full streams must contain all 4009 unique tasks")
+
+
 def _json_line(payload: dict[str, object]) -> bytes:
     return (
         json.dumps(
@@ -107,7 +133,9 @@ def _scope_identity(scope: str) -> tuple[int, str]:
         return PILOT500_SIZE, PILOT500_SEED
     if scope in PILOT500_STREAM_SCOPES:
         return PILOT500_TASKS_PER_STREAM, PILOT500_STREAMS_SEED
-    raise ValueError("scope must be canary9, pilot500, or a frozen pilot stream")
+    if scope in FULL_STREAM_SCOPES:
+        return FULL_STREAM_TASK_COUNTS[full_stream_index(scope)], FULL_STREAMS_SEED
+    raise ValueError("scope must be canary9, pilot500, or a frozen pilot/full stream")
 
 
 def pilot_stream_index(scope: str) -> int:
@@ -118,14 +146,26 @@ def pilot_stream_index(scope: str) -> int:
     return int(scope.rsplit("_", maxsplit=1)[1])
 
 
-def _weighted_category_schedule(category_counts: dict[str, int]) -> tuple[str, ...]:
+def full_stream_index(scope: str) -> int:
+    """Return the closed zero-based full stream index."""
+
+    if scope not in FULL_STREAM_SCOPES:
+        raise ValueError("scope is not a frozen full stream")
+    return int(scope.rsplit("_", maxsplit=1)[1])
+
+
+def _weighted_category_schedule(
+    category_counts: dict[str, int],
+    *,
+    expected_total: int,
+) -> tuple[str, ...]:
     """Interleave categories with deterministic weighted-deficit scheduling."""
 
     if set(category_counts) != set(CHEMBENCH4K_CATEGORIES):
         raise TaskwiseManifestError("category schedule requires all nine categories")
     total = sum(category_counts.values())
-    if total != PILOT500_SIZE:
-        raise TaskwiseManifestError("category schedule must cover exactly 500 tasks")
+    if total != expected_total:
+        raise TaskwiseManifestError("category schedule has the wrong task count")
     used = {category: 0 for category in CHEMBENCH4K_CATEGORIES}
     rank = {category: index for index, category in enumerate(CHEMBENCH4K_CATEGORIES)}
     schedule: list[str] = []
@@ -171,7 +211,10 @@ def select_taskwise_pilot_streams(
         category_seed = hashlib.sha256(f"{PILOT500_STREAMS_SEED}\x1f{category}".encode()).digest()
         random.Random(category_seed).shuffle(tasks)
 
-    schedule = _weighted_category_schedule(allocation)
+    schedule = _weighted_category_schedule(
+        allocation,
+        expected_total=PILOT500_SIZE,
+    )
     offsets = {category: 0 for category in CHEMBENCH4K_CATEGORIES}
     ordered: list[PrivateChemBench4KTask] = []
     for category in schedule:
@@ -203,6 +246,56 @@ def select_taskwise_pilot_streams(
     )
 
 
+def select_taskwise_full_streams(
+    loader: ChemBench4KDatasetLoader,
+) -> TaskwiseFullStreamSuite:
+    """Partition every frozen test item into ten independent ordered streams."""
+
+    if type(loader) is not ChemBench4KDatasetLoader:
+        raise TypeError("loader must be an exact ChemBench4KDatasetLoader")
+    if loader.manifest.test_count != FULL_SIZE:
+        raise TaskwiseManifestError("full stream protocol requires the frozen 4009-task test set")
+    population = {
+        category: loader.manifest.category_counts[category]["test"]
+        for category in CHEMBENCH4K_CATEGORIES
+    }
+    by_category: dict[str, list[PrivateChemBench4KTask]] = {}
+    for category in CHEMBENCH4K_CATEGORIES:
+        tasks = list(loader.load_category(category, split="test"))
+        if len(tasks) != population[category]:
+            raise TaskwiseManifestError("full stream category population is inconsistent")
+        tasks.sort(key=lambda task: task.uid)
+        category_seed = hashlib.sha256(f"{FULL_STREAMS_SEED}\x1f{category}".encode()).digest()
+        random.Random(category_seed).shuffle(tasks)
+        by_category[category] = tasks
+
+    schedule = _weighted_category_schedule(population, expected_total=FULL_SIZE)
+    offsets = {category: 0 for category in CHEMBENCH4K_CATEGORIES}
+    ordered: list[PrivateChemBench4KTask] = []
+    for category in schedule:
+        offset = offsets[category]
+        ordered.append(by_category[category][offset])
+        offsets[category] += 1
+    if offsets != population:
+        raise TaskwiseManifestError("full stream partition did not consume every test item")
+
+    streams: list[tuple[PrivateChemBench4KTask, ...]] = []
+    start = 0
+    for item_count in FULL_STREAM_TASK_COUNTS:
+        stop = start + item_count
+        streams.append(tuple(ordered[start:stop]))
+        start = stop
+    if start != FULL_SIZE:
+        raise TaskwiseManifestError("full stream lengths do not cover the test set")
+    ordered_uids = [task.uid for task in ordered]
+    return TaskwiseFullStreamSuite(
+        streams=tuple(streams),
+        category_population=population,
+        ordered_uid_sha256=hashlib.sha256("\n".join(ordered_uids).encode("ascii")).hexdigest(),
+        uid_set_sha256=hashlib.sha256("\n".join(sorted(ordered_uids)).encode("ascii")).hexdigest(),
+    )
+
+
 def select_taskwise_stream(
     loader: ChemBench4KDatasetLoader,
     *,
@@ -216,6 +309,14 @@ def select_taskwise_stream(
     if scope in PILOT500_STREAM_SCOPES:
         suite = select_taskwise_pilot_streams(loader)
         stream = suite.streams[pilot_stream_index(scope)]
+        allocation = {
+            category: sum(task.category == category for task in stream)
+            for category in CHEMBENCH4K_CATEGORIES
+        }
+        return stream, allocation, seed
+    if scope in FULL_STREAM_SCOPES:
+        suite = select_taskwise_full_streams(loader)
+        stream = suite.streams[full_stream_index(scope)]
         allocation = {
             category: sum(task.category == category for task in stream)
             for category in CHEMBENCH4K_CATEGORIES
@@ -316,6 +417,22 @@ def _manifest_bytes(
                 "global_ordered_uid_sha256": suite.ordered_uid_sha256,
                 "global_uid_set_sha256": suite.uid_set_sha256,
                 "legacy_single_chain": False,
+            }
+        )
+    elif scope in FULL_STREAM_SCOPES:
+        suite = select_taskwise_full_streams(loader)
+        summary.update(
+            {
+                "stream_design": FULL_STREAM_DESIGN,
+                "stream_id": scope,
+                "stream_index": full_stream_index(scope),
+                "stream_count": FULL_STREAM_COUNT,
+                "stream_task_counts": list(FULL_STREAM_TASK_COUNTS),
+                "memory_chain_scope": "one_independent_chain_per_stream",
+                "category_interleaving": FULL_INTERLEAVING,
+                "global_ordered_uid_sha256": suite.ordered_uid_sha256,
+                "global_uid_set_sha256": suite.uid_set_sha256,
+                "complete_test_set": True,
             }
         )
     summary_bytes = _json_line(summary)
@@ -442,6 +559,75 @@ def pilot500_stream_suite_summary_bytes(
     )
 
 
+def full_stream_suite_summary_bytes(
+    loader: ChemBench4KDatasetLoader,
+    *,
+    stream_manifests: tuple[TaskwiseManifestSet, ...],
+) -> bytes:
+    """Build the public summary binding all ten full-test stream manifests."""
+
+    if len(stream_manifests) != FULL_STREAM_COUNT:
+        raise TaskwiseManifestError("full suite summary requires exactly ten stream manifests")
+    suite = select_taskwise_full_streams(loader)
+    stream_payloads: list[dict[str, object]] = []
+    for index, manifest in enumerate(stream_manifests):
+        expected_scope = FULL_STREAM_SCOPES[index]
+        if manifest.item_count != FULL_STREAM_TASK_COUNTS[index]:
+            raise TaskwiseManifestError("full suite member has the wrong task count")
+        stream_payloads.append(
+            {
+                "stream_id": expected_scope,
+                "stream_index": index,
+                "item_count": manifest.item_count,
+                "public_manifest_sha256": manifest.public_sha256,
+                "private_manifest_sha256": manifest.private_sha256,
+                "summary_sha256": manifest.summary_sha256,
+                "ordered_uid_sha256": manifest.ordered_uid_sha256,
+            }
+        )
+    return _json_line(
+        {
+            "schema_version": "chembench4k_taskwise_full_stream_suite_v1",
+            "protocol_family": PROTOCOL_FAMILY,
+            "arm_protocol_ids": [CONTROL_PROTOCOL_ID, ONLINE_PROTOCOL_ID],
+            "classification": list(PROTOCOL_CLASSIFICATION),
+            "stream_design": FULL_STREAM_DESIGN,
+            "category_interleaving": FULL_INTERLEAVING,
+            "memory_chain_scope": "one_independent_chain_per_stream",
+            "seed": FULL_STREAMS_SEED,
+            "sampling_seed": FULL_STREAMS_SEED,
+            "stream_count": FULL_STREAM_COUNT,
+            "stream_task_counts": list(FULL_STREAM_TASK_COUNTS),
+            "total_item_count": FULL_SIZE,
+            "reset_memory_between_streams": True,
+            "complete_test_set": True,
+            "dataset_repository": loader.manifest.repository,
+            "dataset_revision": loader.manifest.revision,
+            "dataset_hash": loader.manifest.combined_sha256,
+            "exact_test_count": loader.manifest.test_count,
+            "category_population": suite.category_population,
+            "category_sample_count": suite.category_population,
+            "global_ordered_uid_sha256": suite.ordered_uid_sha256,
+            "combined_ordered_uid_sha256": suite.ordered_uid_sha256,
+            "global_uid_set_sha256": suite.uid_set_sha256,
+            "per_stream_item_count": {
+                item["stream_id"]: item["item_count"] for item in stream_payloads
+            },
+            "per_stream_ordered_uid_sha256": {
+                item["stream_id"]: item["ordered_uid_sha256"] for item in stream_payloads
+            },
+            "per_stream_category_counts": {
+                FULL_STREAM_SCOPES[index]: {
+                    category: sum(task.category == category for task in suite.streams[index])
+                    for category in CHEMBENCH4K_CATEGORIES
+                }
+                for index in range(FULL_STREAM_COUNT)
+            },
+            "streams": stream_payloads,
+        }
+    )
+
+
 def legacy_single_chain_provenance_bytes(
     legacy_manifest: TaskwiseManifestSet,
 ) -> bytes:
@@ -507,6 +693,13 @@ __all__ = [
     "CANARY9_SCOPE",
     "CANARY9_SEED",
     "CONTROL_PROTOCOL_ID",
+    "FULL_INTERLEAVING",
+    "FULL_SIZE",
+    "FULL_STREAM_COUNT",
+    "FULL_STREAM_DESIGN",
+    "FULL_STREAM_SCOPES",
+    "FULL_STREAM_TASK_COUNTS",
+    "FULL_STREAMS_SEED",
     "MANIFEST_SCHEMA",
     "ONLINE_PROTOCOL_ID",
     "PILOT500_SCOPE",
@@ -523,12 +716,16 @@ __all__ = [
     "LEGACY_SINGLE_CHAIN_CLASSIFICATION",
     "TaskwiseManifestError",
     "TaskwiseManifestSet",
+    "TaskwiseFullStreamSuite",
     "TaskwisePilotStreamSuite",
+    "full_stream_index",
+    "full_stream_suite_summary_bytes",
     "generate_taskwise_manifests",
     "legacy_single_chain_provenance_bytes",
     "pilot500_stream_suite_summary_bytes",
     "pilot_stream_index",
     "select_taskwise_pilot_streams",
+    "select_taskwise_full_streams",
     "select_taskwise_stream",
     "verify_taskwise_manifests",
 ]

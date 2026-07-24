@@ -12,6 +12,7 @@ import pytest
 
 from openevo import __version__
 import openevo.evolution.methods as core_methods
+import openevo_chembench.taskwise_core_evolution_v1 as taskwise_core
 from openevo.evolution.framework import DistributionArtifactExpectation, canonical_digest
 from openevo.evolution.framework import builtins as core_builtins
 from openevo.evolution.framework.builtins import load_verified_builtin_registry
@@ -102,6 +103,7 @@ def _trajectory(
     task_index: int,
     round_index: int,
     correct: bool,
+    response: str | None = None,
 ) -> TaskwiseTrajectoryV1:
     task_uid = _sha(f"task-{task_index}")
     prompt = RenderedChemBench4KPrompt(
@@ -133,7 +135,7 @@ def _trajectory(
         session_id=f"taskwise-session-{task_index}-{round_index}",
         prompt=prompt,
         attempt=RawAttempt(
-            response="A" if correct else "B",
+            response=response if response is not None else ("A" if correct else "B"),
             transcript_reference=TranscriptReference(
                 f"private-transcript-{task_index}-{round_index}"
             ),
@@ -240,6 +242,91 @@ def bridge(tmp_path: Path, executable_registry) -> TaskwiseCoreEvolutionBridgeV1
     instance.close()
 
 
+def test_reflector_projection_seals_task_and_attempt_content(
+    bridge: TaskwiseCoreEvolutionBridgeV1,
+) -> None:
+    trajectory = _trajectory(
+        task_index=7,
+        round_index=0,
+        correct=False,
+        response="private-completion-marker-must-not-reach-reflector",
+    )
+
+    projection = trajectory.to_reflector_projection()
+    boundary_records = taskwise_core._taskwise_reflector_records((trajectory,))
+    event = bridge._event_request(  # noqa: SLF001
+        trajectory=trajectory,
+        policy_version=f"{PROTOCOL_ID}.projection-test",
+    )
+    projection_text = json.dumps(projection, sort_keys=True)
+    boundary_text = json.dumps(boundary_records, sort_keys=True)
+    event_text = json.dumps(event.model_dump(mode="json"), sort_keys=True)
+
+    assert projection["schema_version"] == "taskwise_reflector_trajectory_projection_v1"
+    assert projection["category"] == trajectory.category
+    assert projection["round_index"] == 0
+    assert projection["safe_feedback"] == trajectory.safe_feedback.to_evolution_payload()
+    assert set(projection) == {
+        "schema_version",
+        "protocol_id",
+        "category",
+        "round_index",
+        "safe_feedback",
+        "safe_feedback_digest",
+    }
+    assert boundary_records[0]["uid"] == "taskwise-reflector-record-0"
+    assert boundary_records[0]["source_split"] == taskwise_core.TASKWISE_SOURCE_SPLIT
+    for forbidden in (
+        "private-public-question-7",
+        "private-option-alpha",
+        "private-option-beta",
+        "private-completion-marker-must-not-reach-reflector",
+        trajectory.task_uid,
+        trajectory.session_id,
+    ):
+        assert forbidden not in projection_text
+        assert forbidden not in boundary_text
+        assert forbidden not in event_text
+    assert "safe_taxonomy_projection" in event_text
+    assert TaskwiseSafeSignalCodeV1.INCORRECT.value in event_text
+    assert TaskwiseSafeSignalCodeV1.FORMAT_VIOLATION.value in event_text
+
+
+@pytest.mark.parametrize("correct", (False, True))
+def test_reflector_projection_is_independent_of_prompt_and_completion(
+    correct: bool,
+) -> None:
+    trajectories = tuple(
+        _trajectory(
+            task_index=7 + index,
+            round_index=0,
+            correct=correct,
+            response=response,
+        )
+        for index, response in enumerate(("A", "B", "C", "D"))
+    )
+
+    assert len({item.public_prompt for item in trajectories}) == 4
+    assert len({item.raw_completion for item in trajectories}) == 4
+    assert len({item.task_uid for item in trajectories}) == 4
+    assert (
+        len({json.dumps(item.to_reflector_projection(), sort_keys=True) for item in trajectories})
+        == 1
+    )
+    assert (
+        len(
+            {
+                json.dumps(
+                    taskwise_core._taskwise_reflector_records((item,)),
+                    sort_keys=True,
+                )
+                for item in trajectories
+            }
+        )
+        == 1
+    )
+
+
 def test_global_three_update_chain_uses_complete_task_prefixes(
     bridge: TaskwiseCoreEvolutionBridgeV1,
     monkeypatch: pytest.MonkeyPatch,
@@ -252,24 +339,27 @@ def test_global_three_update_chain_uses_complete_task_prefixes(
         return next(memories)
 
     monkeypatch.setattr(core_methods, "_generate_reflector_markdown", _synthetic_reflector)
+    first_request = _request(task_index=0, update_index=1, predecessor=None)
     task1_update1 = bridge.apply_update(
-        _request(task_index=0, update_index=1, predecessor=None),
+        first_request,
         test_only_allow_synthetic_reflector=True,
+    )
+    second_request = _request(
+        task_index=0,
+        update_index=2,
+        predecessor=task1_update1.predecessor_identity(),
     )
     task1_update2 = bridge.apply_update(
-        _request(
-            task_index=0,
-            update_index=2,
-            predecessor=task1_update1.predecessor_identity(),
-        ),
+        second_request,
         test_only_allow_synthetic_reflector=True,
     )
+    third_request = _request(
+        task_index=1,
+        update_index=1,
+        predecessor=task1_update2.predecessor_identity(),
+    )
     task2_update1 = bridge.apply_update(
-        _request(
-            task_index=1,
-            update_index=1,
-            predecessor=task1_update2.predecessor_identity(),
-        ),
+        third_request,
         test_only_allow_synthetic_reflector=True,
     )
 
@@ -299,6 +389,12 @@ def test_global_three_update_chain_uses_complete_task_prefixes(
         contexts = connection.execute(
             "SELECT selected_artifact_ids_json FROM contexts ORDER BY rowid"
         ).fetchall()
+        event_payload_paths = [
+            Path(row["payload_path"])
+            for row in connection.execute(
+                "SELECT payload_path FROM events ORDER BY rowid"
+            ).fetchall()
+        ]
     assert [tuple(row) for row in datasets] == [(1, 1), (2, 2), (1, 1)]
     assert all(row["state"] == "succeeded" and row["method"] == METHOD_ID for row in jobs)
     assert all(
@@ -311,6 +407,18 @@ def test_global_three_update_chain_uses_complete_task_prefixes(
         == TASKWISE_MEMORY_LIMITS_V1.digest
         for row in jobs
     )
+    assert all("forbidden_literals" not in json.loads(row["config_json"]) for row in jobs)
+    assert all(
+        json.loads(row["config_json"])["name"] == "Taskwise safe text memory update"
+        for row in jobs
+    )
+    for payload_path in event_payload_paths:
+        event_text = payload_path.read_text(encoding="utf-8")
+        assert "public_prompt" not in event_text
+        assert "raw_completion" not in event_text
+        assert "private-public-question" not in event_text
+        assert "private-option-" not in event_text
+        assert "safe_taxonomy_projection" in event_text
     assert all(row["promoted"] == 1 for row in artifacts)
     assert len(contexts) == 3
 
@@ -346,6 +454,41 @@ def test_global_three_update_chain_uses_complete_task_prefixes(
     assert "incorrect" in reflected_prompts[0]
     assert "incorrect" in reflected_prompts[1]
     assert "correct" in reflected_prompts[1]
+    rendered_reflector_input = "\n".join(reflected_prompts)
+    assert "private-public-question" not in rendered_reflector_input
+    assert "private-option-" not in rendered_reflector_input
+    seen_validator_literals: tuple[str, ...] = ()
+    for request in (first_request, second_request, third_request):
+        validator_literals = taskwise_core._deduplicate_literals(
+            (
+                *seen_validator_literals,
+                *request.validator_forbidden_literals,
+                request.task_uid,
+                *(
+                    literal
+                    for trajectory in request.trajectories
+                    for literal in taskwise_core._trajectory_forbidden_literals(trajectory)
+                ),
+            )
+        )
+        private_digests = (
+            ordered_taskwise_trajectory_digest(request.trajectories),
+            taskwise_core._validator_input_digest(validator_literals),
+        )
+        for trajectory in request.trajectories:
+            for private_identity in (
+                trajectory.task_uid,
+                trajectory.session_id,
+                trajectory.public_prompt_sha256,
+                trajectory.trajectory_id,
+                trajectory.safe_feedback.digest,
+                trajectory.dataset_sha256,
+                _sha(trajectory.raw_completion),
+            ):
+                assert private_identity not in rendered_reflector_input
+        for private_digest in private_digests:
+            assert private_digest not in rendered_reflector_input
+        seen_validator_literals = validator_literals
     assert _memory(1).strip() in reflected_prompts[1]
     assert _memory(2).strip() in reflected_prompts[2]
     for result, expected_count in (
@@ -362,6 +505,7 @@ def test_global_three_update_chain_uses_complete_task_prefixes(
     assert set(required_lineage.model_dump(mode="json")) == {
         "schema_version",
         "protocol_id",
+        "reflector_projection_id",
         "task_uid",
         "task_index",
         "round_index",
@@ -702,7 +846,7 @@ def test_private_checkpoint_restores_global_head_and_continues_without_fork(
     restarted.close()
 
 
-def test_checkpoint_cannot_remove_validator_inputs_saved_in_the_core_job(
+def test_checkpoint_cannot_remove_private_validator_inputs_bound_by_digest(
     tmp_path: Path,
     executable_registry,
     monkeypatch: pytest.MonkeyPatch,
@@ -875,6 +1019,42 @@ def test_leaking_candidate_is_rejected_and_never_promoted(
         ).fetchall()
     assert promoted and all(row["promoted"] == 0 for row in promoted)
     with pytest.raises(TaskwiseCoreEvolutionError, match="TASKWISE_STREAM_TERMINAL"):
+        bridge.apply_update(
+            _request(task_index=0, update_index=1, predecessor=None),
+            test_only_allow_synthetic_reflector=True,
+        )
+
+
+@pytest.mark.parametrize(
+    "operational_identifier",
+    (
+        "job_0123456789abcdef",
+        "art_0123456789abcdef",
+        "ds_0123456789abcdef",
+        "taskwise-reflector-record-0",
+        "taskwise_safe_signal",
+        "openevo_core_taskwise",
+    ),
+)
+def test_operational_identifier_echo_is_rejected(
+    bridge: TaskwiseCoreEvolutionBridgeV1,
+    monkeypatch: pytest.MonkeyPatch,
+    operational_identifier: str,
+) -> None:
+    leaking = _memory(1).replace(
+        "Classify the reasoning mode",
+        f"Do not retain runtime identity {operational_identifier}; classify",
+    )
+    monkeypatch.setattr(
+        core_methods,
+        "_generate_reflector_markdown",
+        lambda *_args, **_kwargs: leaking,
+    )
+
+    with pytest.raises(
+        TaskwiseCoreEvolutionError,
+        match="TASKWISE_ARTIFACT_VALIDATION_FAILED",
+    ):
         bridge.apply_update(
             _request(task_index=0, update_index=1, predecessor=None),
             test_only_allow_synthetic_reflector=True,

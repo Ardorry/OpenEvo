@@ -47,9 +47,9 @@ from openevo_chembench.taskwise_generation_v1 import (
     derive_taskwise_generation_id_v1,
     taskwise_canary_comparison_path_v1,
     taskwise_canary_receipt_path_v1,
-    taskwise_pilot_runtime_config_v1,
     validate_taskwise_generation_id_v1,
 )
+from openevo_chembench.taskwise_attempt_v1 import ATTEMPT_SCHEMA_V1
 from openevo_chembench.taskwise_online_runner_v1 import (
     TaskwiseMemoryPublicAggregateV1,
     TaskwiseMemoryPublicMetricsV1,
@@ -1360,21 +1360,11 @@ def _recompute_pilot_binding(
             summary_path=summary,
         )
         manifests.append(manifest)
-        runtime = {
-            arm: taskwise_pilot_runtime_config_v1(paired[arm], generation_id)
-            for arm in ("control", "online")
-        }
         config_payload.append(
             {
                 "scope": scope,
                 "control_config_sha256": paired["control"].config_sha256(),
                 "online_config_sha256": paired["online"].config_sha256(),
-                "control_runtime_config_sha256": runtime["control"].config_sha256(),
-                "online_runtime_config_sha256": runtime["online"].config_sha256(),
-                "control_run_id": runtime["control"].run_name,
-                "online_run_id": runtime["online"].run_name,
-                "control_output_directory": runtime["control"].output_directory,
-                "online_output_directory": runtime["online"].output_directory,
                 "public_manifest_sha256": manifest.public_sha256,
                 "private_manifest_sha256": manifest.private_sha256,
                 "ordered_uid_sha256": manifest.ordered_uid_sha256,
@@ -1400,6 +1390,7 @@ def _recompute_pilot_binding(
     binding = {
         "schema_version": "taskwise_pilot500_binding_v1",
         "generation_id": generation_id,
+        "attempt_namespace_schema": ATTEMPT_SCHEMA_V1,
         "suite_summary_sha256": hashlib.sha256(expected_summary).hexdigest(),
         "ordered_uid_sha256": summary["global_ordered_uid_sha256"],
         "stream_configs": config_payload,

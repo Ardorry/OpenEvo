@@ -16,6 +16,8 @@ from openevo_chembench.taskwise_reporting_v1 import (
     build_taskwise_online_report_v1,
 )
 from openevo_chembench.taskwise_sampling_v1 import (
+    FULL_STREAM_COUNT,
+    FULL_STREAM_SCOPES,
     PILOT500_SIZE,
     PILOT500_STREAM_COUNT,
     PILOT500_STREAM_DESIGN,
@@ -50,6 +52,48 @@ class PrivateTaskwisePairedStreamV1:
     def __post_init__(self) -> None:
         if self.stream_id not in PILOT500_STREAM_SCOPES:
             raise ValueError("stream_id must be one of the ten frozen pilot streams")
+        for value, field_name in (
+            (self.control_security_violations, "control_security_violations"),
+            (self.online_security_violations, "online_security_violations"),
+            (
+                self.online_artifact_validation_failures,
+                "online_artifact_validation_failures",
+            ),
+            (self.context_binding_violations, "context_binding_violations"),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{field_name} must be a non-negative integer")
+        if type(self.completed) is not bool:
+            raise TypeError("completed must be boolean")
+        if type(self.approved_memory_utf8_bytes) is not tuple or any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in self.approved_memory_utf8_bytes
+        ):
+            raise ValueError("approved memory byte metrics must be non-negative integers")
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class PrivateTaskwisePairedFullStreamV1:
+    """One target-bearing full stream pair with a generation-zero reset."""
+
+    stream_id: str
+    control: tuple[PrivateTaskwiseRoundResultV1, ...]
+    online: tuple[PrivateTaskwiseRoundResultV1, ...]
+    control_security_violations: int = 0
+    online_security_violations: int = 0
+    online_artifact_validation_failures: int = 0
+    context_binding_violations: int = 0
+    completed: bool = True
+    approved_memory_utf8_bytes: tuple[int, ...] = ()
+
+    def __repr__(self) -> str:
+        return "PrivateTaskwisePairedFullStreamV1(<redacted>)"
+
+    __str__ = __repr__
+
+    def __post_init__(self) -> None:
+        if self.stream_id not in FULL_STREAM_SCOPES:
+            raise ValueError("stream_id must be one of the ten frozen full streams")
         for value, field_name in (
             (self.control_security_violations, "control_security_violations"),
             (self.online_security_violations, "online_security_violations"),
@@ -299,6 +343,213 @@ def build_taskwise_pilot500_stream_report_v1(
     }
 
 
+def build_taskwise_full_stream_report_v1(
+    streams: tuple[PrivateTaskwisePairedFullStreamV1, ...],
+) -> dict[str, Any]:
+    """Aggregate all 4,009 tasks with ten independent stream clusters."""
+
+    if (
+        type(streams) is not tuple
+        or len(streams) != FULL_STREAM_COUNT
+        or tuple(stream.stream_id for stream in streams) != FULL_STREAM_SCOPES
+    ):
+        raise ValueError("full report requires all ten frozen streams in order")
+
+    per_stream: list[dict[str, Any]] = []
+    all_uids: set[str] = set()
+    stream_deltas: list[float] = []
+    round_2_pairs: list[tuple[PrivateTaskwiseRoundResultV1, PrivateTaskwiseRoundResultV1]] = []
+    position_rows: dict[
+        int,
+        list[tuple[PrivateTaskwiseRoundResultV1, PrivateTaskwiseRoundResultV1]],
+    ] = {}
+    total_security_violations = 0
+    total_artifact_validation_failures = 0
+    total_context_binding_violations = 0
+    completed_streams = 0
+    stream_task_counts: dict[str, int] = {}
+
+    for stream in streams:
+        report = build_taskwise_online_report_v1(
+            control=stream.control,
+            online=stream.online,
+            control_security_violations=stream.control_security_violations,
+            online_security_violations=stream.online_security_violations,
+            online_artifact_validation_failures=(stream.online_artifact_validation_failures),
+        )
+        task_count = int(report["task_count"])
+        if task_count not in {400, 401}:
+            raise ValueError("each full stream must contain 400 or 401 paired tasks")
+        stream_task_counts[stream.stream_id] = task_count
+        control_grouped = _group_rounds(stream.control, expected_arm="control")
+        online_grouped = _group_rounds(stream.online, expected_arm="online")
+        if set(control_grouped) != set(online_grouped):
+            raise ValueError("control and online full tasks must be exactly paired")
+        stream_uids = set(control_grouped)
+        if all_uids & stream_uids:
+            raise ValueError("full streams must not share task UIDs")
+        all_uids.update(stream_uids)
+        for uid in sorted(
+            stream_uids,
+            key=lambda item: control_grouped[item][0].task_index,
+        ):
+            position = control_grouped[uid][0].task_index
+            position_rows.setdefault(position, []).append(
+                (control_grouped[uid][0], online_grouped[uid][0])
+            )
+            round_2_pairs.append((control_grouped[uid][2], online_grouped[uid][2]))
+
+        delta = float(report["paired_final_round"]["absolute_delta"])
+        stream_deltas.append(delta)
+        total_security_violations += (
+            stream.control_security_violations + stream.online_security_violations
+        )
+        total_artifact_validation_failures += stream.online_artifact_validation_failures
+        total_context_binding_violations += stream.context_binding_violations
+        completed_streams += int(stream.completed)
+        if stream.completed and len(stream.approved_memory_utf8_bytes) != 2 * task_count:
+            raise ValueError("completed full stream memory metrics are incomplete")
+        wrong_to_correct_0_to_1 = sum(
+            (not rounds[0].correct) and rounds[1].correct for rounds in online_grouped.values()
+        )
+        wrong_to_correct_0_to_2 = sum(
+            (not rounds[0].correct) and rounds[2].correct for rounds in online_grouped.values()
+        )
+        correct_to_wrong = sum(
+            rounds[0].correct and (not rounds[2].correct) for rounds in online_grouped.values()
+        )
+        memory_values = stream.approved_memory_utf8_bytes
+        per_stream.append(
+            {
+                "stream_id": stream.stream_id,
+                "task_count": task_count,
+                "control_round_0_accuracy": report["control"]["round_0_accuracy"],
+                "online_round_0_accuracy": report["online"]["round_0_accuracy"],
+                "control_round_2_accuracy": report["control"]["round_2_accuracy"],
+                "online_round_1_accuracy": report["online"]["round_1_accuracy"],
+                "online_round_2_accuracy": report["online"]["round_2_accuracy"],
+                "round_2_delta_vs_control": delta,
+                "round_0_transfer_delta_vs_control": (
+                    report["online"]["round_0_accuracy"] - report["control"]["round_0_accuracy"]
+                ),
+                "wrong_to_correct_0_to_1": wrong_to_correct_0_to_1,
+                "wrong_to_correct_0_to_2": wrong_to_correct_0_to_2,
+                "correct_to_wrong": correct_to_wrong,
+                "online_total_within_task_gain": (report["online"]["total_within_task_gain"]),
+                "online_memory_chain_length": report["online"]["memory_chain_length"],
+                "security_violations": (
+                    stream.control_security_violations + stream.online_security_violations
+                ),
+                "artifact_validation_failures": (stream.online_artifact_validation_failures),
+                "context_binding_violations": stream.context_binding_violations,
+                "completed": stream.completed,
+                "memory_growth": {
+                    "first_approved_utf8_bytes": (None if not memory_values else memory_values[0]),
+                    "last_approved_utf8_bytes": (None if not memory_values else memory_values[-1]),
+                    "delta_utf8_bytes": (
+                        None if not memory_values else memory_values[-1] - memory_values[0]
+                    ),
+                    "max_approved_utf8_bytes": (None if not memory_values else max(memory_values)),
+                },
+            }
+        )
+
+    total_tasks = sum(stream_task_counts.values())
+    if total_tasks != 4009 or len(all_uids) != 4009 or len(round_2_pairs) != 4009:
+        raise ValueError("full stream report must cover exactly 4,009 unique tasks")
+    if sorted(stream_task_counts.values()) != [400, *([401] * 9)]:
+        raise ValueError("full stream sizes must be one 400 and nine 401 task streams")
+    if (
+        completed_streams != FULL_STREAM_COUNT
+        or total_security_violations
+        or total_artifact_validation_failures
+        or total_context_binding_violations
+    ):
+        raise ValueError("full report requires ten completed violation-free streams")
+
+    control_round_2_correct = sum(left.correct for left, _right in round_2_pairs)
+    online_round_2_correct = sum(right.correct for _left, right in round_2_pairs)
+    ci_lower, ci_upper = _stream_bootstrap_interval(stream_deltas)
+    mean_delta = statistics.fmean(stream_deltas)
+    return {
+        "schema_version": "taskwise_online_full_ten_stream_report_v1",
+        "protocol_id": PROTOCOL_ID,
+        "protocol_labels": list(PROTOCOL_LABELS),
+        "standard_chembench4k_score_claimed": False,
+        "selection_policy": "fixed_round_2_no_best_of_no_early_stop",
+        "stream_design": "ten_independent_memory_chains_full_test",
+        "inference_unit": "independent_task_stream",
+        "stream_count": FULL_STREAM_COUNT,
+        "per_stream_task_count": stream_task_counts,
+        "task_count": total_tasks,
+        "status": "COMPLETED",
+        "completed_streams": completed_streams,
+        "per_stream": per_stream,
+        "paired_final_round": {
+            "comparison": "online_round_2_vs_control_round_2",
+            "control_round_2_accuracy": control_round_2_correct / total_tasks,
+            "online_round_2_accuracy": online_round_2_correct / total_tasks,
+            "absolute_delta": (online_round_2_correct - control_round_2_correct) / total_tasks,
+            "stream_delta_mean": mean_delta,
+            "stream_delta_median": statistics.median(stream_deltas),
+            "stream_delta_std": statistics.stdev(stream_deltas),
+            "positive_stream_count": sum(value > 0 for value in stream_deltas),
+            "wrong_to_correct": sum(
+                (not left.correct) and right.correct for left, right in round_2_pairs
+            ),
+            "correct_to_wrong": sum(
+                left.correct and (not right.correct) for left, right in round_2_pairs
+            ),
+            "both_correct": sum(left.correct and right.correct for left, right in round_2_pairs),
+            "both_wrong": sum(
+                (not left.correct) and (not right.correct) for left, right in round_2_pairs
+            ),
+            "stream_exact_sign_flip_p_value": _exact_stream_sign_flip_p_value(stream_deltas),
+            "stream_block_bootstrap_95_ci": {
+                "lower": ci_lower,
+                "upper": ci_upper,
+                "samples": STREAM_BOOTSTRAP_SAMPLES,
+                "seed": STREAM_BOOTSTRAP_SEED,
+            },
+        },
+        "dependent_task_observations": {
+            "classification": "DESCRIPTIVE_ONLY_DEPENDENT_TASK_OBSERVATIONS",
+            "round_0_accuracy_by_within_stream_position": [
+                {
+                    "stream_position": position,
+                    "stream_observations": len(rows),
+                    "control_accuracy": (sum(left.correct for left, _right in rows) / len(rows)),
+                    "online_accuracy": (sum(right.correct for _left, right in rows) / len(rows)),
+                }
+                for position, rows in sorted(position_rows.items())
+            ],
+        },
+        "per_category_round_2": _pilot_per_category_round_2(round_2_pairs),
+        "control_round_2_strict_parse_rate": (
+            sum(
+                row.strict_parsed
+                for stream in streams
+                for row in stream.control
+                if row.round_index == 2
+            )
+            / total_tasks
+        ),
+        "online_round_2_strict_parse_rate": (
+            sum(
+                row.strict_parsed
+                for stream in streams
+                for row in stream.online
+                if row.round_index == 2
+            )
+            / total_tasks
+        ),
+        "infrastructure_failures": 0,
+        "security_violations": total_security_violations,
+        "artifact_validation_failures": total_artifact_validation_failures,
+        "context_binding_violations": total_context_binding_violations,
+    }
+
+
 def _group_rounds(
     rows: tuple[PrivateTaskwiseRoundResultV1, ...],
     *,
@@ -400,6 +651,8 @@ def _pilot_per_category_round_2(
 __all__ = [
     "STREAM_BOOTSTRAP_SAMPLES",
     "STREAM_BOOTSTRAP_SEED",
+    "PrivateTaskwisePairedFullStreamV1",
     "PrivateTaskwisePairedStreamV1",
+    "build_taskwise_full_stream_report_v1",
     "build_taskwise_pilot500_stream_report_v1",
 ]

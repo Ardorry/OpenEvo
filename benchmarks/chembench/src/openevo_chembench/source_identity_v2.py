@@ -28,7 +28,11 @@ SOURCE_IDENTITY_INPUTS = (
     "manifests/taskwise_online_v1/*_summary.json",
     "manifests/taskwise_online_v1/streams/*_public_manifest.jsonl",
     "manifests/taskwise_online_v1/streams/*_summary.json",
-    "manifests/taskwise_online_v1/legacy_single_stream/*",
+    "manifests/taskwise_online_v1/full_streams/*_public_manifest.jsonl",
+    "manifests/taskwise_online_v1/full_streams/*_summary.json",
+    "manifests/taskwise_online_v1/legacy_single_stream/*_public_manifest.jsonl",
+    "manifests/taskwise_online_v1/legacy_single_stream/*_summary.json",
+    "manifests/taskwise_online_v1/legacy_single_stream/provenance.json",
 )
 
 # These are generated evidence, private data, runtime state, or local tooling
@@ -168,7 +172,7 @@ def _matches_source_identity_input(relative: PurePosixPath) -> bool:
     if (
         relative.parts[1] == "taskwise_online_v1"
         and len(relative.parts) == 4
-        and relative.parts[2] in {"streams", "legacy_single_stream"}
+        and relative.parts[2] in {"streams", "full_streams", "legacy_single_stream"}
     ):
         return (
             relative.name.endswith("_public_manifest.jsonl")

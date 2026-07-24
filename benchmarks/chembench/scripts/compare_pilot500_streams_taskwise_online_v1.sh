@@ -11,3 +11,5 @@ run_taskwise_manifest_tool verify
 require_taskwise_source_commit "${CONTROL_CONFIG}"
 require_taskwise_source_commit "${ONLINE_CONFIG}"
 run_taskwise_cli compare-pilot-streams "$@"
+run_taskwise_cli freeze-pilot-go-receipt "$@"
+run_taskwise_cli verify-pilot-go-receipt "$@"

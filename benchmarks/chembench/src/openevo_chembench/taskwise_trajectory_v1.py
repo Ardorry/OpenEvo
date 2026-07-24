@@ -176,9 +176,11 @@ class TaskwiseTrajectoryV1:
         return _sha256(_canonical_bytes(identity))
 
     def to_core_record(self) -> dict[str, object]:
-        """Return the complete target-free record consumed by Core."""
+        """Return the private controller binding used to digest this trajectory."""
 
         payload: dict[str, object] = {
+            # Kept for private-checkpoint compatibility. The reflector-visible
+            # Core dataset uses ``to_reflector_projection`` instead.
             "schema_version": "taskwise_core_trajectory_v1",
             "protocol_id": "taskwise_online_evolution_v1",
             "trajectory_id": self.trajectory_id,
@@ -194,6 +196,20 @@ class TaskwiseTrajectoryV1:
             "safe_feedback_digest": self.safe_feedback.digest,
             "dataset_revision": self.dataset_revision,
             "dataset_sha256": self.dataset_sha256,
+        }
+        _assert_no_private_keys(payload)
+        return payload
+
+    def to_reflector_projection(self) -> dict[str, object]:
+        """Project only taxonomy-level evidence into the Core dataset artifact."""
+
+        payload: dict[str, object] = {
+            "schema_version": "taskwise_reflector_trajectory_projection_v1",
+            "protocol_id": "taskwise_online_evolution_v1",
+            "category": self.category,
+            "round_index": self.round_index,
+            "safe_feedback": self.safe_feedback.to_evolution_payload(),
+            "safe_feedback_digest": self.safe_feedback.digest,
         }
         _assert_no_private_keys(payload)
         return payload

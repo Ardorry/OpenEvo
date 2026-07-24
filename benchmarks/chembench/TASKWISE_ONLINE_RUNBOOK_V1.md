@@ -42,6 +42,27 @@ Round 2 with M_i_2
 The control arm also opens three new sessions per task, but creates no Core
 dataset, job, artifact, context, or memory injection.
 
+## Reflector information boundary
+
+The trusted controller binds the complete public prompt and raw completion into
+the private trajectory and Core lineage commitments. Those private commitments
+are not rendered to Codex. The separately constructed, Bubblewrap-mounted
+reflector dataset contains only:
+
+- a fixed synthetic record identity and safe source split;
+- the frozen general chemistry category and round index;
+- the closed `SafeEvolutionSignal` taxonomy and its digest.
+
+In particular, the reflector never receives the raw completion together with a
+`correct` signal. A single-letter completion plus correctness would reveal the
+private target by inference even if no field were named `target`. Full prompt,
+choice, completion, UID, and runtime-session values remain available only to
+the trusted controller and private validator. Core-private event and lineage
+metadata may contain opaque commitments required for restart verification, but
+the registered method's real Codex process cannot see them. The Core dataset
+artifact, plan-bound job, registered method, typed artifact, promotion, and
+Core context resolution lifecycle remain unchanged.
+
 ## Fail-closed evolution policy
 
 An evolution update is atomic. Core job failure, reflector security violation,
@@ -168,6 +189,41 @@ total calls:             4000
 ```
 
 The online arm therefore uses additional paid reflector compute.
+
+## Full 4,009-task streams
+
+The full experiment is a separate ten-stream generation authorized only after
+the persisted Pilot500 comparison is recomputed as `GO`. The Pilot-GO receipt
+binds the current source commit, paired-canary authority, pilot generation and
+report, all full configs, and all full public/private manifest hashes. Each
+full launcher recomputes that receipt; a caller-supplied boolean cannot
+authorize execution.
+
+All 4,009 frozen test tasks are covered exactly once across ten independent
+memory chains: nine streams contain 401 tasks and one contains 400. Every
+stream starts at generation-zero memory and has an independent result, Core
+state, checkpoint, diagnostic, and artifact namespace. Control and online arms
+use the same task order within each stream.
+
+Cost inventory:
+
+```text
+control task calls:       12027
+online task calls:        12027
+online reflector calls:    8018
+total calls:              32072
+```
+
+Full execution and comparison entrypoints:
+
+```bash
+benchmarks/chembench/scripts/run_repeated_control_full_taskwise_v1.sh
+benchmarks/chembench/scripts/run_online_evolution_full_taskwise_v1.sh
+benchmarks/chembench/scripts/compare_online_full_taskwise_v1.sh
+```
+
+They remain fail closed until Pilot500 has completed and its frozen GO receipt
+revalidates against the current source and manifests.
 
 ## Non-paid validation
 

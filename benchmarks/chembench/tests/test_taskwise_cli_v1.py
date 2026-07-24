@@ -566,14 +566,14 @@ def test_manifest_is_bound_to_config_scope_and_path() -> None:
         cli._verify_static_inputs(wrong_scope, path)
 
 
-def test_canary_fix6_uses_fresh_paired_run_namespaces() -> None:
+def test_canary_fix7_uses_fresh_paired_run_namespaces() -> None:
     control = load_taskwise_config_v1(cli.CONFIG_ROOT / "control_canary9_taskwise_online_v1.yaml")
     online = load_taskwise_config_v1(cli.CONFIG_ROOT / "online_canary9_taskwise_online_v1.yaml")
 
-    assert control.run_name == "control_canary9_repeated_session_v1_fix6"
-    assert online.run_name == "online_canary9_taskwise_evolution_v1_fix6"
-    assert control.output_directory.endswith("/canary9/control_fix6")
-    assert online.output_directory.endswith("/canary9/online_fix6")
+    assert control.run_name == "control_canary9_repeated_session_v1_fix7"
+    assert online.run_name == "online_canary9_taskwise_evolution_v1_fix7"
+    assert control.output_directory.endswith("/canary9/control_fix7")
+    assert online.output_directory.endswith("/canary9/online_fix7")
     assert "fix1" not in control.output_directory
     assert "fix1" not in online.output_directory
 
@@ -890,6 +890,36 @@ def test_suite_orchestrator_rejects_existing_stream_without_resume_or_stitch(
     assert state["streams"]["pilot500_stream_00"]["action"] == "TERMINAL_FAILURE"
 
 
+def test_direct_pilot_run_arm_cannot_bypass_paired_attempt_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _allow_test_pilot_generation(monkeypatch)
+    monkeypatch.setattr(cli, "REPOSITORY_ROOT", tmp_path)
+    control_path = cli.CONFIG_ROOT / "control_pilot500_stream_00_taskwise_online_v1.yaml"
+    paired = {
+        arm: load_taskwise_config_v1(
+            cli.CONFIG_ROOT / f"{arm}_pilot500_stream_00_taskwise_online_v1.yaml"
+        )
+        for arm in ("control", "online")
+    }
+    monkeypatch.setattr(
+        cli,
+        "_verify_static_inputs",
+        lambda *_args: (SimpleNamespace(), SimpleNamespace(), paired),
+    )
+
+    with pytest.raises(cli.TaskwiseCLIError, match="ATTEMPT_AUTHORITY_INVALID"):
+        cli.run_arm(
+            control_path,
+            generation_id=_GENERATION_ID,
+            source_gate=lambda _config: _SOURCE_COMMIT,
+            executor_factory=lambda _config: pytest.fail(
+                "executor constructed without paired attempt authority"
+            ),
+        )
+
+
 @pytest.mark.parametrize(
     ("run_status", "failure_code", "counter_name"),
     [
@@ -1063,15 +1093,18 @@ def test_suite_records_infrastructure_failure_but_never_resumes_generation(
             "finding_codes": ["INFRASTRUCTURE_TRANSPORT_FAILURE"],
         }
 
-    result = cli.run_pilot500_stream_suite(
-        arm="control",
-        arm_runner=fake_runner,
-        suite_state_path=tmp_path / "suite" / "control.json",
-        source_gate=lambda _config: _SOURCE_COMMIT,
-    )
+    suite_path = tmp_path / "suite" / "control.json"
+    with pytest.raises(cli.TaskwiseCLIError, match="SUITE_TERMINAL_FAILURE"):
+        cli.run_pilot500_stream_suite(
+            arm="control",
+            arm_runner=fake_runner,
+            suite_state_path=suite_path,
+            source_gate=lambda _config: _SOURCE_COMMIT,
+        )
 
+    result = json.loads(suite_path.read_text(encoding="utf-8"))
     assert calls == 1
-    assert result["status"] == "INCOMPLETE"
+    assert result["status"] == "FAILED"
     assert result["infrastructure_failures"] == 1
     assert result["executor_failures"] == 1
     assert result["executor_failure_codes"] == {"EXECUTOR_MODEL_TRANSPORT_FAILED": 1}
@@ -1084,7 +1117,7 @@ def test_suite_records_infrastructure_failure_but_never_resumes_generation(
         cli.run_pilot500_stream_suite(
             arm="control",
             arm_runner=fake_runner,
-            suite_state_path=tmp_path / "suite" / "control.json",
+            suite_state_path=suite_path,
             source_gate=lambda _config: _SOURCE_COMMIT,
         )
     assert calls == 1

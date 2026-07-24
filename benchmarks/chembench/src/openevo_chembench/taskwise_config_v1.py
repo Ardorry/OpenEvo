@@ -46,7 +46,16 @@ PILOT500_STREAM_COUNT = 10
 PILOT500_STREAM_SCOPES = tuple(
     f"pilot500_stream_{index:02d}" for index in range(PILOT500_STREAM_COUNT)
 )
-_SCOPES = frozenset({"canary9", "pilot500", *PILOT500_STREAM_SCOPES})
+FULL_STREAM_COUNT = 10
+FULL_STREAM_SCOPES = tuple(f"full_stream_{index:02d}" for index in range(FULL_STREAM_COUNT))
+_SCOPES = frozenset(
+    {
+        "canary9",
+        "pilot500",
+        *PILOT500_STREAM_SCOPES,
+        *FULL_STREAM_SCOPES,
+    }
+)
 
 
 class TaskwiseConfigError(ValueError):
@@ -226,7 +235,7 @@ class TaskwiseExperimentConfigV1:
             raise TaskwiseConfigError("model identity is not frozen")
         if self.scope not in _SCOPES:
             raise TaskwiseConfigError(
-                "scope must be canary9, legacy pilot500, or a frozen pilot500 stream"
+                "scope must be canary9, legacy pilot500, or a frozen pilot/full stream"
             )
         if self.protocol_markers != PROTOCOL_MARKERS:
             raise TaskwiseConfigError("non-standard protocol markers are incomplete")
@@ -529,6 +538,8 @@ __all__ = [
     "DATASET_REPOSITORY",
     "DATASET_REVISION",
     "EXECUTION_MODE",
+    "FULL_STREAM_COUNT",
+    "FULL_STREAM_SCOPES",
     "MODEL",
     "ONLINE_PROTOCOL_ID",
     "PILOT500_STREAM_COUNT",
