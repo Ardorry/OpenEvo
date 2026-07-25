@@ -8,8 +8,8 @@ protocol_markers:
   - NOT_A_STANDARD_LEADERBOARD_SCORE
 arm: control
 scope: canary9
-run_name: control_canary9_repeated_session_v1_fix16
-output_directory: OpenEvo/results/chembench4k_taskwise_online_v1/canary9/control_fix16
+run_name: control_canary9_repeated_session_v1_fix17
+output_directory: OpenEvo/results/chembench4k_taskwise_online_v1/canary9/control_fix17
 dataset:
   repository: AI4Chem/ChemBench4K
   revision: f8ad41a980170f4c5d0cc97e57722d06887c8f53
