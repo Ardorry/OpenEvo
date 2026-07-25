@@ -24,7 +24,6 @@ import os
 from pathlib import Path
 import re
 import shutil
-import signal
 import stat
 import subprocess
 import sys
@@ -36,9 +35,13 @@ import uuid
 from openevo_chembench.local_codex_executor import (
     _DISABLED_CODEX_FEATURES,
     _MODEL_TRANSPORT_ENV_KEYS,
+    LocalCodexExecutionError,
+    _close_process_pipes,
     _find_security_tool_use,
+    _parse_jsonl_transcript,
     _path_is_inside_any_protected_root,
     _sanitized_model_transport_environment,
+    _terminate_invocation_processes,
 )
 
 
@@ -400,6 +403,7 @@ class ReflectorBoundaryActivationV2:
         if not isinstance(payload, dict):
             raise ReflectorBoundaryError("REFLECTOR_RECEIPT_SCHEMA_INVALID")
         receipt = ReflectorExecutionReceiptV2.from_payload(payload)
+        expected_private_reference = f"{self.invocation_id}/events.jsonl"
         if (
             receipt.invocation_id != self.invocation_id
             or receipt.record_count != self.expected_record_count
@@ -412,8 +416,32 @@ class ReflectorBoundaryActivationV2:
                 and receipt.projected_prompt_sha256 is None
             )
             or not receipt.wrapper_invoked
+            or receipt.private_event_reference != expected_private_reference
         ):
             raise ReflectorBoundaryError("REFLECTOR_WRAPPER_RECEIPT_BINDING_INVALID")
+        event_path = self.receipt_path.parent / "events.jsonl"
+        try:
+            event_metadata = event_path.lstat()
+            if (
+                stat.S_ISLNK(event_metadata.st_mode)
+                or not stat.S_ISREG(event_metadata.st_mode)
+                or stat.S_IMODE(event_metadata.st_mode) != 0o600
+                or (hasattr(os, "getuid") and event_metadata.st_uid != os.getuid())
+                or event_metadata.st_size > _MAX_EVENT_BYTES
+            ):
+                raise OSError
+            event_bytes = event_path.read_bytes()
+        except OSError as exc:
+            raise ReflectorBoundaryError("REFLECTOR_WRAPPER_RECEIPT_BINDING_INVALID") from exc
+        if hashlib.sha256(event_bytes).hexdigest() != receipt.event_stream_sha256:
+            raise ReflectorBoundaryError("REFLECTOR_WRAPPER_RECEIPT_BINDING_INVALID")
+        if receipt.status is ReflectorBoundaryStatusV2.COMPLETED:
+            if receipt.codex_returncode != 0 or not event_bytes:
+                raise ReflectorBoundaryError("REFLECTOR_WRAPPER_RECEIPT_BINDING_INVALID")
+            try:
+                _parse_jsonl_transcript(event_bytes.decode("utf-8"))
+            except (UnicodeError, LocalCodexExecutionError) as exc:
+                raise ReflectorBoundaryError("REFLECTOR_WRAPPER_RECEIPT_BINDING_INVALID") from exc
         return receipt
 
 
@@ -821,6 +849,10 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
             return_code = _WRAPPER_EXIT_CODEX
             host_output.unlink(missing_ok=True)
         else:
+            try:
+                event_response, _usage, _event_digest = _parse_jsonl_transcript(event_stream)
+            except LocalCodexExecutionError as exc:
+                raise ReflectorBoundaryError("REFLECTOR_EVENT_STREAM_INVALID") from exc
             isolated_output = layout["output"] / "last-message.md"
             content = _read_bounded_regular_file(
                 isolated_output,
@@ -828,6 +860,12 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
             )
             if not content.strip():
                 raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_MISSING")
+            try:
+                output_text = content.decode("utf-8")
+            except UnicodeError as exc:
+                raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID") from exc
+            if output_text.strip() != event_response.strip():
+                raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
             _exclusive_write(host_output, content, mode=0o600)
             last_message_sha256 = hashlib.sha256(content).hexdigest()
             status = ReflectorBoundaryStatusV2.COMPLETED
@@ -958,31 +996,29 @@ def _load_wrapper_config(path: Path) -> dict[str, Any]:
 def _validate_and_rewrite_upstream_arguments(
     arguments: list[str],
 ) -> tuple[Path, list[str]]:
-    required = {
-        "--json",
-        "--ignore-user-config",
-        "--ephemeral",
-        "--skip-git-repo-check",
-    }
+    if any(type(value) is not str for value in arguments):
+        raise ReflectorBoundaryError("REFLECTOR_UPSTREAM_ARGUMENTS_INVALID")
     if (
-        not arguments
-        or arguments[0] != "exec"
-        or not required.issubset(arguments)
-        or arguments[-1] != "-"
-        or arguments.count("--output-last-message") != 1
-        or arguments.count("--cd") != 1
-        or arguments.count("--model") != 1
+        len(arguments) != 16
+        or arguments[:10]
+        != [
+            "exec",
+            "--json",
+            "--ignore-user-config",
+            "--ephemeral",
+            "--sandbox",
+            "read-only",
+            "--disable",
+            "shell_tool",
+            "--skip-git-repo-check",
+            "--cd",
+        ]
+        or arguments[11] != "--output-last-message"
+        or arguments[13:17] != ["--model", "gpt-5.5", "-"]
     ):
         raise ReflectorBoundaryError("REFLECTOR_UPSTREAM_ARGUMENTS_INVALID")
-    output_index = arguments.index("--output-last-message") + 1
-    cwd_index = arguments.index("--cd") + 1
-    model_index = arguments.index("--model") + 1
-    if max(output_index, cwd_index, model_index) >= len(arguments):
-        raise ReflectorBoundaryError("REFLECTOR_UPSTREAM_ARGUMENTS_INVALID")
-    if arguments[model_index] != "gpt-5.5":
-        raise ReflectorBoundaryError("REFLECTOR_MODEL_IDENTITY_INVALID")
-    host_output = Path(arguments[output_index]).resolve()
-    host_cwd = Path(arguments[cwd_index]).resolve()
+    host_cwd = Path(arguments[10]).resolve()
+    host_output = Path(arguments[12]).resolve()
     if host_output.parent != host_cwd or not host_cwd.is_dir():
         raise ReflectorBoundaryError("REFLECTOR_UPSTREAM_PATH_INVALID")
     try:
@@ -1535,20 +1571,36 @@ def _run_process_group(
     )
     try:
         stdout, _stderr = process.communicate(input=input_text, timeout=timeout_seconds)
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
+        quiescent = _terminate_invocation_processes(
+            process,
+            process_group_id=process.pid,
+        )
         try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        try:
-            stdout, _stderr = process.communicate(timeout=5)
+            stdout, _stderr = process.communicate(timeout=2.0)
         except subprocess.TimeoutExpired:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            stdout, _stderr = process.communicate()
+            _close_process_pipes(process)
+            raise ReflectorBoundaryError("REFLECTOR_PROCESS_TERMINATION_FAILED") from exc
+        if not quiescent:
+            raise ReflectorBoundaryError("REFLECTOR_PROCESS_TERMINATION_FAILED") from exc
         return _ProcessResult(returncode=124, stdout=stdout, stderr=_stderr)
+    except BaseException as exc:
+        quiescent = _terminate_invocation_processes(
+            process,
+            process_group_id=process.pid,
+        )
+        _close_process_pipes(process)
+        if not quiescent:
+            raise ReflectorBoundaryError("REFLECTOR_PROCESS_TERMINATION_FAILED") from exc
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise
+        raise ReflectorBoundaryError("REFLECTOR_PROCESS_IO_FAILED") from exc
+    quiescent = _terminate_invocation_processes(
+        process,
+        process_group_id=process.pid,
+    )
+    if not quiescent:
+        raise ReflectorBoundaryError("REFLECTOR_PROCESS_TERMINATION_FAILED")
     return _ProcessResult(
         returncode=process.returncode,
         stdout=stdout,

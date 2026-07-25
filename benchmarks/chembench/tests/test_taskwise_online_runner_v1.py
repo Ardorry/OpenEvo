@@ -317,6 +317,10 @@ class _CoreUpdateFailureWithReceipt(RuntimeError):
         super().__init__("PRIVATE_CORE_FAILURE_BODY_SENTINEL")
 
 
+class _ArtifactValidationFailureWithReceipt(_CoreUpdateFailureWithReceipt):
+    finding_code = "TASKWISE_ARTIFACT_VALIDATION_FAILED"
+
+
 class _CorePortWithPrivateFailureReceipt:
     def update_text_memory(
         self,
@@ -1415,6 +1419,48 @@ def test_core_failure_receipt_is_referenced_only_as_safe_metadata(
         sort_keys=True,
     )
     assert "PRIVATE_CORE_FAILURE_BODY_SENTINEL" not in encoded
+
+
+def test_artifact_validation_failure_preserves_closed_code_and_zero_approved_counts(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path, "online")
+
+    class ArtifactRejectingCore:
+        def update_text_memory(
+            self,
+            _request: TaskwiseRunnerCoreUpdateRequestV1,
+        ) -> TaskwiseCoreUpdateOutcomeV1:
+            raise _ArtifactValidationFailureWithReceipt
+
+        def resolve_text_memory(
+            self,
+            _reference: CoreMemoryReferenceV1,
+        ) -> CoreResolvedTextMemoryV2:
+            raise AssertionError("rejected artifact must never resolve")
+
+    result = TaskwiseOnlineRunnerV1(
+        config=config,
+        episodes=_episodes(1),
+        executor=_DummyExecutor(["B", "A", "A"]),
+        core_update_port=ArtifactRejectingCore(),
+        session_id_factory=_session_factory("artifact-validation-failure"),
+    ).run()
+
+    assert result.status is TaskwiseRunStatusV1.TASKWISE_EVOLUTION_UPDATE_FAILED
+    assert result.finding_codes == ("TASKWISE_ARTIFACT_VALIDATION_FAILED",)
+    assert result.completion_count == result.session_attempt_count == 1
+    assert result.update_count == result.core_job_count == result.core_artifact_count == 0
+    assert result.context_resolution_count == 0
+    assert result.memory_aggregate.approved_artifact_count == 0
+    state = json.loads((config.output_directory / "run_state.json").read_text())
+    assert state["failure"]["code"] == "TASKWISE_ARTIFACT_VALIDATION_FAILED"
+    assert (
+        state["failure"]["diagnostic_receipt"]
+        == _ArtifactValidationFailureWithReceipt.diagnostic_receipt
+    )
+    assert state["active_memory"] is None
+    assert state["carry_memory"] is None
 
 
 def test_resume_rejects_binding_or_history_tampering(tmp_path: Path) -> None:

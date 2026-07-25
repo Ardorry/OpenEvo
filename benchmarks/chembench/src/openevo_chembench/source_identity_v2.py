@@ -15,7 +15,7 @@ DEFAULT_SOURCE_MANIFEST = Path("manifests/chembench_source_manifest_v2.json")
 # source manifest builder below admits only these inputs.
 SOURCE_IDENTITY_INPUTS = (
     ".gitignore",
-    "README.md",
+    "*.md",
     "pyproject.toml",
     "configs/**",
     "scripts/**",
@@ -155,7 +155,9 @@ def _is_derived_runtime_output(relative: PurePosixPath) -> bool:
 
 
 def _matches_source_identity_input(relative: PurePosixPath) -> bool:
-    if relative.as_posix() in {".gitignore", "README.md", "pyproject.toml"}:
+    if relative.as_posix() in {".gitignore", "pyproject.toml"} or (
+        len(relative.parts) == 1 and relative.suffix == ".md"
+    ):
         return True
     if relative.parts[0] in {"configs", "scripts", "src", "tests"}:
         return True

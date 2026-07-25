@@ -330,6 +330,36 @@ def test_reasoning_and_message_events_do_not_false_positive() -> None:
     assert len(digest) == 64
 
 
+def test_nested_tool_schema_inside_agent_message_is_security_violation() -> None:
+    events = [json.loads(line) for line in _safe_transcript().splitlines()]
+    message = events[2]["item"]
+    assert isinstance(message, dict)
+    message["tool_calls"] = [{"type": "file_read"}]
+
+    with pytest.raises(LocalCodexExecutionError) as raised:
+        _parse_jsonl_transcript(
+            "\n".join(json.dumps(event, sort_keys=True) for event in events) + "\n"
+        )
+
+    assert raised.value.taskwise_failure_code == "EXECUTOR_SECURITY_TOOL_USE_VIOLATION"
+    assert raised.value.event_counts == {"file_read": 1, "unknown_tool": 1}
+
+
+def test_innocuous_unknown_message_schema_is_invalid_not_tool_use() -> None:
+    events = [json.loads(line) for line in _safe_transcript().splitlines()]
+    message = events[2]["item"]
+    assert isinstance(message, dict)
+    message["future_metadata"] = "opaque"
+
+    with pytest.raises(LocalCodexExecutionError) as raised:
+        _parse_jsonl_transcript(
+            "\n".join(json.dumps(event, sort_keys=True) for event in events) + "\n"
+        )
+
+    assert raised.value.taskwise_failure_code == "EXECUTOR_EVENT_STREAM_INVALID"
+    assert raised.value.run_status is None
+
+
 def test_recoverable_transport_error_followed_by_completion_is_accepted() -> None:
     transcript = _recoverable_transport_transcript()
     response, usage, digest = _parse_jsonl_transcript(transcript)
@@ -352,10 +382,7 @@ def test_recoverable_transport_error_followed_by_completion_is_accepted() -> Non
         {"type": "error", "message": "stream disconnected; reconnecting", "extra": True},
         {
             "type": "error",
-            "message": (
-                "stream disconnected; reconnecting "
-                + ("x" * 1024)
-            ),
+            "message": ("stream disconnected; reconnecting " + ("x" * 1024)),
         },
     ),
 )
@@ -371,10 +398,7 @@ def test_unrecognized_or_malformed_error_event_remains_fail_closed(
         )
 
     assert raised.value.code is LocalCodexExecutionErrorCode.CLI_FAILED
-    assert (
-        raised.value.taskwise_failure_code
-        == "EXECUTOR_MODEL_TRANSPORT_FAILED"
-    )
+    assert raised.value.taskwise_failure_code == "EXECUTOR_MODEL_TRANSPORT_FAILED"
     assert raised.value.executor_stage == "MODEL_TRANSPORT"
 
 
@@ -390,10 +414,7 @@ def test_recoverable_transport_error_without_completion_fails_closed() -> None:
         _parse_jsonl_transcript(transcript + "\n")
 
     assert raised.value.code is LocalCodexExecutionErrorCode.CLI_FAILED
-    assert (
-        raised.value.taskwise_failure_code
-        == "EXECUTOR_MODEL_TRANSPORT_FAILED"
-    )
+    assert raised.value.taskwise_failure_code == "EXECUTOR_MODEL_TRANSPORT_FAILED"
     assert raised.value.executor_stage == "MODEL_TRANSPORT"
 
 
@@ -407,10 +428,7 @@ def test_turn_failed_remains_terminal_after_reconnect_notice() -> None:
         )
 
     assert raised.value.code is LocalCodexExecutionErrorCode.CLI_FAILED
-    assert (
-        raised.value.taskwise_failure_code
-        == "EXECUTOR_MODEL_TRANSPORT_FAILED"
-    )
+    assert raised.value.taskwise_failure_code == "EXECUTOR_MODEL_TRANSPORT_FAILED"
     assert raised.value.executor_stage == "MODEL_TRANSPORT"
 
 
@@ -461,9 +479,20 @@ def test_malformed_todo_list_lifecycle_remains_fail_closed(
     with pytest.raises(LocalCodexExecutionError) as raised:
         _parse_jsonl_transcript(_todo_list_transcript(started_item=malformed_item))
 
-    assert raised.value.code is LocalCodexExecutionErrorCode.TRANSCRIPT_INVALID
-    assert raised.value.taskwise_failure_code == "EXECUTOR_EVENT_STREAM_INVALID"
-    assert raised.value.event_counts == {}
+    entries = malformed_item.get("items")
+    has_command_schema = (
+        isinstance(entries, list)
+        and bool(entries)
+        and isinstance(entries[0], dict)
+        and "command" in entries[0]
+    )
+    if has_command_schema:
+        assert raised.value.code is LocalCodexExecutionErrorCode.SECURITY_TOOL_USE_VIOLATION
+        assert raised.value.event_counts == {"command_execution": 1}
+    else:
+        assert raised.value.code is LocalCodexExecutionErrorCode.TRANSCRIPT_INVALID
+        assert raised.value.taskwise_failure_code == "EXECUTOR_EVENT_STREAM_INVALID"
+        assert raised.value.event_counts == {}
 
 
 def test_unobserved_todo_list_update_event_remains_fail_closed() -> None:

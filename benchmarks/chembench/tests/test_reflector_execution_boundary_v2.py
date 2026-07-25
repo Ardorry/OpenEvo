@@ -4,9 +4,11 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import stat
 import subprocess
+import time
 
 import pytest
 
@@ -67,6 +69,41 @@ def _fake_codex(path: Path, event: dict[str, object] | str) -> None:
         if isinstance(event, dict)
         else event
     )
+    item = event.get("item") if isinstance(event, dict) else None
+    last_message = (
+        str(item["text"])
+        if isinstance(item, dict)
+        and item.get("type") == "agent_message"
+        and type(item.get("text")) is str
+        else (
+            "# Do\nCheck constraints.\n# Avoid\nAvoid lookup.\n"
+            "# Validate\nVerify units.\n# When Applicable\n"
+            "Use chemistry checks.\n# Retired\nNone."
+        )
+    )
+    thread_started = json.dumps(
+        {"type": "thread.started", "thread_id": "thread-safe"},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    turn_started = json.dumps(
+        {"type": "turn.started"},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    turn_completed = json.dumps(
+        {
+            "type": "turn.completed",
+            "usage": {
+                "input_tokens": 1,
+                "cached_input_tokens": 0,
+                "output_tokens": 1,
+                "reasoning_output_tokens": 0,
+            },
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     script = f"""#!/bin/sh
 set -eu
 output=""
@@ -78,8 +115,8 @@ while [ "$#" -gt 0 ]; do
     shift
   fi
 done
-printf '%s\\n' '{event_text}'
-printf '%s\\n' '# Do' 'Check constraints.' '# Avoid' 'Avoid lookup.' '# Validate' 'Verify units.' '# When Applicable' 'Use chemistry checks.' '# Retired' 'None.' > "$output"
+printf '%s\\n' '{thread_started}' '{turn_started}' '{event_text}' '{turn_completed}'
+printf '%s\\n' {shlex.quote(last_message)} > "$output"
 """
     path.write_text(script, encoding="utf-8")
     path.chmod(0o700)
@@ -182,6 +219,46 @@ def test_wrapper_preserves_upstream_args_and_adds_actual_disable_overrides(
     assert 'model_reasoning_effort="medium"' in rewritten
     assert 'approval_policy="never"' in rewritten
     assert "agents.enabled=false" not in rewritten
+
+
+@pytest.mark.parametrize(
+    "extra_arguments",
+    (
+        ("--enable", "shell_tool"),
+        ("--add-dir", "/"),
+        ("--config", 'approval_policy="on-request"'),
+        ("--sandbox", "danger-full-access"),
+        ("--search",),
+    ),
+)
+def test_wrapper_rejects_any_unapproved_upstream_argument(
+    tmp_path: Path,
+    extra_arguments: tuple[str, ...],
+) -> None:
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    arguments = _upstream_args(upstream)[1:-1] + [*extra_arguments, "-"]
+
+    boundary, _audit, _temporary_parent = _boundary(
+        tmp_path,
+        event={
+            "type": "item.completed",
+            "item": {"type": "agent_message", "text": "safe"},
+        },
+    )
+    with boundary.activate() as activation:
+        completed = subprocess.run(
+            [os.fspath(activation.wrapper_path), *arguments],
+            input="synthetic prompt",
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+
+    assert completed.returncode != 0
+    assert completed.stdout == ""
+    assert not (upstream / "last-message.md").exists()
 
 
 def test_reflector_hardening_has_no_agents_enabled_override() -> None:
@@ -512,6 +589,51 @@ def test_reflector_process_rejects_non_transport_environment() -> None:
         )
 
 
+@pytest.mark.skipif(os.name != "posix", reason="process-group test requires POSIX")
+def test_reflector_decode_failure_still_terminates_process_group(
+    tmp_path: Path,
+) -> None:
+    pid_file = tmp_path / "background.pid"
+    executable = tmp_path / "invalid-utf8"
+    executable.write_text(
+        (
+            "#!/usr/bin/env python3\n"
+            "import os\n"
+            "import subprocess\n"
+            "import sys\n"
+            f"pid_file = {os.fspath(pid_file)!r}\n"
+            "child = subprocess.Popen(\n"
+            "    ['/bin/sleep', '60'],\n"
+            "    stdin=subprocess.DEVNULL,\n"
+            "    stdout=subprocess.DEVNULL,\n"
+            "    stderr=subprocess.DEVNULL,\n"
+            ")\n"
+            "with open(pid_file, 'w', encoding='utf-8') as stream:\n"
+            "    stream.write(str(child.pid))\n"
+            "os.write(sys.stdout.fileno(), b'\\xff')\n"
+        ),
+        encoding="utf-8",
+    )
+    executable.chmod(0o700)
+
+    with pytest.raises(
+        ReflectorBoundaryError,
+        match="REFLECTOR_PROCESS_IO_FAILED",
+    ):
+        _run_process_group(
+            (os.fspath(executable),),
+            input_text="",
+            timeout_seconds=10.0,
+            environment={},
+        )
+
+    background_pid = int(pid_file.read_text(encoding="utf-8"))
+    deadline = time.monotonic() + 2.0
+    while Path(f"/proc/{background_pid}").exists() and time.monotonic() < deadline:
+        time.sleep(0.025)
+    assert not Path(f"/proc/{background_pid}").exists()
+
+
 def test_reflector_transport_environment_ignores_empty_values(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -605,6 +727,106 @@ def test_safe_assistant_event_creates_private_log_and_cleans_root(
     assert stat.S_IMODE(event_log.stat().st_mode) == 0o600
     assert "private-memory" in event_log.read_text(encoding="utf-8")
     assert not list(temporary_parent.glob("openevo-chembench-reflector-v2-*"))
+
+
+def test_nested_tool_schema_inside_agent_message_fails_closed(
+    tmp_path: Path,
+) -> None:
+    boundary, audit, temporary_parent = _boundary(
+        tmp_path,
+        event={
+            "type": "item.completed",
+            "item": {
+                "type": "agent_message",
+                "text": "safe",
+                "tool_calls": [{"type": "file_read"}],
+            },
+        },
+    )
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+
+    with boundary.activate() as activation:
+        completed = subprocess.run(
+            _upstream_args(upstream),
+            input="synthetic prompt",
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+
+    assert completed.returncode != 0
+    receipt = activation.load_receipt_for_audit()
+    assert receipt.status is ReflectorBoundaryStatusV2.SECURITY_TOOL_USE_VIOLATION
+    assert dict(receipt.event_counts) == {"file_read": 1, "unknown_tool": 1}
+    assert not (upstream / "last-message.md").exists()
+    assert stat.S_IMODE((audit / receipt.private_event_reference).stat().st_mode) == 0o600
+    assert not list(temporary_parent.glob("openevo-chembench-reflector-v2-*"))
+
+
+def test_completed_receipt_revalidates_private_event_mode_and_digest(
+    tmp_path: Path,
+) -> None:
+    boundary, audit, _temporary_parent = _boundary(
+        tmp_path,
+        event={
+            "type": "item.completed",
+            "item": {"type": "agent_message", "text": "safe"},
+        },
+    )
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+
+    with boundary.activate() as activation:
+        completed = subprocess.run(
+            _upstream_args(upstream),
+            input="synthetic prompt",
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+    assert completed.returncode == 0
+    receipt = activation.require_receipt()
+    event_path = audit / receipt.private_event_reference
+
+    original = event_path.read_bytes()
+    event_path.write_bytes(original + b"\n")
+    event_path.chmod(0o600)
+    with pytest.raises(RuntimeError, match="REFLECTOR_WRAPPER_RECEIPT_BINDING_INVALID"):
+        activation.require_receipt()
+
+    event_path.write_bytes(original)
+    event_path.chmod(0o644)
+    with pytest.raises(RuntimeError, match="REFLECTOR_WRAPPER_RECEIPT_BINDING_INVALID"):
+        activation.require_receipt()
+
+
+def test_zero_exit_empty_event_stream_is_rejected(
+    tmp_path: Path,
+) -> None:
+    boundary, _audit, _temporary_parent = _boundary(
+        tmp_path,
+        event="",
+    )
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+
+    with boundary.activate() as activation:
+        completed = subprocess.run(
+            _upstream_args(upstream),
+            input="synthetic prompt",
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+
+    assert completed.returncode != 0
+    assert not (upstream / "last-message.md").exists()
+    receipt = activation.load_receipt_for_audit()
+    assert receipt.status is ReflectorBoundaryStatusV2.INVALID_INVOCATION
 
 
 def test_codex_failure_receipt_keeps_only_safe_private_diagnostics(

@@ -842,11 +842,20 @@ def _recompute_arm_evidence(
     *,
     inputs: TaskwisePairedCanaryReceiptInputsV1,
     config: TaskwiseExperimentConfigV1,
-    paired: dict[str, TaskwiseExperimentConfigV1],
+    paired: dict[str, TaskwiseExperimentConfigV1] | None,
     loader: ChemBench4KDatasetLoader,
     manifest_sha256: str,
     source_commit: str,
+    protocol_sha256: str | None = None,
 ) -> _ArmEvidence:
+    if paired is None:
+        if type(protocol_sha256) is not str or _SHA256_RE.fullmatch(protocol_sha256) is None:
+            raise _ArmEvidenceError(TaskwiseCanaryFindingV1.CANARY_RUN_BINDING_INVALID)
+        expected_protocol_sha256 = protocol_sha256
+    else:
+        if protocol_sha256 is not None:
+            raise _ArmEvidenceError(TaskwiseCanaryFindingV1.CANARY_RUN_BINDING_INVALID)
+        expected_protocol_sha256 = _paired_protocol_sha256(paired)
     output = _workspace_path(inputs.repository_root.parent, config.output_directory)
     state_path = output / "run_state.json"
     state_raw = _read_regular(state_path, mode=0o644)
@@ -884,7 +893,7 @@ def _recompute_arm_evidence(
         arm=config.arm,
         run_id=config.run_name,
         output_directory=output,
-        protocol_sha256=_paired_protocol_sha256(paired),
+        protocol_sha256=expected_protocol_sha256,
         source_commit=source_commit,
         dataset_sha256=loader.manifest.combined_sha256,
         task_manifest_sha256=manifest_sha256,

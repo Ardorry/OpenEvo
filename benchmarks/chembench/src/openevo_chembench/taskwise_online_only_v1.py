@@ -19,11 +19,14 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from openevo_chembench.taskwise_canary_receipt_v1 import (
-    TaskwisePilotAuthorizationV1,
+from openevo_chembench.chembench4k_models import CHEMBENCH4K_CATEGORIES
+from openevo_chembench.taskwise_online_canary_receipt_v1 import (
+    OnlineCanaryPilotAuthorizationV1,
+    require_online_canary_authorization_v1,
 )
 from openevo_chembench.taskwise_cli_v1 import (
     CONFIG_ROOT,
+    PACKAGE_ROOT,
     REPOSITORY_ROOT,
     _ClosedExecutorFailureAdapterV1,
     _build_episodes,
@@ -33,13 +36,14 @@ from openevo_chembench.taskwise_cli_v1 import (
     _resolve_workspace_path,
     _suite_result_evidence,
     _suite_state_evidence,
+    _stream_public_evidence,
     _update_suite_totals,
+    _verify_meeting722_run_contract,
     _verify_static_inputs,
     _write_suite_state,
     TaskwiseCLIError,
     build_default_taskwise_core_port_v1,
     build_default_taskwise_executor_v1,
-    require_taskwise_pilot_authorization_v1,
     verify_taskwise_codex_policy_v1,
     verify_taskwise_source_gate_v1,
 )
@@ -48,7 +52,9 @@ from openevo_chembench.taskwise_config_v1 import (
     load_taskwise_config_v1,
 )
 from openevo_chembench.taskwise_online_runner_v1 import (
+    TaskwiseMemoryPublicMetricsV1,
     TaskwiseOnlineRunnerV1,
+    load_private_taskwise_results_v1,
 )
 from openevo_chembench.taskwise_sampling_v1 import (
     PILOT500_STREAM_SCOPES,
@@ -60,11 +66,24 @@ ONLINE_ONLY_CLASSIFICATION = "UNPAIRED_ONLINE_ONLY_NOT_FOR_PAIRED_INFERENCE"
 ONLINE_ONLY_SCHEMA_V1 = "taskwise_unpaired_online_only_pilot500_suite_v1"
 ONLINE_ONLY_AUTHORITY_SCHEMA_V1 = "taskwise_unpaired_online_only_authority_v1"
 ONLINE_ONLY_STREAM_MARKER_SCHEMA_V1 = "taskwise_unpaired_online_only_stream_marker_v1"
+ONLINE_ONLY_REPORT_SCHEMA_V1 = "taskwise_online_only_pilot500_descriptive_report_v1"
+ONLINE_ONLY_REPORT_LABELS = (
+    "ONLINE_TASKWISE_EVOLUTION",
+    "TEST_TIME_ADAPTATION",
+    "ONLINE_ONLY_PILOT500",
+    ONLINE_ONLY_CLASSIFICATION,
+    "NON_STANDARD_CHEMBENCH4K_PROTOCOL",
+    "NOT_A_STANDARD_LEADERBOARD_SCORE",
+    "DESCRIPTIVE_ONLINE_ONLY_RESULT",
+    "NO_CONTROL_ARM",
+    "NO_CAUSAL_CONTROL_COMPARISON",
+    "NO_PAIRED_PERFORMANCE_CLAIM",
+)
 _RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{7,79}")
 _RUNS_DIRECTORY = "unpaired_online_only_pilot500_runs"
 
 StreamRunnerV1 = Callable[
-    [Path, TaskwiseExperimentConfigV1, str, TaskwisePilotAuthorizationV1],
+    [Path, TaskwiseExperimentConfigV1, str, OnlineCanaryPilotAuthorizationV1],
     dict[str, object],
 ]
 
@@ -84,6 +103,7 @@ _OBSERVED_COUNT_FIELDS = (
     "update_count",
     "core_job_count",
     "core_artifact_count",
+    "context_resolution_count",
 )
 _EXPECTED_SUITE_COUNTS = {
     "completed_tasks": _EXPECTED_STREAM_COUNT * _EXPECTED_TASKS_PER_STREAM,
@@ -92,6 +112,7 @@ _EXPECTED_SUITE_COUNTS = {
     "update_count": _EXPECTED_STREAM_COUNT * _EXPECTED_UPDATES_PER_STREAM,
     "core_job_count": _EXPECTED_STREAM_COUNT * _EXPECTED_UPDATES_PER_STREAM,
     "core_artifact_count": _EXPECTED_STREAM_COUNT * _EXPECTED_UPDATES_PER_STREAM,
+    "context_resolution_count": _EXPECTED_STREAM_COUNT * _EXPECTED_UPDATES_PER_STREAM,
 }
 
 
@@ -180,7 +201,7 @@ def _create_online_only_authority(
     repository_root: Path,
     *,
     run_id: str,
-    authorization: TaskwisePilotAuthorizationV1,
+    authorization: OnlineCanaryPilotAuthorizationV1,
     source_commit: str,
 ) -> Path:
     root = online_only_run_root_v1(repository_root, run_id)
@@ -195,15 +216,16 @@ def _create_online_only_authority(
     root.chmod(0o700)
     authority = {
         "schema_version": ONLINE_ONLY_AUTHORITY_SCHEMA_V1,
-        "classification": ONLINE_ONLY_CLASSIFICATION,
+        "classification": list(ONLINE_ONLY_REPORT_LABELS),
+        "primary_classification": ONLINE_ONLY_CLASSIFICATION,
         "paired_inference_allowed": False,
         "paired_comparison_allowed": False,
         "pilot_go_receipt_allowed": False,
         "run_id": run_id,
         "source_commit": source_commit,
-        "paired_canary_generation_id": authorization.paired_canary_generation_id,
+        "online_canary_generation_id": authorization.online_canary_generation_id,
         "canary_receipt_sha256": authorization.receipt_sha256,
-        "pilot_binding_sha256": authorization.pilot_binding_sha256,
+        "online_pilot_binding_sha256": authorization.online_pilot_binding_sha256,
     }
     try:
         _create_file_exclusive(root / "online_only_authority.json", authority, mode=0o600)
@@ -221,19 +243,20 @@ def _write_stream_marker(
     *,
     run_id: str,
     source_commit: str,
-    authorization: TaskwisePilotAuthorizationV1,
+    authorization: OnlineCanaryPilotAuthorizationV1,
     config: TaskwiseExperimentConfigV1,
 ) -> None:
     marker = {
         "schema_version": ONLINE_ONLY_STREAM_MARKER_SCHEMA_V1,
-        "classification": ONLINE_ONLY_CLASSIFICATION,
+        "classification": list(ONLINE_ONLY_REPORT_LABELS),
+        "primary_classification": ONLINE_ONLY_CLASSIFICATION,
         "paired_inference_allowed": False,
         "paired_comparison_allowed": False,
         "pilot_go_receipt_allowed": False,
         "run_id": run_id,
         "scope": config.scope,
         "source_commit": source_commit,
-        "paired_canary_generation_id": authorization.paired_canary_generation_id,
+        "online_canary_generation_id": authorization.online_canary_generation_id,
         "online_config_sha256": config.config_sha256(),
     }
     _create_file_exclusive(
@@ -244,13 +267,13 @@ def _write_stream_marker(
 
 
 def _authorization_identity(
-    authorization: TaskwisePilotAuthorizationV1,
+    authorization: OnlineCanaryPilotAuthorizationV1,
 ) -> tuple[str, str, str, str]:
     values = (
         getattr(authorization, "source_commit", None),
-        getattr(authorization, "paired_canary_generation_id", None),
+        getattr(authorization, "online_canary_generation_id", None),
         getattr(authorization, "receipt_sha256", None),
-        getattr(authorization, "pilot_binding_sha256", None),
+        getattr(authorization, "online_pilot_binding_sha256", None),
     )
     if any(type(value) is not str or not value for value in values):
         raise TaskwiseOnlineOnlyError("ONLINE_ONLY_CANARY_AUTHORITY_INVALID")
@@ -258,16 +281,16 @@ def _authorization_identity(
 
 
 def _require_current_authorization(
-    expected: TaskwisePilotAuthorizationV1,
-) -> TaskwisePilotAuthorizationV1:
-    current = require_taskwise_pilot_authorization_v1()
+    expected: OnlineCanaryPilotAuthorizationV1,
+) -> OnlineCanaryPilotAuthorizationV1:
+    current = require_online_canary_authorization_v1(PACKAGE_ROOT)
     if _authorization_identity(current) != _authorization_identity(expected):
         raise TaskwiseOnlineOnlyError("ONLINE_ONLY_CANARY_AUTHORITY_MISMATCH")
     return current
 
 
 def _completed_stream_counts(result: dict[str, object]) -> dict[str, int]:
-    memory = result.get("memory_aggregate")
+    observed = _observed_stream_counts(result)
     expected = {
         "planned_tasks": _EXPECTED_TASKS_PER_STREAM,
         "completed_tasks": _EXPECTED_TASKS_PER_STREAM,
@@ -276,32 +299,83 @@ def _completed_stream_counts(result: dict[str, object]) -> dict[str, int]:
         "update_count": _EXPECTED_UPDATES_PER_STREAM,
         "core_job_count": _EXPECTED_UPDATES_PER_STREAM,
         "core_artifact_count": _EXPECTED_UPDATES_PER_STREAM,
+        "context_resolution_count": _EXPECTED_UPDATES_PER_STREAM,
         "context_binding_violation_count": 0,
     }
+    if (
+        result.get("status") != "COMPLETED"
+        or result.get("resume_allowed") is not False
+        or result.get("finding_codes") != []
+        or any(observed.get(field) != value for field, value in expected.items())
+    ):
+        raise TaskwiseCLIError("EXECUTOR_OUTPUT_INVALID")
+    return expected
+
+
+def _observed_stream_counts(result: object) -> dict[str, int]:
+    """Validate and retain content-free partial counters from any terminal result."""
+
+    if type(result) is not dict:
+        raise TaskwiseCLIError("EXECUTOR_OUTPUT_INVALID")
+    memory = result.get("memory_aggregate")
     if (
         result.get("schema_version") != "taskwise_online_run_result_v1"
         or result.get("protocol_id") != "taskwise_online_evolution_v1"
         or result.get("standard_chembench4k_score_claimed") is not False
-        or result.get("status") != "COMPLETED"
         or result.get("arm") != "online"
         or result.get("resume_allowed") is not False
-        or result.get("finding_codes") != []
         or type(memory) is not dict
-        or memory.get("approved_artifact_count") != _EXPECTED_UPDATES_PER_STREAM
-        or any(result.get(field) != value for field, value in expected.items())
     ):
         raise TaskwiseCLIError("EXECUTOR_OUTPUT_INVALID")
-    return expected
+    fields = (
+        "planned_tasks",
+        *_OBSERVED_COUNT_FIELDS,
+        "context_binding_violation_count",
+    )
+    if any(type(result.get(field)) is not int or result[field] < 0 for field in fields):
+        raise TaskwiseCLIError("EXECUTOR_OUTPUT_INVALID")
+    observed = {field: int(result[field]) for field in fields}
+    planned = observed["planned_tasks"]
+    completed = observed["completed_tasks"]
+    completions = observed["completion_count"]
+    attempts = observed["session_attempt_count"]
+    updates = observed["update_count"]
+    findings = result.get("finding_codes")
+    if (
+        planned != _EXPECTED_TASKS_PER_STREAM
+        or completed > planned
+        or completions > _EXPECTED_COMPLETIONS_PER_STREAM
+        or attempts > _EXPECTED_COMPLETIONS_PER_STREAM
+        or completions > attempts
+        or attempts > completions + 1
+        or completions < completed * 3
+        or completions > min(_EXPECTED_COMPLETIONS_PER_STREAM, completed * 3 + 3)
+        or updates > _EXPECTED_UPDATES_PER_STREAM
+        or updates < completed * 2
+        or updates > min(_EXPECTED_UPDATES_PER_STREAM, completed * 2 + 2)
+        or observed["core_job_count"] != updates
+        or observed["core_artifact_count"] != updates
+        or observed["context_resolution_count"] != updates
+        or memory.get("approved_artifact_count") != updates
+        or type(findings) is not list
+        or any(type(code) is not str for code in findings)
+        or (result.get("status") == "COMPLETED" and findings != [])
+        or (result.get("status") != "COMPLETED" and len(findings) != 1)
+    ):
+        raise TaskwiseCLIError("EXECUTOR_OUTPUT_INVALID")
+    return observed
 
 
 def _online_only_stream_result_evidence(
     result: object,
 ) -> dict[str, object]:
     evidence = _suite_result_evidence(result)
+    observed = _observed_stream_counts(result)
+    evidence.update(observed)
     if evidence["completed"]:
         if type(result) is not dict:
             raise TaskwiseCLIError("EXECUTOR_OUTPUT_INVALID")
-        evidence.update(_completed_stream_counts(result))
+        _completed_stream_counts(result)
     return evidence
 
 
@@ -405,7 +479,7 @@ def _run_online_only_stream(
     config_path: Path,
     runtime_config: TaskwiseExperimentConfigV1,
     run_id: str,
-    authorization: TaskwisePilotAuthorizationV1,
+    authorization: OnlineCanaryPilotAuthorizationV1,
 ) -> dict[str, object]:
     """Execute one online stream without granting paired statistical authority."""
 
@@ -460,8 +534,328 @@ def _run_online_only_stream(
     )
     payload = result.to_public_dict()
     payload["execution_classification"] = ONLINE_ONLY_CLASSIFICATION
+    payload["execution_classifications"] = list(ONLINE_ONLY_REPORT_LABELS)
     payload["paired_inference_allowed"] = False
     return payload
+
+
+def _read_canonical_public_events(path: Path) -> tuple[dict[str, Any], ...]:
+    try:
+        lines = path.read_bytes().splitlines(keepends=True)
+        rows = tuple(json.loads(line) for line in lines)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise TaskwiseOnlineOnlyError("ONLINE_ONLY_PUBLIC_EVIDENCE_INVALID") from exc
+    if any(
+        type(row) is not dict or line != _canonical_bytes(row) for line, row in zip(lines, rows)
+    ):
+        raise TaskwiseOnlineOnlyError("ONLINE_ONLY_PUBLIC_EVIDENCE_INVALID")
+    return rows
+
+
+def _group_online_rounds(
+    rows: tuple[object, ...],
+) -> dict[int, dict[int, object]]:
+    if len(rows) != _EXPECTED_COMPLETIONS_PER_STREAM:
+        raise TaskwiseOnlineOnlyError("ONLINE_ONLY_PRIVATE_EVIDENCE_INVALID")
+    grouped: dict[int, dict[int, object]] = {}
+    task_uids: dict[int, str] = {}
+    categories: dict[int, str] = {}
+    for row in rows:
+        if (
+            getattr(row, "arm", None) != "online"
+            or type(getattr(row, "task_index", None)) is not int
+            or getattr(row, "round_index", None) not in (0, 1, 2)
+        ):
+            raise TaskwiseOnlineOnlyError("ONLINE_ONLY_PRIVATE_EVIDENCE_INVALID")
+        task_index = row.task_index
+        if not 0 <= task_index < _EXPECTED_TASKS_PER_STREAM:
+            raise TaskwiseOnlineOnlyError("ONLINE_ONLY_PRIVATE_EVIDENCE_INVALID")
+        if task_index in task_uids and task_uids[task_index] != row.task_uid:
+            raise TaskwiseOnlineOnlyError("ONLINE_ONLY_PRIVATE_EVIDENCE_INVALID")
+        if task_index in categories and categories[task_index] != row.category:
+            raise TaskwiseOnlineOnlyError("ONLINE_ONLY_PRIVATE_EVIDENCE_INVALID")
+        task_uids[task_index] = row.task_uid
+        categories[task_index] = row.category
+        rounds = grouped.setdefault(task_index, {})
+        if row.round_index in rounds:
+            raise TaskwiseOnlineOnlyError("ONLINE_ONLY_PRIVATE_EVIDENCE_INVALID")
+        rounds[row.round_index] = row
+    if (
+        set(grouped) != set(range(_EXPECTED_TASKS_PER_STREAM))
+        or len(set(task_uids.values())) != _EXPECTED_TASKS_PER_STREAM
+        or any(set(rounds) != {0, 1, 2} for rounds in grouped.values())
+    ):
+        raise TaskwiseOnlineOnlyError("ONLINE_ONLY_PRIVATE_EVIDENCE_INVALID")
+    return grouped
+
+
+def _round_accuracy(grouped: dict[int, dict[int, object]], round_index: int) -> float:
+    return (
+        sum(bool(grouped[index][round_index].correct) for index in grouped)
+        / _EXPECTED_TASKS_PER_STREAM
+    )
+
+
+def _category_metrics(grouped: dict[int, dict[int, object]]) -> dict[str, dict[str, object]]:
+    result: dict[str, dict[str, object]] = {}
+    for category in CHEMBENCH4K_CATEGORIES:
+        tasks = [rounds for rounds in grouped.values() if rounds[0].category == category]
+        if not tasks:
+            continue
+        result[category] = {
+            "task_count": len(tasks),
+            "round_0_accuracy": sum(row[0].correct for row in tasks) / len(tasks),
+            "round_1_accuracy": sum(row[1].correct for row in tasks) / len(tasks),
+            "round_2_accuracy": sum(row[2].correct for row in tasks) / len(tasks),
+            "wrong_to_correct_0_to_1": sum(
+                (not row[0].correct) and row[1].correct for row in tasks
+            ),
+            "wrong_to_correct_1_to_2": sum(
+                (not row[1].correct) and row[2].correct for row in tasks
+            ),
+            "wrong_to_correct_0_to_2": sum(
+                (not row[0].correct) and row[2].correct for row in tasks
+            ),
+            "correct_to_wrong_0_to_1": sum(
+                row[0].correct and (not row[1].correct) for row in tasks
+            ),
+            "correct_to_wrong_1_to_2": sum(
+                row[1].correct and (not row[2].correct) for row in tasks
+            ),
+        }
+    return result
+
+
+def _build_online_only_descriptive_report(
+    *,
+    run_id: str,
+    source_commit: str,
+    preflight: list[tuple[Path, TaskwiseExperimentConfigV1]],
+    suite_state: dict[str, Any],
+) -> dict[str, object]:
+    """Recompute a content-free online-only report from all ten frozen streams."""
+
+    per_stream: list[dict[str, object]] = []
+    all_grouped: list[dict[int, dict[int, object]]] = []
+    all_task_uids: set[str] = set()
+    all_artifact_ids: set[str] = set()
+    all_job_ids: set[str] = set()
+    manifest_hashes: dict[str, str] = {}
+    dataset_hashes: set[str] = set()
+    contract_receipts: dict[str, str] = {}
+    for config_path, template in preflight:
+        runtime = online_only_runtime_config_v1(template, run_id=run_id)
+        output = _resolve_workspace_path(
+            runtime.output_directory,
+            field_name="output_directory",
+            must_exist=True,
+        )
+        state = _read_public_run_state(output, expected_arm="online")
+        result_like = {
+            "schema_version": "taskwise_online_run_result_v1",
+            "protocol_id": "taskwise_online_evolution_v1",
+            "standard_chembench4k_score_claimed": False,
+            "status": state["status"],
+            "arm": "online",
+            "planned_tasks": state["planned_tasks"],
+            "completed_tasks": state["completed_tasks"],
+            "completion_count": state["completion_count"],
+            "session_attempt_count": state["session_attempt_count"],
+            "update_count": state["update_count"],
+            "core_job_count": state["core_job_count"],
+            "core_artifact_count": state["core_artifact_count"],
+            "context_resolution_count": state["context_resolution_count"],
+            "context_binding_violation_count": state["context_binding_violation_count"],
+            "resume_allowed": state["resume_allowed"],
+            "memory_aggregate": state["memory_aggregate"],
+            "finding_codes": [],
+        }
+        _completed_stream_counts(result_like)
+        loader, manifest, _paired = _verify_static_inputs(template, config_path)
+        episodes = _build_episodes(loader, scope=template.scope)
+        contract_receipts[template.scope] = _verify_meeting722_run_contract(
+            output_directory=output,
+            config=runtime,
+            state=state,
+            episodes=episodes,
+        )
+        memory_bytes, public_findings = _stream_public_evidence(
+            output,
+            expected_arm="online",
+            state=state,
+            expected_task_count=_EXPECTED_TASKS_PER_STREAM,
+        )
+        if public_findings or len(memory_bytes) != _EXPECTED_UPDATES_PER_STREAM:
+            raise TaskwiseOnlineOnlyError("ONLINE_ONLY_PUBLIC_EVIDENCE_INVALID")
+        events = _read_canonical_public_events(output / "public" / "events.jsonl")
+        updates = tuple(row for row in events if row.get("kind") == "core_update")
+        completions = tuple(row for row in events if row.get("kind") == "completion")
+        if (
+            len(updates) != _EXPECTED_UPDATES_PER_STREAM
+            or len(completions) != _EXPECTED_COMPLETIONS_PER_STREAM
+            or completions[0].get("memory") is not None
+            or any(
+                type(metadata := row.get("runtime_metadata")) is not dict
+                or metadata.get("cleanup_status") != "COMPLETE"
+                or metadata.get("residual_root_count") != 0
+                for row in completions
+            )
+        ):
+            raise TaskwiseOnlineOnlyError("ONLINE_ONLY_PUBLIC_EVIDENCE_INVALID")
+        stream_artifacts = {
+            row.get("artifact_id") for row in updates if type(row.get("artifact_id")) is str
+        }
+        stream_jobs = {
+            row.get("core_job_id") for row in updates if type(row.get("core_job_id")) is str
+        }
+        if (
+            len(stream_artifacts) != _EXPECTED_UPDATES_PER_STREAM
+            or len(stream_jobs) != _EXPECTED_UPDATES_PER_STREAM
+            or all_artifact_ids.intersection(stream_artifacts)
+            or all_job_ids.intersection(stream_jobs)
+        ):
+            raise TaskwiseOnlineOnlyError("ONLINE_ONLY_STREAM_NAMESPACE_VIOLATION")
+        all_artifact_ids.update(stream_artifacts)
+        all_job_ids.update(stream_jobs)
+        metrics = tuple(
+            TaskwiseMemoryPublicMetricsV1.from_dict(row.get("memory_metrics")) for row in updates
+        )
+        private_rows = load_private_taskwise_results_v1(output)
+        grouped = _group_online_rounds(tuple(private_rows))
+        stream_uids = {rounds[0].task_uid for rounds in grouped.values()}
+        if all_task_uids.intersection(stream_uids):
+            raise TaskwiseOnlineOnlyError("ONLINE_ONLY_STREAM_NAMESPACE_VIOLATION")
+        all_task_uids.update(stream_uids)
+        all_grouped.append(grouped)
+        manifest_hashes[template.scope] = manifest.public_sha256
+        dataset_hashes.add(loader.manifest.combined_sha256)
+        per_stream.append(
+            {
+                "stream_id": template.scope,
+                "task_count": _EXPECTED_TASKS_PER_STREAM,
+                "session_count": _EXPECTED_COMPLETIONS_PER_STREAM,
+                "update_count": _EXPECTED_UPDATES_PER_STREAM,
+                "core_job_count": _EXPECTED_UPDATES_PER_STREAM,
+                "core_artifact_count": _EXPECTED_UPDATES_PER_STREAM,
+                "context_resolution_count": _EXPECTED_UPDATES_PER_STREAM,
+                "round_0_accuracy": _round_accuracy(grouped, 0),
+                "round_1_accuracy": _round_accuracy(grouped, 1),
+                "round_2_accuracy": _round_accuracy(grouped, 2),
+                "wrong_to_correct_0_to_1": sum(
+                    (not row[0].correct) and row[1].correct for row in grouped.values()
+                ),
+                "wrong_to_correct_1_to_2": sum(
+                    (not row[1].correct) and row[2].correct for row in grouped.values()
+                ),
+                "wrong_to_correct_0_to_2": sum(
+                    (not row[0].correct) and row[2].correct for row in grouped.values()
+                ),
+                "correct_to_wrong_0_to_1": sum(
+                    row[0].correct and (not row[1].correct) for row in grouped.values()
+                ),
+                "correct_to_wrong_1_to_2": sum(
+                    row[1].correct and (not row[2].correct) for row in grouped.values()
+                ),
+                "memory_growth": {
+                    "first_utf8_bytes": metrics[0].utf8_byte_count,
+                    "last_utf8_bytes": metrics[-1].utf8_byte_count,
+                    "max_utf8_bytes": max(item.utf8_byte_count for item in metrics),
+                    "first_estimated_tokens": metrics[0].estimated_token_count,
+                    "last_estimated_tokens": metrics[-1].estimated_token_count,
+                    "max_estimated_tokens": max(item.estimated_token_count for item in metrics),
+                    "max_section_items": max(item.max_section_items for item in metrics),
+                },
+                "category_metrics": _category_metrics(grouped),
+                "generation_zero_reset_verified": True,
+                "meeting722_contract_receipt_sha256": contract_receipts[template.scope],
+            }
+        )
+    if (
+        len(all_grouped) != _EXPECTED_STREAM_COUNT
+        or len(all_task_uids) != _EXPECTED_SUITE_COUNTS["completed_tasks"]
+        or len(all_artifact_ids) != _EXPECTED_SUITE_COUNTS["core_artifact_count"]
+        or len(all_job_ids) != _EXPECTED_SUITE_COUNTS["core_job_count"]
+        or len(dataset_hashes) != 1
+    ):
+        raise TaskwiseOnlineOnlyError("ONLINE_ONLY_SUITE_TOTAL_MISMATCH")
+
+    all_tasks = [rounds for grouped in all_grouped for rounds in grouped.values()]
+    task_position = [
+        {
+            "stream_position": position,
+            "round_0_accuracy": (
+                sum(grouped[position][0].correct for grouped in all_grouped)
+                / _EXPECTED_STREAM_COUNT
+            ),
+        }
+        for position in range(_EXPECTED_TASKS_PER_STREAM)
+    ]
+    all_categories: dict[str, dict[str, object]] = {}
+    for category in CHEMBENCH4K_CATEGORIES:
+        rows = [rounds for rounds in all_tasks if rounds[0].category == category]
+        if not rows:
+            raise TaskwiseOnlineOnlyError("ONLINE_ONLY_PRIVATE_EVIDENCE_INVALID")
+        all_categories[category] = {
+            "task_count": len(rows),
+            "round_0_accuracy": sum(item[0].correct for item in rows) / len(rows),
+            "round_1_accuracy": sum(item[1].correct for item in rows) / len(rows),
+            "round_2_accuracy": sum(item[2].correct for item in rows) / len(rows),
+        }
+    report: dict[str, object] = {
+        "schema_version": ONLINE_ONLY_REPORT_SCHEMA_V1,
+        "labels": list(ONLINE_ONLY_REPORT_LABELS),
+        "protocol_id": "taskwise_online_evolution_v1",
+        "run_id": run_id,
+        "source_commit": source_commit,
+        "dataset_sha256": next(iter(dataset_hashes)),
+        "per_stream_public_manifest_sha256": manifest_hashes,
+        "standard_chembench4k_score_claimed": False,
+        "causal_comparison_claimed": False,
+        "stream_count": _EXPECTED_STREAM_COUNT,
+        "task_count": _EXPECTED_SUITE_COUNTS["completed_tasks"],
+        "session_count": _EXPECTED_SUITE_COUNTS["completion_count"],
+        "update_count": _EXPECTED_SUITE_COUNTS["update_count"],
+        "core_job_count": _EXPECTED_SUITE_COUNTS["core_job_count"],
+        "core_artifact_count": _EXPECTED_SUITE_COUNTS["core_artifact_count"],
+        "context_resolution_count": _EXPECTED_SUITE_COUNTS["context_resolution_count"],
+        "round_0_accuracy": sum(row[0].correct for row in all_tasks) / len(all_tasks),
+        "round_1_accuracy": sum(row[1].correct for row in all_tasks) / len(all_tasks),
+        "round_2_accuracy": sum(row[2].correct for row in all_tasks) / len(all_tasks),
+        "wrong_to_correct_0_to_1": sum(
+            (not row[0].correct) and row[1].correct for row in all_tasks
+        ),
+        "wrong_to_correct_1_to_2": sum(
+            (not row[1].correct) and row[2].correct for row in all_tasks
+        ),
+        "wrong_to_correct_0_to_2": sum(
+            (not row[0].correct) and row[2].correct for row in all_tasks
+        ),
+        "correct_to_wrong_0_to_1": sum(
+            row[0].correct and (not row[1].correct) for row in all_tasks
+        ),
+        "correct_to_wrong_1_to_2": sum(
+            row[1].correct and (not row[2].correct) for row in all_tasks
+        ),
+        "per_category": all_categories,
+        "per_stream": per_stream,
+        "task_position_round_0_trend": task_position,
+        "infrastructure_failures": suite_state["infrastructure_failures"],
+        "security_violations": suite_state["security_violations"],
+        "context_binding_violations": suite_state["context_binding_violations"],
+        "artifact_validation_failures": suite_state["artifact_validation_failures"],
+        "cleanup_residual_count": 0,
+    }
+    forbidden_keys = {
+        "absolute_delta",
+        "decision",
+        "go_gate",
+        "paired_final_round",
+        "p_value",
+        "confidence_interval",
+    }
+    if forbidden_keys.intersection(report):
+        raise TaskwiseOnlineOnlyError("ONLINE_ONLY_REPORT_CLASSIFICATION_VIOLATION")
+    return report
 
 
 def run_online_only_pilot500_v1(
@@ -473,7 +867,7 @@ def run_online_only_pilot500_v1(
     """Run ten independent online streams in an explicitly unpaired namespace."""
 
     validated_run_id = validate_online_only_run_id_v1(run_id)
-    authorization = require_taskwise_pilot_authorization_v1()
+    authorization = require_online_canary_authorization_v1(PACKAGE_ROOT)
     preflight: list[tuple[Path, TaskwiseExperimentConfigV1]] = []
     source_commits: set[str] = set()
     for scope in PILOT500_STREAM_SCOPES:
@@ -494,7 +888,8 @@ def run_online_only_pilot500_v1(
     state_path = root / "online_only_suite_state.json"
     state: dict[str, Any] = {
         "schema_version": ONLINE_ONLY_SCHEMA_V1,
-        "classification": ONLINE_ONLY_CLASSIFICATION,
+        "classification": list(ONLINE_ONLY_REPORT_LABELS),
+        "primary_classification": ONLINE_ONLY_CLASSIFICATION,
         "paired_inference_allowed": False,
         "paired_comparison_allowed": False,
         "pilot_go_receipt_allowed": False,
@@ -516,6 +911,7 @@ def run_online_only_pilot500_v1(
         "update_count": 0,
         "core_job_count": 0,
         "core_artifact_count": 0,
+        "context_resolution_count": 0,
         "infrastructure_failures": 0,
         "security_violations": 0,
         "evolution_update_failures": 0,
@@ -524,9 +920,9 @@ def run_online_only_pilot500_v1(
         "executor_failures": 0,
         "executor_failure_codes": {},
         "source_commit": source_commit,
-        "paired_canary_generation_id": authorization.paired_canary_generation_id,
+        "online_canary_generation_id": authorization.online_canary_generation_id,
         "canary_receipt_sha256": authorization.receipt_sha256,
-        "pilot_binding_sha256": authorization.pilot_binding_sha256,
+        "online_pilot_binding_sha256": authorization.online_pilot_binding_sha256,
         "streams": {
             scope: {
                 "action": "NOT_STARTED",
@@ -605,6 +1001,16 @@ def run_online_only_pilot500_v1(
         persist()
     try:
         _verify_completed_suite_totals(state)
+        report = _build_online_only_descriptive_report(
+            run_id=validated_run_id,
+            source_commit=source_commit,
+            preflight=preflight,
+            suite_state=state,
+        )
+        report_path = root / "online_only_descriptive_report.json"
+        _create_file_exclusive(report_path, report, mode=0o644)
+        state["descriptive_report_sha256"] = hashlib.sha256(_canonical_bytes(report)).hexdigest()
+        state["descriptive_report_path"] = report_path.name
     except BaseException:
         state["status"] = "FAILED"
         state["active_scope"] = None
@@ -628,7 +1034,8 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
         failure = {
             "status": "BLOCKED",
-            "classification": ONLINE_ONLY_CLASSIFICATION,
+            "classification": list(ONLINE_ONLY_REPORT_LABELS),
+            "primary_classification": ONLINE_ONLY_CLASSIFICATION,
             "error_type": type(exc).__name__,
         }
         failure.update(_public_cli_failure_counts(REPOSITORY_ROOT, arguments.run_id))

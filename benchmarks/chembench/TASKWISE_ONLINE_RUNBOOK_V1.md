@@ -18,6 +18,27 @@ NON_STANDARD_CHEMBENCH4K_PROTOCOL
 NOT_A_STANDARD_LEADERBOARD_SCORE
 ```
 
+The unpaired online-only execution mode additionally displays:
+
+```text
+ONLINE_ONLY_PILOT500
+UNPAIRED_ONLINE_ONLY_NOT_FOR_PAIRED_INFERENCE
+DESCRIPTIVE_ONLINE_ONLY_RESULT
+NO_CONTROL_ARM
+NO_CAUSAL_CONTROL_COMPARISON
+NO_PAIRED_PERFORMANCE_CLAIM
+```
+
+It is authorized by an independent `OnlineCanaryMechanismReceiptV1` that
+recomputes only the current online canary and the ten online stream bindings.
+It never reads a control run or a paired receipt. Its final report contains
+online Round 0/1/2, recovery, regression, stream-position, and memory-growth
+descriptives only.
+
+All 4009-item entry points are separately hard-gated. In this source version
+they fail closed with `USER_FULL_RUN_AUTHORIZATION_MISSING`; neither a canary
+receipt nor a completed Pilot500 grants full-run authority.
+
 ## Fixed per-task treatment
 
 Every task receives exactly three completions from three new immutable Codex

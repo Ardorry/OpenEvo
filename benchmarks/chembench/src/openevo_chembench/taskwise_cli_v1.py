@@ -121,6 +121,9 @@ CONFIG_ROOT = PACKAGE_ROOT / "configs"
 TASKWISE_STATE_ROOT = PACKAGE_ROOT / "state" / "taskwise_online_v1"
 FRAMEWORK_LOCK = PACKAGE_ROOT / "state" / "v2" / "framework" / "framework-lock.json"
 SOURCE_MANIFEST = PACKAGE_ROOT / "manifests" / "chembench_source_manifest_v2.json"
+FULL4009_AUTHORIZATION = "MISSING"
+FULL4009_EXECUTION_ALLOWED = False
+FULL4009_BLOCK_CODE = "USER_FULL_RUN_AUTHORIZATION_MISSING"
 _SCOPES = (
     "canary9",
     "pilot500",
@@ -344,6 +347,7 @@ _CLI_PUBLIC_FAILURE_CODES = (
             "TASKWISE_SUITE_STATE_EXISTS",
             "TASKWISE_SUITE_TERMINAL_FAILURE",
             "TASKWISE_VERIFIED_FRAMEWORK_LOCK_MISSING",
+            "USER_FULL_RUN_AUTHORIZATION_MISSING",
         }
     )
 )
@@ -633,6 +637,7 @@ def run_arm(
         except ValueError as exc:
             raise TaskwiseCLIError("TASKWISE_ATTEMPT_ID_INVALID") from exc
     elif template_config.scope in FULL_STREAM_SCOPES:
+        _require_user_full_run_authorization_v1()
         if resume:
             raise TaskwiseCLIError("TASKWISE_FULL_RESUME_FORBIDDEN")
         authorization = require_taskwise_full_authorization_v1()
@@ -939,6 +944,7 @@ def run_full_stream_suite(
 
     if arm not in {"control", "online"}:
         raise TaskwiseCLIError("TASKWISE_SUITE_ARM_INVALID")
+    _require_user_full_run_authorization_v1()
     authorization = require_taskwise_full_authorization_v1()
     generation = _authorized_full_generation_v1(authorization, generation_id)
     gate = source_gate or verify_taskwise_source_gate_v1
@@ -3008,7 +3014,7 @@ def _orchestration_failure_evidence(exc: Exception) -> dict[str, object]:
         status = TaskwiseRunStatusV1.TASKWISE_CONTEXT_BINDING_VIOLATION.value
     elif code == "MEETING_722_TASKWISE_CONTRACT_VIOLATION":
         status = TaskwiseRunStatusV1.MEETING_722_TASKWISE_CONTRACT_VIOLATION.value
-    elif code == "TASKWISE_EVOLUTION_UPDATE_FAILED":
+    elif code == "TASKWISE_EVOLUTION_UPDATE_FAILED" or code in _ARTIFACT_FAILURE_CODES:
         status = TaskwiseRunStatusV1.TASKWISE_EVOLUTION_UPDATE_FAILED.value
     else:
         status = TaskwiseRunStatusV1.EXECUTION_FAILED.value
@@ -3205,7 +3211,14 @@ def _strict_state_counter(state: dict[str, Any], field_name: str) -> int:
 
 def _artifact_validation_failure_count(state: dict[str, Any]) -> int:
     failure = state.get("failure")
-    return int(isinstance(failure, dict) and failure.get("code") == "ARTIFACT_VALIDATION_FAILED")
+    return int(isinstance(failure, dict) and failure.get("code") in _ARTIFACT_FAILURE_CODES)
+
+
+def _require_user_full_run_authorization_v1() -> None:
+    """Keep every paid 4009-item entry point closed until a later source change."""
+
+    if FULL4009_AUTHORIZATION != "GRANTED" or FULL4009_EXECUTION_ALLOWED is not True:
+        raise TaskwiseCLIError(FULL4009_BLOCK_CODE)
 
 
 def _stream_public_evidence(

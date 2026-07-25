@@ -135,7 +135,25 @@ _TASKWISE_INTERNAL_FAILURE_CODES = frozenset(
         "TASKWISE_EVOLUTION_UPDATE_FAILED",
     }
 )
-_TASKWISE_FAILURE_CODES = TASKWISE_EXECUTOR_FAILURE_CODES_V1 | _TASKWISE_INTERNAL_FAILURE_CODES
+_TASKWISE_ARTIFACT_FAILURE_CODES = frozenset(
+    {
+        "ARTIFACT_VALIDATION_FAILED",
+        "TASKWISE_ARTIFACT_VALIDATION_FAILED",
+        "TASKWISE_ARTIFACT_PROMOTION_FAILED",
+        "TASKWISE_CORE_LINEAGE_INVALID",
+        "TASKWISE_LINEAGE_FORK",
+        "TASKWISE_LINEAGE_JUMP",
+        "TASKWISE_LINEAGE_ROLLBACK",
+        "TASKWISE_PREDECESSOR_BINDING_INVALID",
+        "TASKWISE_RUNTIME_PREDECESSOR_FORK",
+        "TASKWISE_TYPED_ARTIFACT_INVALID",
+    }
+)
+_TASKWISE_FAILURE_CODES = (
+    TASKWISE_EXECUTOR_FAILURE_CODES_V1
+    | _TASKWISE_INTERNAL_FAILURE_CODES
+    | _TASKWISE_ARTIFACT_FAILURE_CODES
+)
 
 
 class TaskwiseEpisodeStateV1(str, Enum):
@@ -825,6 +843,7 @@ class TaskwiseRunResultV1:
     update_count: int
     core_job_count: int
     core_artifact_count: int
+    context_resolution_count: int
     context_binding_violation_count: int
     session_attempt_count: int
     output_directory: Path
@@ -840,6 +859,7 @@ class TaskwiseRunResultV1:
             "update_count",
             "core_job_count",
             "core_artifact_count",
+            "context_resolution_count",
             "context_binding_violation_count",
             "session_attempt_count",
         ):
@@ -849,6 +869,7 @@ class TaskwiseRunResultV1:
         if (
             self.core_job_count != self.update_count
             or self.core_artifact_count != self.update_count
+            or self.context_resolution_count != self.update_count
             or self.memory_aggregate.approved_artifact_count != self.update_count
         ):
             raise ValueError(
@@ -858,6 +879,7 @@ class TaskwiseRunResultV1:
             self.update_count
             or self.core_job_count
             or self.core_artifact_count
+            or self.context_resolution_count
             or self.memory_aggregate.approved_artifact_count
         ):
             raise ValueError("control result must contain zero Core evolution evidence")
@@ -876,6 +898,7 @@ class TaskwiseRunResultV1:
             "update_count": self.update_count,
             "core_job_count": self.core_job_count,
             "core_artifact_count": self.core_artifact_count,
+            "context_resolution_count": self.context_resolution_count,
             "context_binding_violation_count": (self.context_binding_violation_count),
             "session_attempt_count": self.session_attempt_count,
             "resume_allowed": self.resume_allowed,
@@ -1035,6 +1058,7 @@ class TaskwiseOnlineRunnerV1:
             or self._state["update_count"] != expected_updates
             or self._state["core_job_count"] != expected_updates
             or self._state["core_artifact_count"] != expected_updates
+            or self._state["context_resolution_count"] != expected_updates
             or len(self._state["registered_core_job_ids"]) != expected_updates
             or len(self._state["registered_core_artifact_ids"]) != expected_updates
             or self._state["context_binding_violation_count"] != 0
@@ -1284,6 +1308,7 @@ class TaskwiseOnlineRunnerV1:
             self._state["registered_core_artifact_ids"].append(reference.core_artifact_id)
             self._state["core_job_count"] += 1
             self._state["core_artifact_count"] += 1
+            self._state["context_resolution_count"] += 1
             self._write_state()
         except Exception as exc:
             if _is_security_violation(exc):
@@ -1416,6 +1441,7 @@ class TaskwiseOnlineRunnerV1:
             "update_count": 0,
             "core_job_count": 0,
             "core_artifact_count": 0,
+            "context_resolution_count": 0,
             "context_binding_violation_count": 0,
             "session_attempt_count": 0,
             "issued_session_ids": [],
@@ -1514,6 +1540,7 @@ class TaskwiseOnlineRunnerV1:
             or len(private_rows) != self._state["completion_count"]
             or self._state["core_job_count"] != len(update_rows)
             or self._state["core_artifact_count"] != len(update_rows)
+            or self._state["context_resolution_count"] != len(update_rows)
             or self._state["registered_core_job_ids"]
             != [row.get("core_job_id") for row in update_rows]
             or self._state["registered_core_artifact_ids"]
@@ -1824,7 +1851,9 @@ class TaskwiseOnlineRunnerV1:
             status = TaskwiseRunStatusV1.TASKWISE_CONTEXT_BINDING_VIOLATION
         elif exc.code == MEETING_722_CONTRACT_VIOLATION:
             status = TaskwiseRunStatusV1.MEETING_722_TASKWISE_CONTRACT_VIOLATION
-        elif exc.code == "TASKWISE_EVOLUTION_UPDATE_FAILED":
+        elif exc.code == "TASKWISE_EVOLUTION_UPDATE_FAILED" or (
+            exc.code in _TASKWISE_ARTIFACT_FAILURE_CODES
+        ):
             status = TaskwiseRunStatusV1.TASKWISE_EVOLUTION_UPDATE_FAILED
         else:
             status = TaskwiseRunStatusV1.EXECUTION_FAILED
@@ -1865,6 +1894,7 @@ class TaskwiseOnlineRunnerV1:
             update_count=self._state["update_count"],
             core_job_count=self._state["core_job_count"],
             core_artifact_count=self._state["core_artifact_count"],
+            context_resolution_count=self._state["context_resolution_count"],
             context_binding_violation_count=self._state["context_binding_violation_count"],
             session_attempt_count=self._state["session_attempt_count"],
             output_directory=self._config.output_directory,
@@ -2080,9 +2110,15 @@ def _taskwise_evolution_failure(exc: Exception) -> TaskwiseExecutionFailureV1:
     """Retain only a validated private Core receipt basename."""
 
     diagnostic_receipt = getattr(exc, "diagnostic_receipt", None)
+    raw_finding = getattr(exc, "finding_code", None)
+    code = (
+        raw_finding
+        if raw_finding in _TASKWISE_ARTIFACT_FAILURE_CODES
+        else "TASKWISE_EVOLUTION_UPDATE_FAILED"
+    )
     try:
         return TaskwiseExecutionFailureV1(
-            "TASKWISE_EVOLUTION_UPDATE_FAILED",
+            code,
             completion_observed=True,
             diagnostic_receipt=diagnostic_receipt,
         )

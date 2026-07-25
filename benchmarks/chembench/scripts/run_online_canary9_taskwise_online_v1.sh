@@ -9,3 +9,7 @@ CONFIG_PATH="$(taskwise_config_path online_canary9_taskwise_online_v1.yaml)"
 run_taskwise_manifest_tool verify
 require_taskwise_source_commit "${CONFIG_PATH}"
 run_taskwise_cli run-arm --config "${CONFIG_PATH}" "$@"
+TASKWISE_ONLINE_CLI_MODULE=openevo_chembench.taskwise_online_canary_receipt_v1 \
+  run_taskwise_cli freeze
+TASKWISE_ONLINE_CLI_MODULE=openevo_chembench.taskwise_online_canary_receipt_v1 \
+  run_taskwise_cli verify

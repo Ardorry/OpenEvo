@@ -520,6 +520,60 @@ class LocalCodexStabilityTests(unittest.TestCase):
             )
             self.assertNotIn(_STDERR_SENTINEL, serialized)
 
+    @unittest.skipUnless(os.name == "posix", "process-group test requires POSIX")
+    def test_default_runner_decode_failure_still_terminates_process_group(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            outer = Path(temporary)
+            auth_file, isolation_parent, diagnostic_root = self._layout(outer)
+            pid_file = outer / "background.pid"
+            fake_codex = outer / "invalid-utf8-fake-codex"
+            fake_codex.write_text(
+                (
+                    "#!/usr/bin/env python3\n"
+                    "import os\n"
+                    "import subprocess\n"
+                    "import sys\n"
+                    f"pid_file = {os.fspath(pid_file)!r}\n"
+                    "child = subprocess.Popen(\n"
+                    "    [sys.executable, '-c', 'import time; time.sleep(60)'],\n"
+                    "    stdin=subprocess.DEVNULL,\n"
+                    "    stdout=subprocess.DEVNULL,\n"
+                    "    stderr=subprocess.DEVNULL,\n"
+                    ")\n"
+                    "with open(pid_file, 'w', encoding='utf-8') as stream:\n"
+                    "    stream.write(str(child.pid))\n"
+                    "os.write(sys.stdout.fileno(), b'\\xff')\n"
+                ),
+                encoding="utf-8",
+            )
+            fake_codex.chmod(0o700)
+            executor = LocalCodexCLIExecutor(
+                config=_config(),
+                codex_executable=fake_codex,
+                auth_file=auth_file,
+                verified_codex_version="0.144.6",
+                isolation_parent=isolation_parent,
+                diagnostic_root=diagnostic_root,
+            )
+
+            with self.assertRaises(LocalCodexExecutionError) as raised:
+                executor.execute(_request())
+            executor.close()
+
+            self.assertEqual(
+                raised.exception.taskwise_failure_code,
+                "EXECUTOR_INTERNAL_ERROR",
+            )
+            background_pid = int(pid_file.read_text(encoding="utf-8"))
+            deadline = time.monotonic() + 2.0
+            while _process_exists(background_pid) and time.monotonic() < deadline:
+                time.sleep(0.025)
+            self.assertFalse(_process_exists(background_pid))
+            self.assertEqual(
+                list(isolation_parent.glob("openevo-chembench-local-codex-*")),
+                [],
+            )
+
 
 def _open_descriptor_count() -> int | None:
     descriptor_root = Path("/proc/self/fd")

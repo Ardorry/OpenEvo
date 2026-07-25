@@ -343,6 +343,8 @@ def test_full_suite_rejects_existing_stream_without_resume_or_stitch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(cli, "FULL4009_AUTHORIZATION", "GRANTED")
+    monkeypatch.setattr(cli, "FULL4009_EXECUTION_ALLOWED", True)
     monkeypatch.setattr(cli, "WORKSPACE_ROOT", tmp_path)
     monkeypatch.setattr(cli, "_verify_static_inputs", lambda *_args: None)
     monkeypatch.setattr(
@@ -392,6 +394,56 @@ def test_full_suite_rejects_existing_stream_without_resume_or_stitch(
     state = json.loads((tmp_path / "suite" / "control.json").read_text())
     assert state["status"] == "FAILED"
     assert state["streams"]["full_stream_00"]["action"] == "TERMINAL_FAILURE"
+
+
+def test_all_full_entrypoints_fail_closed_without_explicit_user_authorization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    full_config = cli.CONFIG_ROOT / "online_full_stream_00_taskwise_online_v1.yaml"
+    touched = {"authorization": 0, "source": 0, "runner": 0}
+
+    def forbidden_authorization() -> object:
+        touched["authorization"] += 1
+        raise AssertionError("legacy receipt must not grant 4009-item authority")
+
+    def forbidden_source(_config: object) -> str:
+        touched["source"] += 1
+        raise AssertionError("source preflight must not run before the user gate")
+
+    def forbidden_runner(*_args: object, **_kwargs: object) -> object:
+        touched["runner"] += 1
+        raise AssertionError("paid full runner must remain unreachable")
+
+    monkeypatch.setattr(
+        cli,
+        "require_taskwise_full_authorization_v1",
+        forbidden_authorization,
+    )
+
+    with pytest.raises(
+        cli.TaskwiseCLIError,
+        match="USER_FULL_RUN_AUTHORIZATION_MISSING",
+    ):
+        cli.run_arm(
+            full_config,
+            source_gate=forbidden_source,
+            executor_factory=forbidden_runner,
+            core_port_factory=forbidden_runner,
+        )
+
+    with pytest.raises(
+        cli.TaskwiseCLIError,
+        match="USER_FULL_RUN_AUTHORIZATION_MISSING",
+    ):
+        cli.run_full_stream_suite(
+            arm="online",
+            arm_runner=forbidden_runner,
+            suite_state_path=tmp_path / "suite.json",
+            source_gate=forbidden_source,
+        )
+
+    assert touched == {"authorization": 0, "source": 0, "runner": 0}
 
 
 def test_full_entrypoints_recompute_go_receipt_and_never_resume() -> None:

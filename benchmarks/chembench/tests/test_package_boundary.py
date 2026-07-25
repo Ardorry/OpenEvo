@@ -80,6 +80,8 @@ class PackageBoundaryTests(unittest.TestCase):
             "taskwise_core_evolution_v1.py",
             "taskwise_feedback_v1.py",
             "taskwise_generation_v1.py",
+            "taskwise_online_canary_receipt_v1.py",
+            "taskwise_online_only_v1.py",
             "taskwise_online_runner_v1.py",
             "taskwise_pilot_go_receipt_v1.py",
             "taskwise_reporting_v1.py",

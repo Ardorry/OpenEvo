@@ -550,7 +550,7 @@ def test_shared_ordered_digests_bind_every_prefix_record() -> None:
     )
 
 
-def test_one_hundred_synthetic_updates_remain_within_memory_policy(
+def test_two_hundred_synthetic_updates_remain_within_memory_policy(
     bridge: TaskwiseCoreEvolutionBridgeV1,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -568,7 +568,7 @@ def test_one_hundred_synthetic_updates_remain_within_memory_policy(
     )
     predecessor = None
     results = []
-    for task_index in range(50):
+    for task_index in range(100):
         for update_index in (1, 2):
             result = bridge.apply_update(
                 _request(
@@ -581,8 +581,8 @@ def test_one_hundred_synthetic_updates_remain_within_memory_policy(
             results.append(result)
             predecessor = result.predecessor_identity()
 
-    assert len(results) == 100
-    assert [item.global_update_ordinal for item in results] == list(range(1, 101))
+    assert len(results) == 200
+    assert [item.global_update_ordinal for item in results] == list(range(1, 201))
     assert all(item.memory_limits_sha256 == TASKWISE_MEMORY_LIMITS_V1.digest for item in results)
     assert all(item.memory_inspection.passed for item in results)
     assert all(
@@ -601,7 +601,7 @@ def test_one_hundred_synthetic_updates_remain_within_memory_policy(
     assert bridge.current_head() == results[-1]
     checkpoint = bridge._checkpoint_path  # noqa: SLF001
     checkpoint_lines = checkpoint.read_text(encoding="utf-8").splitlines()
-    assert len(checkpoint_lines) == 100
+    assert len(checkpoint_lines) == 200
     checkpoint_rows = [json.loads(line) for line in checkpoint_lines]
     assert all(
         row["schema_version"] == "taskwise_core_private_checkpoint_v2" for row in checkpoint_rows
@@ -614,15 +614,15 @@ def test_one_hundred_synthetic_updates_remain_within_memory_policy(
                 "SELECT COUNT(*) FROM jobs WHERE method = ?",
                 (METHOD_ID,),
             ).fetchone()[0]
-            == 100
+            == 200
         )
         assert (
             connection.execute(
                 "SELECT COUNT(*) FROM artifacts WHERE type = 'text_memory' AND promoted = 1"
             ).fetchone()[0]
-            == 100
+            == 200
         )
-        assert connection.execute("SELECT COUNT(*) FROM contexts").fetchone()[0] == 100
+        assert connection.execute("SELECT COUNT(*) FROM contexts").fetchone()[0] == 200
 
 
 def test_memory_parser_is_deterministic_and_enforces_every_frozen_limit() -> None:
@@ -662,6 +662,43 @@ def test_memory_parser_is_deterministic_and_enforces_every_frozen_limit() -> Non
         )
     ).encode("utf-8")
     assert "memory_duplicate_rule" in (inspect_taskwise_text_memory_v1(duplicate).finding_codes)
+
+    for empty_item in ("!!!", "\u200b", "\u2060", "...", "***"):
+        punctuation_only = _memory_with_do_items((empty_item,)).encode("utf-8")
+        assert "memory_item_alnum_missing" in (
+            inspect_taskwise_text_memory_v1(punctuation_only).finding_codes
+        )
+
+    chemistry_punctuation_is_significant = _memory_with_do_items(
+        (
+            "Inspect C-C bonds.",
+            "Inspect CC bonds!",
+        )
+    ).encode("utf-8")
+    assert "memory_duplicate_rule" not in (
+        inspect_taskwise_text_memory_v1(chemistry_punctuation_is_significant).finding_codes
+    )
+    assert taskwise_core._normalize_rule("Inspect C-C bonds.") == (
+        taskwise_core._normalize_rule("inspect c-c bonds!")
+    )
+    assert taskwise_core._normalize_rule("Inspect C-C bonds.") != (
+        taskwise_core._normalize_rule("inspect cc bonds!")
+    )
+    for punctuated, plain in (
+        ("Inspect C=O groups.", "Inspect Co groups."),
+        ("Compare Na+ levels.", "Compare Na levels."),
+        ("Inspect C#N groups.", "Inspect CN groups."),
+    ):
+        assert taskwise_core._normalize_rule(punctuated) != (taskwise_core._normalize_rule(plain))
+
+    retired_duplicate = _memory(1).replace(
+        "Retire advice only when a general validation rule supersedes it.",
+        "Verify units, conservation, structures, and output formatting!",
+    )
+    assert (
+        "memory_duplicate_rule"
+        in inspect_taskwise_text_memory_v1(retired_duplicate.encode("utf-8")).finding_codes
+    )
 
     reordered = _memory(1).replace("## Do", "## TEMP", 1)
     reordered = reordered.replace("## Validate", "## Do", 1)
@@ -1212,10 +1249,221 @@ def test_ngram_overlap_requires_one_contiguous_candidate_position() -> None:
 
     assert source not in disjoint_candidate
     assert not taskwise_core._sequential_ngram_overlap(source, disjoint_candidate)
-    assert taskwise_core._sequential_ngram_overlap(
-        source,
-        f"prefix {source} suffix",
+    assert not taskwise_core._sequential_ngram_overlap(
+        f"left{source}right",
+        f"other{source}suffix",
     )
+    token_aligned = f"{source} transferable strategy"
+    assert taskwise_core._sequential_ngram_overlap(
+        token_aligned,
+        f"prefix {token_aligned} suffix",
+    )
+
+
+def test_ngram_token_alignment_property_fixtures() -> None:
+    for index in range(2_500):
+        shared_internal = f"{index:04d}" + ("x" * 23)
+        source = f"left{shared_internal}alpha trailing token"
+        candidate = f"right{shared_internal}omega trailing token"
+        assert not taskwise_core._sequential_ngram_overlap(source, candidate)
+
+        aligned = f"rule{index:04d} transferable verification strategy"
+        assert taskwise_core._sequential_ngram_overlap(
+            aligned,
+            f"prefix {aligned} suffix",
+        )
+
+
+def test_fix4_structural_fixture_rejects_only_complete_token_spans() -> None:
+    shared_internal = "q" * 27
+    source = f"source{shared_internal}suffix alpha beta"
+    candidate = f"candidate{shared_internal}ending alpha beta"
+
+    assert not taskwise_core._sequential_ngram_overlap(source, candidate)
+    complete_span = "verify reaction direction before selecting products"
+    assert taskwise_core._source_kind_ngram_overlap(
+        "question",
+        complete_span,
+        f"Always {complete_span} independently.",
+    )
+
+
+def test_source_kind_thresholds_allow_generic_chemistry_but_reject_copying() -> None:
+    for generic in (
+        "methanol",
+        "sodium chloride",
+        "dimensional analysis",
+        "reaction mechanism",
+    ):
+        encoded = taskwise_core._encode_validator_literal("option", generic)
+        source_kind, literal = taskwise_core._decode_validator_literal(encoded)
+        assert source_kind == "option"
+        assert not taskwise_core._full_literal_scan_allowed(source_kind, literal)
+        assert not taskwise_core._source_kind_ngram_overlap(
+            source_kind,
+            taskwise_core._normalize(literal),
+            taskwise_core._normalize(f"Use {generic} only when chemically applicable."),
+        )
+
+    copied = "compare oxidation states before selecting the stable product"
+    assert taskwise_core._full_literal_scan_allowed("question", copied)
+    assert taskwise_core._source_kind_ngram_overlap(
+        "question",
+        taskwise_core._normalize(copied),
+        taskwise_core._normalize(f"Always {copied} and then validate units."),
+    )
+
+    generic_stem = "which of the following statements is correct"
+    long_question = (
+        f"{generic_stem} when comparing a deliberately long set of synthetic "
+        "reaction constraints, structural details, numerical assumptions, and "
+        "independent validation requirements"
+    )
+    assert not taskwise_core._source_kind_ngram_overlap(
+        "question",
+        taskwise_core._normalize(long_question),
+        taskwise_core._normalize(f"Treat {generic_stem} as generic prompt phrasing, not memory."),
+    )
+
+
+def test_typed_question_copy_is_rejected_by_artifact_validator(
+    bridge: TaskwiseCoreEvolutionBridgeV1,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    copied = "compare oxidation states before selecting the stable product"
+    candidate = _memory(1).replace(
+        "Classify the reasoning mode before comparing choices, revision 1.",
+        f"Always {copied} and then validate units.",
+    )
+    monkeypatch.setattr(
+        core_methods,
+        "_generate_reflector_markdown",
+        lambda *_args, **_kwargs: candidate,
+    )
+    monkeypatch.setattr(
+        core_methods,
+        "_guard_generic_reflector_output",
+        lambda markdown, **_kwargs: (
+            markdown,
+            {
+                "finding_count": 0,
+                "redaction_count": 0,
+                "remaining_finding_count": 0,
+                "findings": [],
+            },
+        ),
+    )
+    request = replace(
+        _request(task_index=0, update_index=1, predecessor=None),
+        validator_forbidden_literals=(
+            taskwise_core._encode_validator_literal("question", copied),
+        ),
+    )
+
+    with pytest.raises(
+        TaskwiseCoreEvolutionError,
+        match="TASKWISE_ARTIFACT_VALIDATION_FAILED",
+    ):
+        bridge.apply_update(
+            request,
+            test_only_allow_synthetic_reflector=True,
+        )
+
+
+def test_trajectory_literals_are_typed_and_exclude_prompt_boilerplate() -> None:
+    trajectory = _trajectory(task_index=0, round_index=0, correct=False)
+    literals = taskwise_core._trajectory_forbidden_literals(trajectory)
+    decoded = tuple(taskwise_core._decode_validator_literal(value) for value in literals)
+
+    assert decoded
+    assert {source_kind for source_kind, _literal in decoded} <= {
+        "completion",
+        "option",
+        "question",
+        "uid",
+    }
+    assert sum(source_kind == "uid" for source_kind, _literal in decoded) == 1
+    assert sum(source_kind == "completion" for source_kind, _literal in decoded) == 1
+    assert all(literal != trajectory.public_prompt for _source_kind, literal in decoded)
+    assert all(
+        not literal.startswith("There is a single choice question about chemistry.")
+        for _source_kind, literal in decoded
+    )
+
+
+def test_unicode_token_boundaries_and_long_tokens_are_deterministic() -> None:
+    unicode_phrase = "检查反应 解释结构 比较条件 验证产物 守恒电荷 复核单位 排除选项 输出格式"
+    candidate = f"通用策略：{unicode_phrase}。"
+    first = taskwise_core._source_kind_ngram_overlap(
+        "question",
+        taskwise_core._normalize(unicode_phrase),
+        taskwise_core._normalize(candidate),
+    )
+    second = taskwise_core._source_kind_ngram_overlap(
+        "question",
+        taskwise_core._normalize(unicode_phrase),
+        taskwise_core._normalize(candidate),
+    )
+    assert first is True
+    assert second is first
+
+    long_token = "z" * 48
+    assert taskwise_core._source_kind_ngram_overlap(
+        "option",
+        long_token,
+        f"prefix {long_token} suffix",
+    )
+    assert not taskwise_core._source_kind_ngram_overlap(
+        "option",
+        f"left{long_token}right",
+        f"other{long_token}ending",
+    )
+
+
+def test_two_hundred_cumulative_validator_inputs_are_deterministic() -> None:
+    cumulative: tuple[str, ...] = ()
+    candidate = taskwise_core._normalize(_memory(200))
+    for ordinal in range(200):
+        cumulative = taskwise_core._deduplicate_literals(
+            (
+                *cumulative,
+                taskwise_core._encode_validator_literal(
+                    "question",
+                    (
+                        f"Synthetic task {ordinal:03d} asks for independent "
+                        "chemical reasoning and validation"
+                    ),
+                ),
+                taskwise_core._encode_validator_literal(
+                    "option",
+                    f"synthetic-choice-{ordinal:03d}",
+                ),
+            )
+        )
+        first = tuple(
+            taskwise_core._source_kind_ngram_overlap(
+                source_kind,
+                taskwise_core._normalize(literal),
+                candidate,
+            )
+            for source_kind, literal in map(
+                taskwise_core._decode_validator_literal,
+                cumulative,
+            )
+        )
+        second = tuple(
+            taskwise_core._source_kind_ngram_overlap(
+                source_kind,
+                taskwise_core._normalize(literal),
+                candidate,
+            )
+            for source_kind, literal in map(
+                taskwise_core._decode_validator_literal,
+                cumulative,
+            )
+        )
+        assert first == second
+        assert not any(first)
 
 
 @pytest.mark.parametrize(
@@ -1224,12 +1472,35 @@ def test_ngram_overlap_requires_one_contiguous_candidate_position() -> None:
         "Read test/placeholder.md only in a synthetic fixture.",
         "Inspect results/run.log only in a synthetic fixture.",
         "Read test／placeholder.md only in a synthetic fixture.",
+        "Inspect /home/synthetic/private.txt only in a synthetic fixture.",
+        r"Inspect C:\synthetic\private.txt only in a synthetic fixture.",
+        r"Inspect \\server\share\private.txt only in a synthetic fixture.",
+        "Inspect test-data/cache.bin only in a synthetic fixture.",
+        "Inspect a private manifest only in a synthetic fixture.",
+        "Inspect answer-cache only in a synthetic fixture.",
+        "Inspect synthetic-policy.yaml only in a synthetic fixture.",
+        "Inspect synthetic-policy.yml only in a synthetic fixture.",
     ),
 )
 def test_relative_path_markers_are_rejected_from_prose(path_marker: str) -> None:
     scan_text = taskwise_core._security_scan_text(path_marker)
 
     assert taskwise_core._PATH_OR_BENCHMARK_RE.search(scan_text) is not None
+
+
+@pytest.mark.parametrize(
+    "ordinary_text",
+    (
+        "Check the reaction path before committing.",
+        "Compare the input/output relation.",
+        "Validate the acid/base balance.",
+        "Check the cis/trans assignment.",
+        "Verify units in g/mol/s.",
+        "Compare the A/B ratio.",
+    ),
+)
+def test_path_detector_allows_generic_chemistry_language(ordinary_text: str) -> None:
+    assert taskwise_core._PATH_OR_BENCHMARK_RE.search(ordinary_text) is None
 
 
 @pytest.mark.parametrize(
@@ -1241,6 +1512,16 @@ def test_relative_path_markers_are_rejected_from_prose(path_marker: str) -> None
         "taskwise-reflector-record-0",
         "taskwise_safe_signal",
         "openevo_core_taskwise",
+        "runtime_job_0123456789abcdef",
+        "cache_art_0123456789abcdef",
+        "prefix_ds_0123456789abcdef_retry",
+        "taskwise_online_evolution_v1",
+        "openevo_core_taskwise_text_memory_v1",
+        "taskwise_reflector_trajectory_projection_v1",
+        "source index: 35",
+        "source-row # 12",
+        "row_index=7",
+        "uid: 0123456789abcdef",
     ),
 )
 def test_operational_identifier_echo_is_rejected(
@@ -1288,6 +1569,17 @@ def test_operational_identifier_echo_is_rejected(
         "Choose option: D",
         "B is the correct answer",
         "The answer -> A",
+        "Return A",
+        "Output: B",
+        "Select option A",
+        "Return option C.",
+        "The correct choice is C.",
+        "B should be selected.",
+        "Final response: D.",
+        "Prediction = A.",
+        "Letter C is correct.",
+        "Question 35 maps to C.",
+        "item UID maps to D.",
     ),
 )
 def test_answer_map_detector_rejects_only_explicit_abcd_mappings(
@@ -1340,6 +1632,13 @@ def test_answer_map_detector_rejects_only_explicit_abcd_mappings(
         "When the answer is C=O reactivity, verify the functional group.",
         "Use a validated answer supported by independent checks.",
         "Prefer a robust answer after checking every constraint.",
+        "Choose A reagent after comparing compatibility.",
+        "Select A catalyst after checking the substrate.",
+        "Pick A solvent after checking polarity.",
+        "Return a concise final response.",
+        "Output a structured answer.",
+        "Return a single uppercase letter after reasoning.",
+        "Output only a format-compliant response.",
     ),
 )
 def test_non_abcd_strategy_language_is_not_an_answer_map(
@@ -1378,6 +1677,47 @@ def test_non_abcd_strategy_language_is_not_an_answer_map(
     assert result.validation_receipt.passed is True
     assert result.validation_receipt.finding_codes == ()
     assert result.core_artifact_id
+
+
+def test_normalized_literal_threshold_is_eight_characters(
+    bridge: TaskwiseCoreEvolutionBridgeV1,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = _memory(1).replace(
+        "Classify the reasoning mode before comparing choices, revision 1.",
+        "Never retain the unit tag marker in reusable memory.",
+    )
+    monkeypatch.setattr(
+        core_methods,
+        "_generate_reflector_markdown",
+        lambda *_args, **_kwargs: candidate,
+    )
+    monkeypatch.setattr(
+        core_methods,
+        "_guard_generic_reflector_output",
+        lambda markdown, **_kwargs: (
+            markdown,
+            {
+                "finding_count": 0,
+                "redaction_count": 0,
+                "remaining_finding_count": 0,
+                "findings": [],
+            },
+        ),
+    )
+    request = replace(
+        _request(task_index=0, update_index=1, predecessor=None),
+        validator_forbidden_literals=("unit-tag",),
+    )
+
+    with pytest.raises(
+        TaskwiseCoreEvolutionError,
+        match="TASKWISE_ARTIFACT_VALIDATION_FAILED",
+    ):
+        bridge.apply_update(
+            request,
+            test_only_allow_synthetic_reflector=True,
+        )
 
 
 def test_promotion_oserror_writes_closed_private_failure_receipt(

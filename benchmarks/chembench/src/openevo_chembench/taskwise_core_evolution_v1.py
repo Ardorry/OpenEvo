@@ -18,6 +18,7 @@ from dataclasses import dataclass
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -165,25 +166,42 @@ _REFLECTOR_PROJECTED_RESPONSE = (
 )
 _PATH_OR_BENCHMARK_RE = re.compile(
     r"(?:chembench(?:4k)?|ai4chem|opencompass|"
-    r"(?<![A-Za-z0-9_])(?:dev|test|results?)[\\/]|"
-    r"\.(?:json|jsonl|parquet|sqlite3?)\b)",
+    r"(?<![A-Za-z0-9_])(?:dev|test|results?|test[-_ ]data)[\\/]|"
+    r"(?<![A-Za-z0-9_])(?:private[-_ ]manifest|answer[-_ ]cache)"
+    r"(?![A-Za-z0-9_])|"
+    r"(?<![A-Za-z0-9_])/(?:[^\\/\s]+[\\/])+[^\\/\s]+|"
+    r"(?<![A-Za-z0-9_])[A-Za-z]:[\\/]|"
+    r"(?<![A-Za-z0-9_])\\\\[^\\\s]+\\[^\\\s]+|"
+    r"\bfile://|"
+    r"\.(?:json|jsonl|parquet|sqlite3?|ya?ml)\b)",
     re.IGNORECASE | re.MULTILINE,
 )
 _OPERATIONAL_IDENTIFIER_RE = re.compile(
-    r"(?:\b(?:job|art|ds)_[A-Za-z0-9_.:-]{6,}\b|"
-    r"\btaskwise[-_. ](?:reflector|safe_signal|safe|core|online)\b|"
-    r"\bopenevo_core_taskwise\b)",
+    r"(?:(?<![A-Za-z0-9])(?:job|art|ds)_[A-Za-z0-9_.:-]{6,}|"
+    r"\btaskwise[-_. ](?:reflector|safe_signal|safe|core|online)"
+    r"(?![A-Za-z0-9])|"
+    r"\bopenevo_core_taskwise(?![A-Za-z0-9])|"
+    r"\b(?:source(?:[\s_.-]+)(?:row|index)|row(?:[\s_.-]+)index)"
+    r"\s*(?::|=|#|-)?\s*\d+\b|"
+    r"\buid\s*(?::|=|->|→)\s*[A-Za-z0-9][A-Za-z0-9_.:-]{5,}\b)",
     re.IGNORECASE,
 )
 _OPTION_TOKEN_PREFIX_RE = r"(?<![A-Za-z0-9_])"
 _OPTION_CHEMICAL_SUFFIX_RE = r"(?![-‐‑‒–—=][A-Za-z0-9])"
-_EXPLICIT_OPTION_TOKEN_RE = (
-    rf"{_OPTION_TOKEN_PREFIX_RE}[ABCDabcd]\b{_OPTION_CHEMICAL_SUFFIX_RE}"
-)
+_EXPLICIT_OPTION_TOKEN_RE = rf"{_OPTION_TOKEN_PREFIX_RE}[ABCDabcd]\b{_OPTION_CHEMICAL_SUFFIX_RE}"
 _IMPLICIT_OPTION_TOKEN_RE = (
     rf"{_OPTION_TOKEN_PREFIX_RE}(?:(?:[ABCD]|[bcd])\b"
     rf"{_OPTION_CHEMICAL_SUFFIX_RE}|"
     r"a(?=\s*(?:\Z|[^\w\s])))"
+)
+_BARE_OPTION_TOKEN_RE = (
+    rf"{_OPTION_TOKEN_PREFIX_RE}(?:(?:[BCD]|[bcd])\b"
+    rf"{_OPTION_CHEMICAL_SUFFIX_RE}|"
+    r"[Aa](?=\s*(?:\Z|[.,;:!?])))"
+)
+_TERMINAL_OPTION_TOKEN_RE = (
+    rf"{_OPTION_TOKEN_PREFIX_RE}[ABCD]\b{_OPTION_CHEMICAL_SUFFIX_RE}"
+    r"(?=\s*(?:\Z|[.,;:!?]))"
 )
 _ANSWER_MAP_SEPARATOR_RE = r"(?:is|=|:|->|→)"
 _ANSWER_MAP_RE = re.compile(
@@ -191,15 +209,35 @@ _ANSWER_MAP_RE = re.compile(
     rf"{_IMPLICIT_OPTION_TOKEN_RE}|"
     rf"(?i:(?:choose|select|pick)\s+option\s*"
     rf"(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*){_EXPLICIT_OPTION_TOKEN_RE}|"
-    rf"(?i:(?:choose|select|pick)\s+){_IMPLICIT_OPTION_TOKEN_RE}|"
+    rf"(?i:(?:choose|select|pick)\s+){_BARE_OPTION_TOKEN_RE}|"
+    rf"(?i:(?:return|output)\s*(?:only\s+)?option\s*"
+    rf"(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*){_EXPLICIT_OPTION_TOKEN_RE}|"
+    rf"(?i:(?:return|output)\s*(?:only\s+)?"
+    rf"(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*){_TERMINAL_OPTION_TOKEN_RE}|"
+    rf"(?i:(?:final\s+)?(?:response|prediction|letter|choice)\s*"
+    rf"{_ANSWER_MAP_SEPARATOR_RE}\s*){_EXPLICIT_OPTION_TOKEN_RE}|"
+    rf"{_EXPLICIT_OPTION_TOKEN_RE}\s+"
+    r"(?i:(?:is|should\s+be|must\s+be)\s+(?:the\s+)?"
+    r"(?:correct|selected|chosen)(?:\s+(?:answer|choice|option))?)\b|"
     rf"(?i:\boption\s*(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*)"
     rf"{_EXPLICIT_OPTION_TOKEN_RE}|"
     r"(?i:(?:question|item|uid|index)\s*)[^\n]{0,48}"
     rf"(?:->|→|=|:)\s*{_EXPLICIT_OPTION_TOKEN_RE}|"
+    r"(?i:(?:question|item|uid|index)\s*)[^\n]{0,48}"
+    rf"\bmaps?\s+to\s+{_EXPLICIT_OPTION_TOKEN_RE}|"
     rf"{_EXPLICIT_OPTION_TOKEN_RE}\s+"
     r"(?i:(?:is\s+)?(?:the\s+)?(?:correct\s+)?answer)\b",
 )
 _ANSWER_MAP_WRAPPER_RE = re.compile(r"""[*_`~()[\]{}"'“”‘’]""")
+_VALIDATOR_LITERAL_PREFIX = "@chembench-validator-literal-v1:"
+_VALIDATOR_LITERAL_KINDS = frozenset(
+    {
+        "completion",
+        "option",
+        "question",
+        "uid",
+    }
+)
 _NGRAM_WIDTH = 24
 _NGRAM_CONSECUTIVE_MATCHES = 4
 _NGRAM_CONTIGUOUS_WIDTH = _NGRAM_WIDTH + _NGRAM_CONSECUTIVE_MATCHES - 1
@@ -468,6 +506,12 @@ def inspect_taskwise_text_memory_v1(
         for item in section_items
         if _normalize_rule(item)
     ]
+    if any(
+        not any(character.isalnum() for character in _security_scan_text(item))
+        for section_items in items_by_section
+        for item in section_items
+    ):
+        findings.add("memory_item_alnum_missing")
     if len(normalized_items) != len(set(normalized_items)):
         findings.add("memory_duplicate_rule")
     return TaskwiseMemoryInspectionV1(
@@ -920,17 +964,27 @@ class TaskwiseTextMemoryValidatorV1:
         if not isinstance(execution, dict):
             findings.add("invalid_core_execution_lineage")
         normalized_candidate = _normalize(text)
-        for literal in self._forbidden_literals:
-            stripped = literal.strip()
-            if len(stripped) >= 8 and _contains_bounded_literal(text, stripped):
+        for encoded_literal in self._forbidden_literals:
+            source_kind, stripped = _decode_validator_literal(encoded_literal)
+            if _full_literal_scan_allowed(source_kind, stripped) and _contains_bounded_literal(
+                text,
+                stripped,
+            ):
                 findings.add("leak_forbidden_literal")
             normalized_literal = _normalize(stripped)
-            if len(normalized_literal) >= 12 and _contains_bounded_literal(
+            if _full_literal_scan_allowed(
+                source_kind,
+                normalized_literal,
+            ) and _contains_bounded_literal(
                 normalized_candidate,
                 normalized_literal,
             ):
                 findings.add("leak_normalized_literal")
-            if _sequential_ngram_overlap(normalized_literal, normalized_candidate):
+            if _source_kind_ngram_overlap(
+                source_kind,
+                normalized_literal,
+                normalized_candidate,
+            ):
                 findings.add("leak_literal_ngram")
         security_scan_text = _security_scan_text(text)
         if _PATH_OR_BENCHMARK_RE.search(security_scan_text):
@@ -1126,7 +1180,6 @@ class TaskwiseCoreEvolutionBridgeV1:
             (
                 *self._seen_forbidden_literals,
                 *request.validator_forbidden_literals,
-                request.task_uid,
                 *(
                     literal
                     for trajectory in request.trajectories
@@ -2569,23 +2622,28 @@ def _closed_exception_class(exc: Exception) -> str:
 def _trajectory_forbidden_literals(
     trajectory: TaskwiseTrajectoryV1,
 ) -> tuple[str, ...]:
-    """Derive question/option lines without persisting a second private DTO."""
+    """Derive typed private literals without persisting a second private DTO."""
 
     values: list[str] = [
-        trajectory.task_uid,
-        trajectory.public_prompt,
-        trajectory.raw_completion,
+        _encode_validator_literal("uid", trajectory.task_uid),
+        _encode_validator_literal("completion", trajectory.raw_completion),
     ]
     for line in trajectory.public_prompt.splitlines():
         stripped = line.strip()
         if not stripped:
             continue
-        values.append(stripped)
-        for prefix in ("Question:", "A.", "B.", "C.", "D."):
+        for prefix, source_kind in (
+            ("Question:", "question"),
+            ("A.", "option"),
+            ("B.", "option"),
+            ("C.", "option"),
+            ("D.", "option"),
+        ):
             if stripped.startswith(prefix):
                 remainder = stripped[len(prefix) :].strip()
                 if remainder:
-                    values.append(remainder)
+                    values.append(_encode_validator_literal(source_kind, remainder))
+                break
     return _deduplicate_literals(values)
 
 
@@ -2683,6 +2741,97 @@ def _exclusive_private_write(path: Path, payload: bytes) -> None:
         raise
 
 
+def _encode_validator_literal(source_kind: str, value: str) -> str:
+    """Encode private source-kind metadata inside the private validator stream."""
+
+    if source_kind not in _VALIDATOR_LITERAL_KINDS:
+        raise ValueError("validator literal source kind is outside the closed set")
+    if type(value) is not str or not value.strip():
+        raise TypeError("validator literal must be non-empty text")
+    return f"{_VALIDATOR_LITERAL_PREFIX}{source_kind}:{value.strip()}"
+
+
+def _decode_validator_literal(value: str) -> tuple[str, str]:
+    """Decode typed private literals; legacy/controller literals stay strict."""
+
+    if type(value) is not str or not value.strip():
+        raise TypeError("validator literal must be non-empty text")
+    stripped = value.strip()
+    if not stripped.startswith(_VALIDATOR_LITERAL_PREFIX):
+        return "strict", stripped
+    encoded = stripped[len(_VALIDATOR_LITERAL_PREFIX) :]
+    source_kind, separator, literal = encoded.partition(":")
+    if not separator or source_kind not in _VALIDATOR_LITERAL_KINDS or not literal.strip():
+        raise ValueError("typed validator literal is malformed")
+    return source_kind, literal.strip()
+
+
+def _normalized_tokens(value: str) -> tuple[str, ...]:
+    """Tokenize already-normalized text using Unicode alphanumeric boundaries."""
+
+    if type(value) is not str:
+        raise TypeError("normalized token input must be a string")
+    return tuple(match.group(0) for match in _unicode_token_spans(value))
+
+
+def _unicode_token_spans(value: str) -> tuple[re.Match[str], ...]:
+    """Return deterministic complete-token spans for Unicode alphanumeric text."""
+
+    if type(value) is not str:
+        raise TypeError("token span input must be a string")
+    return tuple(re.finditer(r"[^\W_]+", value))
+
+
+def _full_literal_scan_allowed(source_kind: str, value: str) -> bool:
+    """Apply source-kind thresholds without weakening UID/controller literals."""
+
+    normalized = _normalize(value)
+    if source_kind in {"strict", "uid"}:
+        return len(normalized) >= 8
+    tokens = _normalized_tokens(normalized)
+    longest_token = max(map(len, tokens), default=0)
+    if source_kind == "question":
+        return len(normalized) >= 20 and (len(tokens) >= 4 or longest_token >= 40)
+    if source_kind == "option":
+        return len(normalized) >= 24 and (len(tokens) >= 4 or longest_token >= 40)
+    if source_kind == "completion":
+        return len(normalized) >= 64 and len(tokens) >= 8
+    raise ValueError("validator literal source kind is outside the closed set")
+
+
+def _source_kind_ngram_overlap(
+    source_kind: str,
+    source: str,
+    candidate: str,
+) -> bool:
+    """Use stricter semantic spans for prompts than for explicit controller inputs."""
+
+    if source_kind in {"strict", "uid"}:
+        return _sequential_ngram_overlap(source, candidate)
+    if source_kind in {"question", "option"}:
+        minimum_source_ratio = 0.30 if source_kind == "question" else 0.40
+        return _sequential_ngram_overlap(
+            source,
+            candidate,
+            minimum_characters=32,
+            minimum_tokens=4,
+            long_token_characters=48,
+            minimum_source_ratio=minimum_source_ratio,
+            minimum_candidate_ratio=0.002,
+        )
+    if source_kind == "completion":
+        return _sequential_ngram_overlap(
+            source,
+            candidate,
+            minimum_characters=64,
+            minimum_tokens=8,
+            long_token_characters=80,
+            minimum_source_ratio=0.50,
+            minimum_candidate_ratio=0.004,
+        )
+    raise ValueError("validator literal source kind is outside the closed set")
+
+
 def _normalize(value: str) -> str:
     """NFKC/case/punctuation normalization for leakage comparison."""
 
@@ -2706,11 +2855,7 @@ def _security_scan_text(value: str) -> str:
     if type(value) is not str:
         raise TypeError("security scan input must be a string")
     canonical = unicodedata.normalize("NFKC", value)
-    return "".join(
-        character
-        for character in canonical
-        if unicodedata.category(character) != "Cf"
-    )
+    return "".join(character for character in canonical if unicodedata.category(character) != "Cf")
 
 
 def _contains_bounded_literal(text: str, literal: str) -> bool:
@@ -2755,20 +2900,81 @@ def _contains_answer_map(text: str) -> bool:
 
 
 def _normalize_rule(value: str) -> str:
-    return "".join(character.casefold() for character in value if character.isalnum())
+    """Canonical duplicate key preserving internal chemistry punctuation."""
+
+    canonical = " ".join(_security_scan_text(value).casefold().split())
+    return canonical.rstrip(" \t.!?;:,。！？；：，\"'”’")
 
 
-def _sequential_ngram_overlap(source: str, candidate: str) -> bool:
-    """Require four overlapping 24-grams at one contiguous candidate position."""
+def _sequential_ngram_overlap(
+    source: str,
+    candidate: str,
+    *,
+    minimum_characters: int = _NGRAM_CONTIGUOUS_WIDTH,
+    minimum_tokens: int = 1,
+    long_token_characters: int = _NGRAM_CONTIGUOUS_WIDTH,
+    minimum_source_ratio: float = 0.0,
+    minimum_candidate_ratio: float = 0.0,
+) -> bool:
+    """Require a complete-token contiguous overlap under a deterministic policy."""
 
     if type(source) is not str or type(candidate) is not str:
         raise TypeError("ngram scan inputs must be strings")
-    if len(source) < _NGRAM_CONTIGUOUS_WIDTH:
+    if (
+        isinstance(minimum_characters, bool)
+        or not isinstance(minimum_characters, int)
+        or minimum_characters < _NGRAM_CONTIGUOUS_WIDTH
+        or isinstance(minimum_tokens, bool)
+        or not isinstance(minimum_tokens, int)
+        or minimum_tokens < 1
+        or isinstance(long_token_characters, bool)
+        or not isinstance(long_token_characters, int)
+        or long_token_characters < minimum_characters
+        or isinstance(minimum_source_ratio, bool)
+        or not isinstance(minimum_source_ratio, (int, float))
+        or not 0 <= minimum_source_ratio <= 1
+        or isinstance(minimum_candidate_ratio, bool)
+        or not isinstance(minimum_candidate_ratio, (int, float))
+        or not 0 <= minimum_candidate_ratio <= 1
+    ):
+        raise ValueError("ngram policy is invalid")
+    if len(source) < minimum_characters:
         return False
-    return any(
-        source[index : index + _NGRAM_CONTIGUOUS_WIDTH] in candidate
-        for index in range(len(source) - _NGRAM_CONTIGUOUS_WIDTH + 1)
+    tokens = _unicode_token_spans(source)
+    required_span_characters = max(
+        minimum_characters,
+        math.ceil(len(source) * minimum_source_ratio),
+        math.ceil(len(candidate) * minimum_candidate_ratio),
     )
+
+    def ratios_allow(span: str) -> bool:
+        return (
+            len(span) / len(source) >= minimum_source_ratio
+            and len(span) / max(1, len(candidate)) >= minimum_candidate_ratio
+        )
+
+    for start_index, start_token in enumerate(tokens):
+        long_token = start_token.group(0)
+        if (
+            len(long_token) >= long_token_characters
+            and ratios_allow(long_token)
+            and _contains_bounded_literal(candidate, long_token)
+        ):
+            return True
+        required_end_index = start_index + minimum_tokens - 1
+        for end_index in range(start_index, len(tokens)):
+            if end_index < required_end_index:
+                continue
+            token_aligned_span = source[start_token.start() : tokens[end_index].end()]
+            if len(token_aligned_span) < required_span_characters:
+                continue
+            if ratios_allow(token_aligned_span) and _contains_bounded_literal(
+                candidate,
+                token_aligned_span,
+            ):
+                return True
+            break
+    return False
 
 
 def _canonical_json(value: Any) -> str:

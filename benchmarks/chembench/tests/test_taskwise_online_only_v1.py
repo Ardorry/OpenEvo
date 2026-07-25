@@ -18,7 +18,8 @@ from openevo_chembench.taskwise_sampling_v1 import PILOT500_STREAM_SCOPES
 
 
 _SOURCE_COMMIT = "a" * 40
-_GENERATION_ID = f"gen_{'b' * 64}"
+_GENERATION_ID = f"online_canary_{'b' * 64}"
+_PAIRED_GENERATION_ID = f"gen_{'e' * 64}"
 _RECEIPT_SHA256 = "c" * 64
 _PILOT_BINDING_SHA256 = "d" * 64
 _RUN_ID = "online_only_fix_parser_v1"
@@ -27,17 +28,17 @@ _RUN_ID = "online_only_fix_parser_v1"
 def _authorization() -> SimpleNamespace:
     return SimpleNamespace(
         source_commit=_SOURCE_COMMIT,
-        paired_canary_generation_id=_GENERATION_ID,
+        online_canary_generation_id=_GENERATION_ID,
         receipt_sha256=_RECEIPT_SHA256,
-        pilot_binding_sha256=_PILOT_BINDING_SHA256,
+        online_pilot_binding_sha256=_PILOT_BINDING_SHA256,
     )
 
 
 def _allow_online_only_preflight(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         online_only,
-        "require_taskwise_pilot_authorization_v1",
-        _authorization,
+        "require_online_canary_authorization_v1",
+        lambda _package_root: _authorization(),
     )
     monkeypatch.setattr(
         online_only,
@@ -48,6 +49,16 @@ def _allow_online_only_preflight(monkeypatch: pytest.MonkeyPatch) -> None:
         online_only,
         "_verify_static_inputs",
         lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        online_only,
+        "_build_online_only_descriptive_report",
+        lambda **_kwargs: {
+            "schema_version": online_only.ONLINE_ONLY_REPORT_SCHEMA_V1,
+            "labels": list(online_only.ONLINE_ONLY_REPORT_LABELS),
+            "standard_chembench4k_score_claimed": False,
+            "causal_comparison_claimed": False,
+        },
     )
 
 
@@ -70,6 +81,7 @@ def _completed_stream_result() -> dict[str, object]:
         "update_count": 100,
         "core_job_count": 100,
         "core_artifact_count": 100,
+        "context_resolution_count": 100,
         "context_binding_violation_count": 0,
         "session_attempt_count": 150,
         "resume_allowed": False,
@@ -121,7 +133,8 @@ def test_online_only_suite_runs_ten_streams_without_control_authority(
 
     assert result["status"] == "COMPLETED"
     assert result["completed_streams"] == 10
-    assert result["classification"] == online_only.ONLINE_ONLY_CLASSIFICATION
+    assert result["classification"] == list(online_only.ONLINE_ONLY_REPORT_LABELS)
+    assert result["primary_classification"] == online_only.ONLINE_ONLY_CLASSIFICATION
     assert result["paired_inference_allowed"] is False
     assert result["paired_comparison_allowed"] is False
     assert result["pilot_go_receipt_allowed"] is False
@@ -131,20 +144,20 @@ def test_online_only_suite_runs_ten_streams_without_control_authority(
     assert (root.stat().st_mode & 0o777) == 0o700
     authority = root / "online_only_authority.json"
     assert (authority.stat().st_mode & 0o777) == 0o600
-    assert (
-        json.loads(authority.read_text(encoding="utf-8"))["classification"]
-        == online_only.ONLINE_ONLY_CLASSIFICATION
+    assert json.loads(authority.read_text(encoding="utf-8"))["classification"] == list(
+        online_only.ONLINE_ONLY_REPORT_LABELS
     )
     assert not taskwise_attempts_root_v1(
         tmp_path,
         suite_kind="pilot500",
-        generation_id=_GENERATION_ID,
+        generation_id=_PAIRED_GENERATION_ID,
     ).exists()
     assert all(
         entry["completion_count"] == 150
         and entry["update_count"] == 100
         and entry["core_job_count"] == 100
         and entry["core_artifact_count"] == 100
+        and entry["context_resolution_count"] == 100
         for entry in result["streams"].values()
     )
     assert result["completed_tasks"] == 500
@@ -153,6 +166,20 @@ def test_online_only_suite_runs_ten_streams_without_control_authority(
     assert result["update_count"] == 1000
     assert result["core_job_count"] == 1000
     assert result["core_artifact_count"] == 1000
+    assert result["context_resolution_count"] == 1000
+    report = json.loads(
+        (
+            online_only.online_only_run_root_v1(tmp_path, _RUN_ID)
+            / "online_only_descriptive_report.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert report["labels"] == list(online_only.ONLINE_ONLY_REPORT_LABELS)
+    assert "decision" not in report
+    assert "go_gate" not in report
+    assert (
+        result["descriptive_report_sha256"]
+        == online_only.hashlib.sha256(online_only._canonical_bytes(report)).hexdigest()
+    )
 
 
 @pytest.mark.parametrize(
@@ -165,6 +192,7 @@ def test_online_only_suite_runs_ten_streams_without_control_authority(
         ("update_count", 99),
         ("core_job_count", 99),
         ("core_artifact_count", 99),
+        ("context_resolution_count", 99),
         ("context_binding_violation_count", 1),
         ("resume_allowed", True),
         ("finding_codes", ["EXECUTOR_SECURITY_TOOL_USE_VIOLATION"]),
@@ -252,8 +280,8 @@ def test_canary_receipt_is_reverified_before_each_stream(
     authorizations = iter((_authorization(), drifted))
     monkeypatch.setattr(
         online_only,
-        "require_taskwise_pilot_authorization_v1",
-        lambda: next(authorizations),
+        "require_online_canary_authorization_v1",
+        lambda _package_root: next(authorizations),
     )
     calls = 0
 
@@ -445,6 +473,7 @@ def test_existing_run_state_failure_precedes_generic_exception(
         "update_count": 20,
         "core_job_count": 20,
         "core_artifact_count": 20,
+        "context_resolution_count": 20,
     }
     (output / "run_state.json").write_bytes(online_only._canonical_bytes(state))
 
@@ -474,11 +503,23 @@ def test_online_only_failure_stops_without_resume_or_stitch(
     ) -> dict[str, object]:
         nonlocal calls
         calls += 1
-        return {
-            "status": "EXECUTION_FAILED",
-            "resume_allowed": False,
-            "finding_codes": ["EXECUTOR_NONZERO_EXIT"],
-        }
+        result = _completed_stream_result()
+        result.update(
+            {
+                "status": "EXECUTION_FAILED",
+                "completed_tasks": 0,
+                "completion_count": 0,
+                "session_attempt_count": 1,
+                "update_count": 0,
+                "core_job_count": 0,
+                "core_artifact_count": 0,
+                "context_resolution_count": 0,
+                "memory_aggregate": {"approved_artifact_count": 0},
+                "resume_allowed": False,
+                "finding_codes": ["EXECUTOR_NONZERO_EXIT"],
+            }
+        )
+        return result
 
     with pytest.raises(
         online_only.TaskwiseOnlineOnlyError,
@@ -511,6 +552,56 @@ def test_online_only_failure_stops_without_resume_or_stitch(
     assert calls == 1
 
 
+def test_failed_result_preserves_trusted_partial_counts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _allow_online_only_preflight(monkeypatch)
+
+    def failed_stream(*_args: object) -> dict[str, object]:
+        result = _completed_stream_result()
+        result.update(
+            {
+                "status": "TASKWISE_EVOLUTION_UPDATE_FAILED",
+                "completed_tasks": 34,
+                "completion_count": 103,
+                "session_attempt_count": 103,
+                "update_count": 68,
+                "core_job_count": 68,
+                "core_artifact_count": 68,
+                "context_resolution_count": 68,
+                "memory_aggregate": {"approved_artifact_count": 68},
+                "finding_codes": ["TASKWISE_ARTIFACT_VALIDATION_FAILED"],
+            }
+        )
+        return result
+
+    with pytest.raises(
+        online_only.TaskwiseOnlineOnlyError,
+        match="ONLINE_ONLY_SUITE_TERMINAL_FAILURE",
+    ):
+        online_only.run_online_only_pilot500_v1(
+            run_id=_RUN_ID,
+            repository_root=tmp_path,
+            stream_runner=failed_stream,
+        )
+
+    state = json.loads(
+        (
+            online_only.online_only_run_root_v1(tmp_path, _RUN_ID) / "online_only_suite_state.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert state["completed_tasks"] == 34
+    assert state["completion_count"] == state["session_attempt_count"] == 103
+    assert state["update_count"] == state["core_job_count"] == 68
+    assert state["core_artifact_count"] == state["context_resolution_count"] == 68
+    assert state["artifact_validation_failures"] == 1
+    assert state["evolution_update_failures"] == 0
+    assert state["streams"]["pilot500_stream_00"]["failure_code"] == (
+        "TASKWISE_ARTIFACT_VALIDATION_FAILED"
+    )
+
+
 def test_online_only_namespace_is_not_a_paired_comparison_authority(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -526,7 +617,7 @@ def test_online_only_namespace_is_not_a_paired_comparison_authority(
         require_taskwise_completed_paired_attempt_v1(
             tmp_path,
             suite_kind="pilot500",
-            generation_id=_GENERATION_ID,
+            generation_id=_PAIRED_GENERATION_ID,
         )
 
 
@@ -545,7 +636,8 @@ def test_stream_marker_is_public_content_free_and_exclusive(tmp_path: Path) -> N
     )
     marker_path = output / "UNPAIRED_ONLINE_ONLY.json"
     marker = json.loads(marker_path.read_text(encoding="utf-8"))
-    assert marker["classification"] == online_only.ONLINE_ONLY_CLASSIFICATION
+    assert marker["classification"] == list(online_only.ONLINE_ONLY_REPORT_LABELS)
+    assert marker["primary_classification"] == online_only.ONLINE_ONLY_CLASSIFICATION
     assert marker["paired_inference_allowed"] is False
     assert marker["paired_comparison_allowed"] is False
     assert marker["pilot_go_receipt_allowed"] is False
@@ -594,6 +686,7 @@ def test_cli_failure_reports_observed_counts_without_false_zero_model_calls(
         "update_count": 120,
         "core_job_count": 120,
         "core_artifact_count": 120,
+        "context_resolution_count": 120,
         "completed_tasks": 60,
     }
     (root / "online_only_suite_state.json").write_bytes(online_only._canonical_bytes(state))
@@ -612,3 +705,4 @@ def test_cli_failure_reports_observed_counts_without_false_zero_model_calls(
     assert failure["observed_update_count"] == 120
     assert failure["observed_core_job_count"] == 120
     assert failure["observed_core_artifact_count"] == 120
+    assert failure["observed_context_resolution_count"] == 120

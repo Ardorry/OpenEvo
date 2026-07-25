@@ -70,6 +70,7 @@ _FORBIDDEN_PROMPT_MARKERS = (
     "canary",
 )
 _ALLOWED_ITEM_TYPES = frozenset({"agent_message", "reasoning", "todo_list"})
+_TEXT_ITEM_KEYS = frozenset({"id", "text", "type"})
 _TODO_LIST_ITEM_KEYS = frozenset({"id", "items", "type"})
 _TODO_LIST_ENTRY_KEYS = frozenset({"completed", "text"})
 _MAX_TODO_LIST_ITEMS = 100
@@ -2369,22 +2370,8 @@ def _event_stream_summary(transcript: str) -> dict[str, object]:
         event_count += 1
         event_type = str(event["type"])
         last_event_type = event_type
-        category: str | None = None
-        if event_type in {"item.started", "item.updated", "item.completed"}:
-            item = event.get("item")
-            if isinstance(item, Mapping) and type(item.get("type")) is str:
-                item_type = str(item["type"]).casefold()
-                if item_type not in _ALLOWED_ITEM_TYPES:
-                    category = _security_event_category(item_type)
-        elif event_type not in {
-            "thread.started",
-            "turn.started",
-            "turn.completed",
-            "error",
-            "turn.failed",
-        }:
-            category = _security_event_category(event_type)
-        tool_event_count += int(category is not None)
+        categories = _security_categories_in_event_schema(event)
+        tool_event_count += int(bool(categories))
     return {
         "event_count": event_count,
         "tool_event_count": tool_event_count,
@@ -2490,23 +2477,7 @@ def _find_security_tool_use(
             continue
         if not isinstance(event, Mapping) or type(event.get("type")) is not str:
             continue
-        event_type = str(event["type"])
-        category: str | None = None
-        if event_type in {"item.started", "item.updated", "item.completed"}:
-            item = event.get("item")
-            if isinstance(item, Mapping) and type(item.get("type")) is str:
-                item_type = str(item["type"]).casefold()
-                if item_type not in _ALLOWED_ITEM_TYPES:
-                    category = _security_event_category(item_type)
-        elif event_type not in {
-            "thread.started",
-            "turn.started",
-            "turn.completed",
-            "error",
-            "turn.failed",
-        }:
-            category = _security_event_category(event_type.casefold())
-        if category is not None:
+        for category in _security_categories_in_event_schema(event):
             counts[category] += 1
     findings = {category: count for category, count in counts.items() if count}
     if not findings:
@@ -2517,6 +2488,55 @@ def _find_security_tool_use(
         event_counts=findings,
         event_digest=digest,
     )
+
+
+def _security_categories_in_event_schema(
+    event: Mapping[str, object],
+) -> frozenset[str]:
+    """Inspect structural names only, never assistant/message text.
+
+    Codex normally identifies a tool at ``event.type`` or ``item.type``.  This
+    recursive structural pass also fails closed if a future lifecycle schema
+    nests a tool descriptor inside an otherwise inert ``agent_message`` or
+    ``reasoning`` item.  Free-form ``text`` and ``message`` values are never
+    classified, so ordinary discussion of a tool does not become a tool event.
+    """
+
+    findings: set[str] = set()
+    type_keys = frozenset({"event_type", "item_type", "kind", "tool_type", "type"})
+
+    def visit(value: object, *, field_name: str | None = None) -> None:
+        if isinstance(value, Mapping):
+            for raw_key, child in value.items():
+                if type(raw_key) is not str:
+                    findings.add("unknown_tool")
+                    continue
+                category = _security_event_category(raw_key)
+                if category is not None:
+                    findings.add(category)
+                normalized_key = re.sub(
+                    r"[^a-z0-9]+",
+                    "_",
+                    raw_key.casefold(),
+                ).strip("_")
+                if (
+                    normalized_key in type_keys
+                    and type(child) is str
+                    and (category := _security_event_category(child)) is not None
+                ):
+                    findings.add(category)
+                if normalized_key not in {"error", "message", "text"}:
+                    visit(child, field_name=normalized_key)
+        elif isinstance(value, list) and field_name not in {
+            "error",
+            "message",
+            "text",
+        }:
+            for child in value:
+                visit(child, field_name=field_name)
+
+    visit(event)
+    return frozenset(findings)
 
 
 def _security_event_category(event_name: str) -> str | None:
@@ -2602,10 +2622,17 @@ def _parse_jsonl_transcript(
             item_type = str(item["type"]).casefold()
             if item_type not in _ALLOWED_ITEM_TYPES:
                 raise LocalCodexExecutionError(LocalCodexExecutionErrorCode.TRANSCRIPT_INVALID)
-            if item_type == "todo_list" and not _is_valid_todo_list_item(
-                item,
-                event_type=event_type,
-            ):
+            if item_type == "todo_list":
+                valid_item = _is_valid_todo_list_item(
+                    item,
+                    event_type=event_type,
+                )
+            else:
+                valid_item = _is_valid_text_item(
+                    item,
+                    event_type=event_type,
+                )
+            if not valid_item:
                 raise LocalCodexExecutionError(LocalCodexExecutionErrorCode.TRANSCRIPT_INVALID)
             if event_type == "item.completed" and item_type == "agent_message":
                 text = item.get("text")
@@ -2663,21 +2690,14 @@ def _parse_jsonl_transcript(
 def _is_recoverable_transport_error_event(event: Mapping[str, object]) -> bool:
     """Recognize Codex's bounded reconnect notice, never arbitrary error payloads."""
 
-    if (
-        set(event) != _RECOVERABLE_TRANSPORT_ERROR_KEYS
-        or type(event.get("message")) is not str
-    ):
+    if set(event) != _RECOVERABLE_TRANSPORT_ERROR_KEYS or type(event.get("message")) is not str:
         return False
     message = str(event["message"])
     encoded = message.encode("utf-8")
     if not encoded or len(encoded) > _MAX_TRANSPORT_ERROR_MESSAGE_BYTES:
         return False
     normalized = message.casefold()
-    return (
-        "reconnect" in normalized
-        and "stream" in normalized
-        and "disconnect" in normalized
-    )
+    return "reconnect" in normalized and "stream" in normalized and "disconnect" in normalized
 
 
 def _is_valid_todo_list_item(
@@ -2706,6 +2726,23 @@ def _is_valid_todo_list_item(
         ):
             return False
     return True
+
+
+def _is_valid_text_item(
+    item: Mapping[str, object],
+    *,
+    event_type: str,
+) -> bool:
+    """Accept only the observed inert Codex 0.144.6 text-item schema."""
+
+    return (
+        event_type == "item.completed"
+        and set(item).issubset(_TEXT_ITEM_KEYS)
+        and {"text", "type"}.issubset(item)
+        and item.get("type") in {"agent_message", "reasoning"}
+        and type(item.get("text")) is str
+        and ("id" not in item or (type(item.get("id")) is str and bool(str(item["id"]).strip())))
+    )
 
 
 def _run_local_command(
@@ -2755,6 +2792,15 @@ def _run_local_command(
             output=final_stdout,
             stderr=final_stderr,
         ) from exc
+    except BaseException as exc:
+        quiescent = _terminate_invocation_processes(
+            process,
+            process_group_id=process_group_id,
+        )
+        _close_process_pipes(process)
+        if not quiescent:
+            raise _ProcessTerminationError from exc
+        raise
     else:
         quiescent = _terminate_invocation_processes(
             process,

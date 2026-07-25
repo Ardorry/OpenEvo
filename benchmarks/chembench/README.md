@@ -30,6 +30,14 @@ NOT_A_STANDARD_LEADERBOARD_SCORE
 Their repeated-round and test-time-adaptation metrics are research outcomes,
 not standard ChemBench4K accuracy and not leaderboard-comparable.
 
+An explicitly unpaired online-only Pilot500 entry point is also available for
+mechanism and descriptive analysis. It uses no control evidence, cannot issue
+a paired GO/NO-GO conclusion, and writes all required
+`ONLINE_ONLY_PILOT500` / `NO_CONTROL_ARM` / `NO_CAUSAL_CONTROL_COMPARISON`
+classifications into its authority, suite state, stream markers, and final
+report. Full 4009-item execution remains independently blocked until a later
+user-authorized source change.
+
 The operational checklist, fail-closed states, capacity contract, and cost
 inventory are documented in
 [`TASKWISE_ONLINE_RUNBOOK_V1.md`](TASKWISE_ONLINE_RUNBOOK_V1.md).

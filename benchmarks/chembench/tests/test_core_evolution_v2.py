@@ -175,14 +175,56 @@ def _write_synthetic_reflector_codex(
     *,
     item_type: str,
 ) -> None:
-    event = json.dumps(
-        {
-            "type": "item.completed" if item_type == "agent_message" else "item.started",
-            "item": {"type": item_type, "text": "synthetic"},
-        },
-        sort_keys=True,
-        separators=(",", ":"),
+    message = """# General Chemistry Reasoning Memory
+
+## Do
+- Classify the chemistry task before comparing options.
+
+## Avoid
+- Avoid selecting an option before independent verification.
+
+## Validate
+- Check structures, units, and conservation constraints.
+
+## When Applicable
+- Use stoichiometric checks for numerical questions.
+
+## Retired Or Superseded
+- No retired guidance."""
+    events = (
+        json.dumps(
+            {"type": "thread.started", "thread_id": "synthetic-thread"},
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        json.dumps(
+            {"type": "turn.started"},
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        json.dumps(
+            {
+                "type": "item.completed" if item_type == "agent_message" else "item.started",
+                "item": {"type": item_type, "text": message},
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        json.dumps(
+            {
+                "type": "turn.completed",
+                "usage": {
+                    "cached_input_tokens": 0,
+                    "input_tokens": 1,
+                    "output_tokens": 1,
+                    "reasoning_output_tokens": 0,
+                },
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
     )
+    event_stream = "\n".join(events)
     path.write_text(
         f"""#!/bin/sh
 set -eu
@@ -203,24 +245,11 @@ while [ "$#" -gt 0 ]; do
     shift
   fi
 done
-printf '%s\\n' '{event}'
+cat <<'EVENTS'
+{event_stream}
+EVENTS
 cat > "$output" <<'EOF'
-# General Chemistry Reasoning Memory
-
-## Do
-- Classify the chemistry task before comparing options.
-
-## Avoid
-- Avoid selecting an option before independent verification.
-
-## Validate
-- Check structures, units, and conservation constraints.
-
-## When Applicable
-- Use stoichiometric checks for numerical questions.
-
-## Retired Or Superseded
-- No retired guidance.
+{message}
 EOF
 """,
         encoding="utf-8",

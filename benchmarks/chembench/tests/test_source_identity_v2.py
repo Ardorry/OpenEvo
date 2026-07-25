@@ -46,6 +46,17 @@ def test_source_manifest_is_deterministic_and_excludes_itself(tmp_path: Path) ->
     assert "manifest_sha256" not in payload
 
 
+def test_source_manifest_binds_all_root_protocol_documentation(tmp_path: Path) -> None:
+    readme = tmp_path / "README.md"
+    runbook = tmp_path / "TASKWISE_ONLINE_RUNBOOK_V1.md"
+    readme.write_text("# Package\n", encoding="utf-8")
+    runbook.write_text("# Protocol\n", encoding="utf-8")
+
+    paths = {entry["path"] for entry in build_source_manifest(tmp_path)["files"]}
+
+    assert paths == {"README.md", "TASKWISE_ONLINE_RUNBOOK_V1.md"}
+
+
 def test_source_manifest_rejects_symlink(tmp_path: Path) -> None:
     (tmp_path / "src").mkdir()
     source = tmp_path / "src" / "source.py"
