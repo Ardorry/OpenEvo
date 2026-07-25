@@ -96,6 +96,9 @@ _TOKEN_FIELDS = (
     "output_tokens",
     "reasoning_output_tokens",
 )
+_RECOVERABLE_TRANSPORT_ERROR_KEYS = frozenset({"type", "message"})
+_MAX_RECOVERABLE_TRANSPORT_ERRORS = 8
+_MAX_TRANSPORT_ERROR_MESSAGE_BYTES = 1024
 _TASKWISE_EXECUTOR_FAILURE_CODES = frozenset(
     {
         "EXECUTOR_PREFLIGHT_FAILED",
@@ -2574,6 +2577,7 @@ def _parse_jsonl_transcript(
     turn_completed = False
     responses: list[str] = []
     usage: dict[str, int] = {}
+    recoverable_transport_error_count = 0
 
     for raw_line in transcript.splitlines():
         if not raw_line.strip():
@@ -2620,16 +2624,60 @@ def _parse_jsonl_transcript(
                 raise LocalCodexExecutionError(LocalCodexExecutionErrorCode.TRANSCRIPT_INVALID)
             usage = {field: int(raw_usage[field]) for field in _TOKEN_FIELDS}
             turn_completed = True
-        elif event_type in {"error", "turn.failed"}:
-            raise LocalCodexExecutionError(LocalCodexExecutionErrorCode.CLI_FAILED)
+        elif event_type == "error":
+            if not _is_recoverable_transport_error_event(event):
+                raise LocalCodexExecutionError(
+                    LocalCodexExecutionErrorCode.CLI_FAILED,
+                    taskwise_failure_code="EXECUTOR_MODEL_TRANSPORT_FAILED",
+                    executor_stage="MODEL_TRANSPORT",
+                )
+            recoverable_transport_error_count += 1
+            if recoverable_transport_error_count > _MAX_RECOVERABLE_TRANSPORT_ERRORS:
+                raise LocalCodexExecutionError(
+                    LocalCodexExecutionErrorCode.CLI_FAILED,
+                    taskwise_failure_code="EXECUTOR_MODEL_TRANSPORT_FAILED",
+                    executor_stage="MODEL_TRANSPORT",
+                )
+        elif event_type == "turn.failed":
+            raise LocalCodexExecutionError(
+                LocalCodexExecutionErrorCode.CLI_FAILED,
+                taskwise_failure_code="EXECUTOR_MODEL_TRANSPORT_FAILED",
+                executor_stage="MODEL_TRANSPORT",
+            )
         else:
             raise LocalCodexExecutionError(LocalCodexExecutionErrorCode.TRANSCRIPT_INVALID)
 
+    if recoverable_transport_error_count and (not turn_completed or not responses):
+        raise LocalCodexExecutionError(
+            LocalCodexExecutionErrorCode.CLI_FAILED,
+            taskwise_failure_code="EXECUTOR_MODEL_TRANSPORT_FAILED",
+            executor_stage="MODEL_TRANSPORT",
+        )
     if not thread_started or not turn_started or not turn_completed:
         raise LocalCodexExecutionError(LocalCodexExecutionErrorCode.TRANSCRIPT_INVALID)
     if not responses:
         raise LocalCodexExecutionError(LocalCodexExecutionErrorCode.RESPONSE_MISSING)
     return responses[-1], usage, digest
+
+
+def _is_recoverable_transport_error_event(event: Mapping[str, object]) -> bool:
+    """Recognize Codex's bounded reconnect notice, never arbitrary error payloads."""
+
+    if (
+        set(event) != _RECOVERABLE_TRANSPORT_ERROR_KEYS
+        or type(event.get("message")) is not str
+    ):
+        return False
+    message = str(event["message"])
+    encoded = message.encode("utf-8")
+    if not encoded or len(encoded) > _MAX_TRANSPORT_ERROR_MESSAGE_BYTES:
+        return False
+    normalized = message.casefold()
+    return (
+        "reconnect" in normalized
+        and "stream" in normalized
+        and "disconnect" in normalized
+    )
 
 
 def _is_valid_todo_list_item(

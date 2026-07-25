@@ -77,6 +77,18 @@ def _safe_transcript() -> str:
     )
 
 
+def _recoverable_transport_transcript() -> str:
+    events = [json.loads(line) for line in _safe_transcript().splitlines()]
+    events.insert(
+        2,
+        {
+            "type": "error",
+            "message": "stream disconnected; reconnecting (attempt 1/5)",
+        },
+    )
+    return "\n".join(json.dumps(event, sort_keys=True) for event in events) + "\n"
+
+
 def _tool_transcript(item_type: str) -> str:
     return (
         "\n".join(
@@ -316,6 +328,90 @@ def test_reasoning_and_message_events_do_not_false_positive() -> None:
     assert response == "A"
     assert usage["output_tokens"] == 1
     assert len(digest) == 64
+
+
+def test_recoverable_transport_error_followed_by_completion_is_accepted() -> None:
+    transcript = _recoverable_transport_transcript()
+    response, usage, digest = _parse_jsonl_transcript(transcript)
+
+    assert response == "A"
+    assert usage["output_tokens"] == 1
+    assert len(digest) == 64
+    assert _event_stream_summary(transcript) == {
+        "event_count": 5,
+        "tool_event_count": 0,
+        "last_event_type": "turn.completed",
+    }
+
+
+@pytest.mark.parametrize(
+    "error_event",
+    (
+        {"type": "error", "message": "fatal model failure"},
+        {"type": "error", "message": 1},
+        {"type": "error", "message": "stream disconnected; reconnecting", "extra": True},
+        {
+            "type": "error",
+            "message": (
+                "stream disconnected; reconnecting "
+                + ("x" * 1024)
+            ),
+        },
+    ),
+)
+def test_unrecognized_or_malformed_error_event_remains_fail_closed(
+    error_event: dict[str, object],
+) -> None:
+    events = [json.loads(line) for line in _safe_transcript().splitlines()]
+    events.insert(2, error_event)
+
+    with pytest.raises(LocalCodexExecutionError) as raised:
+        _parse_jsonl_transcript(
+            "\n".join(json.dumps(event, sort_keys=True) for event in events) + "\n"
+        )
+
+    assert raised.value.code is LocalCodexExecutionErrorCode.CLI_FAILED
+    assert (
+        raised.value.taskwise_failure_code
+        == "EXECUTOR_MODEL_TRANSPORT_FAILED"
+    )
+    assert raised.value.executor_stage == "MODEL_TRANSPORT"
+
+
+def test_recoverable_transport_error_without_completion_fails_closed() -> None:
+    events = [json.loads(line) for line in _recoverable_transport_transcript().splitlines()]
+    transcript = "\n".join(
+        json.dumps(event, sort_keys=True)
+        for event in events
+        if event["type"] not in {"item.completed", "turn.completed"}
+    )
+
+    with pytest.raises(LocalCodexExecutionError) as raised:
+        _parse_jsonl_transcript(transcript + "\n")
+
+    assert raised.value.code is LocalCodexExecutionErrorCode.CLI_FAILED
+    assert (
+        raised.value.taskwise_failure_code
+        == "EXECUTOR_MODEL_TRANSPORT_FAILED"
+    )
+    assert raised.value.executor_stage == "MODEL_TRANSPORT"
+
+
+def test_turn_failed_remains_terminal_after_reconnect_notice() -> None:
+    events = [json.loads(line) for line in _recoverable_transport_transcript().splitlines()]
+    events[-1] = {"type": "turn.failed"}
+
+    with pytest.raises(LocalCodexExecutionError) as raised:
+        _parse_jsonl_transcript(
+            "\n".join(json.dumps(event, sort_keys=True) for event in events) + "\n"
+        )
+
+    assert raised.value.code is LocalCodexExecutionErrorCode.CLI_FAILED
+    assert (
+        raised.value.taskwise_failure_code
+        == "EXECUTOR_MODEL_TRANSPORT_FAILED"
+    )
+    assert raised.value.executor_stage == "MODEL_TRANSPORT"
 
 
 def test_strict_codex_todo_list_lifecycle_is_not_a_tool_or_parse_failure() -> None:

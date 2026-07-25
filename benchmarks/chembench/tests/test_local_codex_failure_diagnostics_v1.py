@@ -46,6 +46,18 @@ def _transcript(*, response: str = "A") -> str:
     return "\n".join(json.dumps(item, sort_keys=True) for item in events) + "\n"
 
 
+def _recovered_transport_transcript(*, response: str = "A") -> str:
+    events = [json.loads(line) for line in _transcript(response=response).splitlines()]
+    events.insert(
+        2,
+        {
+            "type": "error",
+            "message": "stream disconnected; reconnecting (attempt 1/5)",
+        },
+    )
+    return "\n".join(json.dumps(item, sort_keys=True) for item in events) + "\n"
+
+
 def _item_transcript(item_type: str) -> str:
     events = (
         {"type": "thread.started", "thread_id": "thread-diagnostic"},
@@ -280,6 +292,33 @@ def test_malformed_event_stream_and_missing_output_are_distinct(
     assert missing.value.taskwise_failure_code == "EXECUTOR_OUTPUT_MISSING"
     assert missing.value.completion_observed is True
     assert missing.value.retry_allowed is False
+
+
+def test_zero_exit_recovered_transport_event_is_not_nonzero_failure(
+    tmp_path: Path,
+) -> None:
+    executor, diagnostics = _executor(
+        tmp_path,
+        lambda *_args: LocalCommandResult(
+            returncode=0,
+            stdout=_recovered_transport_transcript(response="A"),
+            stderr="transient transport reconnect diagnostic",
+            output_last_message_exists=True,
+            output_last_message="A\n",
+        ),
+    )
+
+    attempt = executor.execute_taskwise(_request())
+    executor.close()
+
+    assert attempt.response == "A"
+    assert not tuple(diagnostics.glob("receipt_*.json"))
+    success_receipts = tuple(diagnostics.glob("success_*.json"))
+    assert len(success_receipts) == 1
+    success = json.loads(success_receipts[0].read_text(encoding="utf-8"))
+    assert success["process_return_code"] == 0
+    assert success["event_count"] == 5
+    assert success["tool_event_count"] == 0
 
 
 def test_output_last_message_mismatch_fails_after_completion(tmp_path: Path) -> None:
