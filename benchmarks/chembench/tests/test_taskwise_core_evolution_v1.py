@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import errno
 import hashlib
 import importlib.metadata as importlib_metadata
@@ -1085,6 +1086,45 @@ def test_leaking_candidate_is_rejected_and_never_promoted(
             _request(task_index=0, update_index=1, predecessor=None),
             test_only_allow_synthetic_reflector=True,
         )
+
+
+def test_exact_literal_scan_rejects_standalone_but_not_longer_token_prefix(
+    bridge: TaskwiseCoreEvolutionBridgeV1,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert taskwise_core._contains_bounded_literal(
+        "Use the standalone marker Answer: A.",
+        "Answer: A",
+    )
+    assert not taskwise_core._contains_bounded_literal(
+        "Answer: Always verify formatting before final output.",
+        "Answer: A",
+    )
+    candidate = _memory(1).replace(
+        "Classify the reasoning mode before comparing choices, revision 1.",
+        "Answer: Always verify formatting before final output.",
+    )
+    monkeypatch.setattr(
+        core_methods,
+        "_generate_reflector_markdown",
+        lambda *_args, **_kwargs: candidate,
+    )
+    request = _request(task_index=0, update_index=1, predecessor=None)
+    request = replace(
+        request,
+        validator_forbidden_literals=(
+            *request.validator_forbidden_literals,
+            "Answer: A",
+        ),
+    )
+
+    result = bridge.apply_update(
+        request,
+        test_only_allow_synthetic_reflector=True,
+    )
+
+    assert result.validation_receipt.passed is True
+    assert result.validation_receipt.finding_codes == ()
 
 
 @pytest.mark.parametrize(

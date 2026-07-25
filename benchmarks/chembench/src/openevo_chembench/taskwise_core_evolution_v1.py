@@ -908,7 +908,7 @@ class TaskwiseTextMemoryValidatorV1:
         }
         for literal in self._forbidden_literals:
             stripped = literal.strip()
-            if len(stripped) >= 8 and stripped.casefold() in text.casefold():
+            if len(stripped) >= 8 and _contains_bounded_literal(text, stripped):
                 findings.add("leak_forbidden_literal")
             normalized_literal = _normalize(stripped)
             if len(normalized_literal) >= 12 and normalized_literal in normalized_candidate:
@@ -2667,6 +2667,38 @@ def _exclusive_private_write(path: Path, payload: bytes) -> None:
 
 def _normalize(value: str) -> str:
     return " ".join(value.casefold().split())
+
+
+def _contains_bounded_literal(text: str, literal: str) -> bool:
+    """Match an exact literal without accepting a prefix inside a longer token."""
+
+    if type(text) is not str or type(literal) is not str or not literal:
+        return False
+    candidate = text.casefold()
+    needle = literal.casefold()
+    offset = 0
+    while True:
+        index = candidate.find(needle, offset)
+        if index < 0:
+            return False
+        end = index + len(needle)
+        starts_in_token = (
+            index > 0
+            and _literal_token_character(needle[0])
+            and _literal_token_character(candidate[index - 1])
+        )
+        ends_in_token = (
+            end < len(candidate)
+            and _literal_token_character(needle[-1])
+            and _literal_token_character(candidate[end])
+        )
+        if not starts_in_token and not ends_in_token:
+            return True
+        offset = index + 1
+
+
+def _literal_token_character(character: str) -> bool:
+    return character == "_" or character.isalnum()
 
 
 def _normalize_rule(value: str) -> str:
