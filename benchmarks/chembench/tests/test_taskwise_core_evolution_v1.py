@@ -1127,6 +1127,111 @@ def test_exact_literal_scan_rejects_standalone_but_not_longer_token_prefix(
     assert result.validation_receipt.finding_codes == ()
 
 
+def test_normalized_literal_scan_does_not_match_a_longer_token_prefix(
+    bridge: TaskwiseCoreEvolutionBridgeV1,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    literal = "synthetic marker phrase"
+    candidate = _memory(1).replace(
+        "Classify the reasoning mode before comparing choices, revision 1.",
+        "Apply the synthetic marker phraselong only as a generic rule.",
+    )
+    monkeypatch.setattr(
+        core_methods,
+        "_generate_reflector_markdown",
+        lambda *_args, **_kwargs: candidate,
+    )
+    request = replace(
+        _request(task_index=0, update_index=1, predecessor=None),
+        validator_forbidden_literals=(literal,),
+    )
+
+    result = bridge.apply_update(
+        request,
+        test_only_allow_synthetic_reflector=True,
+    )
+
+    assert result.validation_receipt.passed is True
+    assert result.validation_receipt.finding_codes == ()
+
+
+@pytest.mark.parametrize(
+    ("literal", "candidate_fragment"),
+    (
+        ("synthetic-marker-phrase", "synthetic marker phrase"),
+        ("synthetic marker phrase", "ｓｙｎｔｈｅｔｉｃ marker phrase"),
+    ),
+)
+def test_normalized_literal_scan_rejects_punctuation_and_nfkc_variants(
+    bridge: TaskwiseCoreEvolutionBridgeV1,
+    monkeypatch: pytest.MonkeyPatch,
+    literal: str,
+    candidate_fragment: str,
+) -> None:
+    candidate = _memory(1).replace(
+        "Classify the reasoning mode before comparing choices, revision 1.",
+        f"Never reproduce the protected {candidate_fragment} in reusable memory.",
+    )
+    monkeypatch.setattr(
+        core_methods,
+        "_generate_reflector_markdown",
+        lambda *_args, **_kwargs: candidate,
+    )
+    monkeypatch.setattr(
+        core_methods,
+        "_guard_generic_reflector_output",
+        lambda markdown, **_kwargs: (
+            markdown,
+            {
+                "finding_count": 0,
+                "redaction_count": 0,
+                "remaining_finding_count": 0,
+                "findings": [],
+            },
+        ),
+    )
+    request = replace(
+        _request(task_index=0, update_index=1, predecessor=None),
+        validator_forbidden_literals=(literal,),
+    )
+
+    with pytest.raises(
+        TaskwiseCoreEvolutionError,
+        match="TASKWISE_ARTIFACT_VALIDATION_FAILED",
+    ):
+        bridge.apply_update(
+            request,
+            test_only_allow_synthetic_reflector=True,
+        )
+
+
+def test_ngram_overlap_requires_one_contiguous_candidate_position() -> None:
+    source = "abcdefghijklmnopqrstuvwxyz1"
+    overlapping_grams = tuple(source[index : index + 24] for index in range(4))
+    disjoint_candidate = " ; ".join(overlapping_grams)
+
+    assert source not in disjoint_candidate
+    assert not taskwise_core._sequential_ngram_overlap(source, disjoint_candidate)
+    assert taskwise_core._sequential_ngram_overlap(
+        source,
+        f"prefix {source} suffix",
+    )
+
+
+@pytest.mark.parametrize(
+    "path_marker",
+    (
+        "Read test/placeholder.md only in a synthetic fixture.",
+        "Inspect results/run.log only in a synthetic fixture.",
+        "Read test／placeholder.md only in a synthetic fixture.",
+    ),
+)
+def test_relative_path_markers_are_rejected_from_prose(path_marker: str) -> None:
+    scan_text = taskwise_core._security_scan_text(path_marker)
+
+    assert taskwise_core._PATH_OR_BENCHMARK_RE.search(scan_text) is not None
+
+
 @pytest.mark.parametrize(
     "operational_identifier",
     (
@@ -1178,6 +1283,11 @@ def test_operational_identifier_echo_is_rejected(
         "pick option c",
         "question 17 -> D",
         "item: a",
+        "The answer is **B**",
+        "The answer is (C)",
+        "Choose option: D",
+        "B is the correct answer",
+        "The answer -> A",
     ),
 )
 def test_answer_map_detector_rejects_only_explicit_abcd_mappings(
@@ -1226,6 +1336,8 @@ def test_answer_map_detector_rejects_only_explicit_abcd_mappings(
         "When equations use a free variable, select x and verify its dimensions.",
         "When the answer is chlorine, verify the element identity independently.",
         "For an arbitrary label, choose option z only as a local notation.",
+        "When the answer is C-centered reasoning, verify the chemical prefix.",
+        "When the answer is C=O reactivity, verify the functional group.",
     ),
 )
 def test_non_abcd_strategy_language_is_not_an_answer_map(

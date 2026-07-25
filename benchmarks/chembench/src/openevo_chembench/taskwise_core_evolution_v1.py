@@ -24,6 +24,7 @@ import re
 import stat
 import tempfile
 from typing import Any, Literal, NoReturn
+import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -164,7 +165,7 @@ _REFLECTOR_PROJECTED_RESPONSE = (
 )
 _PATH_OR_BENCHMARK_RE = re.compile(
     r"(?:chembench(?:4k)?|ai4chem|opencompass|"
-    r"(?:^|[\\/])(?:dev|test|results?)[\\/]|"
+    r"(?<![A-Za-z0-9_])(?:dev|test|results?)[\\/]|"
     r"\.(?:json|jsonl|parquet|sqlite3?)\b)",
     re.IGNORECASE | re.MULTILINE,
 )
@@ -174,17 +175,30 @@ _OPERATIONAL_IDENTIFIER_RE = re.compile(
     r"\bopenevo_core_taskwise\b)",
     re.IGNORECASE,
 )
-_EXPLICIT_OPTION_TOKEN_RE = r"[ABCDabcd]\b"
-_IMPLICIT_OPTION_TOKEN_RE = r"(?:[ABCD]\b|[bcd]\b|a(?=\s*(?:\Z|[^\w\s])))"
-_ANSWER_MAP_RE = re.compile(
-    rf"(?i:(?:the\s+)?(?:correct\s+)?answer\s*(?:is|=|:))\s*"
-    rf"{_IMPLICIT_OPTION_TOKEN_RE}|"
-    rf"(?i:(?:choose|select|pick)\s+option\s+){_EXPLICIT_OPTION_TOKEN_RE}|"
-    rf"(?i:(?:choose|select|pick)\s+){_IMPLICIT_OPTION_TOKEN_RE}|"
-    rf"(?i:\boption\s+){_EXPLICIT_OPTION_TOKEN_RE}|"
-    r"(?i:(?:question|item|uid|index)\s*)[^\n]{0,48}"
-    rf"(?:->|=|:)\s*{_EXPLICIT_OPTION_TOKEN_RE}",
+_OPTION_CHEMICAL_SUFFIX_RE = r"(?![-‐‑‒–—=][A-Za-z0-9])"
+_EXPLICIT_OPTION_TOKEN_RE = rf"[ABCDabcd]\b{_OPTION_CHEMICAL_SUFFIX_RE}"
+_IMPLICIT_OPTION_TOKEN_RE = (
+    rf"(?:(?:[ABCD]|[bcd])\b{_OPTION_CHEMICAL_SUFFIX_RE}|"
+    r"a(?=\s*(?:\Z|[^\w\s])))"
 )
+_ANSWER_MAP_SEPARATOR_RE = r"(?:is|=|:|->|→)"
+_ANSWER_MAP_RE = re.compile(
+    rf"(?i:(?:the\s+)?(?:correct\s+)?answer\s*{_ANSWER_MAP_SEPARATOR_RE})\s*"
+    rf"{_IMPLICIT_OPTION_TOKEN_RE}|"
+    rf"(?i:(?:choose|select|pick)\s+option\s*"
+    rf"(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*){_EXPLICIT_OPTION_TOKEN_RE}|"
+    rf"(?i:(?:choose|select|pick)\s+){_IMPLICIT_OPTION_TOKEN_RE}|"
+    rf"(?i:\boption\s*(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*)"
+    rf"{_EXPLICIT_OPTION_TOKEN_RE}|"
+    r"(?i:(?:question|item|uid|index)\s*)[^\n]{0,48}"
+    rf"(?:->|→|=|:)\s*{_EXPLICIT_OPTION_TOKEN_RE}|"
+    rf"{_EXPLICIT_OPTION_TOKEN_RE}\s+"
+    r"(?i:(?:is\s+)?(?:the\s+)?(?:correct\s+)?answer)\b",
+)
+_ANSWER_MAP_WRAPPER_RE = re.compile(r"""[*_`~()[\]{}"'“”‘’]""")
+_NGRAM_WIDTH = 24
+_NGRAM_CONSECUTIVE_MATCHES = 4
+_NGRAM_CONTIGUOUS_WIDTH = _NGRAM_WIDTH + _NGRAM_CONSECUTIVE_MATCHES - 1
 
 
 class TaskwiseCoreEvolutionError(RuntimeError):
@@ -902,24 +916,24 @@ class TaskwiseTextMemoryValidatorV1:
         if not isinstance(execution, dict):
             findings.add("invalid_core_execution_lineage")
         normalized_candidate = _normalize(text)
-        candidate_ngrams = {
-            normalized_candidate[index : index + 24]
-            for index in range(max(0, len(normalized_candidate) - 23))
-        }
         for literal in self._forbidden_literals:
             stripped = literal.strip()
             if len(stripped) >= 8 and _contains_bounded_literal(text, stripped):
                 findings.add("leak_forbidden_literal")
             normalized_literal = _normalize(stripped)
-            if len(normalized_literal) >= 12 and normalized_literal in normalized_candidate:
+            if len(normalized_literal) >= 12 and _contains_bounded_literal(
+                normalized_candidate,
+                normalized_literal,
+            ):
                 findings.add("leak_normalized_literal")
-            if _sequential_ngram_overlap(normalized_literal, candidate_ngrams):
+            if _sequential_ngram_overlap(normalized_literal, normalized_candidate):
                 findings.add("leak_literal_ngram")
-        if _PATH_OR_BENCHMARK_RE.search(text):
+        security_scan_text = _security_scan_text(text)
+        if _PATH_OR_BENCHMARK_RE.search(security_scan_text):
             findings.add("leak_path_or_benchmark_marker")
-        if _OPERATIONAL_IDENTIFIER_RE.search(text):
+        if _OPERATIONAL_IDENTIFIER_RE.search(security_scan_text):
             findings.add("leak_operational_identifier")
-        if _ANSWER_MAP_RE.search(text):
+        if _contains_answer_map(security_scan_text):
             findings.add("leak_answer_map")
         finding_codes = tuple(sorted(findings))
         return CoreArtifactValidationReceiptV2(
@@ -2666,7 +2680,33 @@ def _exclusive_private_write(path: Path, payload: bytes) -> None:
 
 
 def _normalize(value: str) -> str:
-    return " ".join(value.casefold().split())
+    """NFKC/case/punctuation normalization for leakage comparison."""
+
+    canonical = _security_scan_text(value).casefold()
+    normalized: list[str] = []
+    pending_separator = False
+    for character in canonical:
+        if character.isalnum():
+            if pending_separator and normalized:
+                normalized.append(" ")
+            normalized.append(character)
+            pending_separator = False
+        else:
+            pending_separator = bool(normalized)
+    return "".join(normalized)
+
+
+def _security_scan_text(value: str) -> str:
+    """Canonicalize compatibility forms and remove invisible format controls."""
+
+    if type(value) is not str:
+        raise TypeError("security scan input must be a string")
+    canonical = unicodedata.normalize("NFKC", value)
+    return "".join(
+        character
+        for character in canonical
+        if unicodedata.category(character) != "Cf"
+    )
 
 
 def _contains_bounded_literal(text: str, literal: str) -> bool:
@@ -2701,22 +2741,30 @@ def _literal_token_character(character: str) -> bool:
     return character == "_" or character.isalnum()
 
 
+def _contains_answer_map(text: str) -> bool:
+    """Detect closed A-D mappings while ignoring chemical letter prefixes."""
+
+    if type(text) is not str:
+        raise TypeError("answer-map scan input must be a string")
+    scan_text = _ANSWER_MAP_WRAPPER_RE.sub(" ", _security_scan_text(text))
+    return _ANSWER_MAP_RE.search(scan_text) is not None
+
+
 def _normalize_rule(value: str) -> str:
     return "".join(character.casefold() for character in value if character.isalnum())
 
 
-def _sequential_ngram_overlap(source: str, candidate_ngrams: set[str]) -> bool:
-    if len(source) < 24:
+def _sequential_ngram_overlap(source: str, candidate: str) -> bool:
+    """Require four overlapping 24-grams at one contiguous candidate position."""
+
+    if type(source) is not str or type(candidate) is not str:
+        raise TypeError("ngram scan inputs must be strings")
+    if len(source) < _NGRAM_CONTIGUOUS_WIDTH:
         return False
-    consecutive = 0
-    for index in range(len(source) - 23):
-        if source[index : index + 24] in candidate_ngrams:
-            consecutive += 1
-            if consecutive >= 4:
-                return True
-        else:
-            consecutive = 0
-    return False
+    return any(
+        source[index : index + _NGRAM_CONTIGUOUS_WIDTH] in candidate
+        for index in range(len(source) - _NGRAM_CONTIGUOUS_WIDTH + 1)
+    )
 
 
 def _canonical_json(value: Any) -> str:

@@ -29,11 +29,14 @@ from openevo_chembench.taskwise_cli_v1 import (
     _build_episodes,
     _build_run_config,
     _orchestration_failure_evidence,
+    _read_public_run_state,
     _resolve_workspace_path,
     _suite_result_evidence,
+    _suite_state_evidence,
     _update_suite_totals,
     _verify_static_inputs,
     _write_suite_state,
+    TaskwiseCLIError,
     build_default_taskwise_core_port_v1,
     build_default_taskwise_executor_v1,
     require_taskwise_pilot_authorization_v1,
@@ -68,6 +71,28 @@ StreamRunnerV1 = Callable[
 
 class TaskwiseOnlineOnlyError(RuntimeError):
     """Closed online-only orchestration failure."""
+
+
+_EXPECTED_TASKS_PER_STREAM = PILOT500_TASKS_PER_STREAM
+_EXPECTED_COMPLETIONS_PER_STREAM = PILOT500_TASKS_PER_STREAM * 3
+_EXPECTED_UPDATES_PER_STREAM = PILOT500_TASKS_PER_STREAM * 2
+_EXPECTED_STREAM_COUNT = len(PILOT500_STREAM_SCOPES)
+_OBSERVED_COUNT_FIELDS = (
+    "completed_tasks",
+    "completion_count",
+    "session_attempt_count",
+    "update_count",
+    "core_job_count",
+    "core_artifact_count",
+)
+_EXPECTED_SUITE_COUNTS = {
+    "completed_tasks": _EXPECTED_STREAM_COUNT * _EXPECTED_TASKS_PER_STREAM,
+    "completion_count": _EXPECTED_STREAM_COUNT * _EXPECTED_COMPLETIONS_PER_STREAM,
+    "session_attempt_count": _EXPECTED_STREAM_COUNT * _EXPECTED_COMPLETIONS_PER_STREAM,
+    "update_count": _EXPECTED_STREAM_COUNT * _EXPECTED_UPDATES_PER_STREAM,
+    "core_job_count": _EXPECTED_STREAM_COUNT * _EXPECTED_UPDATES_PER_STREAM,
+    "core_artifact_count": _EXPECTED_STREAM_COUNT * _EXPECTED_UPDATES_PER_STREAM,
+}
 
 
 def validate_online_only_run_id_v1(run_id: str) -> str:
@@ -218,6 +243,164 @@ def _write_stream_marker(
     )
 
 
+def _authorization_identity(
+    authorization: TaskwisePilotAuthorizationV1,
+) -> tuple[str, str, str, str]:
+    values = (
+        getattr(authorization, "source_commit", None),
+        getattr(authorization, "paired_canary_generation_id", None),
+        getattr(authorization, "receipt_sha256", None),
+        getattr(authorization, "pilot_binding_sha256", None),
+    )
+    if any(type(value) is not str or not value for value in values):
+        raise TaskwiseOnlineOnlyError("ONLINE_ONLY_CANARY_AUTHORITY_INVALID")
+    return values
+
+
+def _require_current_authorization(
+    expected: TaskwisePilotAuthorizationV1,
+) -> TaskwisePilotAuthorizationV1:
+    current = require_taskwise_pilot_authorization_v1()
+    if _authorization_identity(current) != _authorization_identity(expected):
+        raise TaskwiseOnlineOnlyError("ONLINE_ONLY_CANARY_AUTHORITY_MISMATCH")
+    return current
+
+
+def _completed_stream_counts(result: dict[str, object]) -> dict[str, int]:
+    memory = result.get("memory_aggregate")
+    expected = {
+        "planned_tasks": _EXPECTED_TASKS_PER_STREAM,
+        "completed_tasks": _EXPECTED_TASKS_PER_STREAM,
+        "completion_count": _EXPECTED_COMPLETIONS_PER_STREAM,
+        "session_attempt_count": _EXPECTED_COMPLETIONS_PER_STREAM,
+        "update_count": _EXPECTED_UPDATES_PER_STREAM,
+        "core_job_count": _EXPECTED_UPDATES_PER_STREAM,
+        "core_artifact_count": _EXPECTED_UPDATES_PER_STREAM,
+        "context_binding_violation_count": 0,
+    }
+    if (
+        result.get("schema_version") != "taskwise_online_run_result_v1"
+        or result.get("protocol_id") != "taskwise_online_evolution_v1"
+        or result.get("standard_chembench4k_score_claimed") is not False
+        or result.get("status") != "COMPLETED"
+        or result.get("arm") != "online"
+        or result.get("resume_allowed") is not False
+        or result.get("finding_codes") != []
+        or type(memory) is not dict
+        or memory.get("approved_artifact_count") != _EXPECTED_UPDATES_PER_STREAM
+        or any(result.get(field) != value for field, value in expected.items())
+    ):
+        raise TaskwiseCLIError("EXECUTOR_OUTPUT_INVALID")
+    return expected
+
+
+def _online_only_stream_result_evidence(
+    result: object,
+) -> dict[str, object]:
+    evidence = _suite_result_evidence(result)
+    if evidence["completed"]:
+        if type(result) is not dict:
+            raise TaskwiseCLIError("EXECUTOR_OUTPUT_INVALID")
+        evidence.update(_completed_stream_counts(result))
+    return evidence
+
+
+def _close_online_only_resources(
+    core_port: object,
+    executor: object,
+) -> tuple[BaseException, ...]:
+    failures: list[BaseException] = []
+    for resource in (core_port, executor):
+        close = getattr(resource, "close", None)
+        if not callable(close):
+            continue
+        try:
+            close()
+        except BaseException as exc:
+            failures.append(exc)
+    return tuple(failures)
+
+
+def _raise_primary_or_cleanup(
+    primary: BaseException | None,
+    cleanup_failures: tuple[BaseException, ...],
+) -> None:
+    if primary is not None:
+        raise primary
+    if cleanup_failures:
+        raise TaskwiseCLIError("EXECUTOR_CLEANUP_FAILED") from cleanup_failures[0]
+
+
+def _failure_evidence(
+    output_directory: Path | None,
+    exc: BaseException,
+) -> dict[str, object]:
+    if output_directory is not None and output_directory.is_dir():
+        try:
+            state = _read_public_run_state(output_directory, expected_arm="online")
+            evidence = _suite_state_evidence(state)
+        except TaskwiseCLIError:
+            pass
+        else:
+            if not evidence["completed"]:
+                for field in _OBSERVED_COUNT_FIELDS:
+                    value = state.get(field)
+                    if type(value) is int and value >= 0:
+                        evidence[field] = value
+                return evidence
+    if isinstance(exc, Exception):
+        return _orchestration_failure_evidence(exc)
+    return {
+        "run_status": "EXECUTION_FAILED",
+        "resume_allowed": False,
+        "failure_code": "EXECUTOR_SUITE_ORCHESTRATION_FAILED",
+        "completed": False,
+        "missing": False,
+    }
+
+
+def _update_online_only_suite_totals(state: dict[str, Any]) -> None:
+    _update_suite_totals(state)
+    entries = tuple(state["streams"].values())
+    for field in _OBSERVED_COUNT_FIELDS:
+        state[field] = sum(
+            value
+            for entry in entries
+            if type(entry) is dict and type(value := entry.get(field)) is int and value >= 0
+        )
+
+
+def _verify_completed_suite_totals(state: dict[str, Any]) -> None:
+    if (
+        state.get("completed_streams") != _EXPECTED_STREAM_COUNT
+        or state.get("total_task_count") != _EXPECTED_SUITE_COUNTS["completed_tasks"]
+        or any(state.get(field) != expected for field, expected in _EXPECTED_SUITE_COUNTS.items())
+    ):
+        raise TaskwiseOnlineOnlyError("ONLINE_ONLY_SUITE_TOTAL_MISMATCH")
+
+
+def _public_cli_failure_counts(repository_root: Path, run_id: str) -> dict[str, int]:
+    try:
+        state_path = online_only_run_root_v1(repository_root, run_id)
+        raw = (state_path / "online_only_suite_state.json").read_bytes()
+        state = json.loads(raw)
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+        return {}
+    if (
+        type(state) is not dict
+        or raw != _canonical_bytes(state)
+        or state.get("schema_version") != ONLINE_ONLY_SCHEMA_V1
+        or state.get("run_id") != run_id
+    ):
+        return {}
+    observed: dict[str, int] = {}
+    for field in _OBSERVED_COUNT_FIELDS:
+        value = state.get(field)
+        if type(value) is int and value >= 0:
+            observed[f"observed_{field}"] = value
+    return observed
+
+
 def _run_online_only_stream(
     config_path: Path,
     runtime_config: TaskwiseExperimentConfigV1,
@@ -241,7 +424,9 @@ def _run_online_only_stream(
         raise TaskwiseOnlineOnlyError("ONLINE_ONLY_STREAM_OUTPUT_EXISTS")
     verify_taskwise_codex_policy_v1(runtime_config)
     executor = _ClosedExecutorFailureAdapterV1(build_default_taskwise_executor_v1(runtime_config))
-    core_port = None
+    core_port: object = None
+    result: object = None
+    primary_failure: BaseException | None = None
     try:
         core_port = build_default_taskwise_core_port_v1(runtime_config)
         runner = TaskwiseOnlineRunnerV1(
@@ -259,13 +444,13 @@ def _run_online_only_stream(
             resume=False,
         )
         result = runner.run()
+    except BaseException as exc:
+        primary_failure = exc
     finally:
-        close_core = getattr(core_port, "close", None)
-        if callable(close_core):
-            close_core()
-        close_executor = getattr(executor, "close", None)
-        if callable(close_executor):
-            close_executor()
+        cleanup_failures = _close_online_only_resources(core_port, executor)
+    _raise_primary_or_cleanup(primary_failure, cleanup_failures)
+    if result is None:
+        raise TaskwiseCLIError("EXECUTOR_OUTPUT_MISSING")
     _write_stream_marker(
         output_directory,
         run_id=run_id,
@@ -325,6 +510,12 @@ def run_online_only_pilot500_v1(
         "total_task_count": (len(PILOT500_STREAM_SCOPES) * PILOT500_TASKS_PER_STREAM),
         "reset_memory_between_streams": True,
         "completed_streams": 0,
+        "completed_tasks": 0,
+        "completion_count": 0,
+        "session_attempt_count": 0,
+        "update_count": 0,
+        "core_job_count": 0,
+        "core_artifact_count": 0,
         "infrastructure_failures": 0,
         "security_violations": 0,
         "evolution_update_failures": 0,
@@ -358,6 +549,8 @@ def run_online_only_pilot500_v1(
     runner = stream_runner or _run_online_only_stream
     for config_path, template in preflight:
         scope = template.scope
+        runtime_config: TaskwiseExperimentConfigV1 | None = None
+        output_directory: Path | None = None
         state["status"] = "INCOMPLETE"
         state["active_scope"] = scope
         state["streams"][scope] = {
@@ -368,44 +561,58 @@ def run_online_only_pilot500_v1(
             "completed": False,
             "missing": True,
         }
-        _update_suite_totals(state)
+        _update_online_only_suite_totals(state)
         persist()
-        runtime_config = online_only_runtime_config_v1(
-            template,
-            run_id=validated_run_id,
-        )
         try:
+            current_authorization = _require_current_authorization(authorization)
+            runtime_config = online_only_runtime_config_v1(
+                template,
+                run_id=validated_run_id,
+            )
+            output_directory = _resolve_workspace_path(
+                runtime_config.output_directory,
+                field_name="output_directory",
+                must_exist=False,
+            )
             result = runner(
                 config_path,
                 runtime_config,
                 validated_run_id,
-                authorization,
+                current_authorization,
             )
-            evidence = _suite_result_evidence(result)
-        except Exception as exc:
-            evidence = _orchestration_failure_evidence(exc)
+            evidence = _online_only_stream_result_evidence(result)
+        except BaseException as exc:
+            evidence = _failure_evidence(output_directory, exc)
             state["streams"][scope] = {
                 "action": "ORCHESTRATION_ERROR",
                 **evidence,
             }
             state["active_scope"] = None
             state["status"] = "FAILED"
-            _update_suite_totals(state)
+            _update_online_only_suite_totals(state)
             persist()
             raise
         state["streams"][scope] = {"action": "STARTED", **evidence}
         if not evidence["completed"]:
             state["active_scope"] = None
             state["status"] = "FAILED"
-            _update_suite_totals(state)
+            _update_online_only_suite_totals(state)
             persist()
             raise TaskwiseOnlineOnlyError("ONLINE_ONLY_SUITE_TERMINAL_FAILURE")
         state["streams"][scope]["action"] = "COMPLETED"
         state["active_scope"] = None
-        _update_suite_totals(state)
+        _update_online_only_suite_totals(state)
         persist()
+    try:
+        _verify_completed_suite_totals(state)
+    except BaseException:
+        state["status"] = "FAILED"
+        state["active_scope"] = None
+        _update_online_only_suite_totals(state)
+        persist()
+        raise
     state["status"] = "COMPLETED"
-    _update_suite_totals(state)
+    _update_online_only_suite_totals(state)
     persist()
     return state
 
@@ -419,16 +626,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         payload = run_online_only_pilot500_v1(run_id=arguments.run_id)
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        failure = {
+            "status": "BLOCKED",
+            "classification": ONLINE_ONLY_CLASSIFICATION,
+            "error_type": type(exc).__name__,
+        }
+        failure.update(_public_cli_failure_counts(REPOSITORY_ROOT, arguments.run_id))
         print(
-            json.dumps(
-                {
-                    "status": "BLOCKED",
-                    "classification": ONLINE_ONLY_CLASSIFICATION,
-                    "error_type": type(exc).__name__,
-                    "model_calls": 0,
-                },
-                sort_keys=True,
-            ),
+            json.dumps(failure, sort_keys=True),
             file=os.sys.stderr,
         )
         return 2
