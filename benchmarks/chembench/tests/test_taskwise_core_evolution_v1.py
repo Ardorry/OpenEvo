@@ -1338,6 +1338,8 @@ def test_answer_map_detector_rejects_only_explicit_abcd_mappings(
         "For an arbitrary label, choose option z only as a local notation.",
         "When the answer is C-centered reasoning, verify the chemical prefix.",
         "When the answer is C=O reactivity, verify the functional group.",
+        "Use a validated answer supported by independent checks.",
+        "Prefer a robust answer after checking every constraint.",
     ),
 )
 def test_non_abcd_strategy_language_is_not_an_answer_map(

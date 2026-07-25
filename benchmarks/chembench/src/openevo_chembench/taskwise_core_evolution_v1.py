@@ -175,10 +175,14 @@ _OPERATIONAL_IDENTIFIER_RE = re.compile(
     r"\bopenevo_core_taskwise\b)",
     re.IGNORECASE,
 )
+_OPTION_TOKEN_PREFIX_RE = r"(?<![A-Za-z0-9_])"
 _OPTION_CHEMICAL_SUFFIX_RE = r"(?![-‐‑‒–—=][A-Za-z0-9])"
-_EXPLICIT_OPTION_TOKEN_RE = rf"[ABCDabcd]\b{_OPTION_CHEMICAL_SUFFIX_RE}"
+_EXPLICIT_OPTION_TOKEN_RE = (
+    rf"{_OPTION_TOKEN_PREFIX_RE}[ABCDabcd]\b{_OPTION_CHEMICAL_SUFFIX_RE}"
+)
 _IMPLICIT_OPTION_TOKEN_RE = (
-    rf"(?:(?:[ABCD]|[bcd])\b{_OPTION_CHEMICAL_SUFFIX_RE}|"
+    rf"{_OPTION_TOKEN_PREFIX_RE}(?:(?:[ABCD]|[bcd])\b"
+    rf"{_OPTION_CHEMICAL_SUFFIX_RE}|"
     r"a(?=\s*(?:\Z|[^\w\s])))"
 )
 _ANSWER_MAP_SEPARATOR_RE = r"(?:is|=|:|->|→)"
