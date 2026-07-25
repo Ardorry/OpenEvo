@@ -312,7 +312,7 @@ def test_default_receipt_path_is_private_state_not_results() -> None:
     assert "private_manifests" not in path.parts
 
 
-def test_online_scripts_use_independent_receipt_and_fix20_namespace() -> None:
+def test_online_scripts_use_independent_receipt_and_fix21_namespace() -> None:
     canary = (PACKAGE_ROOT / "scripts" / "run_online_canary9_taskwise_online_v1.sh").read_text(
         encoding="utf-8"
     )
@@ -330,7 +330,8 @@ def test_online_scripts_use_independent_receipt_and_fix20_namespace() -> None:
     assert "run_taskwise_cli verify-canary-receipt" not in pilot
     assert "control_canary" not in pilot
     assert "control_pilot" not in pilot
-    assert "online_fix20" in config
+    assert "online_fix21" in config
+    assert "online_fix20" not in config
     assert "online_fix19" not in config
 
 

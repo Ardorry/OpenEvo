@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 import unicodedata
 from enum import Enum
 
 from openevo.evolution.models import ArtifactResponse, ArtifactType
 
-from openevo_chembench.chembench4k_dataset import normalize_benchmark_text
 from openevo_chembench.chembench4k_models import PrivateChemBench4KTask
 from openevo_chembench.core_evolution_v2 import CoreArtifactValidationReceiptV2
 
@@ -26,15 +26,58 @@ _REQUIRED_SECTIONS = (
 _PATH_OR_BENCHMARK_MARKER = re.compile(
     r"(?:chembench(?:4k)?|ai4chem|opencompass|"
     r"(?:^|[\\/])(?:dev|test)[\\/]|_benchmark\.json|"
-    r"\.(?:json|jsonl|parquet)\b)",
+    r"(?<![A-Za-z0-9_])[A-Za-z]:[\\/]|"
+    r"(?<![A-Za-z0-9_])\\\\[^\\\s]+\\[^\\\s]+|"
+    r"\bfile://|"
+    r"\.(?:json|jsonl|parquet|sqlite3?|ya?ml)\b)",
     flags=re.IGNORECASE | re.MULTILINE,
 )
-_ANSWER_MAP = re.compile(
-    r"(?:the\s+)?(?:correct\s+)?answer\s*(?:is|=|:)\s*[ABCD]\b|"
-    r"(?:choose|select|pick)\s+(?:option\s+)?[ABCD]\b|"
-    r"(?:question|item|uid|index)\s*[^\\n]{0,48}(?:->|=|:)\s*[ABCD]\b",
-    flags=re.IGNORECASE,
+_POSIX_ABSOLUTE_PATH_RE = re.compile(
+    r"/(?:[\w.~+@%=-]+/)+[\w.~+@%=-]+",
+    re.UNICODE,
 )
+_POSIX_PATH_OPENING_BOUNDARY = frozenset("\"'([{:=<")
+_OPTION_TOKEN_PREFIX_RE = r"(?<![A-Za-z0-9_])"
+_OPTION_CHEMICAL_SUFFIX_RE = r"(?![-‐‑‒–—=][A-Za-z0-9])"
+_IMPLICIT_OPTION_TOKEN_RE = (
+    rf"{_OPTION_TOKEN_PREFIX_RE}(?:(?:[ABCD]|[bcd])\b"
+    rf"{_OPTION_CHEMICAL_SUFFIX_RE}|"
+    r"a(?=\s*(?:\Z|[^\w\s])))"
+)
+_BARE_OPTION_TOKEN_RE = (
+    rf"{_OPTION_TOKEN_PREFIX_RE}(?:(?:[BCD]|[bcd])\b"
+    rf"{_OPTION_CHEMICAL_SUFFIX_RE}|"
+    r"[Aa](?=\s*(?:\Z|[.,;:!?])))"
+)
+_TERMINAL_OPTION_TOKEN_RE = (
+    rf"{_OPTION_TOKEN_PREFIX_RE}[ABCD]\b{_OPTION_CHEMICAL_SUFFIX_RE}"
+    r"(?=\s*(?:\Z|[.,;:!?]))"
+)
+_ANSWER_MAP_SEPARATOR_RE = r"(?:is|=|:|->|→)"
+_ANSWER_MAP = re.compile(
+    rf"(?i:(?:the\s+)?(?:correct\s+)?answer\s*{_ANSWER_MAP_SEPARATOR_RE})\s*"
+    rf"{_IMPLICIT_OPTION_TOKEN_RE}|"
+    rf"(?i:(?:choose|select|pick)\s+option\s*"
+    rf"(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*){_IMPLICIT_OPTION_TOKEN_RE}|"
+    rf"(?i:(?:choose|select|pick)\s+){_BARE_OPTION_TOKEN_RE}|"
+    rf"(?i:(?:return|output)\s*(?:only\s+)?option\s*"
+    rf"(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*){_IMPLICIT_OPTION_TOKEN_RE}|"
+    rf"(?i:(?:return|output)\s*(?:only\s+)?"
+    rf"(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*){_TERMINAL_OPTION_TOKEN_RE}|"
+    rf"(?i:(?:final\s+)?(?:response|prediction|letter|choice)\s*"
+    rf"{_ANSWER_MAP_SEPARATOR_RE}\s*){_IMPLICIT_OPTION_TOKEN_RE}|"
+    rf"(?i:\boption\s*(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*)"
+    rf"{_IMPLICIT_OPTION_TOKEN_RE}|"
+    r"(?i:(?:question|item|index)"
+    r"(?:\s+(?:\d+|uid|[A-Za-z0-9_.-]{6,}))?|uid"
+    r"(?:\s+[A-Za-z0-9_.:-]{6,})?)\s*"
+    rf"(?:->|→|=|:)\s*{_IMPLICIT_OPTION_TOKEN_RE}|"
+    r"(?i:(?:question|item|index)"
+    r"(?:\s+(?:\d+|uid|[A-Za-z0-9_.-]{6,}))?|uid"
+    r"(?:\s+[A-Za-z0-9_.:-]{6,})?)\s+"
+    rf"maps?\s+to\s+{_IMPLICIT_OPTION_TOKEN_RE}",
+)
+_ANSWER_MAP_WRAPPER_RE = re.compile(r"""[*_`~()[\]{}"'“”‘’]""")
 
 
 class ArtifactFindingV2(str, Enum):
@@ -57,23 +100,115 @@ class ArtifactFindingV2(str, Enum):
 
 
 def _normalize(value: str) -> str:
-    return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
-
-
-def _sequential_ngram_overlap(source: str, candidate_ngrams: set[str]) -> bool:
-    normalized = normalize_benchmark_text(source)
-    if len(normalized) < 24:
-        return False
-    consecutive = 0
-    for index in range(len(normalized) - 23):
-        gram = normalized[index : index + 24]
-        if gram in candidate_ngrams:
-            consecutive += 1
-            if consecutive >= 4:
-                return True
+    canonical = unicodedata.normalize("NFKC", value).casefold()
+    normalized: list[str] = []
+    pending_separator = False
+    for character in canonical:
+        if character.isalnum():
+            if pending_separator and normalized:
+                normalized.append(" ")
+            normalized.append(character)
+            pending_separator = False
         else:
-            consecutive = 0
+            pending_separator = bool(normalized)
+    return "".join(normalized)
+
+
+def _unicode_token_spans(value: str) -> tuple[re.Match[str], ...]:
+    return tuple(re.finditer(r"[^\W_]+", value))
+
+
+def _contains_bounded_literal(text: str, literal: str) -> bool:
+    if not literal:
+        return False
+    candidate = text.casefold()
+    needle = literal.casefold()
+    offset = 0
+    while True:
+        index = candidate.find(needle, offset)
+        if index < 0:
+            return False
+        end = index + len(needle)
+        starts_in_token = (
+            index > 0
+            and (needle[0].isalnum() or needle[0] == "_")
+            and (candidate[index - 1].isalnum() or candidate[index - 1] == "_")
+        )
+        ends_in_token = (
+            end < len(candidate)
+            and (needle[-1].isalnum() or needle[-1] == "_")
+            and (candidate[end].isalnum() or candidate[end] == "_")
+        )
+        if not starts_in_token and not ends_in_token:
+            return True
+        offset = index + 1
+
+
+def _sequential_ngram_overlap(source: str, candidate: str, *, field_name: str) -> bool:
+    normalized = _normalize(source)
+    if field_name == "question":
+        minimum_source_ratio = 0.30
+    elif field_name in {"A", "B", "C", "D"}:
+        minimum_source_ratio = 0.40
+    else:
+        raise ValueError("unsupported private source kind")
+    minimum_characters = 32
+    minimum_tokens = 4
+    required_characters = max(
+        minimum_characters,
+        math.ceil(len(normalized) * minimum_source_ratio),
+        math.ceil(len(candidate) * 0.002),
+    )
+    tokens = _unicode_token_spans(normalized)
+    for start_index, start_token in enumerate(tokens):
+        long_token = start_token.group(0)
+        if (
+            len(long_token) >= 48
+            and len(long_token) / max(1, len(normalized)) >= minimum_source_ratio
+            and len(long_token) / max(1, len(candidate)) >= 0.002
+            and _contains_bounded_literal(candidate, long_token)
+        ):
+            return True
+        for end_index in range(start_index + minimum_tokens - 1, len(tokens)):
+            span = normalized[start_token.start() : tokens[end_index].end()]
+            if len(span) < required_characters:
+                continue
+            if (
+                len(span) / max(1, len(normalized)) >= minimum_source_ratio
+                and len(span) / max(1, len(candidate)) >= 0.002
+                and _contains_bounded_literal(candidate, span)
+            ):
+                return True
+            break
     return False
+
+
+def _contains_path_or_benchmark_marker(text: str) -> bool:
+    if _PATH_OR_BENCHMARK_MARKER.search(text) is not None:
+        return True
+    for match in _POSIX_ABSOLUTE_PATH_RE.finditer(text):
+        if match.start() > 0:
+            preceding = text[match.start() - 1]
+            if not preceding.isspace() and preceding not in _POSIX_PATH_OPENING_BOUNDARY:
+                continue
+        segments = match.group(0)[1:].split("/")
+        if any(
+            not segment
+            or (not segment[0].isalnum() and segment[0] not in "._~")
+            or (not segment[-1].isalnum() and segment[-1] not in "._~")
+            for segment in segments
+        ):
+            continue
+        return True
+    return False
+
+
+def _contains_answer_map(text: str) -> bool:
+    scan_text = _ANSWER_MAP_WRAPPER_RE.sub(
+        " ",
+        unicodedata.normalize("NFKC", text),
+    )
+    return _ANSWER_MAP.search(scan_text) is not None
 
 
 class ChemBench4KTextMemoryArtifactValidatorV2:
@@ -200,21 +335,24 @@ class ChemBench4KTextMemoryArtifactValidatorV2:
             findings.add(ArtifactFindingV2.INVALID_DEV_PROVENANCE)
 
         normalized_candidate = _normalize(text)
-        candidate_ngrams = {
-            normalized_candidate[index : index + 24]
-            for index in range(max(0, len(normalized_candidate) - 23))
-        }
         for task in self._dev_tasks:
             if task.uid in text or task.uid[:24] in text:
                 findings.add(ArtifactFindingV2.LEAK_UID)
             for field_name in ("question", "A", "B", "C", "D"):
                 source = getattr(task, field_name)
-                if len(source.strip()) >= 12 and source.casefold() in text.casefold():
+                if len(source.strip()) >= 12 and _contains_bounded_literal(text, source):
                     findings.add(ArtifactFindingV2.LEAK_EXACT_DEV_TEXT)
-                normalized_source = normalize_benchmark_text(source)
-                if len(normalized_source) >= 12 and normalized_source in normalized_candidate:
+                normalized_source = _normalize(source)
+                if len(normalized_source) >= 12 and _contains_bounded_literal(
+                    normalized_candidate,
+                    normalized_source,
+                ):
                     findings.add(ArtifactFindingV2.LEAK_NORMALIZED_DEV_TEXT)
-                if _sequential_ngram_overlap(source, candidate_ngrams):
+                if _sequential_ngram_overlap(
+                    source,
+                    normalized_candidate,
+                    field_name=field_name,
+                ):
                     findings.add(
                         ArtifactFindingV2.LEAK_QUESTION_NGRAM
                         if field_name == "question"
@@ -222,9 +360,9 @@ class ChemBench4KTextMemoryArtifactValidatorV2:
                     )
         if any(uid in text for uid in self._test_uid_set):
             findings.add(ArtifactFindingV2.LEAK_TEST_UID)
-        if _PATH_OR_BENCHMARK_MARKER.search(text):
+        if _contains_path_or_benchmark_marker(text):
             findings.add(ArtifactFindingV2.LEAK_PATH_OR_BENCHMARK_MARKER)
-        if _ANSWER_MAP.search(text):
+        if _contains_answer_map(text):
             findings.add(ArtifactFindingV2.LEAK_ANSWER_MAP)
 
         finding_codes = tuple(sorted(finding.value for finding in findings))

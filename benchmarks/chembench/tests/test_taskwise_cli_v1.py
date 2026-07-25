@@ -588,14 +588,14 @@ def test_manifest_is_bound_to_config_scope_and_path() -> None:
         cli._verify_static_inputs(wrong_scope, path)
 
 
-def test_online_canary_fix20_uses_fresh_independent_namespace() -> None:
+def test_online_canary_fix21_uses_fresh_independent_namespace() -> None:
     control = load_taskwise_config_v1(cli.CONFIG_ROOT / "control_canary9_taskwise_online_v1.yaml")
     online = load_taskwise_config_v1(cli.CONFIG_ROOT / "online_canary9_taskwise_online_v1.yaml")
 
     assert control.run_name == "control_canary9_repeated_session_v1_fix19"
-    assert online.run_name == "online_canary9_taskwise_evolution_v1_fix20"
+    assert online.run_name == "online_canary9_taskwise_evolution_v1_fix21"
     assert control.output_directory.endswith("/canary9/control_fix19")
-    assert online.output_directory.endswith("/canary9/online_fix20")
+    assert online.output_directory.endswith("/canary9/online_fix21")
     assert not control.output_directory.endswith("/canary9/control_fix11")
     assert not online.output_directory.endswith("/canary9/online_fix11")
 

@@ -169,13 +169,17 @@ _PATH_OR_BENCHMARK_RE = re.compile(
     r"(?<![A-Za-z0-9_])(?:dev|test|results?|test[-_ ]data)[\\/]|"
     r"(?<![A-Za-z0-9_])(?:private[-_ ]manifest|answer[-_ ]cache)"
     r"(?![A-Za-z0-9_])|"
-    r"(?<![A-Za-z0-9_])/(?:[^\\/\s]+[\\/])+[^\\/\s]+|"
     r"(?<![A-Za-z0-9_])[A-Za-z]:[\\/]|"
     r"(?<![A-Za-z0-9_])\\\\[^\\\s]+\\[^\\\s]+|"
     r"\bfile://|"
     r"\.(?:json|jsonl|parquet|sqlite3?|ya?ml)\b)",
     re.IGNORECASE | re.MULTILINE,
 )
+_POSIX_ABSOLUTE_PATH_RE = re.compile(
+    r"/(?:[\w.~+@%=-]+/)+[\w.~+@%=-]+",
+    re.UNICODE,
+)
+_POSIX_PATH_OPENING_BOUNDARY = frozenset("\"'([{:=<")
 _OPERATIONAL_IDENTIFIER_RE = re.compile(
     r"(?:(?<![A-Za-z0-9])(?:job|art|ds)_[A-Za-z0-9_.:-]{6,}|"
     r"\btaskwise[-_. ](?:reflector|safe_signal|safe|core|online)"
@@ -208,23 +212,27 @@ _ANSWER_MAP_RE = re.compile(
     rf"(?i:(?:the\s+)?(?:correct\s+)?answer\s*{_ANSWER_MAP_SEPARATOR_RE})\s*"
     rf"{_IMPLICIT_OPTION_TOKEN_RE}|"
     rf"(?i:(?:choose|select|pick)\s+option\s*"
-    rf"(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*){_EXPLICIT_OPTION_TOKEN_RE}|"
+    rf"(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*){_IMPLICIT_OPTION_TOKEN_RE}|"
     rf"(?i:(?:choose|select|pick)\s+){_BARE_OPTION_TOKEN_RE}|"
     rf"(?i:(?:return|output)\s*(?:only\s+)?option\s*"
-    rf"(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*){_EXPLICIT_OPTION_TOKEN_RE}|"
+    rf"(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*){_IMPLICIT_OPTION_TOKEN_RE}|"
     rf"(?i:(?:return|output)\s*(?:only\s+)?"
     rf"(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*){_TERMINAL_OPTION_TOKEN_RE}|"
     rf"(?i:(?:final\s+)?(?:response|prediction|letter|choice)\s*"
-    rf"{_ANSWER_MAP_SEPARATOR_RE}\s*){_EXPLICIT_OPTION_TOKEN_RE}|"
+    rf"{_ANSWER_MAP_SEPARATOR_RE}\s*){_IMPLICIT_OPTION_TOKEN_RE}|"
     rf"{_EXPLICIT_OPTION_TOKEN_RE}\s+"
     r"(?i:(?:is|should\s+be|must\s+be)\s+(?:the\s+)?"
     r"(?:correct|selected|chosen)(?:\s+(?:answer|choice|option))?)\b|"
     rf"(?i:\boption\s*(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*)"
-    rf"{_EXPLICIT_OPTION_TOKEN_RE}|"
-    r"(?i:(?:question|item|uid|index)\s*)[^\n]{0,48}"
-    rf"(?:->|→|=|:)\s*{_EXPLICIT_OPTION_TOKEN_RE}|"
-    r"(?i:(?:question|item|uid|index)\s*)[^\n]{0,48}"
-    rf"\bmaps?\s+to\s+{_EXPLICIT_OPTION_TOKEN_RE}|"
+    rf"{_IMPLICIT_OPTION_TOKEN_RE}|"
+    r"(?i:(?:question|item|index)"
+    r"(?:\s+(?:\d+|uid|[A-Za-z0-9_.-]{6,}))?|uid"
+    r"(?:\s+[A-Za-z0-9_.:-]{6,})?)\s*"
+    rf"(?:->|→|=|:)\s*{_IMPLICIT_OPTION_TOKEN_RE}|"
+    r"(?i:(?:question|item|index)"
+    r"(?:\s+(?:\d+|uid|[A-Za-z0-9_.-]{6,}))?|uid"
+    r"(?:\s+[A-Za-z0-9_.:-]{6,})?)\s+"
+    rf"maps?\s+to\s+{_IMPLICIT_OPTION_TOKEN_RE}|"
     rf"{_EXPLICIT_OPTION_TOKEN_RE}\s+"
     r"(?i:(?:is\s+)?(?:the\s+)?(?:correct\s+)?answer)\b",
 )
@@ -987,7 +995,7 @@ class TaskwiseTextMemoryValidatorV1:
             ):
                 findings.add("leak_literal_ngram")
         security_scan_text = _security_scan_text(text)
-        if _PATH_OR_BENCHMARK_RE.search(security_scan_text):
+        if _contains_path_or_benchmark_marker(security_scan_text):
             findings.add("leak_path_or_benchmark_marker")
         if _OPERATIONAL_IDENTIFIER_RE.search(security_scan_text):
             findings.add("leak_operational_identifier")
@@ -2897,6 +2905,31 @@ def _contains_answer_map(text: str) -> bool:
         raise TypeError("answer-map scan input must be a string")
     scan_text = _ANSWER_MAP_WRAPPER_RE.sub(" ", _security_scan_text(text))
     return _ANSWER_MAP_RE.search(scan_text) is not None
+
+
+def _contains_path_or_benchmark_marker(text: str) -> bool:
+    """Detect explicit benchmark/file references without treating chemistry as paths."""
+
+    if type(text) is not str:
+        raise TypeError("path-marker scan input must be a string")
+    scan_text = _security_scan_text(text)
+    if _PATH_OR_BENCHMARK_RE.search(scan_text) is not None:
+        return True
+    for match in _POSIX_ABSOLUTE_PATH_RE.finditer(scan_text):
+        if match.start() > 0:
+            preceding = scan_text[match.start() - 1]
+            if not preceding.isspace() and preceding not in _POSIX_PATH_OPENING_BOUNDARY:
+                continue
+        segments = match.group(0)[1:].split("/")
+        if any(
+            not segment
+            or (not segment[0].isalnum() and segment[0] not in "._~")
+            or (not segment[-1].isalnum() and segment[-1] not in "._~")
+            for segment in segments
+        ):
+            continue
+        return True
+    return False
 
 
 def _normalize_rule(value: str) -> str:

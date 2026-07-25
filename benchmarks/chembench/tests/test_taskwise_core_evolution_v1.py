@@ -1485,7 +1485,7 @@ def test_two_hundred_cumulative_validator_inputs_are_deterministic() -> None:
 def test_relative_path_markers_are_rejected_from_prose(path_marker: str) -> None:
     scan_text = taskwise_core._security_scan_text(path_marker)
 
-    assert taskwise_core._PATH_OR_BENCHMARK_RE.search(scan_text) is not None
+    assert taskwise_core._contains_path_or_benchmark_marker(scan_text)
 
 
 @pytest.mark.parametrize(
@@ -1497,10 +1497,25 @@ def test_relative_path_markers_are_rejected_from_prose(path_marker: str) -> None
         "Check the cis/trans assignment.",
         "Verify units in g/mol/s.",
         "Compare the A/B ratio.",
+        "Use E-/Z-/stereochemical notation only after checking geometry.",
+        "Use E—/Z-/stereochemical notation only after checking geometry.",
     ),
 )
 def test_path_detector_allows_generic_chemistry_language(ordinary_text: str) -> None:
-    assert taskwise_core._PATH_OR_BENCHMARK_RE.search(ordinary_text) is None
+    assert not taskwise_core._contains_path_or_benchmark_marker(ordinary_text)
+
+
+@pytest.mark.parametrize(
+    "absolute_path",
+    (
+        "/absolute/path",
+        "Inspect /home/synthetic/private.txt before solving.",
+        "Inspect (/home/synthetic/private.txt) before solving.",
+        "path=/home/synthetic/private.txt",
+    ),
+)
+def test_path_detector_rejects_structural_posix_paths(absolute_path: str) -> None:
+    assert taskwise_core._contains_path_or_benchmark_marker(absolute_path)
 
 
 @pytest.mark.parametrize(
@@ -1639,6 +1654,16 @@ def test_answer_map_detector_rejects_only_explicit_abcd_mappings(
         "Output a structured answer.",
         "Return a single uppercase letter after reasoning.",
         "Output only a format-compliant response.",
+        "Final response is a concise strategy statement.",
+        "Prediction is a useful intermediate diagnostic.",
+        "Choice is a chemically plausible hypothesis.",
+        "Letter is a local variable in the derivation.",
+        "Return option a structured explanation requires.",
+        "Output option a reusable format rule requires.",
+        "Question framing: a general strategy should be used.",
+        "Item validation: a reusable check should be applied.",
+        "Index selection: a deterministic ordering should be used.",
+        "UID handling: a privacy boundary should be preserved.",
     ),
 )
 def test_non_abcd_strategy_language_is_not_an_answer_map(

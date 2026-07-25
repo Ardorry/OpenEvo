@@ -7,6 +7,7 @@ from pathlib import Path
 from openevo.evolution.framework import canonical_digest
 from openevo.evolution.models import ArtifactResponse
 
+from openevo_chembench import artifact_validator_v2
 from openevo_chembench.artifact_validator_v2 import (
     ChemBench4KTextMemoryArtifactValidatorV2,
 )
@@ -99,6 +100,15 @@ def test_answer_mapping_is_rejected() -> None:
     assert "LEAK_ANSWER_MAP" in receipt.finding_codes
 
 
+def test_natural_language_article_is_not_an_answer_mapping() -> None:
+    receipt = _validate(
+        VALID_MEMORY
+        + "\nChoose a reagent, then ensure the final response is a concise strategy.\n"
+    )
+    assert receipt.passed is True
+    assert receipt.finding_codes == ()
+
+
 def test_dev_question_fragment_and_uid_are_rejected() -> None:
     dev_task = _loader().load_split("dev")[0]
     receipt = _validate(VALID_MEMORY + "\n" + dev_task.uid + "\n" + dev_task.question + "\n")
@@ -129,6 +139,32 @@ def test_benchmark_path_marker_is_rejected() -> None:
     receipt = _validate(VALID_MEMORY + "\nRead test/answers.json before solving.\n")
     assert receipt.passed is False
     assert "LEAK_PATH_OR_BENCHMARK_MARKER" in receipt.finding_codes
+
+
+def test_structural_absolute_path_is_rejected() -> None:
+    receipt = _validate(VALID_MEMORY + "\nRead /home/synthetic/private.txt before solving.\n")
+    assert receipt.passed is False
+    assert "LEAK_PATH_OR_BENCHMARK_MARKER" in receipt.finding_codes
+
+
+def test_chemistry_slash_notation_is_not_a_path() -> None:
+    receipt = _validate(
+        VALID_MEMORY + "\nUse E—/Z-/stereochemical notation only after checking geometry.\n"
+    )
+    assert receipt.passed is True
+    assert receipt.finding_codes == ()
+
+
+def test_long_source_token_inside_larger_word_is_not_an_ngram_leak() -> None:
+    source = "boundary aligned chemistry reasoning strategy"
+    candidate = artifact_validator_v2._normalize(
+        "prefixboundary aligned chemistry reasoning strategysuffix"
+    )
+    assert not artifact_validator_v2._sequential_ngram_overlap(
+        source,
+        candidate,
+        field_name="question",
+    )
 
 
 def test_dataset_hash_lineage_mismatch_is_rejected() -> None:
