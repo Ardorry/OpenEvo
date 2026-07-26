@@ -223,6 +223,21 @@ def test_non_paid_dry_run_uses_v2_taxonomy_and_preserves_old_blocker() -> None:
     )
 
 
+def test_preflight_authority_verifier_uses_verified_runtime_environment() -> None:
+    wrapper = (
+        WORKSPACE_ROOT
+        / "benchmarks"
+        / "chembench"
+        / "scripts"
+        / "run_chembench_supervised_transfer_v1.sh"
+    ).read_text(encoding="utf-8")
+    runtime_branch = wrapper.split('elif [[ ! -x "${python_executable}" ]]', 1)[0]
+    assert '"${1:-}" == "run-preflight"' in runtime_branch
+    assert '"${1:-}" == "verify-preflight"' in runtime_branch
+    assert '"${1:-}" == "run-formal"' in runtime_branch
+    assert 'python_executable="${runtime_python}"' in runtime_branch
+
+
 def test_source_import_manifest_is_content_free_and_byte_stable() -> None:
     rendered = render_source_import_manifest_v1(
         repository_root=WORKSPACE_ROOT,
