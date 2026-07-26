@@ -28,7 +28,10 @@ from openevo_chembench.chembench4k_models import (
 )
 from openevo_chembench.chembench4k_prompt import render_official_five_shot_prompt
 from openevo_chembench.frozen_runtime_v2 import CoreResolvedTextMemoryV2
-from openevo_chembench.local_codex_executor import LocalCodexCLIExecutor
+from openevo_chembench.local_codex_executor import (
+    LocalCodexCLIExecutor,
+    LocalCodexExecutionError,
+)
 from openevo_chembench.models import RawAttempt
 from openevo_chembench.supervised_transfer_v1.common import (
     canonical_json_bytes,
@@ -47,8 +50,16 @@ from openevo_chembench.supervised_transfer_v1.config import (
 from openevo_chembench.supervised_transfer_v1.packet import (
     SupervisedEvolutionPacketV1,
 )
+from openevo_chembench.supervised_transfer_v1.preflight import (
+    verify_preflight_authority_v1,
+    write_preflight_authority_v1,
+)
 from openevo_chembench.supervised_transfer_v1.split_v2 import (
     load_private_partition_v2,
+)
+from openevo_chembench.supervised_transfer_v1.test_ledger import (
+    claim_test_manifest_use_v1,
+    complete_test_manifest_use_v1,
 )
 from openevo_chembench.taskwise_config_v1 import load_taskwise_config_v1
 from openevo_chembench.taskwise_core_evolution_v1 import (
@@ -68,11 +79,41 @@ RUN_STATE_SCHEMA = "chembench_supervised_transfer_run_state_v1"
 FROZEN_RECEIPT_SCHEMA = "FrozenTransferReceiptV1"
 TEST_USE_RECEIPT_SCHEMA = "FrozenTestManifestUseReceiptV1"
 SPLIT_ISOLATION_RECEIPT = "split_isolation_receipt_v2.json"
-FORMAL_TASK_CALLS = TOTAL_MODEL_CALLS - 900
+FORMAL_TASK_CALLS = TOTAL_MODEL_CALLS - 900 - (90 * 2)
 FORMAL_REFLECTOR_CALLS = 900
 SMOKE_CANARY_TASK_CALLS = 73
 SMOKE_CANARY_REFLECTOR_CALLS = 19
 _RUN_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,127}\Z", re.ASCII)
+_TEST_MANIFESTS = ("test_primary", "test_recovery_01")
+_TEST_INFRASTRUCTURE_ATTEMPTS = 3
+
+_STAGE_TRANSITIONS: dict[str, frozenset[str]] = {
+    "INITIALIZED": frozenset({"SUPERVISED_UPDATE_SMOKE", "CONTROL_TRAIN"}),
+    "SUPERVISED_UPDATE_SMOKE": frozenset({"ONLINE_CANARY"}),
+    "ONLINE_CANARY": frozenset({"CONTROL_CANARY"}),
+    "CONTROL_CANARY": frozenset({"PROBE_SMOKE"}),
+    "PROBE_SMOKE": frozenset({"PROBE_CHECKPOINT_00"}),
+    "CONTROL_TRAIN": frozenset({"ONLINE_CORE_INITIALIZATION"}),
+    "ONLINE_CORE_INITIALIZATION": frozenset({"ONLINE_TRAIN"}),
+    "ONLINE_TRAIN": frozenset(
+        {
+            "ONLINE_TRAIN",
+            "PROBE_CHECKPOINT_10",
+            "PROBE_CHECKPOINT_20",
+            "PROBE_CHECKPOINT_30",
+            "PROBE_CHECKPOINT_40",
+            "PROBE_CHECKPOINT_50",
+        }
+    ),
+    "PROBE_CHECKPOINT_10": frozenset({"ONLINE_TRAIN"}),
+    "PROBE_CHECKPOINT_20": frozenset({"ONLINE_TRAIN"}),
+    "PROBE_CHECKPOINT_30": frozenset({"ONLINE_TRAIN"}),
+    "PROBE_CHECKPOINT_40": frozenset({"ONLINE_TRAIN"}),
+    "PROBE_CHECKPOINT_50": frozenset({"FREEZE_FINAL_MEMORY"}),
+    "FREEZE_FINAL_MEMORY": frozenset({"FINAL_TEST"}),
+    "FINAL_TEST": frozenset({"REPORTING"}),
+    "REPORTING": frozenset({"COMPLETED"}),
+}
 
 
 class SupervisedExperimentError(RuntimeError):
@@ -97,6 +138,7 @@ class ExperimentInputsV1:
     split_receipt_sha256: str
     source_commit: str
     codex_cli_version: str
+    test_manifest: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,7 +165,11 @@ def utc_now() -> str:
 def load_experiment_inputs_v1(
     repository_root: Path,
     config: SupervisedTransferConfigV1,
+    *,
+    test_manifest: str = "test_primary",
 ) -> ExperimentInputsV1:
+    if test_manifest not in _TEST_MANIFESTS:
+        raise SupervisedExperimentError("TEST_MANIFEST_NOT_PREREGISTERED")
     repository = repository_root.resolve(strict=True)
     snapshot = (repository / config.dataset_root).resolve(strict=True)
     loader = ChemBench4KDatasetLoader(snapshot_root=snapshot)
@@ -143,8 +189,8 @@ def load_experiment_inputs_v1(
     )
     test = load_private_partition_v2(
         loader,
-        partition="test_primary",
-        private_manifest=manifests / "test_primary_private_manifest.jsonl",
+        partition=test_manifest,
+        private_manifest=manifests / f"{test_manifest}_private_manifest.jsonl",
     )
     _require_partition_isolation(train, probe, test)
     source_commit = _git_output(repository, ("rev-parse", "HEAD"))
@@ -162,6 +208,7 @@ def load_experiment_inputs_v1(
         split_receipt_sha256=sha256_bytes(split_receipt.read_bytes()),
         source_commit=source_commit,
         codex_cli_version=codex_version,
+        test_manifest=test_manifest,
     )
 
 
@@ -209,6 +256,36 @@ def build_complete_dry_run_v1(inputs: ExperimentInputsV1) -> dict[str, object]:
         "planned_reflector_calls": FORMAL_REFLECTOR_CALLS,
         "smoke_canary_task_calls": SMOKE_CANARY_TASK_CALLS,
         "smoke_canary_reflector_calls": SMOKE_CANARY_REFLECTOR_CALLS,
+        "preflight_task_calls": 253,
+        "preflight_reflector_calls": 19,
+        "formal_task_calls": FORMAL_TASK_CALLS,
+        "formal_reflector_calls": FORMAL_REFLECTOR_CALLS,
+        "preflight_stage_order": [
+            "SUPERVISED_UPDATE_SMOKE",
+            "ONLINE_CANARY",
+            "CONTROL_CANARY",
+            "PROBE_SMOKE",
+            "PROBE_CHECKPOINT_00",
+            "PREFLIGHT_COMPLETED",
+        ],
+        "formal_stage_order": [
+            "CONTROL_TRAIN",
+            "ONLINE_CORE_INITIALIZATION",
+            "ONLINE_TRAIN",
+            "PROBE_CHECKPOINT_10_20_30_40_50",
+            "FREEZE_FINAL_MEMORY",
+            "FINAL_TEST",
+            "REPORTING",
+            "COMPLETED",
+        ],
+        "formal_first_paid_session": {
+            "stage": "CONTROL_TRAIN",
+            "logical_arm": "control_train",
+            "task_ordinal": 0,
+            "round_index": 0,
+        },
+        "formal_checkpoint_zero_source": "verified aggregate-only preflight authority",
+        "formal_imported_train_rows": 0,
         "call_plan": call_plan,
         "train_order_sha256": _uid_order_sha256(train_order),
         "probe_order_sha256": _uid_order_sha256(inputs.probe),
@@ -226,21 +303,40 @@ def build_complete_dry_run_v1(inputs: ExperimentInputsV1) -> dict[str, object]:
         "reflector_input_scope": "Train only",
         "probe_evolution_jobs": 0,
         "test_evolution_jobs": 0,
-        "test_manifest": "test_primary",
+        "test_manifest": inputs.test_manifest,
         "ready_for_paid_smoke": True,
     }
 
 
 class SupervisedTransferExperimentV1:
-    """Single-use foreground experiment; failures preserve all run evidence."""
+    """Single-use preflight or formal experiment with closed stage transitions."""
 
-    def __init__(self, *, inputs: ExperimentInputsV1, run_id: str) -> None:
+    def __init__(
+        self,
+        *,
+        inputs: ExperimentInputsV1,
+        run_id: str,
+        run_mode: Literal["preflight", "formal"],
+        preflight_run_id: str | None = None,
+    ) -> None:
         if type(inputs) is not ExperimentInputsV1:
             raise TypeError("inputs must be exact ExperimentInputsV1")
         if type(run_id) is not str or _RUN_ID_RE.fullmatch(run_id) is None:
             raise ValueError("run_id is invalid")
+        if run_mode not in {"preflight", "formal"}:
+            raise ValueError("run_mode is invalid")
+        if run_mode == "preflight" and preflight_run_id is not None:
+            raise ValueError("preflight runs cannot consume a preflight authority")
+        if run_mode == "formal" and (
+            type(preflight_run_id) is not str
+            or _RUN_ID_RE.fullmatch(preflight_run_id) is None
+            or preflight_run_id == run_id
+        ):
+            raise ValueError("formal runs require a distinct preflight run ID")
         self.inputs = inputs
         self.run_id = run_id
+        self.run_mode = run_mode
+        self.preflight_run_id = preflight_run_id
         self.result_root = inputs.repository_root / inputs.config.result_root / "runs" / run_id
         self.state_root = inputs.repository_root / inputs.config.state_root / "runs" / run_id
         if self.result_root.exists() or self.state_root.exists():
@@ -258,11 +354,13 @@ class SupervisedTransferExperimentV1:
             "schema_version": RUN_STATE_SCHEMA,
             "protocol_id": PROTOCOL_ID,
             "run_id": run_id,
+            "run_mode": run_mode,
             "status": "INITIALIZED",
             "stage": "INITIALIZED",
             "source_commit": inputs.source_commit,
             "split_receipt_sha256": inputs.split_receipt_sha256,
-            "test_manifest": "test_primary",
+            "test_manifest": inputs.test_manifest,
+            "preflight_run_id": preflight_run_id,
             "task_sessions": 0,
             "reflector_completions": 0,
             "core_jobs": 0,
@@ -282,7 +380,9 @@ class SupervisedTransferExperimentV1:
         }
         self._frozen_checkpoints: dict[int, FrozenMemorySetV1] = {}
 
-    def run(self) -> dict[str, object]:
+    def run_preflight(self) -> dict[str, object]:
+        if self.run_mode != "preflight":
+            raise SupervisedExperimentError("RUN_MODE_MISMATCH")
         try:
             with ExitStack() as stack:
                 control, online = self._open_executors(stack)
@@ -290,10 +390,48 @@ class SupervisedTransferExperimentV1:
                 self._run_online_canary(online)
                 self._run_control_canary(control)
                 self._run_probe_smoke(control, online)
-                self._open_formal_bridges(stack)
                 checkpoint_zero = self._freeze_checkpoint(0)
                 self._run_probe_checkpoint(0, checkpoint_zero, control, online)
+            authority, authority_sha256 = write_preflight_authority_v1(
+                inputs=self.inputs,
+                source_run_id=self.run_id,
+                issued_at_utc=utc_now(),
+            )
+            self._state["preflight_authority_sha256"] = authority_sha256
+            self._state["status"] = "PREFLIGHT_COMPLETED"
+            self._state["stage"] = "PREFLIGHT_COMPLETED"
+            self._state["completed_at_utc"] = utc_now()
+            self._write_state()
+            return {
+                "status": "PREFLIGHT_COMPLETED",
+                "run_id": self.run_id,
+                "preflight_authority_sha256": authority_sha256,
+                "task_sessions": authority["task_sessions"],
+                "reflector_completions": authority["reflector_completions"],
+                "test_model_calls": 0,
+            }
+        except BaseException as exc:
+            self._fail_closed(exc)
+            raise
+
+    def run_formal(self) -> dict[str, object]:
+        if self.run_mode != "formal" or self.preflight_run_id is None:
+            raise SupervisedExperimentError("RUN_MODE_MISMATCH")
+        try:
+            authority, authority_sha256 = verify_preflight_authority_v1(
+                inputs=self.inputs,
+                source_run_id=self.preflight_run_id,
+            )
+            self._state["preflight_authority_sha256"] = authority_sha256
+            self._state["preflight_checkpoint_zero_aggregate_rows"] = authority[
+                "checkpoint_zero_aggregate_rows"
+            ]
+            self._write_state()
+            with ExitStack() as stack:
+                control, online = self._open_executors(stack)
                 self._run_control_train(control)
+                self._open_formal_bridges(stack)
+                self._freeze_checkpoint(0)
                 self._run_online_train_with_probes(control, online)
                 frozen = self._freeze_final_memory()
                 self._run_final_test(frozen, control, online)
@@ -307,33 +445,16 @@ class SupervisedTransferExperimentV1:
                 run_result_root=self.result_root,
                 run_state_root=self.state_root,
                 run_id=self.run_id,
+                preflight_authority=authority,
             )
             self._state["status"] = "COMPLETED"
-            self._state["stage"] = "COMPLETED"
+            self._set_stage("COMPLETED")
             self._state["completed_at_utc"] = utc_now()
             self._state["report_sha256"] = report["final_report_sha256"]
             self._write_state()
             return report
         except BaseException as exc:
-            failure_code = (
-                exc.finding_code
-                if type(exc) is SupervisedExperimentError
-                else _closed_exception_code(exc)
-            )
-            self._state["status"] = "FAIL_CLOSED"
-            self._state["failure_code"] = failure_code
-            if "ARTIFACT" in failure_code:
-                self._state["artifact_findings"] = (
-                    int(self._state["artifact_findings"]) + 1
-                )
-            if "CONTEXT" in failure_code:
-                self._state["context_findings"] = int(self._state["context_findings"]) + 1
-            if "SECURITY" in failure_code:
-                self._state["security_findings"] = (
-                    int(self._state["security_findings"]) + 1
-                )
-            self._state["failed_at_utc"] = utc_now()
-            self._write_state()
+            self._fail_closed(exc)
             raise
 
     def _open_executors(
@@ -681,6 +802,7 @@ class SupervisedTransferExperimentV1:
 
     def _freeze_final_memory(self) -> FrozenMemorySetV1:
         self._set_stage("FREEZE_FINAL_MEMORY")
+        self._require_source_still_frozen()
         frozen = self._freeze_checkpoint(50)
         if any(value is None for value in frozen.artifact_ids.values()):
             raise SupervisedExperimentError("FINAL_MEMORY_SET_INCOMPLETE")
@@ -689,9 +811,12 @@ class SupervisedTransferExperimentV1:
             "protocol_id": PROTOCOL_ID,
             "source_commit": self.inputs.source_commit,
             "split_receipt_sha256": self.inputs.split_receipt_sha256,
-            "test_manifest": "test_primary",
+            "test_manifest": self.inputs.test_manifest,
             "test_manifest_sha256": sha256_bytes(
-                (self.inputs.manifest_root / "test_primary_private_manifest.jsonl").read_bytes()
+                (
+                    self.inputs.manifest_root
+                    / f"{self.inputs.test_manifest}_private_manifest.jsonl"
+                ).read_bytes()
             ),
             "artifact_ids": frozen.artifact_ids,
             "artifact_payload_sha256": frozen.payload_sha256,
@@ -719,6 +844,24 @@ class SupervisedTransferExperimentV1:
         self._write_state()
         return frozen
 
+    def _require_source_still_frozen(self) -> None:
+        repository = self.inputs.repository_root
+        if _git_output(repository, ("rev-parse", "HEAD")) != self.inputs.source_commit:
+            raise SupervisedExperimentError("SOURCE_CHANGED_DURING_FORMAL_RUN")
+        if _git_output(repository, ("diff", "--", "src/openevo")):
+            raise SupervisedExperimentError("SRC_OPENEVO_NOT_PRISTINE")
+        if _git_output(
+            repository,
+            (
+                "status",
+                "--short",
+                "--untracked-files=all",
+                "--",
+                "benchmarks/chembench",
+            ),
+        ):
+            raise SupervisedExperimentError("BENCHMARK_SOURCE_CHANGED_DURING_FORMAL_RUN")
+
     def _run_final_test(
         self,
         frozen: FrozenMemorySetV1,
@@ -727,28 +870,45 @@ class SupervisedTransferExperimentV1:
     ) -> None:
         self._set_stage("FINAL_TEST")
         jobs_before = self._formal_core_job_count()
-        use_receipt = self.result_root / "public/test_primary_use_receipt.json"
+        frozen_receipt_sha256 = self._state.get("frozen_transfer_receipt_sha256")
+        if type(frozen_receipt_sha256) is not str:
+            raise SupervisedExperimentError("FROZEN_TRANSFER_RECEIPT_MISSING")
+        claim = claim_test_manifest_use_v1(
+            inputs=self.inputs,
+            run_id=self.run_id,
+            frozen_receipt_sha256=frozen_receipt_sha256,
+            claimed_at_utc=utc_now(),
+        )
+        claim_sha256 = str(claim["entry_sha256"])
+        use_receipt = (
+            self.result_root
+            / "public"
+            / f"{self.inputs.test_manifest}_use_receipt.json"
+        )
         write_public_file(
             use_receipt,
             canonical_pretty_json_bytes(
                 {
                     "schema_version": TEST_USE_RECEIPT_SCHEMA,
                     "protocol_id": PROTOCOL_ID,
-                    "manifest": "test_primary",
+                    "manifest": self.inputs.test_manifest,
                     "manifest_sha256": sha256_bytes(
                         (
                             self.inputs.manifest_root
-                            / "test_primary_private_manifest.jsonl"
+                            / f"{self.inputs.test_manifest}_private_manifest.jsonl"
                         ).read_bytes()
                     ),
-                    "reason": "PRIMARY_PREREGISTERED_TEST",
+                    "reason": claim["reason"],
                     "maximum_uses": 1,
+                    "global_ledger_claim_sha256": claim_sha256,
                     "started_at_utc": utc_now(),
                 }
             ),
         )
+        self._state["test_ledger_claim_sha256"] = claim_sha256
+        self._write_state()
         for ordinal, task in enumerate(self.inputs.test):
-            self._execute_session(
+            self._execute_test_session(
                 control,
                 task=task,
                 memory=None,
@@ -758,7 +918,7 @@ class SupervisedTransferExperimentV1:
                 round_index=0,
                 stage="FINAL_TEST",
             )
-            self._execute_session(
+            self._execute_test_session(
                 online,
                 task=task,
                 memory=frozen.memories[task.category],
@@ -770,6 +930,37 @@ class SupervisedTransferExperimentV1:
             )
         if self._formal_core_job_count() != jobs_before:
             raise SupervisedExperimentError("TEST_CREATED_EVOLUTION_JOB")
+        completed = complete_test_manifest_use_v1(
+            inputs=self.inputs,
+            run_id=self.run_id,
+            claim_entry_sha256=claim_sha256,
+            completed_at_utc=utc_now(),
+        )
+        self._state["test_ledger_completion_sha256"] = completed["entry_sha256"]
+        self._write_state()
+
+    def _execute_test_session(
+        self,
+        executor: LocalCodexCLIExecutor,
+        **arguments: object,
+    ) -> SessionOutcomeV1:
+        """Retry only pre-completion Test infrastructure attempts in the active run."""
+
+        for infrastructure_attempt in range(1, _TEST_INFRASTRUCTURE_ATTEMPTS + 1):
+            try:
+                return self._execute_session(
+                    executor,
+                    infrastructure_attempt=infrastructure_attempt,
+                    **arguments,  # type: ignore[arg-type]
+                )
+            except LocalCodexExecutionError as exc:
+                if (
+                    exc.completion_observed
+                    or not exc.retry_allowed
+                    or infrastructure_attempt == _TEST_INFRASTRUCTURE_ATTEMPTS
+                ):
+                    raise
+        raise AssertionError("unreachable Test infrastructure attempt loop")
 
     def _execute_session(
         self,
@@ -783,8 +974,25 @@ class SupervisedTransferExperimentV1:
         round_index: Literal[0, 1, 2],
         stage: str,
         checkpoint: int | None = None,
+        infrastructure_attempt: int = 1,
     ) -> SessionOutcomeV1:
-        session_id = self._session_id(stage, logical_arm, task, round_index)
+        self._require_session_admission(
+            task=task,
+            memory=memory,
+            logical_arm=logical_arm,
+            task_ordinal=task_ordinal,
+            round_index=round_index,
+            stage=stage,
+        )
+        if infrastructure_attempt < 1:
+            raise ValueError("infrastructure_attempt must be positive")
+        session_id = self._session_id(
+            stage,
+            logical_arm,
+            task,
+            round_index,
+            infrastructure_attempt,
+        )
         prompt = _render_prompt(self.inputs.loader, task)
         attempt_event = {
             "schema_version": "supervised_task_attempt_v1",
@@ -797,6 +1005,7 @@ class SupervisedTransferExperimentV1:
             "round_index": round_index,
             "checkpoint": checkpoint,
             "session_id": session_id,
+            "infrastructure_attempt": infrastructure_attempt,
             "prompt_sha256": sha256_bytes(prompt.text.encode("utf-8")),
             "started_at_utc": utc_now(),
         }
@@ -834,6 +1043,7 @@ class SupervisedTransferExperimentV1:
             "round_index": round_index,
             "checkpoint": checkpoint,
             "session_id": session_id,
+            "infrastructure_attempt": infrastructure_attempt,
             "official_prediction": evaluation.official.prediction,
             "official_parse_status": evaluation.official.status.value,
             "strict_prediction": evaluation.strict.prediction,
@@ -866,6 +1076,48 @@ class SupervisedTransferExperimentV1:
             session_id=session_id,
             context_binding=context.to_public_dict(),
         )
+
+    def _require_session_admission(
+        self,
+        *,
+        task: PrivateChemBench4KTask,
+        memory: CoreResolvedTextMemoryV2 | None,
+        logical_arm: str,
+        task_ordinal: int,
+        round_index: int,
+        stage: str,
+    ) -> None:
+        if self._state["stage"] != stage:
+            raise SupervisedExperimentError("SESSION_STAGE_BINDING_INVALID")
+        allowed_arms = {
+            "SUPERVISED_UPDATE_SMOKE": {"online_smoke"},
+            "ONLINE_CANARY": {"online_canary"},
+            "CONTROL_CANARY": {"control_canary"},
+            "PROBE_SMOKE": {"control_probe_smoke", "online_probe_smoke"},
+            "CONTROL_TRAIN": {"control_train"},
+            "ONLINE_TRAIN": {"online_train"},
+            "FINAL_TEST": {"control_test", "online_test"},
+        }
+        expected_partition = self.inputs.train
+        if stage.startswith("PROBE_"):
+            allowed_arms = {**allowed_arms, stage: {"control_probe", "online_probe"}}
+            expected_partition = self.inputs.probe
+        elif stage == "FINAL_TEST":
+            expected_partition = self.inputs.test
+        if logical_arm not in allowed_arms.get(stage, set()):
+            raise SupervisedExperimentError("SESSION_ARM_STAGE_INVALID")
+        if task.uid not in {item.uid for item in expected_partition}:
+            raise SupervisedExperimentError("SESSION_PARTITION_SCOPE_INVALID")
+        if logical_arm.startswith("control") and memory is not None:
+            raise SupervisedExperimentError("CONTROL_MEMORY_INJECTION_INVALID")
+        if logical_arm == "online_test" and memory is None:
+            raise SupervisedExperimentError("TEST_FROZEN_MEMORY_MISSING")
+        if (
+            stage == "CONTROL_TRAIN"
+            and int(self._state["task_sessions"]) == 0
+            and (task_ordinal != 0 or round_index != 0)
+        ):
+            raise SupervisedExperimentError("FORMAL_FIRST_SESSION_INVALID")
 
     def _trajectory(
         self,
@@ -971,14 +1223,32 @@ class SupervisedTransferExperimentV1:
         arm: str,
         task: PrivateChemBench4KTask,
         round_index: int,
+        infrastructure_attempt: int,
     ) -> str:
         ordinal = int(self._state["task_sessions"]) + 1
         identity = hashlib.sha256(
-            f"{self.run_id}:{stage}:{arm}:{task.uid}:{round_index}:{ordinal}".encode()
+            (
+                f"{self.run_id}:{stage}:{arm}:{task.uid}:{round_index}:"
+                f"{ordinal}:{infrastructure_attempt}"
+            ).encode()
         ).hexdigest()[:20]
-        return f"st-{ordinal:06d}-{round_index}-{identity}"
+        return (
+            f"st-{ordinal:06d}-{round_index}-infra{infrastructure_attempt}-{identity}"
+        )
 
     def _set_stage(self, stage: str) -> None:
+        current = str(self._state["stage"])
+        if stage not in _STAGE_TRANSITIONS.get(current, frozenset()):
+            raise SupervisedExperimentError("STAGE_TRANSITION_INVALID")
+        if current == "INITIALIZED":
+            expected = (
+                "SUPERVISED_UPDATE_SMOKE"
+                if self.run_mode == "preflight"
+                else "CONTROL_TRAIN"
+            )
+            if stage != expected:
+                raise SupervisedExperimentError("RUN_MODE_STAGE_INVALID")
+        self._require_stage_counters(stage)
         self._state["stage"] = stage
         self._state["last_progress_utc"] = utc_now()
         self._write_state()
@@ -994,6 +1264,48 @@ class SupervisedTransferExperimentV1:
             ),
             flush=True,
         )
+
+    def _require_stage_counters(self, stage: str) -> None:
+        sessions = int(self._state["task_sessions"])
+        reflectors = int(self._state["reflector_completions"])
+        if stage == "PROBE_CHECKPOINT_00" and (sessions, reflectors) != (73, 19):
+            raise SupervisedExperimentError("PREFLIGHT_STAGE_COUNTER_INVALID")
+        if stage == "ONLINE_CORE_INITIALIZATION" and (sessions, reflectors) != (
+            1_350,
+            0,
+        ):
+            raise SupervisedExperimentError("CONTROL_TRAIN_NOT_COMPLETE")
+        if stage.startswith("PROBE_CHECKPOINT_") and stage != "PROBE_CHECKPOINT_00":
+            checkpoint = int(stage.rsplit("_", 1)[1])
+            expected_sessions = 1_350 + (27 * checkpoint) + (
+                180 * ((checkpoint // 10) - 1)
+            )
+            if (sessions, reflectors) != (expected_sessions, 18 * checkpoint):
+                raise SupervisedExperimentError("ONLINE_TRAIN_CHECKPOINT_COUNTER_INVALID")
+        if stage == "FREEZE_FINAL_MEMORY" and (sessions, reflectors) != (3_600, 900):
+            raise SupervisedExperimentError("FORMAL_TRAIN_PROBE_NOT_COMPLETE")
+        if stage == "REPORTING" and (sessions, reflectors) != (
+            FORMAL_TASK_CALLS,
+            FORMAL_REFLECTOR_CALLS,
+        ):
+            raise SupervisedExperimentError("FINAL_TEST_NOT_COMPLETE")
+
+    def _fail_closed(self, exc: BaseException) -> None:
+        failure_code = (
+            exc.finding_code
+            if isinstance(exc, SupervisedExperimentError)
+            else _closed_exception_code(exc)
+        )
+        self._state["status"] = "FAIL_CLOSED"
+        self._state["failure_code"] = failure_code
+        if "ARTIFACT" in failure_code:
+            self._state["artifact_findings"] = int(self._state["artifact_findings"]) + 1
+        if "CONTEXT" in failure_code:
+            self._state["context_findings"] = int(self._state["context_findings"]) + 1
+        if "SECURITY" in failure_code:
+            self._state["security_findings"] = int(self._state["security_findings"]) + 1
+        self._state["failed_at_utc"] = utc_now()
+        self._write_state()
 
     def _append_public(self, payload: dict[str, object]) -> None:
         _append_jsonl(self.public_events, payload, mode=0o644)

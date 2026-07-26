@@ -60,9 +60,29 @@ benchmarks/chembench/scripts/run_chembench_supervised_transfer_v1.sh dry-run
 benchmarks/chembench/scripts/prepare_supervised_transfer_v1_runtime.sh
 ```
 
-The paid `run --run-id ...` entry point requires the dedicated non-editable
-Core runtime and executes smoke, canaries, formal Train/Probe, frozen primary
-Test, paired statistics, and the two hash-verified Desktop exports in order.
+Paid execution is deliberately split into two non-resumable run identities:
+
+```bash
+benchmarks/chembench/scripts/run_chembench_supervised_transfer_v1.sh \
+  run-preflight --run-id <fresh-preflight-run-id>
+benchmarks/chembench/scripts/run_chembench_supervised_transfer_v1.sh \
+  verify-preflight --run-id <terminal-preflight-run-id>
+benchmarks/chembench/scripts/run_chembench_supervised_transfer_v1.sh \
+  run-formal --run-id <fresh-formal-run-id> \
+  --preflight-run-id <terminal-preflight-run-id> \
+  --test-manifest test_primary
+```
+
+`run-preflight` alone performs update smoke, both canaries, Probe smoke, and
+checkpoint-0 Probe. It emits an identity-closed authority containing only
+aggregate checkpoint-0 statistics. `run-formal` refuses mismatched authority
+and its first paid session is Control Train task 0 round 0; it never reruns a
+preflight call or imports another run's Train rows. A private protocol-global,
+append-only ledger claims the frozen Test manifest before the first Test call,
+so a fresh run ID cannot consume Primary Test a second time. Recovery Test 01
+requires a source-change invalidation backed by the failed Test run; score does
+not authorize recovery. Both commands require the dedicated non-editable Core
+runtime.
 
 An explicitly unpaired online-only Pilot500 entry point is also available for
 mechanism and descriptive analysis. It uses no control evidence, cannot issue

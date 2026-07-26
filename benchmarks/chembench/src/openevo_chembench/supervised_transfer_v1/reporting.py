@@ -26,16 +26,25 @@ def build_all_reports_v1(
     run_result_root: Path,
     run_state_root: Path,
     run_id: str,
+    preflight_authority: dict[str, object],
 ) -> dict[str, object]:
     private_rows = _read_jsonl(run_state_root / "private/events.jsonl")
     public_rows = _read_jsonl(run_result_root / "public/events.jsonl")
+    run_state = json.loads(
+        (run_result_root / "public/run_state.json").read_text(encoding="utf-8")
+    )
+    if not isinstance(run_state, dict):
+        raise TypeError("formal run state is invalid")
     reports = run_result_root / "reports"
     charts = reports / "charts"
     reports.mkdir(parents=True, exist_ok=True)
     charts.mkdir(parents=True, exist_ok=True)
 
     train_rows = _training_round_rows(private_rows)
-    probe_rows = _probe_rows(private_rows)
+    checkpoint_zero = preflight_authority.get("checkpoint_zero_aggregate_rows")
+    if not isinstance(checkpoint_zero, list):
+        raise TypeError("preflight checkpoint-zero authority is unavailable")
+    probe_rows = _probe_rows(private_rows, checkpoint_zero_rows=checkpoint_zero)
     test_rows, test_summary, per_category = _test_rows(private_rows)
     memory_rows, rule_rows, evidence_rows = _memory_rows(public_rows, run_state_root)
     transition_rows = _transition_rows(probe_rows, test_rows)
@@ -71,6 +80,8 @@ def build_all_reports_v1(
         probe_rows=probe_rows,
         train_rows=train_rows,
         memory_rows=memory_rows,
+        test_manifest=str(run_state.get("test_manifest")),
+        infrastructure_failures=int(run_state.get("infrastructure_failures", 0)),
     )
     html = _markdown_to_offline_html(markdown)
     write_public_file(reports / "final_report.md", markdown.encode("utf-8"))
@@ -88,6 +99,12 @@ def build_all_reports_v1(
         ),
         "artifact_findings": sum(
             row.get("kind") == "ARTIFACT_VALIDATION_FAILURE" for row in public_rows
+        ),
+        "infrastructure_failures": int(run_state.get("infrastructure_failures", 0)),
+        "test_manifest": run_state.get("test_manifest"),
+        "test_ledger_claim_sha256": run_state.get("test_ledger_claim_sha256"),
+        "test_ledger_completion_sha256": run_state.get(
+            "test_ledger_completion_sha256"
         ),
     }
     write_public_file(
@@ -130,6 +147,8 @@ def _training_round_rows(rows: list[dict[str, Any]]) -> list[dict[str, object]]:
                 for row in selected
                 if row["logical_arm"] == arm and row["round_index"] == round_index
             ]
+            if len(subset) != 450:
+                raise RuntimeError("formal Train round is incomplete")
             result.append(
                 {
                     "arm": arm,
@@ -143,16 +162,68 @@ def _training_round_rows(rows: list[dict[str, Any]]) -> list[dict[str, object]]:
     return result
 
 
-def _probe_rows(rows: list[dict[str, Any]]) -> list[dict[str, object]]:
+def _probe_rows(
+    rows: list[dict[str, Any]],
+    *,
+    checkpoint_zero_rows: list[object],
+) -> list[dict[str, object]]:
     selected = [
         row
         for row in rows
         if row.get("kind") == "PRIVATE_EVALUATED"
         and row.get("logical_arm") in {"control_probe", "online_probe"}
     ]
+    if any(row.get("checkpoint") == 0 for row in selected):
+        raise RuntimeError("formal run duplicated checkpoint-zero Probe")
+    zero_by_category: dict[str, dict[str, object]] = {}
+    for item in checkpoint_zero_rows:
+        if not isinstance(item, dict):
+            raise TypeError("checkpoint-zero authority row is invalid")
+        category = item.get("category")
+        expected_keys = {
+            "checkpoint",
+            "category",
+            "n",
+            "control_accuracy",
+            "online_accuracy",
+            "delta",
+            "wrong_to_correct",
+            "correct_to_wrong",
+            "control_strict_parse_rate",
+            "online_strict_parse_rate",
+        }
+        if (
+            type(category) is not str
+            or category in zero_by_category
+            or set(item) != expected_keys
+            or item.get("checkpoint") != 0
+        ):
+            raise RuntimeError("checkpoint-zero authority row is invalid")
+        zero_by_category[category] = item
+    expected_categories = {"overall", *CHEMBENCH4K_CATEGORIES}
+    if set(zero_by_category) != expected_categories:
+        raise RuntimeError("checkpoint-zero authority categories are incomplete")
     result: list[dict[str, object]] = []
     for checkpoint in (0, 10, 20, 30, 40, 50):
         for category in ("overall", *CHEMBENCH4K_CATEGORIES):
+            if checkpoint == 0:
+                authority = zero_by_category[category]
+                expected = 90 if category == "overall" else 10
+                if authority["n"] != expected:
+                    raise RuntimeError("checkpoint-zero authority count is invalid")
+                result.append(
+                    {
+                        "checkpoint": 0,
+                        "category": category,
+                        "n": authority["n"],
+                        "control_accuracy": authority["control_accuracy"],
+                        "online_accuracy": authority["online_accuracy"],
+                        "delta": authority["delta"],
+                        "wrong_to_correct": authority["wrong_to_correct"],
+                        "correct_to_wrong": authority["correct_to_wrong"],
+                    }
+                )
+                continue
             subset = [
                 row
                 for row in selected
@@ -162,6 +233,9 @@ def _probe_rows(rows: list[dict[str, Any]]) -> list[dict[str, object]]:
             control = [row for row in subset if row["logical_arm"] == "control_probe"]
             online = [row for row in subset if row["logical_arm"] == "online_probe"]
             pairs = _paired_by_uid(control, online)
+            expected = 90 if category == "overall" else 10
+            if len(pairs) != expected:
+                raise RuntimeError("formal Probe checkpoint is incomplete")
             result.append(
                 {
                     "checkpoint": checkpoint,
@@ -253,6 +327,12 @@ def _paired_summary(pairs: list[tuple[dict[str, Any], dict[str, Any]]]) -> dict[
         "paired_bootstrap_ci95": list(_paired_bootstrap_ci(pairs)),
         "control_strict_parse_rate": _strict_rate([left for left, _right in pairs]),
         "online_strict_parse_rate": _strict_rate([right for _left, right in pairs]),
+        "control_official_parse_rate": _official_rate(
+            [left for left, _right in pairs]
+        ),
+        "online_official_parse_rate": _official_rate(
+            [right for _left, right in pairs]
+        ),
     }
 
 
@@ -434,6 +514,8 @@ def _render_final_markdown(
     probe_rows: list[dict[str, object]],
     train_rows: list[dict[str, object]],
     memory_rows: list[dict[str, object]],
+    test_manifest: str,
+    infrastructure_failures: int,
 ) -> str:
     lines = [
         "# ChemBench Supervised Transfer V1",
@@ -481,9 +563,10 @@ def _render_final_markdown(
             "## Integrity",
             "",
             "- Probe and Test created zero evolution jobs.",
-            "- Final Test used the preregistered primary manifest once.",
+            f"- Final Test used the preregistered `{test_manifest}` manifest once.",
             "- Reflector packets were Train-only and answer-supervised.",
             "- The frozen category artifact set was fixed before Test.",
+            f"- Infrastructure failures recorded: {infrastructure_failures}.",
             "",
             (
                 f"Training rows: {len(train_rows)}; Probe curve rows: {len(probe_rows)}; "
@@ -527,6 +610,14 @@ def _accuracy(rows: list[dict[str, Any]]) -> float:
 def _strict_rate(rows: list[dict[str, Any]]) -> float:
     return (
         sum(row.get("strict_parse_status") == "parsed" for row in rows) / len(rows)
+        if rows
+        else 0.0
+    )
+
+
+def _official_rate(rows: list[dict[str, Any]]) -> float:
+    return (
+        sum(row.get("official_parse_status") == "parsed" for row in rows) / len(rows)
         if rows
         else 0.0
     )

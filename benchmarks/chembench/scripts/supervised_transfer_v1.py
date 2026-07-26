@@ -27,6 +27,7 @@ from openevo_chembench.supervised_transfer_v1.config import (
     load_supervised_transfer_config_v1,
 )
 from openevo_chembench.supervised_transfer_v1.experiment import (
+    ExperimentInputsV1,
     SupervisedTransferExperimentV1,
     build_complete_dry_run_v1,
     load_experiment_inputs_v1,
@@ -38,6 +39,12 @@ from openevo_chembench.supervised_transfer_v1.exposure_v2 import (
     build_historical_exposure_bundle_v2,
     verify_historical_exposure_artifacts_v2,
     write_historical_exposure_artifacts_v2,
+)
+from openevo_chembench.supervised_transfer_v1.pause import (
+    record_administrative_pause_v1,
+)
+from openevo_chembench.supervised_transfer_v1.preflight import (
+    verify_preflight_authority_v1,
 )
 from openevo_chembench.supervised_transfer_v1.source_manifest import (
     SOURCE_IMPORT_MANIFEST,
@@ -77,8 +84,32 @@ def _parse_args() -> argparse.Namespace:
     subparsers.add_parser("prepare", help="write exposure and split artifacts; no model calls")
     subparsers.add_parser("verify", help="recompute every artifact without mutation")
     subparsers.add_parser("dry-run", help="simulate the complete experiment with zero calls")
-    run = subparsers.add_parser("run", help="execute the authorized paid experiment once")
-    run.add_argument("--run-id", required=True)
+    preflight = subparsers.add_parser(
+        "run-preflight",
+        help="execute only paid smoke, canaries, and checkpoint-zero Probe",
+    )
+    preflight.add_argument("--run-id", required=True)
+    verify_preflight = subparsers.add_parser(
+        "verify-preflight",
+        help="verify one terminal preflight authority without model calls",
+    )
+    verify_preflight.add_argument("--run-id", required=True)
+    formal = subparsers.add_parser(
+        "run-formal",
+        help="execute Control-first formal Train, Probe 10-50, and frozen Test",
+    )
+    formal.add_argument("--run-id", required=True)
+    formal.add_argument("--preflight-run-id", required=True)
+    formal.add_argument(
+        "--test-manifest",
+        choices=("test_primary", "test_recovery_01"),
+        default="test_primary",
+    )
+    pause = subparsers.add_parser(
+        "record-pause",
+        help="record immutable zero-process evidence for an externally stopped run",
+    )
+    pause.add_argument("--run-id", required=True)
     return parser.parse_args()
 
 
@@ -297,14 +328,79 @@ def _verify(args: argparse.Namespace, *, command: str) -> dict[str, object]:
     return result
 
 
-def _run(args: argparse.Namespace) -> dict[str, object]:
+def _require_paid_gate(
+    args: argparse.Namespace,
+    *,
+    test_manifest: str,
+) -> ExperimentInputsV1:
     verification = _verify(args, command="prepaid-run-gate")
     config = load_supervised_transfer_config_v1(args.config.resolve())
-    inputs = load_experiment_inputs_v1(WORKSPACE_ROOT, config)
+    inputs = load_experiment_inputs_v1(
+        WORKSPACE_ROOT,
+        config,
+        test_manifest=test_manifest,
+    )
     dry_run = build_complete_dry_run_v1(inputs)
     if verification["status"] != "PASS" or dry_run["ready_for_paid_smoke"] is not True:
         raise RuntimeError("paid run gate is not satisfied")
-    return SupervisedTransferExperimentV1(inputs=inputs, run_id=args.run_id).run()
+    return inputs
+
+
+def _run_preflight(args: argparse.Namespace) -> dict[str, object]:
+    inputs = _require_paid_gate(args, test_manifest="test_primary")
+    return SupervisedTransferExperimentV1(
+        inputs=inputs,
+        run_id=args.run_id,
+        run_mode="preflight",
+    ).run_preflight()
+
+
+def _verify_preflight(args: argparse.Namespace) -> dict[str, object]:
+    inputs = _require_paid_gate(args, test_manifest="test_primary")
+    receipt, digest = verify_preflight_authority_v1(
+        inputs=inputs,
+        source_run_id=args.run_id,
+    )
+    return {
+        "status": "PASS",
+        "model_calls_made": 0,
+        "run_id": args.run_id,
+        "preflight_authority_sha256": digest,
+        "task_sessions": receipt["task_sessions"],
+        "reflector_completions": receipt["reflector_completions"],
+        "test_model_calls": receipt["test_model_calls"],
+    }
+
+
+def _run_formal(args: argparse.Namespace) -> dict[str, object]:
+    inputs = _require_paid_gate(args, test_manifest=args.test_manifest)
+    verify_preflight_authority_v1(
+        inputs=inputs,
+        source_run_id=args.preflight_run_id,
+    )
+    return SupervisedTransferExperimentV1(
+        inputs=inputs,
+        run_id=args.run_id,
+        run_mode="formal",
+        preflight_run_id=args.preflight_run_id,
+    ).run_formal()
+
+
+def _record_pause(args: argparse.Namespace) -> dict[str, object]:
+    config = load_supervised_transfer_config_v1(args.config.resolve())
+    receipt, digest = record_administrative_pause_v1(
+        repository_root=WORKSPACE_ROOT,
+        result_root_relative=config.result_root,
+        state_root_relative=config.state_root,
+        run_id=args.run_id,
+    )
+    return {
+        "status": receipt["administrative_status"],
+        "run_id": args.run_id,
+        "pause_receipt_sha256": digest,
+        "active_model_calls": 0,
+        "resume_allowed": False,
+    }
 
 
 def main() -> int:
@@ -313,8 +409,14 @@ def main() -> int:
         result = _prepare(args)
     elif args.command in {"verify", "dry-run"}:
         result = _verify(args, command=args.command)
-    elif args.command == "run":
-        result = _run(args)
+    elif args.command == "run-preflight":
+        result = _run_preflight(args)
+    elif args.command == "verify-preflight":
+        result = _verify_preflight(args)
+    elif args.command == "run-formal":
+        result = _run_formal(args)
+    elif args.command == "record-pause":
+        result = _record_pause(args)
     else:
         raise AssertionError("unhandled command")
     print(json.dumps(result, sort_keys=True, separators=(",", ":")))

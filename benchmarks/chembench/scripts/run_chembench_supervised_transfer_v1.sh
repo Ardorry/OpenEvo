@@ -6,7 +6,7 @@ workspace_root="$(cd -- "${script_dir}/../../.." && pwd)"
 bootstrap_python="${workspace_root}/.venv/bin/python"
 runtime_python="${workspace_root}/state/chembench_supervised_transfer_v1/runtime_venv/bin/python"
 python_executable="${bootstrap_python}"
-if [[ "${1:-}" == "run" ]]; then
+if [[ "${1:-}" == "run-preflight" || "${1:-}" == "run-formal" ]]; then
   if [[ ! -x "${runtime_python}" ]]; then
     echo "BLOCKED: run requires prepare_supervised_transfer_v1_runtime.sh" >&2
     exit 2
