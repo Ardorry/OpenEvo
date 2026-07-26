@@ -145,6 +145,8 @@ _SUPERVISED_PROMPT_CONTRACT = (
     "Supervised category-memory output requirements:\n"
     "- Reconstruct the ordered PACKET_PART records and use only that Train packet "
     "plus the supplied existing memory.\n"
+    "- Return one complete replacement memory, never an append-only patch or a copy "
+    "followed by revised sections.\n"
     "- The first non-empty line must be `# Category Memory: <packet category>`.\n"
     "- Use these exact level-2 headings in order: Confirmed Principles; "
     "Provisional Principles; Common Failure Modes; Option Elimination Checks; "
@@ -156,7 +158,9 @@ _SUPERVISED_PROMPT_CONTRACT = (
     "two independent training-item evidence digests. Never copy a question, option, "
     "answer mapping, UID, ordinal, or path.\n"
     "- Put `- None.` in a section with no current entries. Keep every compatibility "
-    "section non-empty and do not use additional level-2 headings."
+    "section non-empty and do not use additional level-2 headings.\n"
+    "- Emit every listed level-2 heading exactly once. Before returning, count the "
+    "headings: there must be exactly eleven, with no duplicate heading."
 )
 
 ReflectorCodexPolicyProbeRunnerV2 = Callable[

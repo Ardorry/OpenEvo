@@ -344,6 +344,16 @@ def test_reflector_config_probe_rejects_agents_enabled_without_model(
     assert "REFLECTOR_CODEX_CONFIG_POLICY_INVALID" in receipt["finding_codes"]
 
 
+def test_supervised_prompt_requires_one_complete_memory_and_unique_headings() -> None:
+    projected = _project_reflector_prompt(
+        "Reflect the records.",
+        source_split="supervised_train",
+    )
+    assert "one complete replacement memory" in projected
+    assert "exactly eleven" in projected
+    assert "no duplicate heading" in projected
+
+
 def test_reflector_preflight_fails_closed_when_config_parser_rejects(
     tmp_path: Path,
 ) -> None:

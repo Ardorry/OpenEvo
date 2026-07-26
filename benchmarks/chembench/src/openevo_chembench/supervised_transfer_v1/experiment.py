@@ -315,12 +315,23 @@ class SupervisedTransferExperimentV1:
             self._write_state()
             return report
         except BaseException as exc:
-            self._state["status"] = "FAIL_CLOSED"
-            self._state["failure_code"] = (
+            failure_code = (
                 exc.finding_code
                 if type(exc) is SupervisedExperimentError
                 else _closed_exception_code(exc)
             )
+            self._state["status"] = "FAIL_CLOSED"
+            self._state["failure_code"] = failure_code
+            if "ARTIFACT" in failure_code:
+                self._state["artifact_findings"] = (
+                    int(self._state["artifact_findings"]) + 1
+                )
+            if "CONTEXT" in failure_code:
+                self._state["context_findings"] = int(self._state["context_findings"]) + 1
+            if "SECURITY" in failure_code:
+                self._state["security_findings"] = (
+                    int(self._state["security_findings"]) + 1
+                )
             self._state["failed_at_utc"] = utc_now()
             self._write_state()
             raise
@@ -1100,6 +1111,9 @@ def _closed_exception_code(exc: BaseException) -> str:
     taskwise_code = getattr(exc, "taskwise_failure_code", None)
     if type(taskwise_code) is str and re.fullmatch(r"[A-Z][A-Z0-9_]{2,95}", taskwise_code):
         return taskwise_code
+    closed_message = str(exc)
+    if re.fullmatch(r"[A-Z][A-Z0-9_]{2,95}", closed_message):
+        return closed_message
     if isinstance(exc, OSError):
         return "OS_ERROR"
     if isinstance(exc, TimeoutError):
