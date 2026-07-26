@@ -97,6 +97,7 @@ _TOKEN_FIELDS = (
     "output_tokens",
     "reasoning_output_tokens",
 )
+_OPTIONAL_TOKEN_FIELDS = ("cache_write_input_tokens",)
 _RECOVERABLE_TRANSPORT_ERROR_KEYS = frozenset({"type", "message"})
 _MAX_RECOVERABLE_TRANSPORT_ERRORS = 8
 _MAX_TRANSPORT_ERROR_MESSAGE_BYTES = 1024
@@ -2640,16 +2641,21 @@ def _parse_jsonl_transcript(
                     responses.append(text)
         elif event_type == "turn.completed":
             raw_usage = event.get("usage")
+            usage_keys = set(raw_usage) if isinstance(raw_usage, Mapping) else set()
             if (
                 not isinstance(raw_usage, Mapping)
-                or set(raw_usage) != set(_TOKEN_FIELDS)
+                or usage_keys
+                not in (
+                    set(_TOKEN_FIELDS),
+                    set((*_TOKEN_FIELDS, *_OPTIONAL_TOKEN_FIELDS)),
+                )
                 or not all(
                     type(raw_usage[field]) is int and raw_usage[field] >= 0
-                    for field in _TOKEN_FIELDS
+                    for field in usage_keys
                 )
             ):
                 raise LocalCodexExecutionError(LocalCodexExecutionErrorCode.TRANSCRIPT_INVALID)
-            usage = {field: int(raw_usage[field]) for field in _TOKEN_FIELDS}
+            usage = {field: int(raw_usage[field]) for field in usage_keys}
             turn_completed = True
         elif event_type == "error":
             if not _is_recoverable_transport_error_event(event):

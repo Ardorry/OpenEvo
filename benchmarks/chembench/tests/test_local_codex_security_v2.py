@@ -330,6 +330,26 @@ def test_reasoning_and_message_events_do_not_false_positive() -> None:
     assert len(digest) == 64
 
 
+def test_current_codex_cache_write_usage_field_is_strictly_accepted() -> None:
+    events = [json.loads(line) for line in _safe_transcript().splitlines()]
+    events[-1]["usage"]["cache_write_input_tokens"] = 0
+    response, usage, digest = _parse_jsonl_transcript(
+        "\n".join(json.dumps(event, sort_keys=True) for event in events) + "\n"
+    )
+    assert response == "A"
+    assert usage["cache_write_input_tokens"] == 0
+    assert len(digest) == 64
+
+
+def test_unknown_future_usage_field_remains_fail_closed() -> None:
+    events = [json.loads(line) for line in _safe_transcript().splitlines()]
+    events[-1]["usage"]["future_tokens"] = 0
+    with pytest.raises(LocalCodexExecutionError, match="transcript_invalid"):
+        _parse_jsonl_transcript(
+            "\n".join(json.dumps(event, sort_keys=True) for event in events) + "\n"
+        )
+
+
 def test_nested_tool_schema_inside_agent_message_is_security_violation() -> None:
     events = [json.loads(line) for line in _safe_transcript().splitlines()]
     message = events[2]["item"]

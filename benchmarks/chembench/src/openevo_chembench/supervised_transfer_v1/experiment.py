@@ -1097,6 +1097,9 @@ def _append_jsonl(path: Path, payload: dict[str, object], *, mode: int) -> None:
 
 
 def _closed_exception_code(exc: BaseException) -> str:
+    taskwise_code = getattr(exc, "taskwise_failure_code", None)
+    if type(taskwise_code) is str and re.fullmatch(r"[A-Z][A-Z0-9_]{2,95}", taskwise_code):
+        return taskwise_code
     if isinstance(exc, OSError):
         return "OS_ERROR"
     if isinstance(exc, TimeoutError):
