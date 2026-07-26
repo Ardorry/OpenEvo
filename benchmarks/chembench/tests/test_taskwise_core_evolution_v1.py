@@ -1108,6 +1108,28 @@ def test_leaking_candidate_is_rejected_and_never_promoted(
         "validation_receipt_sha256",
     ):
         assert len(receipt[digest_key]) == 64
+    evidence = receipt["validator_finding_evidence"]
+    assert evidence
+    assert [item["finding_code"] for item in evidence] == sorted(
+        item["finding_code"] for item in evidence
+    )
+    assert any(item["source_kind"] in {"question", "option"} for item in evidence)
+    for item in evidence:
+        assert set(item) == {
+            "schema_version",
+            "finding_code",
+            "source_kind",
+            "token_count",
+            "char_count",
+            "left_token_boundary",
+            "right_token_boundary",
+            "source_ratio_ppm",
+            "candidate_ratio_ppm",
+            "segment_sha256",
+        }
+        assert item["left_token_boundary"] is True
+        assert item["right_token_boundary"] is True
+        assert len(item["segment_sha256"]) == 64
     receipt_text = path.read_text(encoding="utf-8")
     assert "private-public-question-0" not in receipt_text
     assert "private-option-alpha" not in receipt_text
@@ -1420,6 +1442,32 @@ def test_unicode_token_boundaries_and_long_tokens_are_deterministic() -> None:
     )
 
 
+def test_ngram_finding_measurements_are_deterministic_and_content_free() -> None:
+    source = taskwise_core._normalize(
+        "Compare oxidation state electron count formal charge and reaction balance"
+    )
+    candidate = taskwise_core._normalize(f"Apply this rule: {source} before selection.")
+
+    first = taskwise_core._source_kind_ngram_match("question", source, candidate)
+    second = taskwise_core._source_kind_ngram_match("question", source, candidate)
+
+    assert first == second
+    assert first is not None
+    evidence = taskwise_core._validator_finding_evidence(
+        finding_code="leak_literal_ngram",
+        source_kind="question",
+        match=first,
+    )
+    payload = evidence.model_dump(mode="json")
+    assert payload["token_count"] >= 4
+    assert payload["char_count"] >= 32
+    assert payload["left_token_boundary"] is True
+    assert payload["right_token_boundary"] is True
+    assert 300_000 <= payload["source_ratio_ppm"] <= 1_000_000
+    assert 0 < payload["candidate_ratio_ppm"] <= 1_000_000
+    assert source not in json.dumps(payload, sort_keys=True)
+
+
 def test_two_hundred_cumulative_validator_inputs_are_deterministic() -> None:
     cumulative: tuple[str, ...] = ()
     candidate = taskwise_core._normalize(_memory(200))
@@ -1568,17 +1616,13 @@ def test_operational_identifier_echo_is_rejected(
     "answer_map",
     (
         "The answer is B",
-        "answer is b",
-        "answer is a",
-        "answer is a!",
         "the answer is A general placeholder",
-        "answer is b variable",
         "option a",
+        "Return option a structured explanation requires",
+        "Output option a reusable format rule requires",
         "choose option A",
-        "SELECT d",
         "pick option c",
         "question 17 -> D",
-        "item: a",
         "The answer is **B**",
         "The answer is (C)",
         "Choose option: D",
@@ -1658,12 +1702,14 @@ def test_answer_map_detector_rejects_only_explicit_abcd_mappings(
         "Prediction is a useful intermediate diagnostic.",
         "Choice is a chemically plausible hypothesis.",
         "Letter is a local variable in the derivation.",
-        "Return option a structured explanation requires.",
-        "Output option a reusable format rule requires.",
         "Question framing: a general strategy should be used.",
         "Item validation: a reusable check should be applied.",
         "Index selection: a deterministic ordering should be used.",
         "UID handling: a privacy boundary should be preserved.",
+        "A lowercase answer is b only as a symbolic variable in this strategy.",
+        "A lowercase answer is a! phrase is ordinary prose, not an option marker.",
+        "For a local derivation, select d after validating the variable domain.",
+        "For a local derivation, item: a denotes a coefficient rather than an option.",
     ),
 )
 def test_non_abcd_strategy_language_is_not_an_answer_map(

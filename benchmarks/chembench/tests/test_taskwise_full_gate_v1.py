@@ -396,10 +396,12 @@ def test_full_suite_rejects_existing_stream_without_resume_or_stitch(
     assert state["streams"]["full_stream_00"]["action"] == "TERMINAL_FAILURE"
 
 
-def test_all_full_entrypoints_fail_closed_without_explicit_user_authorization(
+def test_all_full_entrypoints_fail_closed_if_source_authorization_is_revoked(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(cli, "FULL4009_AUTHORIZATION", "MISSING")
+    monkeypatch.setattr(cli, "FULL4009_EXECUTION_ALLOWED", False)
     full_config = cli.CONFIG_ROOT / "online_full_stream_00_taskwise_online_v1.yaml"
     touched = {"authorization": 0, "source": 0, "runner": 0}
 
@@ -444,6 +446,11 @@ def test_all_full_entrypoints_fail_closed_without_explicit_user_authorization(
         )
 
     assert touched == {"authorization": 0, "source": 0, "runner": 0}
+
+
+def test_source_records_current_explicit_full_authorization() -> None:
+    assert cli.FULL4009_AUTHORIZATION == "GRANTED"
+    assert cli.FULL4009_EXECUTION_ALLOWED is True
 
 
 def test_full_entrypoints_recompute_go_receipt_and_never_resume() -> None:

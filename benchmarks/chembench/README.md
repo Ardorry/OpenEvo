@@ -35,8 +35,9 @@ mechanism and descriptive analysis. It uses no control evidence, cannot issue
 a paired GO/NO-GO conclusion, and writes all required
 `ONLINE_ONLY_PILOT500` / `NO_CONTROL_ARM` / `NO_CAUSAL_CONTROL_COMPARISON`
 classifications into its authority, suite state, stream markers, and final
-report. Full 4009-item execution remains independently blocked until a later
-user-authorized source change.
+report. Full 4009-item execution is now explicitly source-authorized by the
+2026-07-26 experiment handoff, but remains gated by the unchanged paired Pilot500
+GO receipt and its source-bound launch authorization.
 
 The operational checklist, fail-closed states, capacity contract, and cost
 inventory are documented in

@@ -192,17 +192,8 @@ _OPERATIONAL_IDENTIFIER_RE = re.compile(
 )
 _OPTION_TOKEN_PREFIX_RE = r"(?<![A-Za-z0-9_])"
 _OPTION_CHEMICAL_SUFFIX_RE = r"(?![-‐‑‒–—=][A-Za-z0-9])"
+_UPPER_OPTION_TOKEN_RE = rf"{_OPTION_TOKEN_PREFIX_RE}[ABCD]\b{_OPTION_CHEMICAL_SUFFIX_RE}"
 _EXPLICIT_OPTION_TOKEN_RE = rf"{_OPTION_TOKEN_PREFIX_RE}[ABCDabcd]\b{_OPTION_CHEMICAL_SUFFIX_RE}"
-_IMPLICIT_OPTION_TOKEN_RE = (
-    rf"{_OPTION_TOKEN_PREFIX_RE}(?:(?:[ABCD]|[bcd])\b"
-    rf"{_OPTION_CHEMICAL_SUFFIX_RE}|"
-    r"a(?=\s*(?:\Z|[^\w\s])))"
-)
-_BARE_OPTION_TOKEN_RE = (
-    rf"{_OPTION_TOKEN_PREFIX_RE}(?:(?:[BCD]|[bcd])\b"
-    rf"{_OPTION_CHEMICAL_SUFFIX_RE}|"
-    r"[Aa](?=\s*(?:\Z|[.,;:!?])))"
-)
 _TERMINAL_OPTION_TOKEN_RE = (
     rf"{_OPTION_TOKEN_PREFIX_RE}[ABCD]\b{_OPTION_CHEMICAL_SUFFIX_RE}"
     r"(?=\s*(?:\Z|[.,;:!?]))"
@@ -210,30 +201,30 @@ _TERMINAL_OPTION_TOKEN_RE = (
 _ANSWER_MAP_SEPARATOR_RE = r"(?:is|=|:|->|→)"
 _ANSWER_MAP_RE = re.compile(
     rf"(?i:(?:the\s+)?(?:correct\s+)?answer\s*{_ANSWER_MAP_SEPARATOR_RE})\s*"
-    rf"{_IMPLICIT_OPTION_TOKEN_RE}|"
+    rf"{_UPPER_OPTION_TOKEN_RE}|"
     rf"(?i:(?:choose|select|pick)\s+option\s*"
-    rf"(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*){_IMPLICIT_OPTION_TOKEN_RE}|"
-    rf"(?i:(?:choose|select|pick)\s+){_BARE_OPTION_TOKEN_RE}|"
+    rf"(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*){_EXPLICIT_OPTION_TOKEN_RE}|"
+    rf"(?i:(?:choose|select|pick)\s+){_TERMINAL_OPTION_TOKEN_RE}|"
     rf"(?i:(?:return|output)\s*(?:only\s+)?option\s*"
-    rf"(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*){_IMPLICIT_OPTION_TOKEN_RE}|"
+    rf"(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*){_EXPLICIT_OPTION_TOKEN_RE}|"
     rf"(?i:(?:return|output)\s*(?:only\s+)?"
     rf"(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*){_TERMINAL_OPTION_TOKEN_RE}|"
     rf"(?i:(?:final\s+)?(?:response|prediction|letter|choice)\s*"
-    rf"{_ANSWER_MAP_SEPARATOR_RE}\s*){_IMPLICIT_OPTION_TOKEN_RE}|"
-    rf"{_EXPLICIT_OPTION_TOKEN_RE}\s+"
+    rf"{_ANSWER_MAP_SEPARATOR_RE}\s*){_TERMINAL_OPTION_TOKEN_RE}|"
+    rf"{_UPPER_OPTION_TOKEN_RE}\s+"
     r"(?i:(?:is|should\s+be|must\s+be)\s+(?:the\s+)?"
     r"(?:correct|selected|chosen)(?:\s+(?:answer|choice|option))?)\b|"
     rf"(?i:\boption\s*(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*)"
-    rf"{_IMPLICIT_OPTION_TOKEN_RE}|"
+    rf"{_EXPLICIT_OPTION_TOKEN_RE}|"
     r"(?i:(?:question|item|index)"
     r"(?:\s+(?:\d+|uid|[A-Za-z0-9_.-]{6,}))?|uid"
     r"(?:\s+[A-Za-z0-9_.:-]{6,})?)\s*"
-    rf"(?:->|→|=|:)\s*{_IMPLICIT_OPTION_TOKEN_RE}|"
+    rf"(?:->|→|=|:)\s*{_UPPER_OPTION_TOKEN_RE}|"
     r"(?i:(?:question|item|index)"
     r"(?:\s+(?:\d+|uid|[A-Za-z0-9_.-]{6,}))?|uid"
     r"(?:\s+[A-Za-z0-9_.:-]{6,})?)\s+"
-    rf"maps?\s+to\s+{_IMPLICIT_OPTION_TOKEN_RE}|"
-    rf"{_EXPLICIT_OPTION_TOKEN_RE}\s+"
+    rf"maps?\s+to\s+{_UPPER_OPTION_TOKEN_RE}|"
+    rf"{_UPPER_OPTION_TOKEN_RE}\s+"
     r"(?i:(?:is\s+)?(?:the\s+)?(?:correct\s+)?answer)\b",
 )
 _ANSWER_MAP_WRAPPER_RE = re.compile(r"""[*_`~()[\]{}"'“”‘’]""")
@@ -278,6 +269,46 @@ class _FrozenModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, validate_default=True)
 
 
+class TaskwiseValidatorFindingEvidenceV1(_FrozenModel):
+    """Content-free measurements for one deterministic validator finding."""
+
+    schema_version: Literal["chembench4k_taskwise_validator_finding_evidence_v1"] = (
+        "chembench4k_taskwise_validator_finding_evidence_v1"
+    )
+    finding_code: str
+    source_kind: Literal[
+        "artifact",
+        "candidate",
+        "completion",
+        "lineage",
+        "option",
+        "question",
+        "strict",
+        "uid",
+    ]
+    token_count: int = Field(ge=0)
+    char_count: int = Field(ge=0)
+    left_token_boundary: bool
+    right_token_boundary: bool
+    source_ratio_ppm: int = Field(ge=0, le=1_000_000)
+    candidate_ratio_ppm: int = Field(ge=0, le=1_000_000)
+    segment_sha256: str
+
+    @field_validator("finding_code")
+    @classmethod
+    def _finding(cls, value: str) -> str:
+        if re.fullmatch(r"[a-z][a-z0-9_]{0,95}", value) is None:
+            raise ValueError("validator finding code is outside the closed vocabulary")
+        return value
+
+    @field_validator("segment_sha256")
+    @classmethod
+    def _segment_digest(cls, value: str) -> str:
+        if _SHA256_RE.fullmatch(value) is None:
+            raise ValueError("validator segment digest must be SHA-256")
+        return value
+
+
 class TaskwiseCoreFailureReceiptV1(_FrozenModel):
     """Private content-free evidence for a failed Core update stage."""
 
@@ -310,6 +341,7 @@ class TaskwiseCoreFailureReceiptV1(_FrozenModel):
     validation_receipt_sha256: str | None
     core_artifact_manifest_sha256: str | None
     context_resolution_digest: str | None
+    validator_finding_evidence: tuple[TaskwiseValidatorFindingEvidenceV1, ...] = ()
 
     @field_validator(
         "trajectory_digest",
@@ -369,6 +401,18 @@ class TaskwiseCoreFailureReceiptV1(_FrozenModel):
             raise ValueError("Core failure finding is invalid for its stage")
         if self.errno is not None and self.errno < 0:
             raise ValueError("Core failure errno must be non-negative")
+        evidence_keys = tuple(
+            (
+                item.finding_code,
+                item.source_kind,
+                item.segment_sha256,
+            )
+            for item in self.validator_finding_evidence
+        )
+        if evidence_keys != tuple(sorted(set(evidence_keys))):
+            raise ValueError("validator finding evidence must be sorted and unique")
+        if self.stage != "ARTIFACT_VALIDATION" and self.validator_finding_evidence:
+            raise ValueError("validator finding evidence is invalid outside validation")
         return self
 
 
@@ -898,6 +942,16 @@ ReflectorBoundaryFactoryV1 = Callable[
 ]
 
 
+@dataclass(frozen=True, slots=True)
+class _ValidatorSpanMatchV1:
+    segment: str
+    token_count: int
+    left_token_boundary: bool
+    right_token_boundary: bool
+    source_ratio: float
+    candidate_ratio: float
+
+
 class TaskwiseTextMemoryValidatorV1:
     """Validate one Core candidate against cumulative taskwise leakage inputs."""
 
@@ -905,6 +959,7 @@ class TaskwiseTextMemoryValidatorV1:
         "_expected_lineage",
         "_expected_record_count",
         "_forbidden_literals",
+        "_finding_evidence",
         "_memory_limits",
     )
 
@@ -921,7 +976,14 @@ class TaskwiseTextMemoryValidatorV1:
         self._expected_lineage = json.loads(_canonical_json(expected_lineage))
         self._expected_record_count = expected_record_count
         self._forbidden_literals = forbidden_literals
+        self._finding_evidence: tuple[TaskwiseValidatorFindingEvidenceV1, ...] = ()
         self._memory_limits = memory_limits
+
+    @property
+    def finding_evidence(self) -> tuple[TaskwiseValidatorFindingEvidenceV1, ...]:
+        """Return deterministic content-free evidence from the latest validation."""
+
+        return self._finding_evidence
 
     def validate(
         self,
@@ -936,7 +998,9 @@ class TaskwiseTextMemoryValidatorV1:
         if type(payload) is not bytes or not isinstance(lineage, dict):
             raise TypeError("validator inputs use invalid types")
         findings: set[str] = set()
-        if _sha256_bytes(payload) != payload_sha256:
+        evidence: list[TaskwiseValidatorFindingEvidenceV1] = []
+        actual_payload_sha256 = _sha256_bytes(payload)
+        if actual_payload_sha256 != payload_sha256:
             findings.add("payload_digest_mismatch")
         if (
             artifact.type is not ArtifactType.TEXT_MEMORY
@@ -979,6 +1043,13 @@ class TaskwiseTextMemoryValidatorV1:
                 stripped,
             ):
                 findings.add("leak_forbidden_literal")
+                evidence.append(
+                    _validator_finding_evidence(
+                        finding_code="leak_forbidden_literal",
+                        source_kind=source_kind,
+                        match=_literal_match_evidence(stripped, text),
+                    )
+                )
             normalized_literal = _normalize(stripped)
             if _full_literal_scan_allowed(
                 source_kind,
@@ -988,12 +1059,30 @@ class TaskwiseTextMemoryValidatorV1:
                 normalized_literal,
             ):
                 findings.add("leak_normalized_literal")
-            if _source_kind_ngram_overlap(
+                evidence.append(
+                    _validator_finding_evidence(
+                        finding_code="leak_normalized_literal",
+                        source_kind=source_kind,
+                        match=_literal_match_evidence(
+                            normalized_literal,
+                            normalized_candidate,
+                        ),
+                    )
+                )
+            ngram_match = _source_kind_ngram_match(
                 source_kind,
                 normalized_literal,
                 normalized_candidate,
-            ):
+            )
+            if ngram_match is not None:
                 findings.add("leak_literal_ngram")
+                evidence.append(
+                    _validator_finding_evidence(
+                        finding_code="leak_literal_ngram",
+                        source_kind=source_kind,
+                        match=ngram_match,
+                    )
+                )
         security_scan_text = _security_scan_text(text)
         if _contains_path_or_benchmark_marker(security_scan_text):
             findings.add("leak_path_or_benchmark_marker")
@@ -1002,6 +1091,27 @@ class TaskwiseTextMemoryValidatorV1:
         if _contains_answer_map(security_scan_text):
             findings.add("leak_answer_map")
         finding_codes = tuple(sorted(findings))
+        evidence_by_code: dict[str, TaskwiseValidatorFindingEvidenceV1] = {}
+        for item in sorted(
+            evidence,
+            key=lambda value: (
+                value.finding_code,
+                value.source_kind,
+                value.segment_sha256,
+            ),
+        ):
+            evidence_by_code.setdefault(item.finding_code, item)
+        for finding_code in finding_codes:
+            evidence_by_code.setdefault(
+                finding_code,
+                _artifact_finding_evidence(
+                    finding_code=finding_code,
+                    payload_sha256=actual_payload_sha256,
+                    utf8_byte_count=len(payload),
+                    estimated_token_count=inspection.estimated_token_count,
+                ),
+            )
+        self._finding_evidence = tuple(evidence_by_code[code] for code in sorted(evidence_by_code))
         return CoreArtifactValidationReceiptV2(
             validator_id="chembench4k_taskwise_text_memory_validator_v1",
             artifact_id=artifact.artifact_id,
@@ -2036,6 +2146,7 @@ class TaskwiseCoreEvolutionBridgeV1:
             "validation_receipt_sha256": None,
             "core_artifact_manifest_sha256": None,
             "context_resolution_digest": None,
+            "validator_finding_evidence": (),
         }
         try:
             if artifact_id is None or reflector_input_digest is None:
@@ -2107,6 +2218,7 @@ class TaskwiseCoreEvolutionBridgeV1:
                 lineage=lineage,
             )
             failure_metadata["validation_receipt_sha256"] = receipt.digest
+            failure_metadata["validator_finding_evidence"] = validator.finding_evidence
             if not receipt.passed or receipt.finding_codes:
                 raise TaskwiseCoreEvolutionError("TASKWISE_ARTIFACT_VALIDATION_FAILED")
         except Exception as exc:
@@ -2230,6 +2342,7 @@ class TaskwiseCoreEvolutionBridgeV1:
         validation_receipt_sha256: str | None,
         core_artifact_manifest_sha256: str | None,
         context_resolution_digest: str | None,
+        validator_finding_evidence: tuple[TaskwiseValidatorFindingEvidenceV1, ...] = (),
     ) -> NoReturn:
         """Persist closed stage evidence and re-raise a content-free error."""
 
@@ -2267,6 +2380,7 @@ class TaskwiseCoreEvolutionBridgeV1:
             validation_receipt_sha256=validation_receipt_sha256,
             core_artifact_manifest_sha256=core_artifact_manifest_sha256,
             context_resolution_digest=context_resolution_digest,
+            validator_finding_evidence=validator_finding_evidence,
         )
         encoded = (_canonical_json(receipt.model_dump(mode="json")) + "\n").encode("utf-8")
         basename = f"taskwise_core_failure_{canonical_digest(receipt)[:32]}.json"
@@ -2814,11 +2928,21 @@ def _source_kind_ngram_overlap(
 ) -> bool:
     """Use stricter semantic spans for prompts than for explicit controller inputs."""
 
+    return _source_kind_ngram_match(source_kind, source, candidate) is not None
+
+
+def _source_kind_ngram_match(
+    source_kind: str,
+    source: str,
+    candidate: str,
+) -> _ValidatorSpanMatchV1 | None:
+    """Return the first deterministic complete-token span allowed for one source kind."""
+
     if source_kind in {"strict", "uid"}:
-        return _sequential_ngram_overlap(source, candidate)
+        return _sequential_ngram_match(source, candidate)
     if source_kind in {"question", "option"}:
         minimum_source_ratio = 0.30 if source_kind == "question" else 0.40
-        return _sequential_ngram_overlap(
+        return _sequential_ngram_match(
             source,
             candidate,
             minimum_characters=32,
@@ -2828,7 +2952,7 @@ def _source_kind_ngram_overlap(
             minimum_candidate_ratio=0.002,
         )
     if source_kind == "completion":
-        return _sequential_ngram_overlap(
+        return _sequential_ngram_match(
             source,
             candidate,
             minimum_characters=64,
@@ -2869,15 +2993,21 @@ def _security_scan_text(value: str) -> str:
 def _contains_bounded_literal(text: str, literal: str) -> bool:
     """Match an exact literal without accepting a prefix inside a longer token."""
 
+    return _bounded_literal_span(text, literal) is not None
+
+
+def _bounded_literal_span(text: str, literal: str) -> tuple[int, int] | None:
+    """Return the first case-folded match whose two token boundaries are complete."""
+
     if type(text) is not str or type(literal) is not str or not literal:
-        return False
+        return None
     candidate = text.casefold()
     needle = literal.casefold()
     offset = 0
     while True:
         index = candidate.find(needle, offset)
         if index < 0:
-            return False
+            return None
         end = index + len(needle)
         starts_in_token = (
             index > 0
@@ -2890,8 +3020,68 @@ def _contains_bounded_literal(text: str, literal: str) -> bool:
             and _literal_token_character(candidate[end])
         )
         if not starts_in_token and not ends_in_token:
-            return True
+            return index, end
         offset = index + 1
+
+
+def _literal_match_evidence(source: str, candidate: str) -> _ValidatorSpanMatchV1:
+    """Measure a previously accepted complete bounded literal without exposing it."""
+
+    if _bounded_literal_span(candidate, source) is None:
+        raise ValueError("literal evidence requires a bounded match")
+    return _ValidatorSpanMatchV1(
+        segment=source,
+        token_count=len(_normalized_tokens(_normalize(source))),
+        left_token_boundary=True,
+        right_token_boundary=True,
+        source_ratio=1.0,
+        candidate_ratio=len(source) / max(1, len(candidate)),
+    )
+
+
+def _ratio_ppm(value: float) -> int:
+    return min(1_000_000, max(0, round(value * 1_000_000)))
+
+
+def _validator_finding_evidence(
+    *,
+    finding_code: str,
+    source_kind: str,
+    match: _ValidatorSpanMatchV1,
+) -> TaskwiseValidatorFindingEvidenceV1:
+    return TaskwiseValidatorFindingEvidenceV1(
+        finding_code=finding_code,
+        source_kind=source_kind,
+        token_count=match.token_count,
+        char_count=len(match.segment),
+        left_token_boundary=match.left_token_boundary,
+        right_token_boundary=match.right_token_boundary,
+        source_ratio_ppm=_ratio_ppm(match.source_ratio),
+        candidate_ratio_ppm=_ratio_ppm(match.candidate_ratio),
+        segment_sha256=_sha256_bytes(match.segment.encode("utf-8")),
+    )
+
+
+def _artifact_finding_evidence(
+    *,
+    finding_code: str,
+    payload_sha256: str,
+    utf8_byte_count: int,
+    estimated_token_count: int,
+) -> TaskwiseValidatorFindingEvidenceV1:
+    """Bind non-literal findings to the whole candidate without recording content."""
+
+    return TaskwiseValidatorFindingEvidenceV1(
+        finding_code=finding_code,
+        source_kind="artifact",
+        token_count=estimated_token_count,
+        char_count=utf8_byte_count,
+        left_token_boundary=True,
+        right_token_boundary=True,
+        source_ratio_ppm=1_000_000,
+        candidate_ratio_ppm=1_000_000,
+        segment_sha256=payload_sha256,
+    )
 
 
 def _literal_token_character(character: str) -> bool:
@@ -2951,6 +3141,32 @@ def _sequential_ngram_overlap(
 ) -> bool:
     """Require a complete-token contiguous overlap under a deterministic policy."""
 
+    return (
+        _sequential_ngram_match(
+            source,
+            candidate,
+            minimum_characters=minimum_characters,
+            minimum_tokens=minimum_tokens,
+            long_token_characters=long_token_characters,
+            minimum_source_ratio=minimum_source_ratio,
+            minimum_candidate_ratio=minimum_candidate_ratio,
+        )
+        is not None
+    )
+
+
+def _sequential_ngram_match(
+    source: str,
+    candidate: str,
+    *,
+    minimum_characters: int = _NGRAM_CONTIGUOUS_WIDTH,
+    minimum_tokens: int = 1,
+    long_token_characters: int = _NGRAM_CONTIGUOUS_WIDTH,
+    minimum_source_ratio: float = 0.0,
+    minimum_candidate_ratio: float = 0.0,
+) -> _ValidatorSpanMatchV1 | None:
+    """Return deterministic measurements for a complete-token contiguous overlap."""
+
     if type(source) is not str or type(candidate) is not str:
         raise TypeError("ngram scan inputs must be strings")
     if (
@@ -2972,7 +3188,7 @@ def _sequential_ngram_overlap(
     ):
         raise ValueError("ngram policy is invalid")
     if len(source) < minimum_characters:
-        return False
+        return None
     tokens = _unicode_token_spans(source)
     required_span_characters = max(
         minimum_characters,
@@ -2993,7 +3209,14 @@ def _sequential_ngram_overlap(
             and ratios_allow(long_token)
             and _contains_bounded_literal(candidate, long_token)
         ):
-            return True
+            return _ValidatorSpanMatchV1(
+                segment=long_token,
+                token_count=1,
+                left_token_boundary=True,
+                right_token_boundary=True,
+                source_ratio=len(long_token) / len(source),
+                candidate_ratio=len(long_token) / max(1, len(candidate)),
+            )
         required_end_index = start_index + minimum_tokens - 1
         for end_index in range(start_index, len(tokens)):
             if end_index < required_end_index:
@@ -3005,9 +3228,16 @@ def _sequential_ngram_overlap(
                 candidate,
                 token_aligned_span,
             ):
-                return True
+                return _ValidatorSpanMatchV1(
+                    segment=token_aligned_span,
+                    token_count=end_index - start_index + 1,
+                    left_token_boundary=True,
+                    right_token_boundary=True,
+                    source_ratio=len(token_aligned_span) / len(source),
+                    candidate_ratio=len(token_aligned_span) / max(1, len(candidate)),
+                )
             break
-    return False
+    return None
 
 
 def _canonical_json(value: Any) -> str:
@@ -3043,4 +3273,5 @@ __all__ = [
     "TaskwiseCoreUpdateRequestV1",
     "TaskwiseCoreUpdateResultV1",
     "TaskwiseTextMemoryValidatorV1",
+    "TaskwiseValidatorFindingEvidenceV1",
 ]

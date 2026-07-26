@@ -77,6 +77,7 @@ class PackageBoundaryTests(unittest.TestCase):
             "taskwise_canary_receipt_v1.py",
             "taskwise_config_v1.py",
             "taskwise_context_binding_v1.py",
+            "taskwise_control_compatibility_v1.py",
             "taskwise_core_evolution_v1.py",
             "taskwise_feedback_v1.py",
             "taskwise_generation_v1.py",

@@ -4,6 +4,8 @@ import hashlib
 from functools import lru_cache
 from pathlib import Path
 
+import pytest
+
 from openevo.evolution.framework import canonical_digest
 from openevo.evolution.models import ArtifactResponse
 
@@ -100,11 +102,41 @@ def test_answer_mapping_is_rejected() -> None:
     assert "LEAK_ANSWER_MAP" in receipt.finding_codes
 
 
+@pytest.mark.parametrize(
+    "mapping",
+    (
+        "Choose option: D.",
+        "pick option c.",
+        "question 17 -> B.",
+        "Return A.",
+    ),
+)
+def test_explicit_answer_mapping_forms_are_rejected(mapping: str) -> None:
+    receipt = _validate(VALID_MEMORY + f"\n{mapping}\n")
+    assert receipt.passed is False
+    assert "LEAK_ANSWER_MAP" in receipt.finding_codes
+
+
 def test_natural_language_article_is_not_an_answer_mapping() -> None:
     receipt = _validate(
         VALID_MEMORY
         + "\nChoose a reagent, then ensure the final response is a concise strategy.\n"
     )
+    assert receipt.passed is True
+    assert receipt.finding_codes == ()
+
+
+@pytest.mark.parametrize(
+    "strategy",
+    (
+        "The answer is b only as a symbolic variable in this strategy.",
+        "Select d after validating the local variable domain.",
+        "The strategy should avoid spurious suffix c detection.",
+        "Use a robust path and validate the source before reasoning.",
+    ),
+)
+def test_lowercase_strategy_language_is_not_an_answer_mapping(strategy: str) -> None:
+    receipt = _validate(VALID_MEMORY + f"\n{strategy}\n")
     assert receipt.passed is True
     assert receipt.finding_codes == ()
 

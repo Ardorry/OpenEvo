@@ -39,16 +39,8 @@ _POSIX_ABSOLUTE_PATH_RE = re.compile(
 _POSIX_PATH_OPENING_BOUNDARY = frozenset("\"'([{:=<")
 _OPTION_TOKEN_PREFIX_RE = r"(?<![A-Za-z0-9_])"
 _OPTION_CHEMICAL_SUFFIX_RE = r"(?![-‐‑‒–—=][A-Za-z0-9])"
-_IMPLICIT_OPTION_TOKEN_RE = (
-    rf"{_OPTION_TOKEN_PREFIX_RE}(?:(?:[ABCD]|[bcd])\b"
-    rf"{_OPTION_CHEMICAL_SUFFIX_RE}|"
-    r"a(?=\s*(?:\Z|[^\w\s])))"
-)
-_BARE_OPTION_TOKEN_RE = (
-    rf"{_OPTION_TOKEN_PREFIX_RE}(?:(?:[BCD]|[bcd])\b"
-    rf"{_OPTION_CHEMICAL_SUFFIX_RE}|"
-    r"[Aa](?=\s*(?:\Z|[.,;:!?])))"
-)
+_UPPER_OPTION_TOKEN_RE = rf"{_OPTION_TOKEN_PREFIX_RE}[ABCD]\b{_OPTION_CHEMICAL_SUFFIX_RE}"
+_EXPLICIT_OPTION_TOKEN_RE = rf"{_OPTION_TOKEN_PREFIX_RE}[ABCDabcd]\b{_OPTION_CHEMICAL_SUFFIX_RE}"
 _TERMINAL_OPTION_TOKEN_RE = (
     rf"{_OPTION_TOKEN_PREFIX_RE}[ABCD]\b{_OPTION_CHEMICAL_SUFFIX_RE}"
     r"(?=\s*(?:\Z|[.,;:!?]))"
@@ -56,26 +48,26 @@ _TERMINAL_OPTION_TOKEN_RE = (
 _ANSWER_MAP_SEPARATOR_RE = r"(?:is|=|:|->|→)"
 _ANSWER_MAP = re.compile(
     rf"(?i:(?:the\s+)?(?:correct\s+)?answer\s*{_ANSWER_MAP_SEPARATOR_RE})\s*"
-    rf"{_IMPLICIT_OPTION_TOKEN_RE}|"
+    rf"{_UPPER_OPTION_TOKEN_RE}|"
     rf"(?i:(?:choose|select|pick)\s+option\s*"
-    rf"(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*){_IMPLICIT_OPTION_TOKEN_RE}|"
-    rf"(?i:(?:choose|select|pick)\s+){_BARE_OPTION_TOKEN_RE}|"
+    rf"(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*){_EXPLICIT_OPTION_TOKEN_RE}|"
+    rf"(?i:(?:choose|select|pick)\s+){_TERMINAL_OPTION_TOKEN_RE}|"
     rf"(?i:(?:return|output)\s*(?:only\s+)?option\s*"
-    rf"(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*){_IMPLICIT_OPTION_TOKEN_RE}|"
+    rf"(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*){_EXPLICIT_OPTION_TOKEN_RE}|"
     rf"(?i:(?:return|output)\s*(?:only\s+)?"
     rf"(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*){_TERMINAL_OPTION_TOKEN_RE}|"
     rf"(?i:(?:final\s+)?(?:response|prediction|letter|choice)\s*"
-    rf"{_ANSWER_MAP_SEPARATOR_RE}\s*){_IMPLICIT_OPTION_TOKEN_RE}|"
+    rf"{_ANSWER_MAP_SEPARATOR_RE}\s*){_TERMINAL_OPTION_TOKEN_RE}|"
     rf"(?i:\boption\s*(?:{_ANSWER_MAP_SEPARATOR_RE})?\s*)"
-    rf"{_IMPLICIT_OPTION_TOKEN_RE}|"
+    rf"{_EXPLICIT_OPTION_TOKEN_RE}|"
     r"(?i:(?:question|item|index)"
     r"(?:\s+(?:\d+|uid|[A-Za-z0-9_.-]{6,}))?|uid"
     r"(?:\s+[A-Za-z0-9_.:-]{6,})?)\s*"
-    rf"(?:->|→|=|:)\s*{_IMPLICIT_OPTION_TOKEN_RE}|"
+    rf"(?:->|→|=|:)\s*{_UPPER_OPTION_TOKEN_RE}|"
     r"(?i:(?:question|item|index)"
     r"(?:\s+(?:\d+|uid|[A-Za-z0-9_.-]{6,}))?|uid"
     r"(?:\s+[A-Za-z0-9_.:-]{6,})?)\s+"
-    rf"maps?\s+to\s+{_IMPLICIT_OPTION_TOKEN_RE}",
+    rf"maps?\s+to\s+{_UPPER_OPTION_TOKEN_RE}",
 )
 _ANSWER_MAP_WRAPPER_RE = re.compile(r"""[*_`~()[\]{}"'“”‘’]""")
 

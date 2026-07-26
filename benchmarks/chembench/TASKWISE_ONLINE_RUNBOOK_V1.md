@@ -35,9 +35,10 @@ It never reads a control run or a paired receipt. Its final report contains
 online Round 0/1/2, recovery, regression, stream-position, and memory-growth
 descriptives only.
 
-All 4009-item entry points are separately hard-gated. In this source version
-they fail closed with `USER_FULL_RUN_AUTHORIZATION_MISSING`; neither a canary
-receipt nor a completed Pilot500 grants full-run authority.
+All 4009-item entry points remain separately hard-gated. This source version
+records the explicit 2026-07-26 user authorization, but launch still requires
+the frozen paired Pilot500 GO receipt and its exact source-bound Full authority;
+a canary receipt alone never grants full-run authority.
 
 ## Fixed per-task treatment
 
