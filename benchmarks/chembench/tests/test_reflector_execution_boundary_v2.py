@@ -3,24 +3,26 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
 import shlex
 import shutil
 import stat
 import subprocess
 import time
+from pathlib import Path
 
 import pytest
 
 from openevo_chembench.reflector_execution_boundary_v2 import (
+    SUPERVISED_TRAIN_SOURCE_SPLIT,
+    TASKWISE_SOURCE_SPLIT,
     ReflectorBoundaryError,
     ReflectorBoundaryStatusV2,
     ReflectorExecutionBoundaryV2,
     ReflectorExecutionReceiptV2,
-    TASKWISE_SOURCE_SPLIT,
     _bubblewrap_base_command,
     _create_layout,
     _materialize_reflector_transport_environment,
+    _normalize_supervised_memory_sections,
     _project_reflector_prompt,
     _reflector_hardening_arguments,
     _replace_upstream_paths,
@@ -354,6 +356,141 @@ def test_supervised_prompt_requires_one_complete_memory_and_unique_headings() ->
     assert "no duplicate heading" in projected
     assert "four or more complete tokens" in projected
     assert "retain only the abstract chemistry principle" in projected
+
+
+def test_supervised_section_normalizer_merges_only_duplicate_exact_sections() -> None:
+    duplicated = """# Category Memory: Yield_Prediction
+
+## Confirmed Principles
+- None.
+## Provisional Principles
+- first body
+## Provisional Principles
+- second body
+## Common Failure Modes
+- None.
+## Option Elimination Checks
+- None.
+## Retired Or Contradicted
+- None.
+## Output Discipline
+- one letter
+## Do
+- estimate
+## Avoid
+- guessing
+## Validate
+- bounds
+## When Applicable
+- yield
+## Retired Or Superseded
+- None.
+"""
+
+    normalized, applied = _normalize_supervised_memory_sections(duplicated)
+
+    assert applied is True
+    assert normalized.count("## Provisional Principles\n") == 1
+    assert "- first body" in normalized
+    assert "- second body" in normalized
+    assert sum(line.startswith("## ") for line in normalized.splitlines()) == 11
+
+    reordered = duplicated.replace(
+        "## Confirmed Principles\n- None.\n## Provisional Principles",
+        "## Provisional Principles\n- None.\n## Confirmed Principles",
+        1,
+    )
+    unchanged, applied = _normalize_supervised_memory_sections(reordered)
+    assert unchanged == reordered
+    assert applied is False
+
+
+def test_supervised_boundary_records_and_binds_section_normalization(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "private-supervised.jsonl"
+    records = [
+        {
+            "uid": hashlib.sha256(b"supervised-part").hexdigest(),
+            "source_split": SUPERVISED_TRAIN_SOURCE_SPLIT,
+            "content": "private packet part",
+        }
+    ]
+    source.write_text(
+        json.dumps(records[0], sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    source.chmod(0o600)
+    auth = tmp_path / "auth.json"
+    auth.write_text("{}\n", encoding="utf-8")
+    auth.chmod(0o600)
+    memory = """# Category Memory: Yield_Prediction
+## Confirmed Principles
+- None.
+## Provisional Principles
+- first body
+## Provisional Principles
+- second body
+## Common Failure Modes
+- None.
+## Option Elimination Checks
+- None.
+## Retired Or Contradicted
+- None.
+## Output Discipline
+- one letter
+## Do
+- estimate
+## Avoid
+- guessing
+## Validate
+- bounds
+## When Applicable
+- yield
+## Retired Or Superseded
+- None.
+"""
+    fake = tmp_path / "fake-codex"
+    _fake_codex(
+        fake,
+        {"type": "item.completed", "item": {"type": "agent_message", "text": memory}},
+    )
+    temporary_parent = tmp_path / "temporary"
+    temporary_parent.mkdir(mode=0o700)
+    boundary = ReflectorExecutionBoundaryV2(
+        dev_artifact_path=source,
+        expected_records_sha256=_canonical_sha256(records),
+        expected_record_count=1,
+        expected_source_split=SUPERVISED_TRAIN_SOURCE_SPLIT,
+        private_audit_root=tmp_path / "audit",
+        real_codex_binary=fake,
+        auth_source=auth,
+        timeout_seconds=30,
+        temporary_parent=temporary_parent,
+        config_probe_runner=_passing_policy_probe,
+    )
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+
+    with boundary.activate() as activation:
+        completed = subprocess.run(
+            _upstream_args(upstream),
+            input="private supervised prompt",
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+
+    assert completed.returncode == 0
+    receipt = activation.require_receipt()
+    output = (upstream / "last-message.md").read_text(encoding="utf-8")
+    assert receipt.output_normalization_id == "supervised_memory_section_merge_v1"
+    assert receipt.output_normalization_applied is True
+    assert receipt.source_last_message_sha256 != receipt.last_message_sha256
+    assert receipt.last_message_sha256 == hashlib.sha256(output.encode()).hexdigest()
+    assert output.count("## Provisional Principles\n") == 1
+    assert "- first body" in output and "- second body" in output
 
 
 def test_reflector_preflight_fails_closed_when_config_parser_rejects(
@@ -907,8 +1044,11 @@ def test_legacy_fix1_v2_receipt_remains_readable() -> None:
         "stderr_sha256",
         "stderr_tail_codes",
         "projected_prompt_sha256",
+        "source_last_message_sha256",
+        "output_normalization_id",
+        "output_normalization_applied",
     ):
-        legacy.pop(key)
+        legacy.pop(key, None)
 
     loaded = ReflectorExecutionReceiptV2.from_payload(legacy)
 

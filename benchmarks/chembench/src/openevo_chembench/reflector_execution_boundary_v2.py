@@ -43,6 +43,10 @@ from openevo_chembench.local_codex_executor import (
     _sanitized_model_transport_environment,
     _terminate_invocation_processes,
 )
+from openevo_chembench.supervised_transfer_v1.memory import (
+    CORE_EXPEL_REQUIRED_SECTIONS,
+    SUPERVISED_MEMORY_REQUIRED_SECTIONS,
+)
 
 PROTOCOL_ID = "chembench4k_frozen_generalization_v2"
 TASKWISE_PROTOCOL_ID = "taskwise_online_evolution_v1"
@@ -66,7 +70,8 @@ TOOL_VIOLATION_STATUS = "REFLECTOR_SECURITY_TOOL_USE_VIOLATION"
 _CONFIG_SCHEMA = "chembench4k_reflector_wrapper_config_v2"
 _RECEIPT_SCHEMA_V2 = "chembench4k_reflector_execution_receipt_v2"
 _RECEIPT_SCHEMA_V3 = "chembench4k_reflector_execution_receipt_v3"
-_RECEIPT_SCHEMA = "chembench4k_reflector_execution_receipt_v4"
+_RECEIPT_SCHEMA_V4 = "chembench4k_reflector_execution_receipt_v4"
+_RECEIPT_SCHEMA = "chembench4k_reflector_execution_receipt_v5"
 _ROOT_PREFIX = "openevo-chembench-reflector-v2-"
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _MAX_EVENT_BYTES = 16 * 1024 * 1024
@@ -135,6 +140,13 @@ _TASKWISE_OPERATIONAL_LINE_RE = re.compile(
     re.IGNORECASE | re.ASCII,
 )
 _TASKWISE_EXACT_H1 = "# General Chemistry Memory"
+_SUPERVISED_SECTION_NORMALIZATION_ID = "supervised_memory_section_merge_v1"
+_NO_OUTPUT_NORMALIZATION_ID = "none"
+_SUPERVISED_EXACT_SECTIONS = (
+    *SUPERVISED_MEMORY_REQUIRED_SECTIONS,
+    *CORE_EXPEL_REQUIRED_SECTIONS,
+)
+_H2_LINE_RE = re.compile(r"^##\s+(.+?)\s*$", re.ASCII)
 _TASKWISE_PROMPT_CONTRACT = (
     "Taskwise benchmark output requirements:\n"
     f"- The first non-empty line must be exactly `{_TASKWISE_EXACT_H1}`.\n"
@@ -223,14 +235,24 @@ class ReflectorExecutionReceiptV2:
     protocol_id: str = PROTOCOL_ID
     source_split: str = "dev"
     projected_prompt_sha256: str | None = None
+    source_last_message_sha256: str | None = None
+    output_normalization_id: str = _NO_OUTPUT_NORMALIZATION_ID
+    output_normalization_applied: bool = False
 
     @property
     def digest(self) -> str:
         return _canonical_sha256(self.to_payload())
 
     def to_payload(self) -> dict[str, Any]:
-        return {
-            "schema_version": _RECEIPT_SCHEMA,
+        source_last_message_sha256 = self.source_last_message_sha256
+        if source_last_message_sha256 is None and not self.output_normalization_applied:
+            source_last_message_sha256 = self.last_message_sha256
+        payload = {
+            "schema_version": (
+                _RECEIPT_SCHEMA
+                if self.source_split == SUPERVISED_TRAIN_SOURCE_SPLIT
+                else _RECEIPT_SCHEMA_V4
+            ),
             "protocol_id": self.protocol_id,
             "invocation_id": self.invocation_id,
             "status": self.status.value,
@@ -254,6 +276,15 @@ class ReflectorExecutionReceiptV2:
             "source_split": self.source_split,
             "projected_prompt_sha256": self.projected_prompt_sha256,
         }
+        if self.source_split == SUPERVISED_TRAIN_SOURCE_SPLIT:
+            payload.update(
+                {
+                    "source_last_message_sha256": source_last_message_sha256,
+                    "output_normalization_id": self.output_normalization_id,
+                    "output_normalization_applied": self.output_normalization_applied,
+                }
+            )
+        return payload
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> ReflectorExecutionReceiptV2:
@@ -283,11 +314,17 @@ class ReflectorExecutionReceiptV2:
             "stderr_sha256",
             "stderr_tail_codes",
         }
-        current_expected = v3_expected | {"projected_prompt_sha256"}
+        v4_expected = v3_expected | {"projected_prompt_sha256"}
+        current_expected = v4_expected | {
+            "source_last_message_sha256",
+            "output_normalization_id",
+            "output_normalization_applied",
+        }
         schema_version = payload.get("schema_version")
         if not (
             (schema_version == _RECEIPT_SCHEMA_V2 and set(payload) == legacy_expected)
             or (schema_version == _RECEIPT_SCHEMA_V3 and set(payload) == v3_expected)
+            or (schema_version == _RECEIPT_SCHEMA_V4 and set(payload) == v4_expected)
             or (schema_version == _RECEIPT_SCHEMA and set(payload) == current_expected)
         ):
             raise ReflectorBoundaryError("REFLECTOR_RECEIPT_SCHEMA_INVALID")
@@ -319,7 +356,11 @@ class ReflectorExecutionReceiptV2:
             type(last_digest) is not str or _SHA256_RE.fullmatch(last_digest) is None
         ):
             raise ReflectorBoundaryError("REFLECTOR_RECEIPT_SCHEMA_INVALID")
-        if schema_version in {_RECEIPT_SCHEMA_V3, _RECEIPT_SCHEMA}:
+        if schema_version in {
+            _RECEIPT_SCHEMA_V3,
+            _RECEIPT_SCHEMA_V4,
+            _RECEIPT_SCHEMA,
+        }:
             codex_returncode = payload["codex_returncode"]
             source_split = payload["source_split"]
             stderr_sha256 = payload["stderr_sha256"]
@@ -349,13 +390,52 @@ class ReflectorExecutionReceiptV2:
             stderr_sha256 = hashlib.sha256(b"").hexdigest()
             stderr_tail_codes = []
         projected_prompt_sha256 = (
-            payload["projected_prompt_sha256"] if schema_version == _RECEIPT_SCHEMA else None
+            payload["projected_prompt_sha256"]
+            if schema_version in {_RECEIPT_SCHEMA_V4, _RECEIPT_SCHEMA}
+            else None
         )
         if projected_prompt_sha256 is not None and (
             type(projected_prompt_sha256) is not str
             or _SHA256_RE.fullmatch(projected_prompt_sha256) is None
         ):
             raise ReflectorBoundaryError("REFLECTOR_RECEIPT_SCHEMA_INVALID")
+        if schema_version == _RECEIPT_SCHEMA:
+            source_last_digest = payload["source_last_message_sha256"]
+            normalization_id = payload["output_normalization_id"]
+            normalization_applied = payload["output_normalization_applied"]
+            if (
+                (
+                    source_last_digest is not None
+                    and (
+                        type(source_last_digest) is not str
+                        or _SHA256_RE.fullmatch(source_last_digest) is None
+                    )
+                )
+                or normalization_id
+                not in {
+                    _NO_OUTPUT_NORMALIZATION_ID,
+                    _SUPERVISED_SECTION_NORMALIZATION_ID,
+                }
+                or type(normalization_applied) is not bool
+                or (
+                    normalization_id == _NO_OUTPUT_NORMALIZATION_ID
+                    and normalization_applied
+                )
+                or (
+                    normalization_id == _SUPERVISED_SECTION_NORMALIZATION_ID
+                    and source_split != SUPERVISED_TRAIN_SOURCE_SPLIT
+                )
+                or (source_last_digest is None) != (last_digest is None)
+                or (
+                    not normalization_applied
+                    and source_last_digest != last_digest
+                )
+            ):
+                raise ReflectorBoundaryError("REFLECTOR_RECEIPT_SCHEMA_INVALID")
+        else:
+            source_last_digest = None
+            normalization_id = _NO_OUTPUT_NORMALIZATION_ID
+            normalization_applied = False
         counts: list[tuple[str, int]] = []
         for key, value in payload["event_counts"].items():
             if type(key) is not str or type(value) is not int or value <= 0:
@@ -388,6 +468,9 @@ class ReflectorExecutionReceiptV2:
             protocol_id=str(payload["protocol_id"]),
             source_split=source_split,
             projected_prompt_sha256=projected_prompt_sha256,
+            source_last_message_sha256=source_last_digest,
+            output_normalization_id=normalization_id,
+            output_normalization_applied=normalization_applied,
         )
 
 
@@ -468,9 +551,26 @@ class ReflectorBoundaryActivationV2:
             if receipt.codex_returncode != 0 or not event_bytes:
                 raise ReflectorBoundaryError("REFLECTOR_WRAPPER_RECEIPT_BINDING_INVALID")
             try:
-                _parse_jsonl_transcript(event_bytes.decode("utf-8"))
+                event_response, _usage, _event_digest = _parse_jsonl_transcript(
+                    event_bytes.decode("utf-8")
+                )
             except (UnicodeError, LocalCodexExecutionError) as exc:
                 raise ReflectorBoundaryError("REFLECTOR_WRAPPER_RECEIPT_BINDING_INVALID") from exc
+            if receipt.source_split == SUPERVISED_TRAIN_SOURCE_SPLIT:
+                source_message = event_response.strip() + "\n"
+                normalized_message, normalization_applied = (
+                    _normalize_supervised_memory_sections(source_message)
+                )
+                if (
+                    receipt.output_normalization_id
+                    != _SUPERVISED_SECTION_NORMALIZATION_ID
+                    or receipt.source_last_message_sha256
+                    != hashlib.sha256(source_message.encode("utf-8")).hexdigest()
+                    or receipt.last_message_sha256
+                    != hashlib.sha256(normalized_message.encode("utf-8")).hexdigest()
+                    or receipt.output_normalization_applied != normalization_applied
+                ):
+                    raise ReflectorBoundaryError("REFLECTOR_WRAPPER_RECEIPT_BINDING_INVALID")
         return receipt
 
 
@@ -712,8 +812,7 @@ class ReflectorExecutionBoundaryV2:
             completed = subprocess.run(
                 command,
                 stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                capture_output=True,
                 timeout=20,
                 check=False,
             )
@@ -816,7 +915,10 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
     codex_returncode: int | None = None
     stderr = ""
     last_message_sha256: str | None = None
+    source_last_message_sha256: str | None = None
     projected_prompt_sha256: str | None = None
+    output_normalization_id = _NO_OUTPUT_NORMALIZATION_ID
+    output_normalization_applied = False
     return_code = _WRAPPER_EXIT_INVALID
     try:
         _copy_private_file(
@@ -897,6 +999,18 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
                 raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID") from exc
             if output_text.strip() != event_response.strip():
                 raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+            if config["source_split"] == SUPERVISED_TRAIN_SOURCE_SPLIT:
+                output_text = output_text.strip() + "\n"
+                source_last_message_sha256 = hashlib.sha256(
+                    output_text.encode("utf-8")
+                ).hexdigest()
+                output_text, output_normalization_applied = (
+                    _normalize_supervised_memory_sections(output_text)
+                )
+                output_normalization_id = _SUPERVISED_SECTION_NORMALIZATION_ID
+                content = output_text.encode("utf-8")
+            else:
+                source_last_message_sha256 = hashlib.sha256(content).hexdigest()
             _exclusive_write(host_output, content, mode=0o600)
             last_message_sha256 = hashlib.sha256(content).hexdigest()
             status = ReflectorBoundaryStatusV2.COMPLETED
@@ -946,6 +1060,9 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
             protocol_id=str(config["protocol_id"]),
             source_split=str(config["source_split"]),
             projected_prompt_sha256=projected_prompt_sha256,
+            source_last_message_sha256=source_last_message_sha256,
+            output_normalization_id=output_normalization_id,
+            output_normalization_applied=output_normalization_applied,
         )
         _exclusive_write(
             Path(config["receipt_path"]),
@@ -1090,6 +1207,73 @@ def _project_reflector_prompt(prompt: str, *, source_split: str) -> str:
         else _SUPERVISED_PROMPT_CONTRACT
     )
     return f"{projected}\n\n{contract}\n"
+
+
+def _normalize_supervised_memory_sections(memory: str) -> tuple[str, bool]:
+    """Merge duplicate exact supervised sections without changing their bodies.
+
+    This is deliberately narrower than the validator.  It only handles the observed
+    syntactic failure mode: every required section is present in first-occurrence
+    order, but one or more exact allowed headings were repeated.  Missing, unknown,
+    or reordered headings remain untouched and therefore fail closed downstream.
+    """
+
+    if type(memory) is not str:
+        raise TypeError("supervised memory must be text")
+    lines = memory.splitlines()
+    first_nonempty_index = next(
+        (index for index, line in enumerate(lines) if line.strip()),
+        None,
+    )
+    if first_nonempty_index is None:
+        return memory, False
+    h1 = lines[first_nonempty_index]
+    if not h1.startswith("# Category Memory: ") or not h1.removeprefix(
+        "# Category Memory: "
+    ).strip():
+        return memory, False
+
+    sections: dict[str, list[list[str]]] = {name: [] for name in _SUPERVISED_EXACT_SECTIONS}
+    headings: list[str] = []
+    current: list[str] | None = None
+    for line in lines[first_nonempty_index + 1 :]:
+        match = _H2_LINE_RE.fullmatch(line)
+        if match is not None:
+            section = match.group(1)
+            if section not in sections:
+                return memory, False
+            headings.append(section)
+            current = []
+            sections[section].append(current)
+            continue
+        if current is None:
+            if line.strip():
+                return memory, False
+        else:
+            current.append(line)
+
+    first_occurrences = tuple(dict.fromkeys(headings))
+    if first_occurrences != _SUPERVISED_EXACT_SECTIONS or len(headings) == len(
+        _SUPERVISED_EXACT_SECTIONS
+    ):
+        return memory, False
+
+    normalized = [h1, ""]
+    for index, section in enumerate(_SUPERVISED_EXACT_SECTIONS):
+        normalized.append(f"## {section}")
+        bodies = sections[section]
+        for body_index, body in enumerate(bodies):
+            trimmed = list(body)
+            while trimmed and not trimmed[0].strip():
+                trimmed.pop(0)
+            while trimmed and not trimmed[-1].strip():
+                trimmed.pop()
+            if body_index and trimmed and normalized[-1].strip():
+                normalized.append("")
+            normalized.extend(trimmed)
+        if index != len(_SUPERVISED_EXACT_SECTIONS) - 1:
+            normalized.append("")
+    return "\n".join(normalized).rstrip() + "\n", True
 
 
 def _reflector_hardening_arguments(

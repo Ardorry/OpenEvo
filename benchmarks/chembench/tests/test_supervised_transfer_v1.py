@@ -12,6 +12,9 @@ from openevo_chembench.chembench4k_models import (
     CHEMBENCH4K_REVISION,
     PrivateChemBench4KTask,
 )
+from openevo_chembench.reflector_execution_boundary_v2 import (
+    _normalize_supervised_memory_sections,
+)
 from openevo_chembench.supervised_transfer_v1.common import canonical_pretty_json_bytes
 from openevo_chembench.supervised_transfer_v1.config import (
     TOTAL_MODEL_CALLS,
@@ -271,6 +274,22 @@ def test_category_memory_requires_confirmed_evidence_and_all_sections() -> None:
         category="Name_Conversion",
     )
     assert "memory_confirmed_evidence_insufficient" in invalid.finding_codes
+
+    duplicated = memory.replace(
+        "## Common Failure Modes",
+        "## Provisional Principles\n- None.\n## Common Failure Modes",
+        1,
+    )
+    rejected = inspect_supervised_category_memory_v1(
+        duplicated.encode(), category="Name_Conversion"
+    )
+    assert "memory_required_sections_invalid" in rejected.finding_codes
+    normalized, applied = _normalize_supervised_memory_sections(duplicated)
+    accepted = inspect_supervised_category_memory_v1(
+        normalized.encode(), category="Name_Conversion"
+    )
+    assert applied is True
+    assert accepted.passed
 
 
 def test_mcnemar_exact_is_two_sided_and_closed() -> None:

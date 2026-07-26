@@ -107,3 +107,35 @@ to `PROBE_CHECKPOINT_*`; a regression now proves both smoke arms are admitted
 and checkpoint arms are rejected at `PROBE_SMOKE`. The fix passed 8 focused
 tests, Ruff, dry-run with zero calls, and source-diff checks. A new source
 commit and fresh preflight run ID are required; run-06 is never resumed.
+
+## Preflight run-07 fail-closed debug history
+
+`st-v1-preflight-20260727-07` completed the supervised update smoke and reached
+the 9-category online canary. It then failed closed on Yield_Prediction update
+2 with `TASKWISE_ARTIFACT_VALIDATION_FAILED`. It has 21 completed task
+sessions and 14 reflector jobs/artifacts, zero infrastructure, security, or
+context findings, one artifact finding, zero Test access, complete cleanup,
+and no residual process. The failed artifact and run remain preserved and are
+not reusable.
+
+The content-free validation receipt identifies
+`memory_required_sections_invalid`. A private heading-only inspection showed
+all required headings but one exact duplicate `Provisional Principles`
+heading. The model-facing contract already required exactly eleven unique
+headings, so another prompt-only reminder would not provide adequate
+reliability for 900 formal updates. The benchmark-local reflector boundary now
+performs one closed structural normalization: only when all eleven exact
+allowed headings first occur in the required order and the sole structural
+defect is one or more duplicate allowed headings, it merges those section
+bodies without changing their text. Missing, unknown, or reordered headings
+remain unchanged and fail the existing validator. Leakage, provenance, rule
+schema, evidence, capacity, and answer-map checks remain downstream and are
+not weakened.
+
+The private reflector receipt schema records both source and Core-consumed
+output digests, the normalization ID, and whether it was applied; receipt
+loading recomputes the transformation from the immutable private event stream.
+Thus the normalized bytes still enter the registered Core method and typed
+artifact lifecycle, while the original model output remains audit-bound. A
+fresh source commit and new preflight run ID are required; run-07 is never
+resumed.
