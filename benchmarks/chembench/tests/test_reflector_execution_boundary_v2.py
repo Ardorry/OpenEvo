@@ -352,6 +352,8 @@ def test_supervised_prompt_requires_one_complete_memory_and_unique_headings() ->
     assert "one complete replacement memory" in projected
     assert "exactly eleven" in projected
     assert "no duplicate heading" in projected
+    assert "four or more complete tokens" in projected
+    assert "retain only the abstract chemistry principle" in projected
 
 
 def test_reflector_preflight_fails_closed_when_config_parser_rejects(
