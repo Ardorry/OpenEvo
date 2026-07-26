@@ -117,6 +117,37 @@ def test_run_mode_and_stage_machine_fail_closed_before_paid_work(tmp_path: Path)
         formal._set_stage("FINAL_TEST")
 
 
+def test_probe_smoke_admits_only_probe_smoke_arms(tmp_path: Path) -> None:
+    inputs = _experiment_inputs(tmp_path)
+    probe_task = SimpleNamespace(uid="probe-task")
+    object.__setattr__(inputs, "probe", (probe_task,))
+    experiment = SupervisedTransferExperimentV1(
+        inputs=inputs,
+        run_id="probe-smoke-test-0001",
+        run_mode="preflight",
+    )
+    experiment._state["stage"] = "PROBE_SMOKE"
+
+    for arm in ("control_probe_smoke", "online_probe_smoke"):
+        experiment._require_session_admission(
+            task=cast(Any, probe_task),
+            memory=None,
+            logical_arm=arm,
+            task_ordinal=0,
+            round_index=0,
+            stage="PROBE_SMOKE",
+        )
+    with pytest.raises(SupervisedExperimentError, match="SESSION_ARM_STAGE_INVALID"):
+        experiment._require_session_admission(
+            task=cast(Any, probe_task),
+            memory=None,
+            logical_arm="control_probe",
+            task_ordinal=0,
+            round_index=0,
+            stage="PROBE_SMOKE",
+        )
+
+
 def test_formal_run_calls_control_before_bridges_or_online(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

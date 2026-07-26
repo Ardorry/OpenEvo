@@ -90,3 +90,20 @@ Exact next sequence:
 6. if and only if the second decision is `EXPECTED_MECHANISM_CONFIRMED`, start
    a distinct `run-formal` ID whose first paid session is Control task 0 round
    0.
+
+## Preflight run-06 fail-closed debug history
+
+`st-v1-preflight-20260727-06` completed update smoke, online canary, and
+control canary, then failed before the first Probe-smoke attempt with
+`SESSION_ARM_STAGE_INVALID`. It has 55 completed task sessions, 19 reflector
+jobs/artifacts, zero infrastructure/security/context/artifact findings, zero
+Test access, and no active residual process. The run is terminal, preserved,
+and excluded from reuse.
+
+Root cause: the new admission guard treated `PROBE_SMOKE` as both the explicit
+smoke stage and a generic `PROBE_*` checkpoint. The checkpoint arm set
+overwrote `control_probe_smoke`/`online_probe_smoke`. The condition is narrowed
+to `PROBE_CHECKPOINT_*`; a regression now proves both smoke arms are admitted
+and checkpoint arms are rejected at `PROBE_SMOKE`. The fix passed 8 focused
+tests, Ruff, dry-run with zero calls, and source-diff checks. A new source
+commit and fresh preflight run ID are required; run-06 is never resumed.

@@ -1099,8 +1099,10 @@ class SupervisedTransferExperimentV1:
             "FINAL_TEST": {"control_test", "online_test"},
         }
         expected_partition = self.inputs.train
-        if stage.startswith("PROBE_"):
+        if stage.startswith("PROBE_CHECKPOINT_"):
             allowed_arms = {**allowed_arms, stage: {"control_probe", "online_probe"}}
+            expected_partition = self.inputs.probe
+        elif stage == "PROBE_SMOKE":
             expected_partition = self.inputs.probe
         elif stage == "FINAL_TEST":
             expected_partition = self.inputs.test
