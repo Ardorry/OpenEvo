@@ -1,0 +1,140 @@
+{
+  "actual_exposure_counts": {
+    "probe": 0,
+    "reserve": 141,
+    "test_primary": 0,
+    "test_recovery_01": 0,
+    "train": 367
+  },
+  "counts": {
+    "probe": 90,
+    "reserve": 2569,
+    "test_primary": 450,
+    "test_recovery_01": 450,
+    "train": 450
+  },
+  "data_file_sha256": {
+    "probe_private_manifest.jsonl": "eb89b40b7e1fc4af4806c2f2560d167cfd25b49d1f9f0e766ae6168239c59823",
+    "probe_public_manifest.jsonl": "ce48aaf65382cac730c4bab9033a3a0315ff0dc55aa1b9d2db33457571c1ca04",
+    "reserve_public_manifest.jsonl": "d553800a60e448671a8dac07135f790b4f7f40ef59b71584c706ac01579b3ffc",
+    "test_primary_private_manifest.jsonl": "1dd4becb39df1d966412b4cd83f3174c96dc868fa9c650f409f96a2635f3d33f",
+    "test_primary_public_manifest.jsonl": "ac4deb97180338928a0ccde4d88ba14cd3c25e1e0950272a2d92a4a4ce9db1f4",
+    "test_recovery_01_private_manifest.jsonl": "88959e766ef2c213a0782f522bcb9c2870f798bba8e9dc29038f594a9f5ba661",
+    "test_recovery_01_public_manifest.jsonl": "a3e668a1de1c72cef4b4874abab7327b68f5f14a9096c7e6872ebb40173c400e",
+    "train_private_manifest.jsonl": "c09f5e41143e607d19d3dcf432a04b9c4a98fdd21282bb82cb8188e9c3bca72f",
+    "train_public_manifest.jsonl": "5dd84e7e6b033790488aaf036ee09365e6b0c21ac50828458be24990d54798c0"
+  },
+  "dataset_combined_sha256": "cb6c17c54d4c0cf103b38f12e9ce05663515b05bfdc342d83e3245d39f3a4b3a",
+  "dataset_repository": "AI4Chem/ChemBench4K",
+  "dataset_revision": "f8ad41a980170f4c5d0cc97e57722d06887c8f53",
+  "historical_exposure_manifest_v2_sha256": "aece0e945140e70eda5c1a24c553c19b126bf644e8e7cd3bf159cdd7e4159d7c",
+  "ordered_uid_sha256": {
+    "probe": "c310c9770f3079e9b405b3195dcf20217640e2cb43ec3dc39eb8faeaa565b869",
+    "reserve": "73e9486c427c7d569126ca2bf6c52439cb833fdbb3eccbc3c16abe35198f7683",
+    "test_primary": "4f27b78f747a2e10b2f2dcb30f210b83de5993388e31f32439c56783db6a7e27",
+    "test_recovery_01": "247587e4c78ddab84708e1737f7ee615184625fb39314ee16b58d51b35cc25fe",
+    "train": "0250517295c3666b25e1fc311b279891459561c883de1aaf6e7cf4c448b69251"
+  },
+  "pairwise_intersection_counts": {
+    "probe_reserve": 0,
+    "probe_test_primary": 0,
+    "probe_test_recovery_01": 0,
+    "test_primary_reserve": 0,
+    "test_primary_test_recovery_01": 0,
+    "test_recovery_01_reserve": 0,
+    "train_probe": 0,
+    "train_reserve": 0,
+    "train_test_primary": 0,
+    "train_test_recovery_01": 0
+  },
+  "per_category_counts": {
+    "probe": {
+      "Caption2mol": 10,
+      "Mol2caption": 10,
+      "Name_Conversion": 10,
+      "Product_Prediction": 10,
+      "Property_Prediction": 10,
+      "Retrosynthesis": 10,
+      "Solvent_Prediction": 10,
+      "Temperature_Prediction": 10,
+      "Yield_Prediction": 10
+    },
+    "reserve": {
+      "Caption2mol": 640,
+      "Mol2caption": 139,
+      "Name_Conversion": 639,
+      "Product_Prediction": 140,
+      "Property_Prediction": 549,
+      "Retrosynthesis": 140,
+      "Solvent_Prediction": 140,
+      "Temperature_Prediction": 42,
+      "Yield_Prediction": 140
+    },
+    "test_primary": {
+      "Caption2mol": 50,
+      "Mol2caption": 50,
+      "Name_Conversion": 50,
+      "Product_Prediction": 50,
+      "Property_Prediction": 50,
+      "Retrosynthesis": 50,
+      "Solvent_Prediction": 50,
+      "Temperature_Prediction": 50,
+      "Yield_Prediction": 50
+    },
+    "test_recovery_01": {
+      "Caption2mol": 50,
+      "Mol2caption": 50,
+      "Name_Conversion": 50,
+      "Product_Prediction": 50,
+      "Property_Prediction": 50,
+      "Retrosynthesis": 50,
+      "Solvent_Prediction": 50,
+      "Temperature_Prediction": 50,
+      "Yield_Prediction": 50
+    },
+    "train": {
+      "Caption2mol": 50,
+      "Mol2caption": 50,
+      "Name_Conversion": 50,
+      "Product_Prediction": 50,
+      "Property_Prediction": 50,
+      "Retrosynthesis": 50,
+      "Solvent_Prediction": 50,
+      "Temperature_Prediction": 50,
+      "Yield_Prediction": 50
+    }
+  },
+  "protocol_id": "chembench_supervised_transfer_v1",
+  "recovery_policy": {
+    "maximum": 2,
+    "performance_based_switch_forbidden": true,
+    "primary_test_never_reduced": true,
+    "source_bug_invalidation_required": true
+  },
+  "recovery_test_count": 1,
+  "schema_version": "chembench_supervised_transfer_split_summary_v2",
+  "seed": "openevo-chembench-supervised-transfer-v1-balanced-split",
+  "split_generation_code_sha256": "69de1bc3f148e15b2f75db0182b127ff9af5a2034d9bee462ef2182b49d76301",
+  "train_actual_exposure": {
+    "Caption2mol": 50,
+    "Mol2caption": 38,
+    "Name_Conversion": 50,
+    "Product_Prediction": 39,
+    "Property_Prediction": 50,
+    "Retrosynthesis": 38,
+    "Solvent_Prediction": 38,
+    "Temperature_Prediction": 26,
+    "Yield_Prediction": 38
+  },
+  "train_supplemented_never_executed": {
+    "Caption2mol": 0,
+    "Mol2caption": 12,
+    "Name_Conversion": 0,
+    "Product_Prediction": 11,
+    "Property_Prediction": 0,
+    "Retrosynthesis": 12,
+    "Solvent_Prediction": 12,
+    "Temperature_Prediction": 24,
+    "Yield_Prediction": 12
+  }
+}

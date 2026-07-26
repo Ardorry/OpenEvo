@@ -1,30 +1,37 @@
 from __future__ import annotations
 
-from dataclasses import replace
 import errno
 import hashlib
 import importlib.metadata as importlib_metadata
 import json
-from pathlib import Path
 import stat
+from dataclasses import replace
+from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
-import pytest
-
-from openevo import __version__
 import openevo.evolution.methods as core_methods
-import openevo_chembench.taskwise_core_evolution_v1 as taskwise_core
+import pytest
+from openevo import __version__
 from openevo.evolution.framework import DistributionArtifactExpectation, canonical_digest
 from openevo.evolution.framework import builtins as core_builtins
 from openevo.evolution.framework.builtins import load_verified_builtin_registry
 from openevo.evolution.framework.loading import _verify_distribution_install
 
+import openevo_chembench.taskwise_core_evolution_v1 as taskwise_core
+from openevo_chembench.chembench4k_evaluation import ChemBench4KPrivateEvaluator
 from openevo_chembench.chembench4k_models import (
     CHEMBENCH4K_REVISION,
+    PrivateChemBench4KTask,
     RenderedChemBench4KPrompt,
 )
 from openevo_chembench.frozen_runtime_v2 import CoreResolvedTextMemoryV2
 from openevo_chembench.models import RawAttempt, TranscriptReference
+from openevo_chembench.supervised_transfer_v1.memory import (
+    SUPERVISED_MEMORY_LIMITS_V1,
+    inspect_supervised_category_memory_v1,
+)
+from openevo_chembench.supervised_transfer_v1.packet import SupervisedEvolutionPacketV1
+from openevo_chembench.taskwise_config_v1 import TASKWISE_MEMORY_LIMITS_V1
 from openevo_chembench.taskwise_core_evolution_v1 import (
     METHOD_ID,
     PROTOCOL_ID,
@@ -33,24 +40,23 @@ from openevo_chembench.taskwise_core_evolution_v1 import (
     TaskwiseCoreEvolutionError,
     TaskwiseCoreFailureReceiptV1,
     TaskwiseCorePredecessorV1,
-    TaskwiseCoreUpdateRequestV1,
     TaskwiseCoreUpdatePortAdapterV1,
+    TaskwiseCoreUpdateRequestV1,
     inspect_taskwise_text_memory_v1,
 )
-from openevo_chembench.taskwise_config_v1 import TASKWISE_MEMORY_LIMITS_V1
 from openevo_chembench.taskwise_feedback_v1 import (
     TaskwiseSafeEvolutionSignalV1,
     TaskwiseSafeSignalCodeV1,
-)
-from openevo_chembench.taskwise_trajectory_v1 import (
-    TaskwiseTrajectoryV1,
-    ordered_safe_feedback_digest,
-    ordered_taskwise_trajectory_digest,
 )
 from openevo_chembench.taskwise_online_runner_v1 import (
     CoreMemoryReferenceV1,
     TaskwiseCoreUpdateOutcomeV1,
     TaskwiseRunnerCoreUpdateRequestV1,
+)
+from openevo_chembench.taskwise_trajectory_v1 import (
+    TaskwiseTrajectoryV1,
+    ordered_safe_feedback_digest,
+    ordered_taskwise_trajectory_digest,
 )
 
 
@@ -217,6 +223,44 @@ def _memory_with_do_items(items: tuple[str, ...]) -> str:
 """
 
 
+def _supervised_memory() -> str:
+    return """# Category Memory: Name_Conversion
+
+## Confirmed Principles
+- None.
+
+## Provisional Principles
+- Rule ID=NC-P-001; Status=provisional; Category=Name_Conversion; Trigger=an unambiguous molecular formula; Principle=apply deterministic nomenclature constraints; Action=enumerate compatible functional groups before naming; Validation=round-trip the proposed name to the formula; Evidence Count=1; Evidence=1f43d5d7d7e56e5d.
+
+## Common Failure Modes
+- Treating a plausible synonym as unique without a formula round-trip check.
+
+## Option Elimination Checks
+- Reject choices whose locants or functional-group precedence contradict the structure.
+
+## Retired Or Contradicted
+- None.
+
+## Output Discipline
+- Return one uppercase choice letter and no explanation.
+
+## Do
+- Apply the category principles above when their trigger holds.
+
+## Avoid
+- Avoid instance-specific answer mappings.
+
+## Validate
+- Validate structure, locants, and final answer format.
+
+## When Applicable
+- Use only rules whose trigger matches the current item.
+
+## Retired Or Superseded
+- Ignore retired rules above.
+"""
+
+
 def _load_only_core_failure_receipt(tmp_path: Path) -> tuple[Path, dict[str, object]]:
     root = tmp_path / "core" / "private_core_failure_diagnostics"
     paths = list(root.glob("taskwise_core_failure_*.json"))
@@ -255,7 +299,7 @@ def test_reflector_projection_seals_task_and_attempt_content(
 
     projection = trajectory.to_reflector_projection()
     boundary_records = taskwise_core._taskwise_reflector_records((trajectory,))
-    event = bridge._event_request(  # noqa: SLF001
+    event = bridge._event_request(
         trajectory=trajectory,
         policy_version=f"{PROTOCOL_ID}.projection-test",
     )
@@ -328,6 +372,91 @@ def test_reflector_projection_is_independent_of_prompt_and_completion(
     )
 
 
+def test_supervised_packet_runs_real_core_dataset_job_artifact_context_lifecycle(
+    tmp_path: Path,
+    executable_registry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trajectory = _trajectory(task_index=0, round_index=0, correct=False, response="B")
+    task = PrivateChemBench4KTask(
+        uid=trajectory.task_uid,
+        category=trajectory.category,
+        source_split="test",
+        source_index=0,
+        question="private-public-question-0",
+        A="private-option-alpha",
+        B="private-option-beta",
+        C="private-option-gamma",
+        D="private-option-delta",
+        target="A",
+        dataset_revision=CHEMBENCH4K_REVISION,
+        dataset_sha256=trajectory.dataset_sha256,
+    )
+    evaluation = ChemBench4KPrivateEvaluator().evaluate(task=task, raw_completion="B")
+    packet = SupervisedEvolutionPacketV1.from_evaluation(
+        task=task,
+        training_task_ordinal=1,
+        round_index=0,
+        evaluation=evaluation,
+        predecessor_memory=None,
+        predecessor_artifact_id=None,
+        session_id=trajectory.session_id,
+    )
+    inspection = inspect_supervised_category_memory_v1(
+        _supervised_memory().encode(),
+        category=task.category,
+    )
+    assert inspection.passed
+    assert len(packet.reflector_records()) > 2
+
+    monkeypatch.setattr(
+        core_methods,
+        "_generate_reflector_markdown",
+        lambda *_args, **_kwargs: _supervised_memory(),
+    )
+    bridge = TaskwiseCoreEvolutionBridgeV1(
+        db_path=tmp_path / "supervised" / "evolution.sqlite3",
+        artifact_root=tmp_path / "supervised" / "artifacts",
+        executable_registry=executable_registry,
+        memory_limits=SUPERVISED_MEMORY_LIMITS_V1,
+    )
+    try:
+        result = bridge.apply_update(
+            TaskwiseCoreUpdateRequestV1(
+                task_uid=task.uid,
+                task_index=0,
+                round_index=0,
+                update_index=1,
+                trajectories=(trajectory,),
+                predecessor=None,
+                validator_forbidden_literals=taskwise_core._trajectory_forbidden_literals(
+                    trajectory
+                ),
+                supervised_packet=packet,
+            ),
+            test_only_allow_synthetic_reflector=True,
+        )
+        assert result.supervised_packet_sha256 == packet.digest
+        assert result.supervised_category == task.category
+        assert result.records_visible_to_reflector == len(packet.reflector_records())
+        assert result.memory_inspection == inspection
+        assert result.validation_receipt.passed
+        assert result.core_artifact_id
+        assert result.core_context_id
+        with bridge._store.connect() as connection:
+            dataset = connection.execute(
+                "SELECT event_count, trace_count FROM datasets"
+            ).fetchone()
+            job = connection.execute("SELECT state, method FROM jobs").fetchone()
+        assert tuple(dataset) == (
+            len(packet.reflector_records()),
+            len(packet.reflector_records()),
+        )
+        assert tuple(job) == ("succeeded", METHOD_ID)
+    finally:
+        bridge.close()
+
+
 def test_global_three_update_chain_uses_complete_task_prefixes(
     bridge: TaskwiseCoreEvolutionBridgeV1,
     monkeypatch: pytest.MonkeyPatch,
@@ -376,7 +505,7 @@ def test_global_three_update_chain_uses_complete_task_prefixes(
     assert type(runtime_memory) is CoreResolvedTextMemoryV2
     assert runtime_memory.core_artifact_id == task2_update1.core_artifact_id
 
-    with bridge._store.connect() as connection:  # noqa: SLF001
+    with bridge._store.connect() as connection:
         datasets = connection.execute(
             "SELECT event_count, trace_count FROM datasets ORDER BY rowid"
         ).fetchall()
@@ -599,7 +728,7 @@ def test_two_hundred_synthetic_updates_remain_within_memory_policy(
         for item in results
     )
     assert bridge.current_head() == results[-1]
-    checkpoint = bridge._checkpoint_path  # noqa: SLF001
+    checkpoint = bridge._checkpoint_path
     checkpoint_lines = checkpoint.read_text(encoding="utf-8").splitlines()
     assert len(checkpoint_lines) == 200
     checkpoint_rows = [json.loads(line) for line in checkpoint_lines]
@@ -608,7 +737,7 @@ def test_two_hundred_synthetic_updates_remain_within_memory_policy(
     )
     assert all("validator_forbidden_literals" not in row for row in checkpoint_rows)
     assert max(map(len, checkpoint_lines)) < 32_000
-    with bridge._store.connect() as connection:  # noqa: SLF001
+    with bridge._store.connect() as connection:
         assert (
             connection.execute(
                 "SELECT COUNT(*) FROM jobs WHERE method = ?",
@@ -800,7 +929,7 @@ def test_process_exclusive_stream_lock_prevents_a_second_writer_before_core_writ
             executable_registry=executable_registry,
         )
 
-    with first._store.connect() as connection:  # noqa: SLF001
+    with first._store.connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
         assert connection.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0] == 0
     first.close()
@@ -984,7 +1113,7 @@ def test_core_lease_is_timeout_plus_bounded_grace_and_bound_into_job(
     assert result.reflector_timeout_seconds == 600
     assert result.core_lease_grace_seconds == 120
     assert result.core_lease_seconds == 720
-    with bridge._store.connect() as connection:  # noqa: SLF001
+    with bridge._store.connect() as connection:
         config = json.loads(
             connection.execute(
                 "SELECT config_json FROM jobs WHERE job_id = ?",
@@ -1004,7 +1133,7 @@ def test_real_execution_requires_boundary_before_core_write(
         match="TASKWISE_REFLECTOR_BOUNDARY_REQUIRED",
     ):
         bridge.apply_update(_request(task_index=0, update_index=1, predecessor=None))
-    with bridge._store.connect() as connection:  # noqa: SLF001
+    with bridge._store.connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 0
 
 
@@ -1135,7 +1264,7 @@ def test_leaking_candidate_is_rejected_and_never_promoted(
     assert "private-option-alpha" not in receipt_text
     assert "correct" not in receipt_text.casefold()
     assert "target" not in receipt_text.casefold()
-    with bridge._store.connect() as connection:  # noqa: SLF001
+    with bridge._store.connect() as connection:
         promoted = connection.execute(
             "SELECT promoted FROM artifacts WHERE type = 'text_memory'"
         ).fetchall()
@@ -1938,7 +2067,7 @@ def test_checkpoint_oserror_has_digest_only_receipt_and_never_advances_head(
     assert "General Chemistry Memory" not in receipt_text
     assert "private-public-question" not in receipt_text
     assert bridge.current_head() is None
-    with bridge._store.connect() as connection:  # noqa: SLF001
+    with bridge._store.connect() as connection:
         before = (
             connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0],
             connection.execute("SELECT COUNT(*) FROM contexts").fetchone()[0],
@@ -1949,7 +2078,7 @@ def test_checkpoint_oserror_has_digest_only_receipt_and_never_advances_head(
             _request(task_index=0, update_index=1, predecessor=None),
             test_only_allow_synthetic_reflector=True,
         )
-    with bridge._store.connect() as connection:  # noqa: SLF001
+    with bridge._store.connect() as connection:
         after = (
             connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0],
             connection.execute("SELECT COUNT(*) FROM contexts").fetchone()[0],
@@ -1967,7 +2096,7 @@ def test_unsafe_checkpoint_has_private_receipt_and_is_not_overwritten(
         "_generate_reflector_markdown",
         lambda *_args, **_kwargs: _memory(1),
     )
-    checkpoint = bridge._checkpoint_path  # noqa: SLF001
+    checkpoint = bridge._checkpoint_path
     preserved = b"PRIVATE_UNSAFE_CHECKPOINT_EVIDENCE\n"
     checkpoint.write_bytes(preserved)
     checkpoint.chmod(0o644)
@@ -2023,7 +2152,7 @@ def test_existing_same_name_failure_receipt_is_never_deleted_or_modified(
         context_resolution_digest=None,
     )
     basename = f"taskwise_core_failure_{canonical_digest(receipt)[:32]}.json"
-    path = bridge._private_failure_root / basename  # noqa: SLF001
+    path = bridge._private_failure_root / basename
     preserved = b"IMMUTABLE_PREEXISTING_CORE_FAILURE_EVIDENCE\n"
     path.write_bytes(preserved)
     path.chmod(0o600)
@@ -2032,7 +2161,7 @@ def test_existing_same_name_failure_receipt_is_never_deleted_or_modified(
         TaskwiseCoreEvolutionError,
         match="TASKWISE_CORE_DIAGNOSTICS_FAILED",
     ) as raised:
-        bridge._raise_private_core_failure(  # noqa: SLF001
+        bridge._raise_private_core_failure(
             stage=receipt.stage,
             default_finding=receipt.finding_code,
             cause=OSError(errno.EIO, "PRIVATE_DUPLICATE_BODY_SENTINEL"),
@@ -2097,7 +2226,7 @@ def test_over_limit_candidate_is_rejected_without_truncation_or_fallback(
             test_only_allow_synthetic_reflector=True,
         )
 
-    with bridge._store.connect() as connection:  # noqa: SLF001
+    with bridge._store.connect() as connection:
         rows = connection.execute(
             "SELECT promoted, uri FROM artifacts WHERE type = 'text_memory'"
         ).fetchall()
@@ -2107,7 +2236,7 @@ def test_over_limit_candidate_is_rejected_without_truncation_or_fallback(
     payload = payload_path.read_bytes()
     assert hashlib.sha256(payload).hexdigest() == candidate_sha256
     assert payload.decode("utf-8") == candidate
-    assert bridge._head is None  # noqa: SLF001
+    assert bridge._head is None
     with pytest.raises(TaskwiseCoreEvolutionError, match="TASKWISE_STREAM_TERMINAL"):
         bridge.apply_update(
             _request(task_index=0, update_index=1, predecessor=None),
@@ -2128,7 +2257,7 @@ def test_head_payload_drift_blocks_runtime_capability(
         _request(task_index=0, update_index=1, predecessor=None),
         test_only_allow_synthetic_reflector=True,
     )
-    artifact = bridge._store.get_artifact(result.core_artifact_id)  # noqa: SLF001
+    artifact = bridge._store.get_artifact(result.core_artifact_id)
     path = Path(artifact.uri.removeprefix("file://"))
     path.write_text(_memory(9), encoding="utf-8")
     with pytest.raises(TaskwiseCoreEvolutionError, match="TASKWISE_HEAD_IDENTITY_DRIFT"):

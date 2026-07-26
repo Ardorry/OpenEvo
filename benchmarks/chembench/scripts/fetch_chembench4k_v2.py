@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
-WORKSPACE_ROOT = Path(__file__).resolve().parents[4]
+WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(PACKAGE_ROOT / "src"))
 
 from openevo_chembench.chembench4k_dataset import (  # noqa: E402

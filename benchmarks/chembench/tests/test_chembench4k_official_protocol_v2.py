@@ -23,7 +23,7 @@ from openevo_chembench.chembench4k_prompt import (
 )
 
 
-WORKSPACE_ROOT = Path(__file__).resolve().parents[4]
+WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 SNAPSHOT_ROOT = (
     WORKSPACE_ROOT / "data" / "chembench4k" / "AI4Chem_ChemBench4K" / CHEMBENCH4K_REVISION
 )

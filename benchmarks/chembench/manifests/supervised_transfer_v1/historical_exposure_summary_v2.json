@@ -1,0 +1,80 @@
+{
+  "actual_exposed_uid_count": 508,
+  "aggregate_review_evidence_count": 0,
+  "label_counts": {
+    "AGGREGATE_ONLY_REVIEWED": 0,
+    "HUMAN_ITEM_REVIEWED": 0,
+    "MANIFEST_LISTED_ONLY": 3501,
+    "PRIVATE_EVALUATED": 508,
+    "PROMPT_RENDERED_ONLY": 0,
+    "REFLECTOR_SUPERVISED": 508,
+    "TASK_MODEL_ATTEMPTED": 508,
+    "TASK_MODEL_EXECUTED": 508
+  },
+  "manifest_sha256": "aece0e945140e70eda5c1a24c553c19b126bf644e8e7cd3bf159cdd7e4159d7c",
+  "per_category": {
+    "Caption2mol": {
+      "actual_exposed": 101,
+      "dataset_items": 800,
+      "strict_never_executed": 699
+    },
+    "Mol2caption": {
+      "actual_exposed": 38,
+      "dataset_items": 299,
+      "strict_never_executed": 261
+    },
+    "Name_Conversion": {
+      "actual_exposed": 101,
+      "dataset_items": 799,
+      "strict_never_executed": 698
+    },
+    "Product_Prediction": {
+      "actual_exposed": 39,
+      "dataset_items": 300,
+      "strict_never_executed": 261
+    },
+    "Property_Prediction": {
+      "actual_exposed": 89,
+      "dataset_items": 709,
+      "strict_never_executed": 620
+    },
+    "Retrosynthesis": {
+      "actual_exposed": 38,
+      "dataset_items": 300,
+      "strict_never_executed": 262
+    },
+    "Solvent_Prediction": {
+      "actual_exposed": 38,
+      "dataset_items": 300,
+      "strict_never_executed": 262
+    },
+    "Temperature_Prediction": {
+      "actual_exposed": 26,
+      "dataset_items": 202,
+      "strict_never_executed": 176
+    },
+    "Yield_Prediction": {
+      "actual_exposed": 38,
+      "dataset_items": 300,
+      "strict_never_executed": 262
+    }
+  },
+  "schema_version": "historical_exposure_summary_v2",
+  "source_repository_commit": "d795ee3d6d654ab175ab8b3c9929c4db318180c5",
+  "strict_never_executed_uid_count": 3501,
+  "taxonomy": {
+    "actual_exposure_labels": [
+      "HUMAN_ITEM_REVIEWED",
+      "PRIVATE_EVALUATED",
+      "REFLECTOR_SUPERVISED",
+      "TASK_MODEL_ATTEMPTED",
+      "TASK_MODEL_EXECUTED"
+    ],
+    "manifest_listing_alone_excludes_holdout": false,
+    "non_excluding_labels": [
+      "AGGREGATE_ONLY_REVIEWED",
+      "MANIFEST_LISTED_ONLY",
+      "PROMPT_RENDERED_ONLY"
+    ]
+  }
+}

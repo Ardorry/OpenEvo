@@ -69,7 +69,7 @@ from openevo_chembench.v2_config import (
 _MODULE = Path(__file__).resolve()
 PACKAGE_ROOT = _MODULE.parents[2]
 REPOSITORY_ROOT = _MODULE.parents[4]
-WORKSPACE_ROOT = _MODULE.parents[5]
+WORKSPACE_ROOT = REPOSITORY_ROOT
 DATASET_ROOT = (
     WORKSPACE_ROOT
     / "data"

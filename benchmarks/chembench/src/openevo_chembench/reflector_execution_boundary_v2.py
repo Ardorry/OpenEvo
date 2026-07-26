@@ -14,14 +14,9 @@ uses ``codex exec``, authenticates, or invokes a model.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
-from dataclasses import dataclass
-from enum import Enum
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import shutil
 import stat
@@ -29,8 +24,13 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Any
 import uuid
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
+from typing import Any
 
 from openevo_chembench.local_codex_executor import (
     _DISABLED_CODEX_FEATURES,
@@ -44,15 +44,20 @@ from openevo_chembench.local_codex_executor import (
     _terminate_invocation_processes,
 )
 
-
 PROTOCOL_ID = "chembench4k_frozen_generalization_v2"
 TASKWISE_PROTOCOL_ID = "taskwise_online_evolution_v1"
+SUPERVISED_TRANSFER_PROTOCOL_ID = "chembench_supervised_transfer_v1"
 EXPECTED_RECORDS = 45
+MAX_BOUNDARY_RECORDS = 512
 TASKWISE_SOURCE_SPLIT = "taskwise_safe_signal"
-_ALLOWED_SOURCE_SPLITS = frozenset({"dev", TASKWISE_SOURCE_SPLIT})
+SUPERVISED_TRAIN_SOURCE_SPLIT = "supervised_train"
+_ALLOWED_SOURCE_SPLITS = frozenset(
+    {"dev", TASKWISE_SOURCE_SPLIT, SUPERVISED_TRAIN_SOURCE_SPLIT}
+)
 _PROTOCOL_BY_SOURCE_SPLIT = {
     "dev": PROTOCOL_ID,
     TASKWISE_SOURCE_SPLIT: TASKWISE_PROTOCOL_ID,
+    SUPERVISED_TRAIN_SOURCE_SPLIT: SUPERVISED_TRANSFER_PROTOCOL_ID,
 }
 CONFIG_ENV = "OPENEVO_CHEMBENCH_REFLECTOR_BOUNDARY_CONFIG_V2"
 WRAPPER_STATUS_ENV = "OPENEVO_CHEMBENCH_REFLECTOR_WRAPPER_V2"
@@ -77,7 +82,7 @@ _TRANSPORT_CA_FILE_KEYS = (
 )
 _TRANSPORT_CA_DIRECTORY_KEY = "SSL_CERT_DIR"
 _CODEX_POLICY_PROBE_TIMEOUT_SECONDS = 15.0
-_EXPECTED_CODEX_VERSION = "codex-cli 0.144.6"
+_EXPECTED_CODEX_VERSION = "codex-cli 0.145.0"
 _WRAPPER_EXIT_INVALID = 80
 _WRAPPER_EXIT_CODEX = 81
 _WRAPPER_EXIT_TOOL = 86
@@ -135,6 +140,23 @@ _TASKWISE_PROMPT_CONTRACT = (
     f"- The first non-empty line must be exactly `{_TASKWISE_EXACT_H1}`.\n"
     "- Preserve every required level-2 memory section and merge or retire "
     "superseded rules instead of growing memory without bound."
+)
+_SUPERVISED_PROMPT_CONTRACT = (
+    "Supervised category-memory output requirements:\n"
+    "- Reconstruct the ordered PACKET_PART records and use only that Train packet "
+    "plus the supplied existing memory.\n"
+    "- The first non-empty line must be `# Category Memory: <packet category>`.\n"
+    "- Use these exact level-2 headings in order: Confirmed Principles; "
+    "Provisional Principles; Common Failure Modes; Option Elimination Checks; "
+    "Retired Or Contradicted; Output Discipline; Do; Avoid; Validate; When Applicable; "
+    "Retired Or Superseded.\n"
+    "- Every principle rule is one bullet with Rule ID, Status, Category, Trigger, "
+    "Principle, Action, Validation, Evidence Count, and Evidence digest fields.\n"
+    "- A provisional rule has Evidence Count 1. A confirmed rule requires at least "
+    "two independent training-item evidence digests. Never copy a question, option, "
+    "answer mapping, UID, ordinal, or path.\n"
+    "- Put `- None.` in a section with no current entries. Keep every compatibility "
+    "section non-empty and do not use additional level-2 headings."
 )
 
 ReflectorCodexPolicyProbeRunnerV2 = Callable[
@@ -488,9 +510,11 @@ class ReflectorExecutionBoundaryV2:
         if (
             isinstance(expected_record_count, bool)
             or not isinstance(expected_record_count, int)
-            or not 1 <= expected_record_count <= EXPECTED_RECORDS
+            or not 1 <= expected_record_count <= MAX_BOUNDARY_RECORDS
         ):
-            raise ValueError("expected_record_count must be between 1 and 45")
+            raise ValueError(
+                f"expected_record_count must be between 1 and {MAX_BOUNDARY_RECORDS}"
+            )
         if expected_source_split not in _ALLOWED_SOURCE_SPLITS:
             raise ValueError("expected_source_split is outside the closed allowlist")
         if not 0 < timeout_seconds <= 86_400:
@@ -965,7 +989,7 @@ def _load_wrapper_config(path: Path) -> dict[str, Any]:
         or payload["protocol_id"] not in _PROTOCOL_BY_SOURCE_SPLIT.values()
         or isinstance(payload["record_count"], bool)
         or not isinstance(payload["record_count"], int)
-        or not 1 <= payload["record_count"] <= EXPECTED_RECORDS
+        or not 1 <= payload["record_count"] <= MAX_BOUNDARY_RECORDS
         or payload["source_split"] not in _ALLOWED_SOURCE_SPLITS
         or payload["protocol_id"] != _PROTOCOL_BY_SOURCE_SPLIT[payload["source_split"]]
     ):
@@ -1046,14 +1070,19 @@ def _project_reflector_prompt(prompt: str, *, source_split: str) -> str:
 
     if type(prompt) is not str or source_split not in _ALLOWED_SOURCE_SPLITS:
         raise ReflectorBoundaryError("REFLECTOR_WRAPPER_CONFIG_INVALID")
-    if source_split != TASKWISE_SOURCE_SPLIT:
+    if source_split == "dev":
         return prompt
     retained = [
         line for line in prompt.splitlines() if _TASKWISE_OPERATIONAL_LINE_RE.match(line) is None
     ]
     projected = "\n".join(retained)
     projected = _TASKWISE_OPERATIONAL_ID_RE.sub("[sealed]", projected).rstrip()
-    return f"{projected}\n\n{_TASKWISE_PROMPT_CONTRACT}\n"
+    contract = (
+        _TASKWISE_PROMPT_CONTRACT
+        if source_split == TASKWISE_SOURCE_SPLIT
+        else _SUPERVISED_PROMPT_CONTRACT
+    )
+    return f"{projected}\n\n{contract}\n"
 
 
 def _reflector_hardening_arguments(
@@ -1665,7 +1694,7 @@ def _read_and_validate_records(
     if (
         isinstance(expected_record_count, bool)
         or not isinstance(expected_record_count, int)
-        or not 1 <= expected_record_count <= EXPECTED_RECORDS
+        or not 1 <= expected_record_count <= MAX_BOUNDARY_RECORDS
         or expected_source_split not in _ALLOWED_SOURCE_SPLITS
     ):
         raise ReflectorBoundaryError("REFLECTOR_DEV_ARTIFACT_INVALID")

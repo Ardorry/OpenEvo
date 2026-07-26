@@ -216,7 +216,7 @@ _DISALLOWED_PLUGIN_RELATIVE_PATHS = (
     Path("codex_home") / "plugins" / "cache" / "openai-curated-remote",
 )
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
-_WORKSPACE_ROOT = _REPOSITORY_ROOT.parent
+_WORKSPACE_ROOT = _REPOSITORY_ROOT
 _PROTECTED_HOST_ROOTS = tuple(
     path.resolve()
     for path in (

@@ -140,7 +140,7 @@ def _passing_policy_probe(
 ) -> tuple[int, str]:
     command = tuple(arguments)
     if command[1:] == ("--version",):
-        return 0, "codex-cli 0.144.6\n"
+        return 0, "codex-cli 0.145.0\n"
     assert command[1:3] == ("debug", "prompt-input")
     assert "exec" not in command
     assert "--model" not in command
@@ -302,7 +302,7 @@ def test_reflector_config_probe_is_zero_model_and_discards_subprocess_text(
         assert Path(environment["XDG_STATE_HOME"]).is_dir()
         assert Path(environment["TMPDIR"]).is_dir()
         if command[1:] == ("--version",):
-            return 0, "codex-cli 0.144.6\n"
+            return 0, "codex-cli 0.145.0\n"
         assert command[1:3] == ("debug", "prompt-input")
         assert "exec" not in command
         assert "--model" not in command
@@ -359,7 +359,7 @@ def test_reflector_preflight_fails_closed_when_config_parser_rejects(
         _timeout_seconds: float,
     ) -> tuple[int, str]:
         if tuple(arguments)[1:] == ("--version",):
-            return 0, "codex-cli 0.144.6\n"
+            return 0, "codex-cli 0.145.0\n"
         return 1, "PRIVATE STDERR MUST NOT SURFACE"
 
     boundary.config_probe_runner = rejecting_probe
@@ -452,7 +452,7 @@ def test_real_native_codex_mount_policy_excludes_host_system_and_protected_roots
         timeout=20,
     )
     assert completed.returncode == 0
-    assert completed.stdout.strip() == "codex-cli 0.144.6"
+    assert completed.stdout.strip() == "codex-cli 0.145.0"
 
 
 def test_reflector_codex_receives_only_sanitized_transport_environment(

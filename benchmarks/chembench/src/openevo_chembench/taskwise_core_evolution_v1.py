@@ -13,21 +13,19 @@ classes are intentionally absent.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
 import fcntl
 import hashlib
 import json
 import math
 import os
-from pathlib import Path
 import re
 import stat
 import tempfile
-from typing import Any, Literal, NoReturn
 import unicodedata
-
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Literal, NoReturn
 
 from openevo.evolution.context_materialization import MaterializedContext
 from openevo.evolution.context_projection import ContextProjectionResolveRequest
@@ -58,22 +56,36 @@ from openevo.evolution.planned_jobs import (
 )
 from openevo.evolution.store import EvolutionStore
 from openevo.evolution.worker import run_once
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from openevo_chembench.chembench4k_models import CHEMBENCH4K_CATEGORIES
 from openevo_chembench.core_evolution_v2 import (
     CoreArtifactValidationReceiptV2,
-    _StoreWorkerClient,
     _read_bounded_regular_file,
     _resolved_text_memory,
     _safe_core_file_path,
+    _StoreWorkerClient,
 )
 from openevo_chembench.frozen_runtime_v2 import (
     CoreResolvedTextMemoryV2,
     _issue_core_resolved_text_memory_v2,
 )
 from openevo_chembench.reflector_execution_boundary_v2 import (
+    SUPERVISED_TRAIN_SOURCE_SPLIT,
+    TASKWISE_SOURCE_SPLIT,
     ReflectorBoundaryStatusV2,
     ReflectorExecutionBoundaryV2,
-    TASKWISE_SOURCE_SPLIT,
+)
+from openevo_chembench.supervised_transfer_v1.memory import (
+    SUPERVISED_MEMORY_LIMITS_V1,
+    SupervisedMemoryInspectionV1,
+    SupervisedMemoryLimitsV1,
+    inspect_supervised_category_memory_v1,
+)
+from openevo_chembench.supervised_transfer_v1.packet import (
+    PACKET_INPUT_SCHEMA_DIGEST,
+    REFLECTOR_PROMPT_DIGEST,
+    SupervisedEvolutionPacketV1,
 )
 from openevo_chembench.taskwise_config_v1 import (
     TASKWISE_MEMORY_LIMITS_V1,
@@ -88,11 +100,11 @@ from openevo_chembench.taskwise_trajectory_v1 import (
     ordered_taskwise_trajectory_digest,
 )
 
-
 PROTOCOL_ID = "taskwise_online_evolution_v1"
 BRIDGE_ID = "openevo_core_taskwise_text_memory_v1"
 METHOD_ID = "text_memory_expel_reflector"
 REFLECTOR_PROJECTION_ID = "taskwise_reflector_trajectory_projection_v1"
+SUPERVISED_REFLECTOR_PROJECTION_ID = "SupervisedEvolutionPacketV1"
 TARGET_ID = "text_memory"
 MODEL = "gpt-5.5"
 CORE_LEASE_GRACE_SECONDS = 120
@@ -103,6 +115,7 @@ MAX_MANIFEST_BYTES = 1024 * 1024
 _EVENT_TYPE = "openevo.session_completed"
 _EVENT_SOURCE = "chembench4k.taskwise_core.v1"
 _DATASET_PURPOSE = "chembench4k_taskwise_trajectory_v1"
+_SUPERVISED_DATASET_PURPOSE = "chembench_supervised_evolution_packet_v1"
 _JOB_PREFIX = "chembench4k.taskwise.text_memory.v1"
 _PRIVATE_INPUT_DIRECTORY = "private_taskwise_reflector_inputs"
 _PRIVATE_FAILURE_DIRECTORY = "private_core_failure_diagnostics"
@@ -692,6 +705,78 @@ class TaskwiseArtifactLineageReceiptV1(_FrozenModel):
         return self
 
 
+class SupervisedArtifactLineageReceiptV1(_FrozenModel):
+    """Private content-free receipt for one answer-supervised category update."""
+
+    schema_version: Literal["chembench_supervised_artifact_lineage_v1"] = (
+        "chembench_supervised_artifact_lineage_v1"
+    )
+    protocol_id: Literal["chembench_supervised_transfer_v1"]
+    reflector_projection_id: Literal["SupervisedEvolutionPacketV1"]
+    task_uid: str
+    task_index: int = Field(ge=0)
+    round_index: Literal[0, 1]
+    category: str
+    supervised_packet_sha256: str
+    input_schema_sha256: str
+    reflector_prompt_sha256: str
+    predecessor_artifact_id: str | None
+    predecessor_memory_sha256: str | None
+    trajectory_ids: tuple[str, ...]
+    trajectory_digest: str
+    safe_feedback_digest: str
+    memory_limits_sha256: str
+    memory_inspection_sha256: str
+    utf8_byte_count: int = Field(ge=0)
+    estimated_token_count: int = Field(ge=0)
+    section_item_counts: tuple[int, ...]
+    evolution_plan_id: str
+    evolution_job_id: str
+    core_artifact_id: str
+    artifact_payload_sha256: str
+    context_resolution_digest: str
+
+    @field_validator(
+        "task_uid",
+        "supervised_packet_sha256",
+        "input_schema_sha256",
+        "reflector_prompt_sha256",
+        "predecessor_memory_sha256",
+        "trajectory_digest",
+        "safe_feedback_digest",
+        "memory_limits_sha256",
+        "memory_inspection_sha256",
+        "artifact_payload_sha256",
+        "context_resolution_digest",
+    )
+    @classmethod
+    def _digest(cls, value: str | None) -> str | None:
+        if value is not None and _SHA256_RE.fullmatch(value) is None:
+            raise ValueError("supervised lineage receipt digest must be SHA-256")
+        return value
+
+    @model_validator(mode="after")
+    def _memory(self) -> SupervisedArtifactLineageReceiptV1:
+        if (
+            self.category not in CHEMBENCH4K_CATEGORIES
+            or self.memory_limits_sha256 != SUPERVISED_MEMORY_LIMITS_V1.digest
+            or self.input_schema_sha256 != PACKET_INPUT_SCHEMA_DIGEST
+            or self.reflector_prompt_sha256 != REFLECTOR_PROMPT_DIGEST
+            or self.utf8_byte_count > SUPERVISED_MEMORY_LIMITS_V1.max_utf8_bytes
+            or self.estimated_token_count
+            > SUPERVISED_MEMORY_LIMITS_V1.max_estimated_tokens
+            or len(self.section_item_counts)
+            != len(SUPERVISED_MEMORY_LIMITS_V1.required_sections)
+            + len(SUPERVISED_MEMORY_LIMITS_V1.core_compatibility_sections)
+        ):
+            raise ValueError("supervised lineage receipt violates protocol limits")
+        return self
+
+    @property
+    def digest(self) -> str:
+        return canonical_digest(self)
+
+
 class TaskwiseCoreUpdateResultV1(_FrozenModel):
     """Core evidence for one approved global update."""
 
@@ -711,12 +796,12 @@ class TaskwiseCoreUpdateResultV1(_FrozenModel):
     safe_feedback_digest: str
     validator_input_digest: str
     memory_limits_sha256: str
-    memory_inspection: TaskwiseMemoryInspectionV1
+    memory_inspection: TaskwiseMemoryInspectionV1 | SupervisedMemoryInspectionV1
     dataset_id: str
     dataset_artifact_id: str
     dataset_manifest_sha256: str
-    configured_max_records: Literal[1, 2]
-    records_visible_to_reflector: Literal[1, 2]
+    configured_max_records: int = Field(ge=1, le=512)
+    records_visible_to_reflector: int = Field(ge=1, le=512)
     reflector_input_digest: str
     reflector_timeout_seconds: int = Field(gt=0)
     core_lease_seconds: int = Field(gt=0)
@@ -740,6 +825,10 @@ class TaskwiseCoreUpdateResultV1(_FrozenModel):
     context_resolution_digest: str
     resolved_memory: str
     resolved_memory_sha256: str
+    supervised_packet_sha256: str | None = None
+    supervised_category: str | None = None
+    supervised_input_schema_sha256: str | None = None
+    supervised_reflector_prompt_sha256: str | None = None
 
     @field_validator(
         "task_uid",
@@ -760,6 +849,9 @@ class TaskwiseCoreUpdateResultV1(_FrozenModel):
         "reflector_event_stream_sha256",
         "context_resolution_digest",
         "resolved_memory_sha256",
+        "supervised_packet_sha256",
+        "supervised_input_schema_sha256",
+        "supervised_reflector_prompt_sha256",
     )
     @classmethod
     def _digest(cls, value: str | None) -> str | None:
@@ -780,11 +872,12 @@ class TaskwiseCoreUpdateResultV1(_FrozenModel):
 
     @model_validator(mode="after")
     def _sequence_and_memory(self) -> TaskwiseCoreUpdateResultV1:
+        supervised = self.supervised_packet_sha256 is not None
         if (
             self.update_index != self.round_index + 1
             or len(self.trajectory_ids) != self.update_index
-            or self.configured_max_records != self.update_index
-            or self.records_visible_to_reflector != self.update_index
+            or self.configured_max_records != self.records_visible_to_reflector
+            or (not supervised and self.configured_max_records != self.update_index)
             or self.core_lease_seconds != _core_lease_seconds(self.reflector_timeout_seconds)
         ):
             raise ValueError("update evidence does not bind the complete round prefix")
@@ -816,9 +909,24 @@ class TaskwiseCoreUpdateResultV1(_FrozenModel):
             raise ValueError("the next task must start from the prior task final memory")
         if _sha256_bytes(self.resolved_memory.encode("utf-8")) != self.resolved_memory_sha256:
             raise ValueError("resolved memory digest mismatch")
-        if (
-            self.memory_limits_sha256 != TASKWISE_MEMORY_LIMITS_V1.digest
+        if supervised:
+            if (
+                type(self.memory_inspection) is not SupervisedMemoryInspectionV1
+                or self.memory_limits_sha256 != SUPERVISED_MEMORY_LIMITS_V1.digest
+                or self.memory_inspection.memory_limits_sha256 != self.memory_limits_sha256
+                or self.supervised_category != self.memory_inspection.category
+                or self.supervised_input_schema_sha256 != PACKET_INPUT_SCHEMA_DIGEST
+                or self.supervised_reflector_prompt_sha256 != REFLECTOR_PROMPT_DIGEST
+                or not self.memory_inspection.passed
+            ):
+                raise ValueError("supervised memory inspection is not approved")
+        elif (
+            type(self.memory_inspection) is not TaskwiseMemoryInspectionV1
+            or self.memory_limits_sha256 != TASKWISE_MEMORY_LIMITS_V1.digest
             or self.memory_inspection.memory_limits_sha256 != self.memory_limits_sha256
+            or self.supervised_category is not None
+            or self.supervised_input_schema_sha256 is not None
+            or self.supervised_reflector_prompt_sha256 is not None
             or not self.memory_inspection.passed
         ):
             raise ValueError("memory inspection is not an approved protocol-limit result")
@@ -847,9 +955,51 @@ class TaskwiseCoreUpdateResultV1(_FrozenModel):
             resolved_memory_sha256=self.resolved_memory_sha256,
         )
 
-    def required_lineage_receipt(self) -> TaskwiseArtifactLineageReceiptV1:
+    def required_lineage_receipt(
+        self,
+    ) -> TaskwiseArtifactLineageReceiptV1 | SupervisedArtifactLineageReceiptV1:
         """Expose the exact closed lineage contract required by the protocol."""
 
+        if self.supervised_packet_sha256 is not None:
+            if (
+                self.supervised_category is None
+                or self.supervised_input_schema_sha256 is None
+                or self.supervised_reflector_prompt_sha256 is None
+                or type(self.memory_inspection) is not SupervisedMemoryInspectionV1
+            ):
+                raise ValueError("supervised result lineage fields are incomplete")
+            return SupervisedArtifactLineageReceiptV1(
+                protocol_id="chembench_supervised_transfer_v1",
+                reflector_projection_id=SUPERVISED_REFLECTOR_PROJECTION_ID,
+                task_uid=self.task_uid,
+                task_index=self.task_index,
+                round_index=self.round_index,
+                category=self.supervised_category,
+                supervised_packet_sha256=self.supervised_packet_sha256,
+                input_schema_sha256=self.supervised_input_schema_sha256,
+                reflector_prompt_sha256=self.supervised_reflector_prompt_sha256,
+                predecessor_artifact_id=(
+                    None if self.predecessor is None else self.predecessor.core_artifact_id
+                ),
+                predecessor_memory_sha256=(
+                    None
+                    if self.predecessor is None
+                    else self.predecessor.resolved_memory_sha256
+                ),
+                trajectory_ids=self.trajectory_ids,
+                trajectory_digest=self.trajectory_digest,
+                safe_feedback_digest=self.safe_feedback_digest,
+                memory_limits_sha256=self.memory_limits_sha256,
+                memory_inspection_sha256=self.memory_inspection.digest,
+                utf8_byte_count=self.memory_inspection.utf8_byte_count,
+                estimated_token_count=self.memory_inspection.estimated_token_count,
+                section_item_counts=self.memory_inspection.section_item_counts,
+                evolution_plan_id=self.plan_id,
+                evolution_job_id=self.job_id,
+                core_artifact_id=self.core_artifact_id,
+                artifact_payload_sha256=self.artifact_payload_sha256,
+                context_resolution_digest=self.context_resolution_digest,
+            )
         return TaskwiseArtifactLineageReceiptV1(
             protocol_id=self.protocol_id,
             reflector_projection_id=REFLECTOR_PROJECTION_ID,
@@ -890,6 +1040,7 @@ class TaskwiseCoreUpdateRequestV1:
     trajectories: tuple[TaskwiseTrajectoryV1, ...]
     predecessor: TaskwiseCorePredecessorV1 | None
     validator_forbidden_literals: tuple[str, ...] = ()
+    supervised_packet: SupervisedEvolutionPacketV1 | None = None
 
     def __repr__(self) -> str:
         return "TaskwiseCoreUpdateRequestV1(<trajectory-prefix-and-validator-input>)"
@@ -934,6 +1085,30 @@ class TaskwiseCoreUpdateRequestV1:
             for value in self.validator_forbidden_literals
         ):
             raise TypeError("validator_forbidden_literals must be non-empty strings")
+        packet = self.supervised_packet
+        if packet is not None:
+            if type(packet) is not SupervisedEvolutionPacketV1:
+                raise TypeError("supervised_packet must be exact SupervisedEvolutionPacketV1")
+            current = self.trajectories[-1]
+            if (
+                packet.task_uid != self.task_uid
+                or packet.training_task_ordinal != self.task_index + 1
+                or packet.round_index != self.round_index
+                or packet.category != current.category
+                or packet.model_raw_completion != current.raw_completion
+                or packet.predecessor_artifact_id
+                != (None if self.predecessor is None else self.predecessor.core_artifact_id)
+            ):
+                raise ValueError("supervised packet does not bind the current Core update")
+            predecessor_digest = (
+                None
+                if packet.predecessor_memory is None
+                else _sha256_bytes(packet.predecessor_memory.encode("utf-8"))
+            )
+            if predecessor_digest != (
+                None if self.predecessor is None else self.predecessor.resolved_memory_sha256
+            ):
+                raise ValueError("supervised packet predecessor memory binding differs")
 
 
 ReflectorBoundaryFactoryV1 = Callable[
@@ -958,9 +1133,10 @@ class TaskwiseTextMemoryValidatorV1:
     __slots__ = (
         "_expected_lineage",
         "_expected_record_count",
-        "_forbidden_literals",
         "_finding_evidence",
+        "_forbidden_literals",
         "_memory_limits",
+        "_supervised_category",
     )
 
     def __init__(
@@ -969,15 +1145,21 @@ class TaskwiseTextMemoryValidatorV1:
         expected_lineage: dict[str, Any],
         expected_record_count: int,
         forbidden_literals: tuple[str, ...],
-        memory_limits: TaskwiseMemoryLimitsV1,
+        memory_limits: TaskwiseMemoryLimitsV1 | SupervisedMemoryLimitsV1,
+        supervised_category: str | None = None,
     ) -> None:
-        if type(memory_limits) is not TaskwiseMemoryLimitsV1:
-            raise TypeError("memory_limits must be exact TaskwiseMemoryLimitsV1")
+        if type(memory_limits) not in (TaskwiseMemoryLimitsV1, SupervisedMemoryLimitsV1):
+            raise TypeError("memory_limits type is unsupported")
+        if (type(memory_limits) is SupervisedMemoryLimitsV1) != (
+            supervised_category is not None
+        ):
+            raise TypeError("supervised category and limits must be selected together")
         self._expected_lineage = json.loads(_canonical_json(expected_lineage))
         self._expected_record_count = expected_record_count
         self._forbidden_literals = forbidden_literals
         self._finding_evidence: tuple[TaskwiseValidatorFindingEvidenceV1, ...] = ()
         self._memory_limits = memory_limits
+        self._supervised_category = supervised_category
 
     @property
     def finding_evidence(self) -> tuple[TaskwiseValidatorFindingEvidenceV1, ...]:
@@ -1009,7 +1191,24 @@ class TaskwiseTextMemoryValidatorV1:
             findings.add("invalid_artifact_type_or_state")
         if artifact.promoted:
             findings.add("already_promoted")
-        inspection = inspect_taskwise_text_memory_v1(payload, limits=self._memory_limits)
+        if self._supervised_category is None:
+            if type(self._memory_limits) is not TaskwiseMemoryLimitsV1:
+                raise AssertionError("taskwise validator limit type changed")
+            inspection: TaskwiseMemoryInspectionV1 | SupervisedMemoryInspectionV1 = (
+                inspect_taskwise_text_memory_v1(payload, limits=self._memory_limits)
+            )
+            required_core_sections = list(self._memory_limits.required_sections)
+            validator_id = "chembench4k_taskwise_text_memory_validator_v1"
+        else:
+            if type(self._memory_limits) is not SupervisedMemoryLimitsV1:
+                raise AssertionError("supervised validator limit type changed")
+            inspection = inspect_supervised_category_memory_v1(
+                payload,
+                category=self._supervised_category,
+                limits=self._memory_limits,
+            )
+            required_core_sections = list(self._memory_limits.core_compatibility_sections)
+            validator_id = "chembench_supervised_category_memory_validator_v1"
         findings.update(inspection.finding_codes)
         try:
             text = payload.decode("utf-8")
@@ -1025,7 +1224,7 @@ class TaskwiseTextMemoryValidatorV1:
             or manifest.get("record_count") != self._expected_record_count
             or manifest.get("reflected_record_count") != self._expected_record_count
             or manifest.get("prior_memory_count") != expected_prior_count
-            or manifest.get("required_sections") != list(self._memory_limits.required_sections)
+            or manifest.get("required_sections") != required_core_sections
         ):
             findings.add("invalid_core_manifest")
         for key, value in self._expected_lineage.items():
@@ -1113,7 +1312,7 @@ class TaskwiseTextMemoryValidatorV1:
             )
         self._finding_evidence = tuple(evidence_by_code[code] for code in sorted(evidence_by_code))
         return CoreArtifactValidationReceiptV2(
-            validator_id="chembench4k_taskwise_text_memory_validator_v1",
+            validator_id=validator_id,
             artifact_id=artifact.artifact_id,
             artifact_payload_sha256=payload_sha256,
             passed=not finding_codes,
@@ -1131,12 +1330,15 @@ class TaskwiseCoreEvolutionBridgeV1:
         artifact_root: str | Path,
         executable_registry: VerifiedExecutableRegistry,
         reflector_boundary_factory: ReflectorBoundaryFactoryV1 | None = None,
+        supervised_reflector_boundary_factory: ReflectorBoundaryFactoryV1 | None = None,
         checkpoint_path: str | Path | None = None,
-        memory_limits: TaskwiseMemoryLimitsV1 = TASKWISE_MEMORY_LIMITS_V1,
+        memory_limits: TaskwiseMemoryLimitsV1 | SupervisedMemoryLimitsV1 = (
+            TASKWISE_MEMORY_LIMITS_V1
+        ),
         reflector_timeout_seconds: int = DEFAULT_REFLECTOR_TIMEOUT_SECONDS,
     ) -> None:
-        if type(memory_limits) is not TaskwiseMemoryLimitsV1:
-            raise TypeError("memory_limits must be exact TaskwiseMemoryLimitsV1")
+        if type(memory_limits) not in (TaskwiseMemoryLimitsV1, SupervisedMemoryLimitsV1):
+            raise TypeError("memory_limits must be an exact supported protocol type")
         self._reflector_timeout_seconds = _validate_reflector_timeout_seconds(
             reflector_timeout_seconds
         )
@@ -1173,6 +1375,9 @@ class TaskwiseCoreEvolutionBridgeV1:
             )
             self._store.initialize()
             self._reflector_boundary_factory = reflector_boundary_factory
+            self._supervised_reflector_boundary_factory = (
+                supervised_reflector_boundary_factory
+            )
             self._restore_private_checkpoints()
         except Exception:
             self.close()
@@ -1245,41 +1450,67 @@ class TaskwiseCoreEvolutionBridgeV1:
             raise TaskwiseCoreEvolutionError("TASKWISE_STREAM_CLOSED")
         if self._terminal_finding is not None:
             raise TaskwiseCoreEvolutionError("TASKWISE_STREAM_TERMINAL")
-        if test_only_allow_synthetic_reflector and self._reflector_boundary_factory is not None:
+        selected_factory = (
+            self._supervised_reflector_boundary_factory
+            if request.supervised_packet is not None
+            else self._reflector_boundary_factory
+        )
+        if test_only_allow_synthetic_reflector and selected_factory is not None:
             raise ValueError("reflector execution mode is ambiguous")
-        if not test_only_allow_synthetic_reflector and self._reflector_boundary_factory is None:
+        if not test_only_allow_synthetic_reflector and selected_factory is None:
             raise TaskwiseCoreEvolutionError("TASKWISE_REFLECTOR_BOUNDARY_REQUIRED")
         self._require_next_predecessor(request)
 
         trajectory_digest = ordered_taskwise_trajectory_digest(request.trajectories)
         safe_feedback_digest = ordered_safe_feedback_digest(request.trajectories)
         global_update_ordinal = 1 if self._head is None else self._head.global_update_ordinal + 1
-        policy_version = f"{PROTOCOL_ID}.{global_update_ordinal}.{trajectory_digest[:20]}"
-        for trajectory in request.trajectories:
-            self._store.ingest_event(
-                self._event_request(
-                    trajectory=trajectory,
-                    policy_version=policy_version,
+        packet = request.supervised_packet
+        packet_records = () if packet is None else packet.reflector_records()
+        policy_protocol = PROTOCOL_ID if packet is None else packet.protocol_id
+        policy_version = f"{policy_protocol}.{global_update_ordinal}.{trajectory_digest[:20]}"
+        if packet is None:
+            for trajectory in request.trajectories:
+                self._store.ingest_event(
+                    self._event_request(
+                        trajectory=trajectory,
+                        policy_version=policy_version,
+                    )
                 )
-            )
+            expected_record_count = request.update_index
+        else:
+            for record in packet_records:
+                self._store.ingest_event(
+                    self._supervised_event_request(
+                        packet=packet,
+                        record=record,
+                        policy_version=policy_version,
+                    )
+                )
+            expected_record_count = len(packet_records)
         dataset = self._store.create_dataset(
             DatasetCreateRequest(
-                name="Taskwise safe trajectory prefix",
-                purpose=_DATASET_PURPOSE,
+                name=(
+                    "Taskwise safe trajectory prefix"
+                    if packet is None
+                    else "Supervised Train evolution packet"
+                ),
+                purpose=(
+                    _DATASET_PURPOSE if packet is None else _SUPERVISED_DATASET_PURPOSE
+                ),
                 query={
                     "event_types": [_EVENT_TYPE],
                     "status": ["COMPLETED"],
                     "policy_version": policy_version,
                 },
                 limits={
-                    "max_events": request.update_index,
-                    "max_traces": request.update_index,
+                    "max_events": expected_record_count,
+                    "max_traces": expected_record_count,
                 },
             )
         )
         if (
-            dataset.event_count != request.update_index
-            or dataset.trace_count != request.update_index
+            dataset.event_count != expected_record_count
+            or dataset.trace_count != expected_record_count
         ):
             self._terminal_finding = "TASKWISE_DATASET_CARDINALITY_INVALID"
             raise TaskwiseCoreEvolutionError(self._terminal_finding)
@@ -1313,6 +1544,7 @@ class TaskwiseCoreEvolutionBridgeV1:
             safe_feedback_digest=safe_feedback_digest,
             validator_input_digest=validator_input_digest,
             dataset_artifact_id=dataset.artifact_id,
+            expected_record_count=expected_record_count,
         )
         plan = self._create_job(
             request=request,
@@ -1321,6 +1553,7 @@ class TaskwiseCoreEvolutionBridgeV1:
             trajectory_digest=trajectory_digest,
             forbidden_literals=forbidden_literals,
             validator_input_digest=validator_input_digest,
+            expected_record_count=expected_record_count,
         )
         try:
             try:
@@ -1329,6 +1562,7 @@ class TaskwiseCoreEvolutionBridgeV1:
                     job_id=plan["job_id"],
                     job_type=plan["job_type"],
                     trajectory_digest=trajectory_digest,
+                    expected_record_count=expected_record_count,
                     test_only_allow_synthetic_reflector=(test_only_allow_synthetic_reflector),
                 )
             except TaskwiseCoreEvolutionError as exc:
@@ -1361,6 +1595,7 @@ class TaskwiseCoreEvolutionBridgeV1:
                 global_update_ordinal=global_update_ordinal,
                 trajectory_digest=trajectory_digest,
                 safe_feedback_digest=safe_feedback_digest,
+                expected_record_count=expected_record_count,
                 validator_input_digest=validator_input_digest,
                 dataset_id=dataset.dataset_id,
                 dataset_artifact_id=dataset.artifact_id,
@@ -1493,9 +1728,20 @@ class TaskwiseCoreEvolutionBridgeV1:
                 raise TaskwiseCoreEvolutionError("TASKWISE_PRIVATE_CHECKPOINT_INVALID")
             try:
                 result = TaskwiseCoreUpdateResultV1.model_validate(row["result"])
-                lineage_receipt = TaskwiseArtifactLineageReceiptV1.model_validate(
-                    row["required_lineage"]
-                )
+                lineage_payload = row["required_lineage"]
+                if (
+                    isinstance(lineage_payload, dict)
+                    and lineage_payload.get("schema_version")
+                    == "chembench_supervised_artifact_lineage_v1"
+                ):
+                    lineage_receipt: (
+                        TaskwiseArtifactLineageReceiptV1
+                        | SupervisedArtifactLineageReceiptV1
+                    ) = SupervisedArtifactLineageReceiptV1.model_validate(lineage_payload)
+                else:
+                    lineage_receipt = TaskwiseArtifactLineageReceiptV1.model_validate(
+                        lineage_payload
+                    )
                 literals = _merge_checkpoint_literal_delta(
                     prior_literals,
                     row["validator_forbidden_literals_delta"],
@@ -1654,9 +1900,10 @@ class TaskwiseCoreEvolutionBridgeV1:
             raise TaskwiseCoreEvolutionError("TASKWISE_HEAD_IDENTITY_DRIFT")
         validator = TaskwiseTextMemoryValidatorV1(
             expected_lineage=self._expected_lineage_from_result(result),
-            expected_record_count=result.update_index,
+            expected_record_count=result.records_visible_to_reflector,
             forbidden_literals=forbidden,
             memory_limits=self._memory_limits,
+            supervised_category=result.supervised_category,
         )
         recomputed = validator.validate(
             artifact=artifact.model_copy(update={"promoted": False}),
@@ -1666,7 +1913,20 @@ class TaskwiseCoreEvolutionBridgeV1:
         )
         if recomputed != result.validation_receipt:
             raise TaskwiseCoreEvolutionError("TASKWISE_VALIDATION_RECEIPT_DRIFT")
-        inspection = inspect_taskwise_text_memory_v1(payload, limits=self._memory_limits)
+        if result.supervised_category is None:
+            if type(self._memory_limits) is not TaskwiseMemoryLimitsV1:
+                raise TaskwiseCoreEvolutionError("TASKWISE_MEMORY_LIMITS_DRIFT")
+            inspection: TaskwiseMemoryInspectionV1 | SupervisedMemoryInspectionV1 = (
+                inspect_taskwise_text_memory_v1(payload, limits=self._memory_limits)
+            )
+        else:
+            if type(self._memory_limits) is not SupervisedMemoryLimitsV1:
+                raise TaskwiseCoreEvolutionError("TASKWISE_MEMORY_LIMITS_DRIFT")
+            inspection = inspect_supervised_category_memory_v1(
+                payload,
+                category=result.supervised_category,
+                limits=self._memory_limits,
+            )
         if inspection != result.memory_inspection:
             raise TaskwiseCoreEvolutionError("TASKWISE_MEMORY_INSPECTION_DRIFT")
         if context_row is None:
@@ -1842,6 +2102,94 @@ class TaskwiseCoreEvolutionBridgeV1:
             },
         )
 
+    def _supervised_event_request(
+        self,
+        *,
+        packet: SupervisedEvolutionPacketV1,
+        record: dict[str, Any],
+        policy_version: str,
+    ) -> EventIngestRequest:
+        """Ingest one bounded packet part as a real private Core trajectory event."""
+
+        if type(packet) is not SupervisedEvolutionPacketV1 or not isinstance(record, dict):
+            raise TypeError("supervised Core event inputs are invalid")
+        if (
+            record.get("source_split") != SUPERVISED_TRAIN_SOURCE_SPLIT
+            or record.get("packet_sha256") != packet.digest
+            or type(record.get("uid")) is not str
+            or type(record.get("content")) is not str
+            or record.get("packet_part_count") != len(packet.reflector_records())
+        ):
+            raise TaskwiseCoreEvolutionError("TASKWISE_SUPERVISED_PACKET_BINDING_INVALID")
+        reward = 1.0 if packet.prediction_correct else 0.0
+        part = int(record["packet_part"])
+        task_id = "supervised-current-train-task"
+        session_id = f"supervised-current-round-{packet.round_index}"
+        trajectory_payload = {
+            "status": "COMPLETED",
+            "metadata": {
+                "builder": BRIDGE_ID,
+                "capture_mode": "supervised_train_answer_projection",
+                "token_level_metrics_available": False,
+                "packet_sha256": packet.digest,
+                "packet_part": part,
+                "packet_part_count": record["packet_part_count"],
+                "input_schema_sha256": PACKET_INPUT_SCHEMA_DIGEST,
+                "reflector_prompt_sha256": REFLECTOR_PROMPT_DIGEST,
+            },
+            "traces": [
+                {
+                    "prompt_ids": [],
+                    "response_ids": [],
+                    "loss_mask": [],
+                    "prompt_messages": [
+                        {"role": "user", "content": record["content"]}
+                    ],
+                    "response_messages": [
+                        {
+                            "role": "assistant",
+                            "content": "Bound supervised packet part for category reflection.",
+                        }
+                    ],
+                    "finish_reason": "supervised_train_answer_projection",
+                    "response_logprobs": None,
+                    "reward": reward,
+                    "metadata": {
+                        "capture_mode": "supervised_train_answer_projection",
+                        "token_level_metrics_available": False,
+                        "packet_part": part,
+                    },
+                }
+            ],
+        }
+        return EventIngestRequest(
+            source="chembench.supervised_transfer.core.v1",
+            event_type=_EVENT_TYPE,
+            source_event_id=f"{BRIDGE_ID}:{policy_version}:{record['uid']}",
+            task_id=task_id,
+            session_id=session_id,
+            policy_version=policy_version,
+            rollout_step=part - 1,
+            agent={"harness": "codex", "model_name": MODEL},
+            base_model=MODEL,
+            reward=reward,
+            status="COMPLETED",
+            payload={
+                "session_result": {
+                    "session_id": session_id,
+                    "task_id": task_id,
+                    "status": "COMPLETED",
+                    "trajectory": trajectory_payload,
+                    "metadata": {
+                        "protocol_id": packet.protocol_id,
+                        "bridge_id": BRIDGE_ID,
+                        "packet_sha256": packet.digest,
+                        "packet_part": part,
+                    },
+                }
+            },
+        )
+
     def _expected_lineage(
         self,
         *,
@@ -1851,12 +2199,21 @@ class TaskwiseCoreEvolutionBridgeV1:
         safe_feedback_digest: str,
         validator_input_digest: str,
         dataset_artifact_id: str,
+        expected_record_count: int,
     ) -> dict[str, Any]:
         predecessor = request.predecessor
-        return {
-            "protocol_id": PROTOCOL_ID,
+        lineage = {
+            "protocol_id": (
+                PROTOCOL_ID
+                if request.supervised_packet is None
+                else request.supervised_packet.protocol_id
+            ),
             "bridge_id": BRIDGE_ID,
-            "reflector_projection_id": REFLECTOR_PROJECTION_ID,
+            "reflector_projection_id": (
+                REFLECTOR_PROJECTION_ID
+                if request.supervised_packet is None
+                else SUPERVISED_REFLECTOR_PROJECTION_ID
+            ),
             "task_uid": request.task_uid,
             "task_index": request.task_index,
             "round_index": request.round_index,
@@ -1888,16 +2245,36 @@ class TaskwiseCoreEvolutionBridgeV1:
                 None if predecessor is None else predecessor.context_resolution_digest
             ),
         }
+        packet = request.supervised_packet
+        if packet is not None:
+            lineage.update(
+                {
+                    "supervised_packet_sha256": packet.digest,
+                    "supervised_category": packet.category,
+                    "supervised_input_schema_sha256": PACKET_INPUT_SCHEMA_DIGEST,
+                    "supervised_reflector_prompt_sha256": REFLECTOR_PROMPT_DIGEST,
+                    "records_visible_to_reflector": expected_record_count,
+                }
+            )
+        return lineage
 
     def _expected_lineage_from_result(
         self,
         result: TaskwiseCoreUpdateResultV1,
     ) -> dict[str, Any]:
         predecessor = result.predecessor
-        return {
-            "protocol_id": PROTOCOL_ID,
+        lineage = {
+            "protocol_id": (
+                PROTOCOL_ID
+                if result.supervised_packet_sha256 is None
+                else "chembench_supervised_transfer_v1"
+            ),
             "bridge_id": BRIDGE_ID,
-            "reflector_projection_id": REFLECTOR_PROJECTION_ID,
+            "reflector_projection_id": (
+                REFLECTOR_PROJECTION_ID
+                if result.supervised_packet_sha256 is None
+                else SUPERVISED_REFLECTOR_PROJECTION_ID
+            ),
             "task_uid": result.task_uid,
             "task_index": result.task_index,
             "round_index": result.round_index,
@@ -1929,6 +2306,21 @@ class TaskwiseCoreEvolutionBridgeV1:
                 None if predecessor is None else predecessor.context_resolution_digest
             ),
         }
+        if result.supervised_packet_sha256 is not None:
+            lineage.update(
+                {
+                    "supervised_packet_sha256": result.supervised_packet_sha256,
+                    "supervised_category": result.supervised_category,
+                    "supervised_input_schema_sha256": (
+                        result.supervised_input_schema_sha256
+                    ),
+                    "supervised_reflector_prompt_sha256": (
+                        result.supervised_reflector_prompt_sha256
+                    ),
+                    "records_visible_to_reflector": result.records_visible_to_reflector,
+                }
+            )
+        return lineage
 
     def _create_job(
         self,
@@ -1939,6 +2331,7 @@ class TaskwiseCoreEvolutionBridgeV1:
         trajectory_digest: str,
         forbidden_literals: tuple[str, ...],
         validator_input_digest: str,
+        expected_record_count: int,
     ) -> dict[str, str]:
         if validator_input_digest != _validator_input_digest(forbidden_literals):
             raise TaskwiseCoreEvolutionError("TASKWISE_VALIDATOR_INPUT_DIGEST_INVALID")
@@ -1947,7 +2340,7 @@ class TaskwiseCoreEvolutionBridgeV1:
             enabled=True,
             method_id=METHOD_ID,
             config={
-                "max_records": request.update_index,
+                "max_records": expected_record_count,
                 "reflector_llm": {
                     "provider": "codex_cli",
                     "model": MODEL,
@@ -1987,19 +2380,35 @@ class TaskwiseCoreEvolutionBridgeV1:
                     ),
                 ),
                 core_config={
-                    "name": "Taskwise safe text memory update",
+                    "name": (
+                        "Taskwise safe text memory update"
+                        if request.supervised_packet is None
+                        else "Supervised category text memory update"
+                    ),
                     "promoted": False,
                     "lineage": expected_lineage,
                     "compatibility": {
                         "agent_harness": ["codex"],
                         "auth_mode": ["subscription"],
                         "base_model": [MODEL],
-                        "task_tags": [PROTOCOL_ID],
+                        "task_tags": [
+                            PROTOCOL_ID
+                            if request.supervised_packet is None
+                            else request.supervised_packet.protocol_id
+                        ],
                     },
                     "tags": [
-                        PROTOCOL_ID,
+                        (
+                            PROTOCOL_ID
+                            if request.supervised_packet is None
+                            else request.supervised_packet.protocol_id
+                        ),
                         BRIDGE_ID,
-                        "taskwise-safe-projection",
+                        (
+                            "taskwise-safe-projection"
+                            if request.supervised_packet is None
+                            else "supervised-train-answer-projection"
+                        ),
                     ],
                 },
             ),
@@ -2019,6 +2428,7 @@ class TaskwiseCoreEvolutionBridgeV1:
         job_id: str,
         job_type: str,
         trajectory_digest: str,
+        expected_record_count: int,
         test_only_allow_synthetic_reflector: bool,
     ) -> dict[str, str | None]:
         reflector_input_digest: str
@@ -2036,7 +2446,11 @@ class TaskwiseCoreEvolutionBridgeV1:
                 executable_registry=self._registry,
             )
         else:
-            records = _taskwise_reflector_records(request.trajectories)
+            records = (
+                _taskwise_reflector_records(request.trajectories)
+                if request.supervised_packet is None
+                else list(request.supervised_packet.reflector_records())
+            )
             reflector_input_digest = canonical_digest(records)
             private_parent = self._store.files.root / _PRIVATE_INPUT_DIRECTORY
             private_parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -2050,19 +2464,28 @@ class TaskwiseCoreEvolutionBridgeV1:
                     "utf-8"
                 )
                 _exclusive_private_write(path, encoded)
-                boundary_factory = self._reflector_boundary_factory
+                boundary_factory = (
+                    self._reflector_boundary_factory
+                    if request.supervised_packet is None
+                    else self._supervised_reflector_boundary_factory
+                )
                 if boundary_factory is None:  # defensive against mutation
                     raise TaskwiseCoreEvolutionError("TASKWISE_REFLECTOR_BOUNDARY_REQUIRED")
                 boundary = boundary_factory(
                     path,
                     reflector_input_digest,
-                    request.update_index,
+                    expected_record_count,
                 )
                 if type(boundary) is not ReflectorExecutionBoundaryV2:
                     raise TypeError("reflector boundary factory returned an untrusted type")
                 if (
-                    boundary.expected_record_count != request.update_index
-                    or boundary.expected_source_split != TASKWISE_SOURCE_SPLIT
+                    boundary.expected_record_count != expected_record_count
+                    or boundary.expected_source_split
+                    != (
+                        TASKWISE_SOURCE_SPLIT
+                        if request.supervised_packet is None
+                        else SUPERVISED_TRAIN_SOURCE_SPLIT
+                    )
                     or boundary.expected_records_sha256 != reflector_input_digest
                 ):
                     raise TaskwiseCoreEvolutionError("TASKWISE_REFLECTOR_BOUNDARY_BINDING_INVALID")
@@ -2089,7 +2512,7 @@ class TaskwiseCoreEvolutionBridgeV1:
                     or receipt.retry_allowed
                     or receipt.resume_allowed
                     or receipt.replacement_completion_allowed
-                    or receipt.record_count != request.update_index
+                    or receipt.record_count != expected_record_count
                     or receipt.ordered_records_sha256 != reflector_input_digest
                 ):
                     raise TaskwiseCoreEvolutionError("TASKWISE_REFLECTOR_BOUNDARY_FAILED")
@@ -2114,6 +2537,7 @@ class TaskwiseCoreEvolutionBridgeV1:
         global_update_ordinal: int,
         trajectory_digest: str,
         safe_feedback_digest: str,
+        expected_record_count: int,
         validator_input_digest: str,
         dataset_id: str,
         dataset_artifact_id: str,
@@ -2202,14 +2626,29 @@ class TaskwiseCoreEvolutionBridgeV1:
                 maximum=ABSOLUTE_MAX_MEMORY_FILE_BYTES,
             )
             payload_sha256 = _sha256_bytes(payload)
-            inspection = inspect_taskwise_text_memory_v1(payload, limits=self._memory_limits)
+            packet = request.supervised_packet
+            if packet is None:
+                if type(self._memory_limits) is not TaskwiseMemoryLimitsV1:
+                    raise TypeError("taskwise stream uses incompatible memory limits")
+                inspection: TaskwiseMemoryInspectionV1 | SupervisedMemoryInspectionV1 = (
+                    inspect_taskwise_text_memory_v1(payload, limits=self._memory_limits)
+                )
+            else:
+                if type(self._memory_limits) is not SupervisedMemoryLimitsV1:
+                    raise TypeError("supervised stream uses incompatible memory limits")
+                inspection = inspect_supervised_category_memory_v1(
+                    payload,
+                    category=packet.category,
+                    limits=self._memory_limits,
+                )
             failure_metadata["artifact_payload_sha256"] = payload_sha256
             failure_metadata["memory_inspection_sha256"] = inspection.digest
             validator = TaskwiseTextMemoryValidatorV1(
                 expected_lineage=expected_lineage,
-                expected_record_count=request.update_index,
+                expected_record_count=expected_record_count,
                 forbidden_literals=forbidden_literals,
                 memory_limits=self._memory_limits,
+                supervised_category=None if packet is None else packet.category,
             )
             receipt = validator.validate(
                 artifact=artifact,
@@ -2261,6 +2700,11 @@ class TaskwiseCoreEvolutionBridgeV1:
                     artifact_id=artifact_id,
                     task_index=request.task_index,
                     update_index=request.update_index,
+                    supervised_protocol=(
+                        None
+                        if request.supervised_packet is None
+                        else request.supervised_packet.protocol_id
+                    ),
                 )
             )
             failure_metadata["context_resolution_digest"] = canonical_digest(context)
@@ -2286,8 +2730,8 @@ class TaskwiseCoreEvolutionBridgeV1:
                 dataset_id=dataset_id,
                 dataset_artifact_id=dataset_artifact_id,
                 dataset_manifest_sha256=dataset_manifest_sha256,
-                configured_max_records=request.update_index,
-                records_visible_to_reflector=request.update_index,
+                configured_max_records=expected_record_count,
+                records_visible_to_reflector=expected_record_count,
                 reflector_input_digest=reflector_input_digest,
                 reflector_timeout_seconds=self._reflector_timeout_seconds,
                 core_lease_seconds=self._core_lease_seconds,
@@ -2310,6 +2754,14 @@ class TaskwiseCoreEvolutionBridgeV1:
                 context_resolution_digest=canonical_digest(context),
                 resolved_memory=resolved_memory,
                 resolved_memory_sha256=_sha256_bytes(resolved_memory.encode("utf-8")),
+                supervised_packet_sha256=(None if packet is None else packet.digest),
+                supervised_category=(None if packet is None else packet.category),
+                supervised_input_schema_sha256=(
+                    None if packet is None else PACKET_INPUT_SCHEMA_DIGEST
+                ),
+                supervised_reflector_prompt_sha256=(
+                    None if packet is None else REFLECTOR_PROMPT_DIGEST
+                ),
             )
         except Exception as exc:
             self._raise_private_core_failure(
@@ -2456,6 +2908,7 @@ class TaskwiseCoreEvolutionBridgeV1:
         artifact_id: str,
         task_index: int,
         update_index: int,
+        supervised_protocol: str | None = None,
     ) -> ContextProjectionResolveRequest:
         return ContextProjectionResolveRequest(
             task_id=(f"taskwise-task-{task_index:08d}-after-update-{update_index}"),
@@ -2465,9 +2918,11 @@ class TaskwiseCoreEvolutionBridgeV1:
                 "settings": {"auth_mode": "subscription"},
             },
             base_model=MODEL,
-            policy_version=PROTOCOL_ID,
+            policy_version=PROTOCOL_ID if supervised_protocol is None else supervised_protocol,
             metadata={
-                "task_tags": [PROTOCOL_ID],
+                "task_tags": [
+                    PROTOCOL_ID if supervised_protocol is None else supervised_protocol
+                ],
                 "evolution": {"context_artifact_ids": [artifact_id]},
             },
             execution_profile=self._execution_profile(),
@@ -2690,6 +3145,93 @@ def build_taskwise_core_port_at_roots_v1(
         reflector_timeout_seconds=timeout_seconds,
     )
     return TaskwiseCoreUpdatePortAdapterV1(bridge)
+
+
+def build_supervised_core_bridge_at_roots_v1(
+    *,
+    state_root: Path,
+    framework_lock: Path,
+    timeout_seconds: int,
+    memory_limits: SupervisedMemoryLimitsV1 = SUPERVISED_MEMORY_LIMITS_V1,
+) -> TaskwiseCoreEvolutionBridgeV1:
+    """Build one category-private supervised stream on the verified Core method."""
+
+    if (
+        not isinstance(state_root, Path)
+        or not state_root.is_absolute()
+        or not isinstance(framework_lock, Path)
+        or not framework_lock.is_absolute()
+    ):
+        raise TypeError("Core state and framework lock roots must be absolute Paths")
+    if type(memory_limits) is not SupervisedMemoryLimitsV1:
+        raise TypeError("supervised memory limits must be exact")
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, int)
+        or not 0 < timeout_seconds <= MAX_CORE_LEASE_SECONDS - CORE_LEASE_GRACE_SECONDS
+    ):
+        raise ValueError("Core reflector timeout must be positive and bounded")
+    if not framework_lock.is_file():
+        raise TaskwiseCoreEvolutionError("TASKWISE_VERIFIED_FRAMEWORK_LOCK_MISSING")
+
+    capability = ReflectorExecutionBoundaryV2.detect_capability()
+    if not capability.available:
+        raise TaskwiseCoreEvolutionError("REFLECTOR_FILESYSTEM_ISOLATION_MISSING")
+    _prepare_private_state_root(state_root)
+    private_audit_root = state_root / "private_reflector_events"
+    probe_record = {
+        "uid": "0" * 64,
+        "source_split": SUPERVISED_TRAIN_SOURCE_SPLIT,
+        "packet_sha256": "0" * 64,
+        "packet_part": 1,
+        "packet_part_count": 1,
+        "field": "preflight",
+        "field_part": 1,
+        "field_part_count": 1,
+        "content": "PACKET_PART 001/001 field=preflight field_part=001/001 value=preflight",
+        "reward": 0.0,
+    }
+    probe_digest = canonical_digest([probe_record])
+    with tempfile.TemporaryDirectory(
+        prefix=".supervised-reflector-preflight-",
+        dir=state_root,
+    ) as temporary:
+        probe_path = Path(temporary) / "records.jsonl"
+        _exclusive_private_write(probe_path, (_canonical_json(probe_record) + "\n").encode())
+        boundary = ReflectorExecutionBoundaryV2(
+            dev_artifact_path=probe_path,
+            expected_records_sha256=probe_digest,
+            expected_record_count=1,
+            expected_source_split=SUPERVISED_TRAIN_SOURCE_SPLIT,
+            private_audit_root=private_audit_root,
+            timeout_seconds=timeout_seconds,
+        )
+        if not boundary.preflight().available:
+            raise TaskwiseCoreEvolutionError("REFLECTOR_FILESYSTEM_ISOLATION_MISSING")
+
+    def supervised_boundary_factory(
+        artifact_path: Path,
+        records_sha256: str,
+        record_count: int,
+    ) -> ReflectorExecutionBoundaryV2:
+        return ReflectorExecutionBoundaryV2(
+            dev_artifact_path=artifact_path,
+            expected_records_sha256=records_sha256,
+            expected_record_count=record_count,
+            expected_source_split=SUPERVISED_TRAIN_SOURCE_SPLIT,
+            private_audit_root=private_audit_root,
+            timeout_seconds=timeout_seconds,
+        )
+
+    return TaskwiseCoreEvolutionBridgeV1(
+        db_path=state_root / "evolution.sqlite3",
+        artifact_root=state_root / "artifacts",
+        executable_registry=load_verified_framework_registry(framework_lock),
+        supervised_reflector_boundary_factory=supervised_boundary_factory,
+        checkpoint_path=state_root / "private_lineage_checkpoints.jsonl",
+        memory_limits=memory_limits,
+        reflector_timeout_seconds=timeout_seconds,
+    )
 
 
 def _prepare_private_state_root(path: Path) -> None:
@@ -3259,10 +3801,10 @@ def _validator_input_digest(values: tuple[str, ...]) -> str:
 
 
 __all__ = [
-    "build_taskwise_core_port_at_roots_v1",
     "BRIDGE_ID",
     "METHOD_ID",
     "PROTOCOL_ID",
+    "SUPERVISED_REFLECTOR_PROJECTION_ID",
     "ReflectorBoundaryFactoryV1",
     "TaskwiseArtifactLineageReceiptV1",
     "TaskwiseCoreEvolutionBridgeV1",
@@ -3274,4 +3816,6 @@ __all__ = [
     "TaskwiseCoreUpdateResultV1",
     "TaskwiseTextMemoryValidatorV1",
     "TaskwiseValidatorFindingEvidenceV1",
+    "build_supervised_core_bridge_at_roots_v1",
+    "build_taskwise_core_port_at_roots_v1",
 ]

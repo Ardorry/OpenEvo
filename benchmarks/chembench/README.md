@@ -30,6 +30,40 @@ NOT_A_STANDARD_LEADERBOARD_SCORE
 Their repeated-round and test-time-adaptation metrics are research outcomes,
 not standard ChemBench4K accuracy and not leaderboard-comparable.
 
+## Supervised frozen-transfer protocol
+
+`chembench_supervised_transfer_v1` is a separate research-only protocol. Its
+nine category-local reflectors may see full Train questions, options,
+predictions, targets, correctness, and predecessor memory. Each category has
+50 Train, 10 Probe, and 50 primary Test items. Probe is evaluated at frozen
+checkpoints 0/10/20/30/40/50 without feedback or evolution; final Test compares
+one no-memory completion with one completion using the frozen category memory.
+It must be reported as `RESEARCH_ONLY_SUPERVISED_EVOLUTION`,
+`TRAIN_ANSWER_SUPERVISION`, `FROZEN_UNSEEN_TEST_TRANSFER`, and
+`NOT_A_STANDARD_LEADERBOARD_SCORE`.
+
+ExposureTaxonomyV2 distinguishes manifest listing from actual item exposure.
+Holdouts exclude any UID with a task-model attempt, completion, private
+evaluation, supervised-reflector input, or item-level human review. Mere
+manifest listing, deterministic prompt rendering, and aggregate-only review do
+not exclude a UID. The immutable V1 blocked receipt is retained as evidence of
+the earlier over-conservative classification. The V2 manifests and isolation
+receipt live in `manifests/supervised_transfer_v1/`; private manifests remain
+mode `0600` and untracked.
+
+Non-paid preparation and validation use:
+
+```bash
+benchmarks/chembench/scripts/run_chembench_supervised_transfer_v1.sh prepare
+benchmarks/chembench/scripts/run_chembench_supervised_transfer_v1.sh verify
+benchmarks/chembench/scripts/run_chembench_supervised_transfer_v1.sh dry-run
+benchmarks/chembench/scripts/prepare_supervised_transfer_v1_runtime.sh
+```
+
+The paid `run --run-id ...` entry point requires the dedicated non-editable
+Core runtime and executes smoke, canaries, formal Train/Probe, frozen primary
+Test, paired statistics, and the two hash-verified Desktop exports in order.
+
 An explicitly unpaired online-only Pilot500 entry point is also available for
 mechanism and descriptive analysis. It uses no control evidence, cannot issue
 a paired GO/NO-GO conclusion, and writes all required

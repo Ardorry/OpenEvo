@@ -1,0 +1,57 @@
+schema_version: chembench_supervised_transfer_config_v1
+protocol_id: chembench_supervised_transfer_v1
+dataset:
+  repository: AI4Chem/ChemBench4K
+  revision: f8ad41a980170f4c5d0cc97e57722d06887c8f53
+  root: data/chembench4k/AI4Chem_ChemBench4K/f8ad41a980170f4c5d0cc97e57722d06887c8f53
+  manifest: benchmarks/chembench/manifests/supervised_transfer_v1/chembench4k_dataset_manifest_supervised_v1.json
+manifests:
+  historical_exposure: benchmarks/chembench/manifests/supervised_transfer_v1/historical_exposure_manifest_v2.json
+  split_summary: benchmarks/chembench/manifests/supervised_transfer_v1/split_summary_v2.json
+roots:
+  results: results/chembench_supervised_transfer_v1
+  state: state/chembench_supervised_transfer_v1
+model: gpt-5.5
+reasoning_effort: medium
+codex_cli_version: BIND_VERIFIED_CODEX_AT_LAUNCH
+source_commit: BIND_CLEAN_HEAD_AT_LAUNCH
+reflector:
+  method_id: text_memory_expel_reflector
+  timeout_seconds: 600
+  framework_lock: state/chembench_supervised_transfer_v1/framework/framework-lock.json
+executor:
+  backend: local_codex_cli
+  harness: codex_cli
+  timeout_seconds: 600
+  concurrency: 1
+  infrastructure_retries_before_completion: 0
+  tools_enabled: false
+  mcp_enabled: false
+  web_enabled: false
+  network_enabled: false
+  subagents_enabled: false
+memory_limits:
+  max_utf8_bytes: 24576
+  max_estimated_tokens: 6144
+  max_confirmed_rules: 40
+  max_provisional_rules: 20
+  max_failure_modes: 24
+  max_retired_rules: 24
+split:
+  seed: openevo-chembench-supervised-transfer-v1-balanced-split
+  train_per_category: 50
+  probe_per_category: 10
+  test_per_category: 50
+  checkpoints: [0, 10, 20, 30, 40, 50]
+train:
+  rounds_per_task: 3
+  online_updates_per_task: 2
+  stop_when_correct: false
+  select_best_round: false
+call_budget:
+  control_train_task_calls: 1350
+  online_train_task_calls: 1350
+  online_train_reflector_calls: 900
+  probe_task_calls: 1080
+  test_task_calls: 900
+  total_model_calls: 5580

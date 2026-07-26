@@ -13,7 +13,7 @@ from openevo_chembench.frozen_runtime_v2 import FrozenAgentRequestV2
 from openevo_chembench.models import RawAttempt, TranscriptReference
 
 
-WORKSPACE_ROOT = Path(__file__).resolve().parents[4]
+WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 SNAPSHOT_ROOT = (
     WORKSPACE_ROOT
     / "data"

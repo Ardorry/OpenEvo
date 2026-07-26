@@ -1,0 +1,25 @@
+{
+  "dataset_manifest_sha256": "76593f7c1cb32ab9a477412d070434798b1e421d98f133a1914d995fe75cb1c4",
+  "dataset_test_count": 4009,
+  "finding_code": "INSUFFICIENT_NEVER_EXPOSED_POOL",
+  "historical_exposed_uid_count": 4009,
+  "historical_exposure_manifest_sha256": "389c6ad25283b801f3bbe0061437a7891e2af80f17c01cd81aa901883eb4f660",
+  "model_calls_made": 0,
+  "never_exposed_count_by_category": {
+    "Caption2mol": 0,
+    "Mol2caption": 0,
+    "Name_Conversion": 0,
+    "Product_Prediction": 0,
+    "Property_Prediction": 0,
+    "Retrosynthesis": 0,
+    "Solvent_Prediction": 0,
+    "Temperature_Prediction": 0,
+    "Yield_Prediction": 0
+  },
+  "protocol_id": "chembench_supervised_transfer_v1",
+  "required_never_exposed_per_category_minimum": 60,
+  "safety_rule": "Probe and Test require never-exposed UIDs",
+  "schema_version": "chembench_supervised_transfer_split_blocked_v1",
+  "source_repository_commit": "d795ee3d6d654ab175ab8b3c9929c4db318180c5",
+  "status": "BLOCKED"
+}

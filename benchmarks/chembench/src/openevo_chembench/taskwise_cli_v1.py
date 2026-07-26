@@ -116,7 +116,7 @@ from openevo_chembench.source_identity_v2 import (
 _MODULE = Path(__file__).resolve()
 PACKAGE_ROOT = _MODULE.parents[2]
 REPOSITORY_ROOT = _MODULE.parents[4]
-WORKSPACE_ROOT = _MODULE.parents[5]
+WORKSPACE_ROOT = REPOSITORY_ROOT
 CONFIG_ROOT = PACKAGE_ROOT / "configs"
 TASKWISE_STATE_ROOT = PACKAGE_ROOT / "state" / "taskwise_online_v1"
 FRAMEWORK_LOCK = PACKAGE_ROOT / "state" / "v2" / "framework" / "framework-lock.json"

@@ -229,7 +229,7 @@ def _write_synthetic_reflector_codex(
         f"""#!/bin/sh
 set -eu
 if [ "${{1:-}}" = "--version" ]; then
-  printf '%s\\n' 'codex-cli 0.144.6'
+  printf '%s\\n' 'codex-cli 0.145.0'
   exit 0
 fi
 if [ "${{1:-}}" = "debug" ] && [ "${{2:-}}" = "prompt-input" ]; then

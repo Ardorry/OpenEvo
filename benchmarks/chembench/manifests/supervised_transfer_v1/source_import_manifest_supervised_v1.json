@@ -1,0 +1,115 @@
+{
+  "records": [
+    {
+      "destination_file": "benchmarks/chembench/src/openevo_chembench/artifact_validator_v2.py",
+      "destination_sha256": "422b2f818b1ddfad49ec48fb9a8084ea3bf1f6efb0da3814701a3101826eee93",
+      "modification_summary": "unchanged reuse of the token-aligned leakage validator",
+      "source_commit": "d795ee3d6d654ab175ab8b3c9929c4db318180c5",
+      "source_file": "benchmarks/chembench/src/openevo_chembench/artifact_validator_v2.py",
+      "source_repository": "/home/lhy-h/work/openevo_chembench/OpenEvo",
+      "source_sha256": "422b2f818b1ddfad49ec48fb9a8084ea3bf1f6efb0da3814701a3101826eee93"
+    },
+    {
+      "destination_file": "benchmarks/chembench/src/openevo_chembench/core_evolution_v2.py",
+      "destination_sha256": "81a4b38b64d55a29ffca7ad3d18e950c3a016beeb58adda6e9213cede4c0c370",
+      "modification_summary": "unchanged reuse of the offline framework bundle builder",
+      "source_commit": "d795ee3d6d654ab175ab8b3c9929c4db318180c5",
+      "source_file": "benchmarks/chembench/src/openevo_chembench/core_evolution_v2.py",
+      "source_repository": "/home/lhy-h/work/openevo_chembench/OpenEvo",
+      "source_sha256": "81a4b38b64d55a29ffca7ad3d18e950c3a016beeb58adda6e9213cede4c0c370"
+    },
+    {
+      "destination_file": "benchmarks/chembench/src/openevo_chembench/frozen_runtime_v2.py",
+      "destination_sha256": "6d3ccd0c56eeece73af4ed9fe8617305dec1763e4cb3782c56d84e532b413791",
+      "modification_summary": "unchanged reuse of the resolved text-memory runtime contract",
+      "source_commit": "d795ee3d6d654ab175ab8b3c9929c4db318180c5",
+      "source_file": "benchmarks/chembench/src/openevo_chembench/frozen_runtime_v2.py",
+      "source_repository": "/home/lhy-h/work/openevo_chembench/OpenEvo",
+      "source_sha256": "6d3ccd0c56eeece73af4ed9fe8617305dec1763e4cb3782c56d84e532b413791"
+    },
+    {
+      "destination_file": "benchmarks/chembench/src/openevo_chembench/local_codex_executor.py",
+      "destination_sha256": "995287b0e9d71cb4c364a550776d50b6ae0341cfec4295bbb283647777d54ef8",
+      "modification_summary": "unchanged reuse of the isolated Codex task executor",
+      "source_commit": "d795ee3d6d654ab175ab8b3c9929c4db318180c5",
+      "source_file": "benchmarks/chembench/src/openevo_chembench/local_codex_executor.py",
+      "source_repository": "/home/lhy-h/work/openevo_chembench/OpenEvo",
+      "source_sha256": "f76390112a33d03255c687bc8db4b15d230f44f29595951ac1a67ce73eef6573"
+    },
+    {
+      "destination_file": "benchmarks/chembench/src/openevo_chembench/reflector_execution_boundary_v2.py",
+      "destination_sha256": "15672f59645e7ce07d3efd95fa4b99f32d4ce4c560c15bfc25b78741884629ba",
+      "modification_summary": "extended for bounded Train-only supervised packets and current Codex policy",
+      "source_commit": "d795ee3d6d654ab175ab8b3c9929c4db318180c5",
+      "source_file": "benchmarks/chembench/src/openevo_chembench/reflector_execution_boundary_v2.py",
+      "source_repository": "/home/lhy-h/work/openevo_chembench/OpenEvo",
+      "source_sha256": "92cdf49593dda9ebe8a164e33ea4dec8d1444690ace6c81ebac7db53e41cdbf5"
+    },
+    {
+      "destination_file": "benchmarks/chembench/src/openevo_chembench/taskwise_core_evolution_v1.py",
+      "destination_sha256": "e40c021c4fae6ac17d1647f6070b22c730caf9c8f4e6b0244713ce08c59dff7f",
+      "modification_summary": "extended with a typed supervised packet through the verified Core lifecycle",
+      "source_commit": "d795ee3d6d654ab175ab8b3c9929c4db318180c5",
+      "source_file": "benchmarks/chembench/src/openevo_chembench/taskwise_core_evolution_v1.py",
+      "source_repository": "/home/lhy-h/work/openevo_chembench/OpenEvo",
+      "source_sha256": "4510b8b55742f072a0843903cf978d9f8a276b7cbc53689963984f33d467838f"
+    },
+    {
+      "destination_file": "benchmarks/chembench/src/openevo_chembench/taskwise_cli_v1.py",
+      "destination_sha256": "1aa3292e221b4245f2eaaa4e2d9b8185cbf33816a7eb1093ba236975b54bc011",
+      "modification_summary": "adapted repository-root binding for the independent compare2 clone",
+      "source_commit": "d795ee3d6d654ab175ab8b3c9929c4db318180c5",
+      "source_file": "benchmarks/chembench/src/openevo_chembench/taskwise_cli_v1.py",
+      "source_repository": "/home/lhy-h/work/openevo_chembench/OpenEvo",
+      "source_sha256": "a5c4de37e5cf729a03d8c53b8c7881c4a69bd089dbd728b49bddebfcc9a90953"
+    },
+    {
+      "destination_file": "benchmarks/chembench/src/openevo_chembench/taskwise_online_runner_v1.py",
+      "destination_sha256": "34960e64e4ee0fa524c97a7207ec7449d68fe9b16b389e3a28a0cf8bd731c993",
+      "modification_summary": "unchanged reuse of immutable task-session request binding",
+      "source_commit": "d795ee3d6d654ab175ab8b3c9929c4db318180c5",
+      "source_file": "benchmarks/chembench/src/openevo_chembench/taskwise_online_runner_v1.py",
+      "source_repository": "/home/lhy-h/work/openevo_chembench/OpenEvo",
+      "source_sha256": "34960e64e4ee0fa524c97a7207ec7449d68fe9b16b389e3a28a0cf8bd731c993"
+    },
+    {
+      "destination_file": "benchmarks/chembench/src/openevo_chembench/taskwise_trajectory_v1.py",
+      "destination_sha256": "f259bc80f31e8268d2e9cf45cd94142d3439655e5ec1abf18b8c9a1e96bfc1a4",
+      "modification_summary": "unchanged reuse of transcript trajectory construction",
+      "source_commit": "d795ee3d6d654ab175ab8b3c9929c4db318180c5",
+      "source_file": "benchmarks/chembench/src/openevo_chembench/taskwise_trajectory_v1.py",
+      "source_repository": "/home/lhy-h/work/openevo_chembench/OpenEvo",
+      "source_sha256": "f259bc80f31e8268d2e9cf45cd94142d3439655e5ec1abf18b8c9a1e96bfc1a4"
+    },
+    {
+      "destination_file": "benchmarks/chembench/src/openevo_chembench/taskwise_round0_smoke_v1.py",
+      "destination_sha256": "9fc3c154820e6fc068507ad444ce294ef5cca2a967cb4ed6678e6325ff58058d",
+      "modification_summary": "adapted repository-root binding for the independent compare2 clone",
+      "source_commit": "d795ee3d6d654ab175ab8b3c9929c4db318180c5",
+      "source_file": "benchmarks/chembench/src/openevo_chembench/taskwise_round0_smoke_v1.py",
+      "source_repository": "/home/lhy-h/work/openevo_chembench/OpenEvo",
+      "source_sha256": "a5f066105d14ccc951f31c8d1482d0c957f722a644e5ad3c4721e78fd50d4edc"
+    },
+    {
+      "destination_file": "benchmarks/chembench/src/openevo_chembench/taskwise_update1_smoke_v1.py",
+      "destination_sha256": "6de74051f4b4ac50c007c8d8fde19c156707f937d12395fe57995b51ce5cc006",
+      "modification_summary": "adapted repository-root binding for the independent compare2 clone",
+      "source_commit": "d795ee3d6d654ab175ab8b3c9929c4db318180c5",
+      "source_file": "benchmarks/chembench/src/openevo_chembench/taskwise_update1_smoke_v1.py",
+      "source_repository": "/home/lhy-h/work/openevo_chembench/OpenEvo",
+      "source_sha256": "d983aecd5a051e68117e0f1febfdb464b7b0a16c1afdd2d871cc055d4220e270"
+    },
+    {
+      "destination_file": "benchmarks/chembench/src/openevo_chembench/v2_cli.py",
+      "destination_sha256": "1e4cb7cdc4f374bbdead6f490c4c89f9be9a78d612cd5db79972f9cd36d22409",
+      "modification_summary": "adapted repository-root binding for the independent compare2 clone",
+      "source_commit": "d795ee3d6d654ab175ab8b3c9929c4db318180c5",
+      "source_file": "benchmarks/chembench/src/openevo_chembench/v2_cli.py",
+      "source_repository": "/home/lhy-h/work/openevo_chembench/OpenEvo",
+      "source_sha256": "8098b30af47ca8dc7292fda71f1e0a74ac08063d571fcd91150ed96201d8c757"
+    }
+  ],
+  "schema_version": "chembench_supervised_transfer_source_import_manifest_v1",
+  "source_commit": "d795ee3d6d654ab175ab8b3c9929c4db318180c5",
+  "source_repository": "/home/lhy-h/work/openevo_chembench/OpenEvo"
+}

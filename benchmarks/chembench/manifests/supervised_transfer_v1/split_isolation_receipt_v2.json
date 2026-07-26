@@ -1,0 +1,24 @@
+{
+  "all_partition_uids_pairwise_disjoint": true,
+  "historical_exposure_manifest_v2_sha256": "aece0e945140e70eda5c1a24c553c19b126bf644e8e7cd3bf159cdd7e4159d7c",
+  "manifest_regeneration_policy": "byte-for-byte",
+  "memory_provenance_uid_allowlist_sha256": "9185ce5226b8a470aaa7ce0e4dd327dbaf07fcb2824aa0a5c6d655b4d61d75ae",
+  "primary_test_ordered_uid_sha256": "4f27b78f747a2e10b2f2dcb30f210b83de5993388e31f32439c56783db6a7e27",
+  "probe_actual_exposure_count": 0,
+  "probe_evolution_jobs_allowed": false,
+  "protocol_id": "chembench_supervised_transfer_v1",
+  "recovery_test_ordered_uid_sha256": {
+    "test_recovery_01": "247587e4c78ddab84708e1737f7ee615184625fb39314ee16b58d51b35cc25fe"
+  },
+  "reflector_input_uid_allowlist_partition": "train",
+  "reflector_input_uid_allowlist_sha256": "9185ce5226b8a470aaa7ce0e4dd327dbaf07fcb2824aa0a5c6d655b4d61d75ae",
+  "schema_version": "SplitIsolationReceiptV2",
+  "split_summary_sha256": "50968e95944e982b2513fdd832ba9b88f405ba987b53d452e7bd6975010257cf",
+  "status": "PASS",
+  "test_actual_exposure_counts": {
+    "test_primary": 0,
+    "test_recovery_01": 0
+  },
+  "test_artifact_set_policy": "frozen_before_first_primary_test_call",
+  "test_evolution_jobs_allowed": false
+}

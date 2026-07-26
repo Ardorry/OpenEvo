@@ -1,0 +1,3 @@
+# Evaluator-only labels and all runtime authorization/state stay local.
+*_private_manifest.jsonl
+paid_launch_authorization*.json
