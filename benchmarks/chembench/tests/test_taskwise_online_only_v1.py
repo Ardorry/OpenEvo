@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,6 +15,7 @@ from openevo_chembench.taskwise_attempt_v1 import (
     taskwise_attempts_root_v1,
 )
 from openevo_chembench.taskwise_config_v1 import load_taskwise_config_v1
+from openevo_chembench.local_codex_executor import TaskwiseExecutorSuccessReceiptV1
 from openevo_chembench.taskwise_sampling_v1 import PILOT500_STREAM_SCOPES
 
 
@@ -90,6 +92,70 @@ def _completed_stream_result() -> dict[str, object]:
     }
 
 
+def _private_executor_fixture(
+    tmp_path: Path,
+) -> tuple[object, tuple[dict[str, object], ...], Path]:
+    template = load_taskwise_config_v1(
+        online_only.CONFIG_ROOT / "online_pilot500_stream_00_taskwise_online_v1.yaml"
+    )
+    config = online_only.online_only_runtime_config_v1(template, run_id=_RUN_ID)
+    root = (
+        tmp_path
+        / "state"
+        / "taskwise_online_v1"
+        / "private_executor_events"
+        / config.scope
+        / config.run_name
+        / config.arm
+    )
+    root.mkdir(parents=True, mode=0o700)
+    root.chmod(0o700)
+    completions: list[dict[str, object]] = []
+    for index in range(150):
+        task_index, round_index = divmod(index, 3)
+        session_id = f"session_{index:03d}"
+        task_uid = online_only.hashlib.sha256(f"task-{task_index}".encode()).hexdigest()
+        event_sha256 = online_only.hashlib.sha256(f"event-{index}".encode()).hexdigest()
+        receipt = TaskwiseExecutorSuccessReceiptV1(
+            run_id=config.run_name,
+            task_uid=task_uid,
+            task_index=task_index,
+            round_index=round_index,
+            session_id=session_id,
+            event_stream_sha256=event_sha256,
+            event_count=1,
+            tool_event_count=0,
+            completion_observed=True,
+            process_return_code=0,
+            process_signal=None,
+            cleanup_status="COMPLETE",
+            residual_root_count=0,
+            codex_cli_version=config.codex_cli_version,
+            model=config.model,
+            executor_policy_sha256=online_only._executor_policy_sha256(config),
+            created_at_utc="2026-07-26T00:00:00+00:00",
+        )
+        receipt_path = root / f"success_{index:032x}.json"
+        receipt_path.write_bytes(online_only._canonical_bytes(receipt.to_payload()))
+        receipt_path.chmod(0o600)
+        completions.append(
+            {
+                "session_id": session_id,
+                "task_uid": task_uid,
+                "task_ordinal": task_index,
+                "round_index": round_index,
+                "transcript_reference": f"local-codex-jsonl:sha256:{event_sha256}",
+                "runtime_metadata": {
+                    "model": config.model,
+                    "codex_cli_version": config.codex_cli_version,
+                    "harness": "codex_cli",
+                    "execution_backend": "local_codex_cli",
+                },
+            }
+        )
+    return config, tuple(completions), root
+
+
 def test_online_only_runtime_reuses_frozen_online_config_and_security() -> None:
     template = load_taskwise_config_v1(
         online_only.CONFIG_ROOT / "online_pilot500_stream_00_taskwise_online_v1.yaml"
@@ -105,6 +171,55 @@ def test_online_only_runtime_reuses_frozen_online_config_and_security() -> None:
     assert runtime.executor == template.executor
     assert runtime.task_manifest == template.task_manifest
     assert runtime.private_task_manifest == template.private_task_manifest
+
+
+def test_online_only_report_binds_cleanup_to_private_success_receipts(
+    tmp_path: Path,
+) -> None:
+    config, completions, _root = _private_executor_fixture(tmp_path)
+
+    count, digest = online_only._verify_stream_executor_success_evidence(
+        package_root=tmp_path,
+        config=config,
+        completions=completions,
+    )
+
+    assert count == 150
+    assert len(digest) == 64
+    assert all("cleanup_status" not in row["runtime_metadata"] for row in completions)
+
+
+@pytest.mark.parametrize("corruption", ["missing", "unsafe_mode", "identity", "cleanup"])
+def test_online_only_report_rejects_invalid_private_success_evidence(
+    tmp_path: Path,
+    corruption: str,
+) -> None:
+    config, completions, root = _private_executor_fixture(tmp_path)
+    receipt = sorted(root.glob("success_*.json"))[0]
+    if corruption == "missing":
+        receipt.unlink()
+    elif corruption == "unsafe_mode":
+        receipt.chmod(0o644)
+        assert stat.S_IMODE(receipt.lstat().st_mode) == 0o644
+    else:
+        payload = json.loads(receipt.read_text(encoding="utf-8"))
+        if corruption == "identity":
+            payload["task_uid"] = "f" * 64
+        else:
+            payload["cleanup_status"] = "FAILED"
+            payload["residual_root_count"] = 1
+        receipt.write_bytes(online_only._canonical_bytes(payload))
+        receipt.chmod(0o600)
+
+    with pytest.raises(
+        online_only.TaskwiseOnlineOnlyError,
+        match="ONLINE_ONLY_EXECUTOR_EVIDENCE_INVALID",
+    ):
+        online_only._verify_stream_executor_success_evidence(
+            package_root=tmp_path,
+            config=config,
+            completions=completions,
+        )
 
 
 def test_online_only_suite_runs_ten_streams_without_control_authority(
@@ -618,6 +733,126 @@ def test_online_only_namespace_is_not_a_paired_comparison_authority(
             tmp_path,
             suite_kind="pilot500",
             generation_id=_PAIRED_GENERATION_ID,
+        )
+
+
+def test_report_recovery_keeps_failed_run_immutable_and_writes_disjoint_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_root = online_only.online_only_run_root_v1(tmp_path, _RUN_ID)
+    run_root.mkdir(parents=True)
+    state = {
+        "schema_version": online_only.ONLINE_ONLY_SCHEMA_V1,
+        "run_id": _RUN_ID,
+        "status": "FAILED",
+        "active_scope": None,
+        "source_commit": _SOURCE_COMMIT,
+        "stream_count": 10,
+        "total_task_count": 500,
+        "completed_streams": 10,
+        "completed_tasks": 500,
+        "completion_count": 1500,
+        "session_attempt_count": 1500,
+        "update_count": 1000,
+        "core_job_count": 1000,
+        "core_artifact_count": 1000,
+        "context_resolution_count": 1000,
+        "security_violations": 0,
+        "context_binding_violations": 0,
+        "artifact_validation_failures": 0,
+        "streams": {
+            scope: {
+                "completed": True,
+                "run_status": "COMPLETED",
+                "failure_code": None,
+            }
+            for scope in PILOT500_STREAM_SCOPES
+        },
+    }
+    state_path = run_root / "online_only_suite_state.json"
+    state_path.write_bytes(online_only._canonical_bytes(state))
+    before = state_path.read_bytes()
+    reporter_commit = "f" * 40
+    monkeypatch.setattr(
+        online_only,
+        "verify_taskwise_source_gate_v1",
+        lambda _config: reporter_commit,
+    )
+    monkeypatch.setattr(online_only, "_verify_static_inputs", lambda *_args: None)
+    monkeypatch.setattr(
+        online_only,
+        "_build_online_only_descriptive_report",
+        lambda **_kwargs: {
+            "schema_version": online_only.ONLINE_ONLY_REPORT_SCHEMA_V1,
+            "labels": list(online_only.ONLINE_ONLY_REPORT_LABELS),
+        },
+    )
+
+    receipt = online_only.recover_completed_online_only_report_v1(
+        run_id=_RUN_ID,
+        repository_root=tmp_path,
+    )
+
+    assert state_path.read_bytes() == before
+    assert receipt["status"] == "PASS"
+    assert receipt["completed_tasks"] == 500
+    assert receipt["core_artifact_count"] == 1000
+    assert receipt["original_run_mutated"] is False
+    recovered_root = online_only.online_only_recovered_report_root_v1(
+        tmp_path,
+        run_id=_RUN_ID,
+        reporter_source_commit=reporter_commit,
+    )
+    report = json.loads(
+        (recovered_root / "online_only_descriptive_report.json").read_text(encoding="utf-8")
+    )
+    assert report["report_recovery"]["execution_evidence_status"] == "COMPLETED"
+    assert report["report_recovery"]["original_run_mutated"] is False
+    serialized = json.dumps(report, sort_keys=True).casefold()
+    assert "target" not in serialized
+    assert "private feedback" not in serialized
+    assert "memory_payload" not in serialized
+
+
+def test_report_recovery_rejects_incomplete_failed_suite(
+    tmp_path: Path,
+) -> None:
+    run_root = online_only.online_only_run_root_v1(tmp_path, _RUN_ID)
+    run_root.mkdir(parents=True)
+    state = {
+        "schema_version": online_only.ONLINE_ONLY_SCHEMA_V1,
+        "run_id": _RUN_ID,
+        "status": "FAILED",
+        "active_scope": None,
+        "source_commit": _SOURCE_COMMIT,
+        "total_task_count": 500,
+        "completed_streams": 9,
+        "completed_tasks": 450,
+        "completion_count": 1350,
+        "session_attempt_count": 1350,
+        "update_count": 900,
+        "core_job_count": 900,
+        "core_artifact_count": 900,
+        "context_resolution_count": 900,
+        "streams": {
+            scope: {
+                "completed": index < 9,
+                "run_status": "COMPLETED" if index < 9 else "MISSING",
+                "failure_code": None,
+            }
+            for index, scope in enumerate(PILOT500_STREAM_SCOPES)
+        },
+    }
+    (run_root / "online_only_suite_state.json").write_bytes(online_only._canonical_bytes(state))
+
+    with pytest.raises(
+        online_only.TaskwiseOnlineOnlyError,
+        match="ONLINE_ONLY_RECOVERY_STATE_INVALID",
+    ):
+        online_only.recover_completed_online_only_report_v1(
+            run_id=_RUN_ID,
+            repository_root=tmp_path,
         )
 
 
