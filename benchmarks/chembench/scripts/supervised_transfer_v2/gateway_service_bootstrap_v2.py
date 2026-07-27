@@ -42,9 +42,7 @@ def main() -> int:
     base = arguments.base_config.resolve(strict=True)
     effective = _new_private_path(arguments.effective_config)
     receipt = _new_private_path(arguments.receipt)
-    runtime_python = arguments.runtime_python.resolve(strict=True)
-    if not os.access(runtime_python, os.X_OK):
-        raise RuntimeError("GATEWAY_BOOTSTRAP_RUNTIME_INVALID")
+    runtime_python = _validated_runtime_python(arguments.runtime_python)
 
     authority = DockerEngineAuthority.open()
     inspected = subprocess.run(
@@ -123,6 +121,21 @@ def _effective_topology(base: Path, docker_host_path: dict[str, object]) -> dict
     node["host"] = _GATEWAY_BIND_HOST
     node["docker_host_path"] = docker_host_path
     return loaded
+
+
+def _validated_runtime_python(path: Path) -> Path:
+    if not path.is_absolute():
+        raise RuntimeError("GATEWAY_BOOTSTRAP_RUNTIME_INVALID")
+    try:
+        resolved = path.resolve(strict=True)
+        metadata = resolved.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise RuntimeError("GATEWAY_BOOTSTRAP_RUNTIME_INVALID") from exc
+    if not stat.S_ISREG(metadata.st_mode) or not os.access(path, os.X_OK):
+        raise RuntimeError("GATEWAY_BOOTSTRAP_RUNTIME_INVALID")
+    # Preserve the venv launcher pathname.  Executing the resolved interpreter
+    # would discard pyvenv.cfg discovery and silently load the image's Python.
+    return path
 
 
 def _new_private_path(path: Path) -> Path:

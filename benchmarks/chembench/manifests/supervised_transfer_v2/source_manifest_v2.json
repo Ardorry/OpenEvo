@@ -1,5 +1,5 @@
 {
-  "combined_sha256": "cf609078501c64951009408cf680de88f2013c46c738cf08f6b9b157e7929c9e",
+  "combined_sha256": "fee64e82ea8e01ba54eda0e98553848cfb48617f492344bd1ef344a741e400e5",
   "private_manifests_excluded": [
     "test_private_manifest.jsonl",
     "train_private_manifest.jsonl"
@@ -90,8 +90,8 @@
     {
       "executable": false,
       "path": "benchmarks/chembench/scripts/supervised_transfer_v2/gateway_service_bootstrap_v2.py",
-      "sha256": "6dff3cf243425edecd046dede7e9a291465557dfeb3715a0c41f6ca0410e9c75",
-      "size_bytes": 5533
+      "sha256": "81221ef87bfeae7ad9ac53e4e6c28c609f1a3e43c01d16f28b121ac1c0a75656",
+      "size_bytes": 6099
     },
     {
       "executable": true,
@@ -300,8 +300,8 @@
     {
       "executable": false,
       "path": "benchmarks/chembench/tests/supervised_transfer_v2/test_gateway_service_bootstrap_v2.py",
-      "sha256": "b00ba38e929d01a4259dd24d0e08ae2c95975bd54cf360a1847f30ab5b60d28f",
-      "size_bytes": 1973
+      "sha256": "1bacc045f8423168c665baf4d2b79f69b5d5e938aa26983c59234092ca0dc842",
+      "size_bytes": 2310
     },
     {
       "executable": false,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 
 import yaml
@@ -63,3 +64,13 @@ def test_gateway_bootstrap_source_has_no_model_execution() -> None:
     assert "codex exec" not in source
     assert "allow-paid" not in source
     assert "openevo.gateway.server" in source
+
+
+def test_runtime_python_validation_preserves_venv_launcher_symlink(tmp_path: Path) -> None:
+    launcher = tmp_path / "python"
+    launcher.symlink_to(Path(os.sys.executable).resolve(strict=True))
+
+    selected = _module()._validated_runtime_python(launcher)
+
+    assert selected == launcher
+    assert selected.is_symlink()
