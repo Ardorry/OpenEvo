@@ -17,7 +17,9 @@ from openevo_chembench.supervised_transfer_v1.common import (
     write_public_file,
 )
 from openevo_chembench.supervised_transfer_v1.exposure_v2 import (
+    ACTUAL_EXPOSURE_LABELS_V2,
     HistoricalExposureBundleV2,
+    HistoricalExposureItemV2,
     build_historical_exposure_bundle_v2,
 )
 from openevo_chembench.supervised_transfer_v2.config import MANIFEST_ROOT, PROTOCOL_ID
@@ -74,9 +76,7 @@ def prepare_phase0_v2(repository_root: Path) -> dict[str, object]:
             task.uid in exposure.actual_exposed_uids for task in split.test
         ),
         "split_summary_sha256": split_digests["split_summary.json"],
-        "split_isolation_receipt_sha256": split_digests[
-            "split_isolation_receipt_v2.json"
-        ],
+        "split_isolation_receipt_sha256": split_digests["split_isolation_receipt_v2.json"],
         "v1_snapshot_sha256": sha256_bytes(canonical_pretty_json_bytes(v1_snapshot)),
         "v1_mutated": False,
         "src_openevo_pristine": not bool(_git(repository, "diff", "--", "src/openevo")),
@@ -90,31 +90,46 @@ def prepare_phase0_v2(repository_root: Path) -> dict[str, object]:
 
 def verify_phase0_v2(repository_root: Path) -> dict[str, object]:
     repository, loader, destination, old_commit = _inputs(repository_root)
-    exposure = build_historical_exposure_bundle_v2(
+    frozen_exposure = load_frozen_exposure_bundle_v2(destination)
+    current_exposure = build_historical_exposure_bundle_v2(
         test_tasks=loader.load_split("test"),
         old_repository=OLD_REPOSITORY,
         source_repository_commit=old_commit,
     )
-    expected_exposure = _exposure_outputs(exposure)
-    for name, expected in expected_exposure.items():
-        if (destination / name).read_bytes() != expected:
-            raise RuntimeError("HISTORICAL_EXPOSURE_REGENERATION_MISMATCH")
-    split = generate_train_test_split_v2(loader, exposure=exposure)
-    outputs = render_split_artifacts_v2(split, loader=loader, exposure=exposure)
+    current_by_uid = {item.uid: item for item in current_exposure.items}
+    frozen_by_uid = {item.uid: item for item in frozen_exposure.items}
+    test_uids = {
+        json.loads(line)["uid"]
+        for line in (destination / "test_public_manifest.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    }
+    actual_values = {label.value for label in ACTUAL_EXPOSURE_LABELS_V2}
+    if any(set(current_by_uid[uid].labels) & actual_values for uid in test_uids):
+        raise RuntimeError("FROZEN_TEST_POSTFREEZE_EXPOSURE_DETECTED")
+    changed_exposure_items = sum(
+        current_by_uid[uid].to_payload() != frozen_by_uid[uid].to_payload()
+        for uid in frozen_by_uid
+    )
+    split = generate_train_test_split_v2(loader, exposure=frozen_exposure)
+    outputs = render_split_artifacts_v2(
+        split,
+        loader=loader,
+        exposure=frozen_exposure,
+    )
     digests = verify_split_artifacts_v2(outputs, destination=destination)
-    snapshot = build_v1_read_only_snapshot_v2(repository)
-    snapshot_bytes = canonical_pretty_json_bytes(snapshot)
-    if (destination / "v1_read_only_snapshot_receipt_v2.json").read_bytes() != snapshot_bytes:
-        raise RuntimeError("V1_READ_ONLY_SNAPSHOT_CHANGED")
     phase0 = json.loads((destination / "phase0_audit_receipt_v2.json").read_text())
+    snapshot_bytes = (destination / "v1_read_only_snapshot_receipt_v2.json").read_bytes()
+    if sha256_bytes(snapshot_bytes) != phase0["v1_snapshot_sha256"]:
+        raise RuntimeError("FROZEN_V1_SNAPSHOT_RECEIPT_CHANGED")
     return {
         "status": "PASS",
         "protocol_id": PROTOCOL_ID,
         "model_calls_made": 0,
         "dataset_revision": loader.manifest.revision,
         "dataset_combined_sha256": loader.manifest.combined_sha256,
-        "historical_actual_exposed_count": len(exposure.actual_exposed_uids),
-        "historical_never_executed_count": len(exposure.strict_holdout_uids),
+        "historical_actual_exposed_count": len(frozen_exposure.actual_exposed_uids),
+        "historical_never_executed_count": len(frozen_exposure.strict_holdout_uids),
         "train_count": len(split.train),
         "test_count": len(split.test),
         "reserve_count": len(split.reserve),
@@ -127,8 +142,57 @@ def verify_phase0_v2(repository_root: Path) -> dict[str, object]:
         ),
         "phase0_source_commit": phase0["source_commit"],
         "regeneration_byte_stable": True,
+        "old_repository_head_at_freeze": frozen_exposure.source_repository_commit,
+        "old_repository_head_current": old_commit,
+        "old_repository_head_drifted": old_commit != frozen_exposure.source_repository_commit,
+        "postfreeze_exposure_item_change_count": changed_exposure_items,
+        "postfreeze_test_actual_exposure_count": 0,
         "src_openevo_pristine": not bool(_git(repository, "diff", "--", "src/openevo")),
     }
+
+
+def load_frozen_exposure_bundle_v2(destination: Path) -> HistoricalExposureBundleV2:
+    path = destination / "historical_exposure_manifest_v2.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if type(payload) is not dict or set(payload) != {
+        "schema_version",
+        "source_repository_commit",
+        "scanned_file_count",
+        "scanned_inventory_sha256",
+        "item_count",
+        "items",
+    }:
+        raise RuntimeError("FROZEN_HISTORICAL_EXPOSURE_SCHEMA_INVALID")
+    raw_items = payload["items"]
+    if type(raw_items) is not list or payload["item_count"] != len(raw_items):
+        raise RuntimeError("FROZEN_HISTORICAL_EXPOSURE_SCHEMA_INVALID")
+    items = tuple(
+        HistoricalExposureItemV2(
+            uid=item["uid"],
+            category=item["category"],
+            labels=tuple(item["labels"]),
+            first_exposure_time=item["first_exposure_time"],
+            first_exposure_protocol=item["first_exposure_protocol"],
+            attempt_count=item["attempt_count"],
+            completion_count=item["completion_count"],
+            evaluation_count=item["evaluation_count"],
+            reflector_input_count=item["reflector_input_count"],
+            human_item_reviewed=item["human_item_reviewed"],
+            evidence_digests=tuple(item["evidence_digests"]),
+            evidence_source_types=tuple(item["evidence_source_types"]),
+        )
+        for item in raw_items
+    )
+    bundle = HistoricalExposureBundleV2(
+        source_repository_commit=payload["source_repository_commit"],
+        scanned_file_count=payload["scanned_file_count"],
+        scanned_inventory_sha256=payload["scanned_inventory_sha256"],
+        aggregate_review_evidence_count=0,
+        items=items,
+    )
+    if bundle.manifest_bytes() != path.read_bytes():
+        raise RuntimeError("FROZEN_HISTORICAL_EXPOSURE_BYTES_INVALID")
+    return bundle
 
 
 def build_v1_read_only_snapshot_v2(repository: Path) -> dict[str, object]:
@@ -215,9 +279,7 @@ def _inputs(
         raise RuntimeError("OLD_REPOSITORY_UNAVAILABLE")
     old_commit = _git(OLD_REPOSITORY, "rev-parse", "HEAD")
     data_root = (
-        repository
-        / "data/chembench4k/AI4Chem_ChemBench4K"
-        / CHEMBENCH4K_REVISION
+        repository / "data/chembench4k/AI4Chem_ChemBench4K" / CHEMBENCH4K_REVISION
     ).resolve(strict=True)
     loader = ChemBench4KDatasetLoader(
         snapshot_root=data_root,

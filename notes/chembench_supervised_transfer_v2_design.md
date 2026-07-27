@@ -16,6 +16,32 @@ The only shared inputs are the revision-pinned dataset, content-free historical
 exposure evidence, benchmark/Core utility code, and the OpenEvo-managed Codex
 package contract.
 
+## Managed candidate and reflector execution
+
+Candidate sessions do not invoke Codex from the adapter. The benchmark builds
+an official `TaskRequest`, pins `agent.harness=codex`, transcript capture and
+the Core `managed_science` runtime, then submits it through the official local
+Rollout/Gateway services. Those services run from the v2 non-editable OpenEvo
+wheel environment. A private service receipt binds the source commit, topology,
+wheel, runtime Python, Rollout/Gateway process identities and health state; a
+formal executor refuses to submit without that live binding.
+
+The managed subscription runtime needs provider transport, so the candidate
+container permits model network transport. Tool use remains fail closed: MCP is
+empty, approval is `never`, the instruction prohibits tools, and any Codex tool
+event invalidates the transcript. The candidate binary is the Codex executable
+inside the pinned Core managed-runtime image and is re-attested before a paid
+run.
+
+Reflector calls are initiated only while an OpenEvo plan-bound job is leased by
+the Core worker. The benchmark-local provider runs the same pinned Codex native
+binary in a separate Bubblewrap boundary. It stages an explicitly validated
+subscription-auth source into a private temporary home, exposes no repository,
+dataset or future task path, disables MCP and rejects every tool event. Raw
+reflector output cannot become runtime context: all three projections must pass
+their independent Core job, typed-artifact, validator, promotion and context
+resolution paths first.
+
 ## Data protocol
 
 The formal experiment has exactly two model-visible sets:

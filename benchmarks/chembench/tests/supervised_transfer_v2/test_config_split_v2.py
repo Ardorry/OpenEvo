@@ -10,13 +10,18 @@ from openevo_chembench.chembench4k_models import CHEMBENCH4K_CATEGORIES, CHEMBEN
 from openevo_chembench.supervised_transfer_v1.exposure_v2 import (
     ACTUAL_EXPOSURE_LABELS_V2,
     ExposureLabelV2,
-    build_historical_exposure_bundle_v2,
 )
 from openevo_chembench.supervised_transfer_v2.config import (
     MANIFEST_ROOT,
     load_config_v2,
 )
-from openevo_chembench.supervised_transfer_v2.prepare import OLD_REPOSITORY
+from openevo_chembench.supervised_transfer_v2.prepare import (
+    load_frozen_exposure_bundle_v2,
+)
+from openevo_chembench.supervised_transfer_v2.source_identity import (
+    build_source_manifest_v2,
+    verify_source_manifest_v2,
+)
 from openevo_chembench.supervised_transfer_v2.split import (
     generate_train_test_split_v2,
     load_private_partition_v2,
@@ -39,11 +44,7 @@ def _inputs():
         snapshot_root=data,
         manifest_path=data / "chembench4k_dataset_manifest_v2.json",
     )
-    exposure = build_historical_exposure_bundle_v2(
-        test_tasks=loader.load_split("test"),
-        old_repository=OLD_REPOSITORY,
-        source_repository_commit="d795ee3d6d654ab175ab8b3c9929c4db318180c5",
-    )
+    exposure = load_frozen_exposure_bundle_v2(MANIFESTS)
     split = generate_train_test_split_v2(loader, exposure=exposure)
     return loader, exposure, split
 
@@ -61,6 +62,15 @@ def test_config_has_exact_one_call_three_target_strategy() -> None:
     assert config.payload["targets"] == ["text_memory", "skill_bundle", "agent_system"]
     assert config.payload["executor"]["task_attempts_per_train_item"] == 4
     assert config.payload["executor"]["evolution_cycles_per_train_item"] == 3
+    assert config.payload["executor"]["allow_internet"] is True
+    assert config.payload["executor"]["runtime_services_identity_required"] is True
+    assert config.payload["executor"]["runtime_services_state_root"] == (
+        "state/chembench_supervised_transfer_v2/runtime_services"
+    )
+    assert (
+        config.payload["executor"]["network_policy"]
+        == "model_transport_with_zero_tool_fail_closed"
+    )
 
 
 def test_split_is_two_formal_sets_only_and_is_byte_stable() -> None:
@@ -96,7 +106,11 @@ def test_public_manifests_have_no_private_answer_fields() -> None:
         "prediction",
         "correctness",
     }
-    for name in ("train_public_manifest.jsonl", "test_public_manifest.jsonl", "reserve_public_manifest.jsonl"):
+    for name in (
+        "train_public_manifest.jsonl",
+        "test_public_manifest.jsonl",
+        "reserve_public_manifest.jsonl",
+    ):
         for line in (MANIFESTS / name).read_text(encoding="utf-8").splitlines():
             row = json.loads(line)
             assert not (set(row) & forbidden)
@@ -127,3 +141,13 @@ def test_split_receipt_directly_attests_zero_test_exposure() -> None:
     assert receipt["test_actual_exposure_count"] == 0
     assert receipt["test_evolution_jobs_allowed"] is False
     assert receipt["test_consumption_policy"] == "one-valid-completion-per-uid-per-arm"
+
+
+def test_source_manifest_is_byte_stable_and_excludes_private_manifests() -> None:
+    first = build_source_manifest_v2(REPOSITORY.resolve())
+    second = build_source_manifest_v2(REPOSITORY.resolve())
+    assert first == second
+    assert verify_source_manifest_v2(REPOSITORY.resolve())["status"] == "PASS"
+    paths = {row["path"] for row in first["source_files"]}
+    assert not any(path.endswith("_private_manifest.jsonl") for path in paths)
+    assert "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/core.py" in paths

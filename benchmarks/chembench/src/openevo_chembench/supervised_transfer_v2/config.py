@@ -60,8 +60,16 @@ class SupervisedTransferConfigV2:
         return int(self.payload["executor"]["timeout_seconds"])
 
     @property
+    def rollout_url(self) -> str:
+        return str(self.payload["executor"]["rollout_url"])
+
+    @property
     def reflector_timeout_seconds(self) -> int:
         return int(self.payload["reflector"]["timeout_seconds"])
+
+    @property
+    def framework_lock(self) -> str:
+        return str(self.payload["reflector"]["framework_lock"])
 
     @property
     def call_budget(self) -> dict[str, int]:
@@ -130,7 +138,7 @@ def load_config_v2(path: Path) -> SupervisedTransferConfigV2:
             "manifest_root": MANIFEST_ROOT,
         }
         or roots != {"results": RESULT_ROOT, "state": STATE_ROOT, "reports": REPORT_ROOT}
-        or model != {"name": "gpt-5.5", "reasoning_effort": "high"}
+        or model != {"name": "gpt-5.5", "reasoning_effort": "medium"}
     ):
         raise SupervisedTransferV2ConfigError("CONFIG_FROZEN_VALUE_INVALID")
     if codex != {
@@ -142,7 +150,24 @@ def load_config_v2(path: Path) -> SupervisedTransferConfigV2:
     }:
         raise SupervisedTransferV2ConfigError("MANAGED_CODEX_CONFIG_INVALID")
     if executor != {
+        "rollout_url": "http://127.0.0.1:8080",
+        "runtime_services_topology": (
+            "benchmarks/chembench/configs/supervised_transfer_v2/"
+            "openevo_runtime_services_v2.yaml"
+        ),
+        "runtime_services_state_root": f"{STATE_ROOT}/runtime_services",
+        "runtime_services_identity_required": True,
         "timeout_seconds": 1200,
+        "runtime_profile": "managed_science",
+        "auth_mode": "subscription",
+        "capture_mode": "transcript",
+        "approval_policy": "never",
+        "sandbox_policy": "openevo_codex_subscription_v1",
+        "tool_policy": "zero_tool_transcript_audit",
+        "network_policy": "model_transport_with_zero_tool_fail_closed",
+        "allow_internet": True,
+        "mcp_servers": [],
+        "max_output_tokens": None,
         "task_attempts_per_train_item": TRAIN_ROUNDS,
         "evolution_cycles_per_train_item": EVOLUTION_CYCLES,
         "final_test_attempts_per_item": 1,
@@ -150,7 +175,18 @@ def load_config_v2(path: Path) -> SupervisedTransferConfigV2:
         raise SupervisedTransferV2ConfigError("EXECUTOR_POLICY_INVALID")
     if reflector != {
         "method_id": "text_memory_expel_reflector",
+        "framework_lock": f"{STATE_ROOT}/framework/framework-lock.json",
         "timeout_seconds": 1800,
+        "model": "gpt-5.5",
+        "reasoning_effort": "medium",
+        "auth_mode": "subscription",
+        "approval_policy": "never",
+        "sandbox_policy": "bubblewrap_read_only",
+        "tool_policy": "zero_tool_event_gate",
+        "network_policy": "model_transport_only",
+        "mcp_servers": [],
+        "max_output_tokens": None,
+        "max_last_message_bytes": 65536,
         "call_strategy": REFLECTOR_CALL_STRATEGY,
     }:
         raise SupervisedTransferV2ConfigError("REFLECTOR_POLICY_INVALID")
@@ -195,7 +231,9 @@ def _require_keys(value: dict[str, Any], expected: set[str]) -> None:
 
 
 def _canonical(value: object) -> bytes:
-    return (json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n").encode()
+    return (
+        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n"
+    ).encode()
 
 
 __all__ = [
