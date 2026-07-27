@@ -18,6 +18,9 @@ from openevo_chembench.supervised_transfer_v2.experiment import (
     build_complete_dry_run_v2,
     load_experiment_inputs_v2,
 )
+from openevo_chembench.supervised_transfer_v2.managed_codex import (
+    require_paid_runtime_python_v2,
+)
 from openevo_chembench.supervised_transfer_v2.prepare import (
     prepare_phase0_v2,
     verify_phase0_v2,
@@ -94,6 +97,7 @@ def main() -> int:
             parser.error("preflight/formal requires the explicit --allow-paid gate")
         if not arguments.run_id:
             parser.error("preflight/formal requires --run-id")
+        require_paid_runtime_python_v2(repository_root=REPOSITORY_ROOT)
         inputs = load_experiment_inputs_v2(
             REPOSITORY_ROOT,
             config,

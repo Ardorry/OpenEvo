@@ -8,6 +8,7 @@ from openevo_chembench.supervised_transfer_v2 import managed_codex
 from openevo_chembench.supervised_transfer_v2.managed_codex import (
     ManagedCodexError,
     load_managed_candidate_codex_v2,
+    require_paid_runtime_python_v2,
     write_managed_candidate_codex_receipt_v2,
 )
 from openevo_chembench.supervised_transfer_v2.reflector_boundary import (
@@ -30,6 +31,12 @@ def test_reflector_stages_nontrivial_auth_bytes_through_core_primitive(
     assert staged.read_bytes() == source.read_bytes()
     assert staged.stat().st_size > 1
     assert staged.stat().st_mode & 0o777 == 0o600
+
+
+def test_repository_venv_is_rejected_for_paid_orchestration() -> None:
+    repository = Path(__file__).resolve().parents[4]
+    with pytest.raises(ManagedCodexError, match="PAID_RUNTIME_PYTHON_INVALID"):
+        require_paid_runtime_python_v2(repository_root=repository)
 
 
 def _candidate_payload(*, executable_sha256: str = "a" * 64) -> dict[str, object]:

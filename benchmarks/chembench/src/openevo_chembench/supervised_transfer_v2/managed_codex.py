@@ -10,6 +10,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -483,6 +484,31 @@ def _read_codex_version(executable: Path, repository: Path) -> str:
     return value
 
 
+def require_paid_runtime_python_v2(*, repository_root: Path) -> None:
+    """Require paid orchestration to use the isolated non-editable Core wheel."""
+
+    repository = repository_root.resolve(strict=True)
+    expected_root = (
+        repository / "state/chembench_supervised_transfer_v2/runtime_venv"
+    ).resolve(strict=True)
+    expected_python = (expected_root / "bin/python").resolve(strict=True)
+    try:
+        actual_python = Path(sys.executable).resolve(strict=True)
+        distribution = importlib.metadata.distribution("openevo")
+        direct_url_text = distribution.read_text("direct_url.json")
+        direct_url = json.loads(direct_url_text) if direct_url_text else {}
+        package_file = Path(distribution.locate_file("openevo/__init__.py")).resolve(
+            strict=True
+        )
+        package_file.relative_to(expected_root)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise ManagedCodexError("PAID_RUNTIME_PYTHON_INVALID") from exc
+    if actual_python != expected_python or (
+        isinstance(direct_url, dict) and "dir_info" in direct_url
+    ):
+        raise ManagedCodexError("PAID_RUNTIME_PYTHON_INVALID")
+
+
 def _read_package_json(path: Path) -> dict[str, object]:
     def closed_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
         result: dict[str, object] = {}
@@ -553,6 +579,7 @@ __all__ = [
     "codex_subscription_auth_source_v2",
     "load_managed_candidate_codex_v2",
     "load_managed_codex_v2",
+    "require_paid_runtime_python_v2",
     "write_managed_candidate_codex_receipt_v2",
     "write_managed_codex_receipt_v2",
 ]
