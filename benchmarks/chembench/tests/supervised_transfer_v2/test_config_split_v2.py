@@ -57,7 +57,12 @@ def test_config_has_exact_one_call_three_target_strategy() -> None:
         "online_train_reflector_calls": 1350,
         "online_train_core_jobs": 4050,
         "final_test_task_calls": 900,
-        "total_model_calls": 5850,
+        "candidate_task_calls": 4500,
+        "candidate_subscription_readiness_calls_minimum": 4500,
+        "candidate_subscription_readiness_calls_maximum": 9000,
+        "answer_and_reflector_model_calls": 5850,
+        "total_model_calls": 10350,
+        "maximum_model_calls": 14850,
     }
     assert config.payload["targets"] == ["text_memory", "skill_bundle", "agent_system"]
     assert config.payload["executor"]["task_attempts_per_train_item"] == 4

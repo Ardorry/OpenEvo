@@ -118,7 +118,14 @@ call per cycle supplies distinct `text_memory`, `skill_bundle`, and
 Core plan-bound jobs, typed artifact validation, promotion, and context
 resolution. Thus the paid plan is 1,800 Control task calls, 1,800 Online task
 calls, 1,350 reflector calls, and 900 final-Test task calls (5,850 total), while
-the three target lifecycles still produce 4,050 Core jobs and artifacts.
+the three target lifecycles still produce 4,050 Core jobs and artifacts. That
+5,850 figure counts answer and reflector calls only. Every
+candidate session also runs one real Core-managed subscription readiness
+`codex exec` before its answer call. The normal paid-call baseline is therefore
+10,350 calls. Core permits one additional readiness attempt only when the first
+probe is a validated refusal, so the reserved fail-closed maximum is 14,850;
+the planned receipt reports the 5,850 answer/reflector calls, 4,500 required
+readiness calls, and 4,500 retry capacity separately.
 
 Candidate sessions are submitted through the OpenEvo Rollout/Gateway
 `TaskRequest` path and the official `CodexHarness` in `managed_science` runtime.

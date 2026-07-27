@@ -101,7 +101,8 @@ PREFLIGHT_AUTHORITY_SCHEMA = "SupervisedTransferPreflightAuthorityV2"
 FROZEN_RECEIPT_SCHEMA = "FrozenThreeTargetTransferReceiptV2"
 _RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,127}\Z", re.ASCII)
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
-_FORMAL_CALLS = 5850
+_FORMAL_CALLS = 10350
+_FORMAL_MAXIMUM_CALLS = 14850
 _PREFLIGHT_TASK_CALLS = 73
 _PREFLIGHT_REFLECTOR_CALLS = 28
 _TASK_INFRASTRUCTURE_RETRY_LIMIT = 60
@@ -267,7 +268,10 @@ def build_complete_dry_run_v2(inputs: ExperimentInputsV2) -> dict[str, object]:
         for category in CHEMBENCH4K_CATEGORIES
     ]
     budget = inputs.config.call_budget
-    if budget["total_model_calls"] != _FORMAL_CALLS:
+    if (
+        budget["total_model_calls"] != _FORMAL_CALLS
+        or budget["maximum_model_calls"] != _FORMAL_MAXIMUM_CALLS
+    ):
         raise SupervisedExperimentV2Error("DRY_RUN_CALL_BUDGET_INVALID")
     return {
         "schema_version": DRY_RUN_SCHEMA,
@@ -1172,9 +1176,23 @@ class SupervisedTransferExperimentV2:
     def _write_paid_plan(self) -> None:
         calls = (
             {
-                "task_calls": _PREFLIGHT_TASK_CALLS,
+                "candidate_task_calls": _PREFLIGHT_TASK_CALLS,
+                "candidate_subscription_readiness_calls_minimum": (
+                    _PREFLIGHT_TASK_CALLS
+                ),
+                "candidate_subscription_readiness_calls_maximum": (
+                    _PREFLIGHT_TASK_CALLS * 2
+                ),
                 "reflector_calls": _PREFLIGHT_REFLECTOR_CALLS,
-                "total_model_calls": _PREFLIGHT_TASK_CALLS + _PREFLIGHT_REFLECTOR_CALLS,
+                "answer_and_reflector_model_calls": (
+                    _PREFLIGHT_TASK_CALLS + _PREFLIGHT_REFLECTOR_CALLS
+                ),
+                "total_model_calls": (
+                    _PREFLIGHT_TASK_CALLS * 2 + _PREFLIGHT_REFLECTOR_CALLS
+                ),
+                "maximum_model_calls": (
+                    _PREFLIGHT_TASK_CALLS * 3 + _PREFLIGHT_REFLECTOR_CALLS
+                ),
             }
             if self.run_mode == "preflight"
             else self.inputs.config.call_budget
@@ -1202,6 +1220,11 @@ class SupervisedTransferExperimentV2:
             "reflector_max_output_tokens": None,
             "reflector_max_last_message_bytes": 65536,
             "reflector_strategy": "one_structured_call_three_typed_artifacts",
+            "candidate_readiness_call_accounting": (
+                "Every immutable candidate session runs one real Core-managed subscription "
+                "readiness codex exec before the answer call; one additional readiness call "
+                "is reserved only for the Core refusal-retry branch."
+            ),
             "candidate_codex_identity_sha256": self.inputs.candidate_codex.digest,
             "candidate_codex_executable_sha256": (self.inputs.candidate_codex.executable_sha256),
             "reflector_codex_identity_sha256": self.inputs.managed_codex.digest,

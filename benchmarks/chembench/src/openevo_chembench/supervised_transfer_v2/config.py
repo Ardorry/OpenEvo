@@ -77,13 +77,20 @@ class SupervisedTransferConfigV2:
         online_train = TRAIN_COUNT * TRAIN_ROUNDS
         reflector = TRAIN_COUNT * EVOLUTION_CYCLES
         final_test = TEST_COUNT * 2
+        candidate_tasks = control_train + online_train + final_test
+        answer_and_reflector = candidate_tasks + reflector
         return {
             "control_train_task_calls": control_train,
             "online_train_task_calls": online_train,
             "online_train_reflector_calls": reflector,
             "online_train_core_jobs": reflector * len(TARGETS),
             "final_test_task_calls": final_test,
-            "total_model_calls": control_train + online_train + reflector + final_test,
+            "candidate_task_calls": candidate_tasks,
+            "candidate_subscription_readiness_calls_minimum": candidate_tasks,
+            "candidate_subscription_readiness_calls_maximum": candidate_tasks * 2,
+            "answer_and_reflector_model_calls": answer_and_reflector,
+            "total_model_calls": answer_and_reflector + candidate_tasks,
+            "maximum_model_calls": answer_and_reflector + candidate_tasks * 2,
         }
 
 
@@ -214,7 +221,10 @@ def load_config_v2(path: Path) -> SupervisedTransferConfigV2:
     }:
         raise SupervisedTransferV2ConfigError("TARGET_LIMITS_INVALID")
     config = SupervisedTransferConfigV2(path=path, payload=payload)
-    if config.call_budget["total_model_calls"] != 5850:
+    if (
+        config.call_budget["total_model_calls"] != 10350
+        or config.call_budget["maximum_model_calls"] != 14850
+    ):
         raise AssertionError("paid-call plan drifted")
     return config
 

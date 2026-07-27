@@ -401,8 +401,29 @@ def load_runtime_services_v2(
     repository_root: Path,
 ) -> OpenEvoRuntimeServicesIdentityV2:
     repository = _repository(repository_root)
-    paths = _runtime_paths(repository)
-    pointer_path = paths["service_root"] / "current.json"
+    identity = _load_runtime_services_identity_v2(
+        repository,
+        require_current_source=True,
+    )
+    identity.require_current()
+    return identity
+
+
+def _load_runtime_services_identity_v2(
+    repository: Path,
+    *,
+    require_current_source: bool,
+) -> OpenEvoRuntimeServicesIdentityV2:
+    """Load a closed receipt for use or exact owned-state cleanup.
+
+    Runtime reuse additionally binds the receipt to the current source and
+    runtime inputs. Cleanup instead relies on the immutable pointer/receipt,
+    process, and container identities so a source change cannot make an old
+    owned service namespace impossible to retire.
+    """
+
+    service_root = repository / SERVICE_ROOT_RELATIVE
+    pointer_path = service_root / "current.json"
     pointer = _read_private_json(pointer_path, maximum=4096)
     if type(pointer) is not dict or set(pointer) != {
         "schema_version",
@@ -420,7 +441,7 @@ def load_runtime_services_v2(
         or _SHA256_RE.fullmatch(receipt_digest) is None
     ):
         raise RuntimeServicesV2Error("RUNTIME_SERVICE_POINTER_INVALID")
-    receipt_path = paths["service_root"] / "runs" / service_run_id / "runtime_services_receipt_v2.json"
+    receipt_path = service_root / "runs" / service_run_id / "runtime_services_receipt_v2.json"
     encoded = _read_private_bytes(receipt_path, maximum=64 * 1024)
     if sha256_bytes(encoded) != receipt_digest:
         raise RuntimeServicesV2Error("RUNTIME_SERVICE_RECEIPT_DIGEST_MISMATCH")
@@ -455,15 +476,33 @@ def load_runtime_services_v2(
         or receipt["gateway_url"] != GATEWAY_URL
     ):
         raise RuntimeServicesV2Error("RUNTIME_SERVICE_RECEIPT_INVALID")
-    _validate_runtime_inputs(paths)
-    metadata = _runtime_metadata(paths)
-    if any(receipt.get(key) != value for key, value in metadata.items()):
-        raise RuntimeServicesV2Error("RUNTIME_SERVICE_SOURCE_DRIFT")
-    if receipt["source_commit"] != _git(repository, "rev-parse", "HEAD"):
-        raise RuntimeServicesV2Error("RUNTIME_SERVICE_SOURCE_DRIFT")
-    for key in ("rollout_health_sha256", "gateway_health_sha256"):
+    digest_fields = (
+        "framework_lock_sha256",
+        "framework_wheel_sha256",
+        "topology_sha256",
+        "gateway_bootstrap_sha256",
+        "runtime_python_sha256",
+        "rollout_health_sha256",
+        "gateway_health_sha256",
+    )
+    for key in digest_fields:
         if type(receipt[key]) is not str or _SHA256_RE.fullmatch(receipt[key]) is None:
             raise RuntimeServicesV2Error("RUNTIME_SERVICE_RECEIPT_INVALID")
+    if (
+        type(receipt["source_commit"]) is not str
+        or re.fullmatch(r"[0-9a-f]{40}", receipt["source_commit"]) is None
+        or type(receipt["openevo_version"]) is not str
+        or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", receipt["openevo_version"]) is None
+    ):
+        raise RuntimeServicesV2Error("RUNTIME_SERVICE_RECEIPT_INVALID")
+    if require_current_source:
+        paths = _runtime_paths(repository)
+        _validate_runtime_inputs(paths)
+        metadata = _runtime_metadata(paths)
+        if any(receipt.get(key) != value for key, value in metadata.items()):
+            raise RuntimeServicesV2Error("RUNTIME_SERVICE_SOURCE_DRIFT")
+        if receipt["source_commit"] != _git(repository, "rev-parse", "HEAD"):
+            raise RuntimeServicesV2Error("RUNTIME_SERVICE_SOURCE_DRIFT")
     identity = OpenEvoRuntimeServicesIdentityV2(
         repository_root=repository,
         service_run_id=service_run_id,
@@ -482,29 +521,39 @@ def load_runtime_services_v2(
         receipt_path=receipt_path,
         receipt_sha256=receipt_digest,
     )
-    identity.require_current()
     return identity
 
 
 def stop_runtime_services_v2(*, repository_root: Path) -> dict[str, object]:
     repository = _repository(repository_root)
-    identity = load_runtime_services_v2(repository_root=repository)
-    processes = {identity.rollout.service: identity.rollout, identity.gateway.service: identity.gateway}
-    _require_process_identity(identity.rollout)
-    _require_process_identity(
-        identity.gateway,
-        gateway_container_name=identity.gateway_container.container_name,
+    identity = _load_runtime_services_identity_v2(
+        repository,
+        require_current_source=False,
     )
+    active_processes: dict[str, RuntimeProcessIdentityV2] = {}
+    if _process_exists(identity.rollout.pid):
+        _require_process_identity(identity.rollout)
+        active_processes[identity.rollout.service] = identity.rollout
+    if _process_exists(identity.gateway.pid):
+        _require_process_identity(
+            identity.gateway,
+            gateway_container_name=identity.gateway_container.container_name,
+        )
+        active_processes[identity.gateway.service] = identity.gateway
     for service in ("gateway", "rollout"):
-        process = processes[service]
+        process = active_processes.get(service)
+        if process is None:
+            continue
         try:
             os.killpg(process.process_group_id, signal.SIGTERM)
         except ProcessLookupError:
             continue
     deadline = time.monotonic() + _STOP_GRACE_SECONDS
-    while time.monotonic() < deadline and any(_process_exists(p.pid) for p in processes.values()):
+    while time.monotonic() < deadline and any(
+        _process_exists(process.pid) for process in active_processes.values()
+    ):
         time.sleep(0.1)
-    for process in processes.values():
+    for process in active_processes.values():
         if _process_exists(process.pid):
             _require_process_identity(
                 process,
@@ -516,9 +565,11 @@ def stop_runtime_services_v2(*, repository_root: Path) -> dict[str, object]:
             )
             os.killpg(process.process_group_id, signal.SIGKILL)
     deadline = time.monotonic() + 5.0
-    while time.monotonic() < deadline and any(_process_exists(p.pid) for p in processes.values()):
+    while time.monotonic() < deadline and any(
+        _process_exists(process.pid) for process in active_processes.values()
+    ):
         time.sleep(0.1)
-    if any(_process_exists(p.pid) for p in processes.values()):
+    if any(_process_exists(process.pid) for process in active_processes.values()):
         raise RuntimeServicesV2Error("RUNTIME_SERVICE_CLEANUP_INCOMPLETE")
     _remove_gateway_container_if_owned(
         container_name=identity.gateway_container.container_name,

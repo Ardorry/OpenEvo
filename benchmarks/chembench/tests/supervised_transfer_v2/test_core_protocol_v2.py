@@ -596,6 +596,21 @@ def test_controller_runs_four_sessions_three_cycles_without_model_calls(
         executor_factory=lambda _arm: executor,
         bridge_factory=lambda _root, _category: _SyntheticBridge(bridge, active),
     )
+    paid_plan = json.loads(
+        (
+            experiment.result_root
+            / "public/planned_paid_execution_receipt_v2.json"
+        ).read_text()
+    )
+    assert paid_plan["calls"] == {
+        "candidate_task_calls": 73,
+        "candidate_subscription_readiness_calls_minimum": 73,
+        "candidate_subscription_readiness_calls_maximum": 146,
+        "reflector_calls": 28,
+        "answer_and_reflector_model_calls": 101,
+        "total_model_calls": 174,
+        "maximum_model_calls": 247,
+    }
     experiment._state["stage"] = "ONLINE_TRAIN"
     experiment._write_state()
     task = next(value for value in inputs.train if value.category == "Name_Conversion")
