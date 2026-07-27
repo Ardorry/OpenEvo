@@ -307,12 +307,17 @@ class TaskwiseExecutorSuccessReceiptV1:
     model: str
     executor_policy_sha256: str
     created_at_utc: str
+    codex_executable_sha256: str | None = None
 
     def to_payload(self) -> dict[str, object]:
         """Return the closed, content-free serialization schema."""
 
-        return {
-            "schema_version": "taskwise_executor_private_success_v1",
+        payload: dict[str, object] = {
+            "schema_version": (
+                "taskwise_executor_private_success_v2"
+                if self.codex_executable_sha256 is not None
+                else "taskwise_executor_private_success_v1"
+            ),
             "status": "COMPLETED",
             "run_id": self.run_id,
             "task_uid": self.task_uid,
@@ -332,6 +337,9 @@ class TaskwiseExecutorSuccessReceiptV1:
             "executor_policy_sha256": self.executor_policy_sha256,
             "created_at_utc": self.created_at_utc,
         }
+        if self.codex_executable_sha256 is not None:
+            payload["codex_executable_sha256"] = self.codex_executable_sha256
+        return payload
 
     @classmethod
     def from_payload(
@@ -361,10 +369,17 @@ class TaskwiseExecutorSuccessReceiptV1:
             "executor_policy_sha256",
             "created_at_utc",
         }
+        schema_version = payload.get("schema_version") if isinstance(payload, Mapping) else None
+        if schema_version == "taskwise_executor_private_success_v2":
+            expected.add("codex_executable_sha256")
         if (
             not isinstance(payload, Mapping)
             or set(payload) != expected
-            or payload["schema_version"] != "taskwise_executor_private_success_v1"
+            or schema_version
+            not in {
+                "taskwise_executor_private_success_v1",
+                "taskwise_executor_private_success_v2",
+            }
             or payload["status"] != "COMPLETED"
         ):
             raise ValueError("taskwise executor success receipt schema is invalid")
@@ -393,7 +408,9 @@ class TaskwiseExecutorSuccessReceiptV1:
             raise ValueError("taskwise executor success receipt index is invalid")
         if payload["round_index"] is not None and payload["round_index"] not in (0, 1, 2):
             raise ValueError("taskwise executor success receipt index is invalid")
-        digest_fields = ("event_stream_sha256", "executor_policy_sha256")
+        digest_fields = ["event_stream_sha256", "executor_policy_sha256"]
+        if schema_version == "taskwise_executor_private_success_v2":
+            digest_fields.append("codex_executable_sha256")
         if any(
             type(payload[key]) is not str
             or re.fullmatch(r"[0-9a-f]{64}", str(payload[key])) is None
@@ -441,6 +458,11 @@ class TaskwiseExecutorSuccessReceiptV1:
             model=str(payload["model"]),
             executor_policy_sha256=str(payload["executor_policy_sha256"]),
             created_at_utc=str(payload["created_at_utc"]),
+            codex_executable_sha256=(
+                None
+                if schema_version == "taskwise_executor_private_success_v1"
+                else str(payload["codex_executable_sha256"])
+            ),
         )
 
 
@@ -638,6 +660,7 @@ class LocalCodexCLIExecutor:
         "_auth_file",
         "_closed",
         "_codex_executable",
+        "_codex_executable_sha256",
         "_codex_version",
         "_command_runner",
         "_config",
@@ -750,6 +773,20 @@ class LocalCodexCLIExecutor:
         self._taskwise_session_ids: set[str] = set()
         self._task_timeout_seconds = float(task_timeout_seconds)
         self._codex_executable = resolved_executable
+        try:
+            self._codex_executable_sha256 = _sha256_regular_file(resolved_executable)
+        except OSError:
+            # Unit tests and research harness simulators historically inject both a
+            # command runner and a verified version while using a sentinel binary
+            # path. Preserve that non-production seam and its v1 receipt. Real
+            # execution (command_runner=None), including supervised transfer, must
+            # bind an existing regular executable and emits the digest-bound v2
+            # receipt below.
+            if command_runner is None or verified_codex_version is None:
+                raise LocalCodexExecutionError(
+                    LocalCodexExecutionErrorCode.CODEX_UNAVAILABLE
+                ) from None
+            self._codex_executable_sha256 = None
         self._auth_file = resolved_auth
         self._command_runner = _run_local_command if command_runner is None else command_runner
         resolved_isolation_parent = (
@@ -1463,6 +1500,7 @@ class LocalCodexCLIExecutor:
             model=self._model,
             executor_policy_sha256=self._executor_policy_sha256,
             created_at_utc=datetime.now(UTC).isoformat(timespec="milliseconds"),
+            codex_executable_sha256=self._codex_executable_sha256,
         )
         try:
             success_reference = _persist_success_receipt(
@@ -1641,6 +1679,7 @@ class LocalCodexCLIExecutor:
             "redacted_argv": _redacted_command(command),
             "codex_version": self._codex_version,
             "real_codex_binary": os.fspath(self._codex_executable),
+            "real_codex_binary_sha256": self._codex_executable_sha256,
             "model": self._model,
             "invocation_root_id": invocation_root_id,
             "auth_materialization_status": (
@@ -1715,6 +1754,36 @@ def _validate_auth_file(path: Path) -> None:
         raise LocalCodexExecutionError(
             LocalCodexExecutionErrorCode.SUBSCRIPTION_AUTH_PERMISSIONS_UNSAFE
         )
+
+
+def _sha256_regular_file(path: Path) -> str:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise OSError("Codex executable is not a regular file")
+        digest = hashlib.sha256()
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        after = os.fstat(descriptor)
+        if (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        ):
+            raise OSError("Codex executable changed while hashing")
+        return digest.hexdigest()
+    finally:
+        os.close(descriptor)
 
 
 def _base_environment() -> dict[str, str]:

@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from openevo.runtime.managed import MANAGED_CODEX_NPM_PACKAGE, MANAGED_CODEX_VERSION
 
 from openevo_chembench.chembench4k_dataset import ChemBench4KDatasetLoader
 from openevo_chembench.chembench4k_evaluation import ChemBench4KPrivateEvaluator
@@ -38,6 +39,12 @@ from openevo_chembench.supervised_transfer_v1.desktop_export import (
 from openevo_chembench.supervised_transfer_v1.exposure import (
     HistoricalExposureManifestV1,
     load_historical_exposure_manifest,
+)
+from openevo_chembench.supervised_transfer_v1.managed_codex import (
+    MANAGED_CODEX_SOURCE,
+    ManagedCodexError,
+    load_managed_codex_v1,
+    write_managed_codex_receipt_v1,
 )
 from openevo_chembench.supervised_transfer_v1.memory import (
     inspect_supervised_category_memory_v1,
@@ -80,6 +87,46 @@ def _loader() -> ChemBench4KDatasetLoader:
     )
 
 
+def _fake_managed_codex(repository: Path) -> Path:
+    root = repository / "state/chembench_supervised_transfer_v1/managed_codex"
+    root.mkdir(parents=True, mode=0o700)
+    root.chmod(0o700)
+    launcher_script = root / "lib/node_modules/@openai/codex/bin/codex.js"
+    launcher_script.parent.mkdir(parents=True)
+    launcher_script.write_text("#!/usr/bin/env node\n", encoding="utf-8")
+    launcher_script.chmod(0o755)
+    package_json = launcher_script.parent.parent / "package.json"
+    package_json.write_text(
+        json.dumps({"name": "@openai/codex", "version": MANAGED_CODEX_VERSION}),
+        encoding="utf-8",
+    )
+    platform = (
+        launcher_script.parent.parent
+        / "node_modules/@openai/codex-linux-x64"
+    )
+    platform.mkdir(parents=True)
+    (platform / "package.json").write_text(
+        json.dumps(
+            {
+                "name": "@openai/codex",
+                "version": f"{MANAGED_CODEX_VERSION}-linux-x64",
+            }
+        ),
+        encoding="utf-8",
+    )
+    executable = platform / "vendor/x86_64-unknown-linux-musl/bin/codex"
+    executable.parent.mkdir(parents=True)
+    executable.write_text(
+        f"#!/bin/sh\nprintf '%s\\n' 'codex-cli {MANAGED_CODEX_VERSION}'\n",
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
+    launcher = root / "bin/codex"
+    launcher.parent.mkdir()
+    launcher.symlink_to("../lib/node_modules/@openai/codex/bin/codex.js")
+    return executable
+
+
 def test_config_freezes_roots_model_and_exact_call_budget() -> None:
     config = load_supervised_transfer_config_v1(
         WORKSPACE_ROOT
@@ -92,6 +139,10 @@ def test_config_freezes_roots_model_and_exact_call_budget() -> None:
     assert config.state_root == "state/chembench_supervised_transfer_v1"
     assert config.model == "gpt-5.5"
     assert config.reasoning_effort == "medium"
+    assert config.codex_runtime_source == MANAGED_CODEX_SOURCE
+    assert config.codex_runtime_root == (
+        "state/chembench_supervised_transfer_v1/managed_codex"
+    )
     assert config.call_budget["total_model_calls"] == TOTAL_MODEL_CALLS == 5580
     assert dict(EVOLUTION_TARGET_METHODS) == {
         "text_memory": "text_memory_expel_reflector",
@@ -100,6 +151,31 @@ def test_config_freezes_roots_model_and_exact_call_budget() -> None:
     }
     assert (FORMAL_CORE_JOBS, FORMAL_CORE_ARTIFACTS) == (2700, 2700)
     assert (PREFLIGHT_CORE_JOBS, PREFLIGHT_CORE_ARTIFACTS) == (57, 57)
+
+
+def test_openevo_managed_codex_is_identity_bound_and_drift_fails_closed(
+    tmp_path: Path,
+) -> None:
+    executable = _fake_managed_codex(tmp_path)
+    payload, receipt_sha256 = write_managed_codex_receipt_v1(
+        repository_root=tmp_path.resolve()
+    )
+    identity = load_managed_codex_v1(repository_root=tmp_path.resolve())
+
+    assert identity.source == MANAGED_CODEX_SOURCE
+    assert identity.npm_package == MANAGED_CODEX_NPM_PACKAGE
+    assert identity.codex_cli_version == f"codex-cli {MANAGED_CODEX_VERSION}"
+    assert identity.executable == executable.resolve()
+    assert identity.executable_sha256 == payload["executable_sha256"]
+    assert identity.receipt_sha256 == receipt_sha256
+
+    executable.write_text(
+        f"#!/bin/sh\nprintf '%s\\n' 'codex-cli {MANAGED_CODEX_VERSION}'\n# drift\n",
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
+    with pytest.raises(ManagedCodexError, match="MANAGED_CODEX_IDENTITY_DRIFT"):
+        load_managed_codex_v1(repository_root=tmp_path.resolve())
 
 
 def test_supervised_dataset_manifest_is_complete_and_byte_stable() -> None:
@@ -336,6 +412,11 @@ def test_non_paid_dry_run_uses_v2_taxonomy_and_preserves_old_blocker() -> None:
     assert payload["model_calls_made"] == 0
     assert payload["paid_calls_started"] is False
     assert payload["src_openevo_pristine"] is True
+    assert payload["codex_cli_version"] == f"codex-cli {MANAGED_CODEX_VERSION}"
+    assert payload["codex_runtime_source"] == MANAGED_CODEX_SOURCE
+    assert len(payload["codex_runtime_identity_sha256"]) == 64
+    assert len(payload["codex_executable_sha256"]) == 64
+    assert payload["ready_for_paid_smoke"] is payload["benchmark_source_clean"]
     assert payload["old_blocked_receipt_sha256"] == (
         "43e64dce6a4c357b5811042140b7a908820fa13e9fe0aefc0f9eab4da11ab18e"
     )

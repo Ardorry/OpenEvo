@@ -3,9 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Self, cast
 
 import pytest
 
@@ -21,6 +22,9 @@ from openevo_chembench.supervised_transfer_v1.experiment import (
     ExperimentInputsV1,
     SupervisedExperimentError,
     SupervisedTransferExperimentV1,
+)
+from openevo_chembench.supervised_transfer_v1.managed_codex import (
+    OpenEvoManagedCodexIdentityV1,
 )
 from openevo_chembench.supervised_transfer_v1.pause import (
     AdministrativePauseError,
@@ -42,6 +46,7 @@ from openevo_chembench.supervised_transfer_v1.test_ledger import (
 from openevo_chembench.supervised_transfer_v1.test_ledger import (
     TestManifestLedgerError as LedgerError,
 )
+from openevo_chembench.taskwise_config_v1 import load_taskwise_config_v1
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 CONFIG_PATH = (
@@ -51,6 +56,18 @@ CONFIG_PATH = (
 
 
 def _experiment_inputs(tmp_path: Path) -> ExperimentInputsV1:
+    managed_codex = OpenEvoManagedCodexIdentityV1(
+        root=tmp_path / "state/chembench_supervised_transfer_v1/managed_codex",
+        executable=Path("/bin/true"),
+        executable_sha256="3" * 64,
+        launcher_sha256="4" * 64,
+        package_json_sha256="5" * 64,
+        platform_package_json_sha256="6" * 64,
+        codex_cli_version="codex-cli 0.1.0",
+        npm_package="@openai/codex@0.1.0",
+        openevo_distribution_version="0.1.8",
+        receipt_sha256="7" * 64,
+    )
     return ExperimentInputsV1(
         repository_root=tmp_path,
         config=load_supervised_transfer_config_v1(CONFIG_PATH),
@@ -62,6 +79,7 @@ def _experiment_inputs(tmp_path: Path) -> ExperimentInputsV1:
         split_receipt_sha256="1" * 64,
         source_commit="2" * 40,
         codex_cli_version="codex-cli 0.1.0",
+        managed_codex=managed_codex,
         test_manifest="test_primary",
     )
 
@@ -117,6 +135,74 @@ def test_run_mode_and_stage_machine_fail_closed_before_paid_work(tmp_path: Path)
     formal._set_stage("ONLINE_CORE_INITIALIZATION")
     with pytest.raises(SupervisedExperimentError, match="STAGE_TRANSITION_INVALID"):
         formal._set_stage("FINAL_TEST")
+
+
+def test_paid_run_rejects_uncommitted_benchmark_source(tmp_path: Path) -> None:
+    subprocess.run(("git", "init", "-q"), cwd=tmp_path, check=True)
+    source = tmp_path / "benchmarks/chembench/src/uncommitted.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("UNCOMMITTED = True\n", encoding="utf-8")
+
+    with pytest.raises(SupervisedExperimentError, match="BENCHMARK_SOURCE_NOT_COMMITTED"):
+        SupervisedTransferExperimentV1(
+            inputs=_experiment_inputs(tmp_path),
+            run_id="dirty-source-test-0001",
+            run_mode="preflight",
+        )
+    assert not (tmp_path / "results/chembench_supervised_transfer_v1").exists()
+
+
+def test_task_and_reflector_paths_use_only_explicit_openevo_managed_codex(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inputs = _experiment_inputs(tmp_path)
+    experiment = SupervisedTransferExperimentV1(
+        inputs=inputs,
+        run_id="managed-codex-test-0001",
+        run_mode="preflight",
+    )
+    executor_paths: list[Path] = []
+
+    class FakeExecutor:
+        def __init__(self, **arguments: object) -> None:
+            executor_paths.append(cast(Path, arguments["codex_executable"]))
+
+        def __enter__(self) -> Self:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "openevo_chembench.supervised_transfer_v1.experiment.LocalCodexCLIExecutor",
+        FakeExecutor,
+    )
+    taskwise_config = load_taskwise_config_v1(
+        WORKSPACE_ROOT
+        / "benchmarks/chembench/configs/control_canary9_taskwise_online_v1.yaml"
+    )
+    monkeypatch.setattr(
+        "openevo_chembench.supervised_transfer_v1.experiment.load_taskwise_config_v1",
+        lambda _path: taskwise_config,
+    )
+    with ExitStack() as stack:
+        experiment._open_executors(stack)
+    assert executor_paths == [inputs.managed_codex.executable] * 2
+
+    bridge_arguments: dict[str, object] = {}
+
+    def fake_bridge(**arguments: object) -> object:
+        bridge_arguments.update(arguments)
+        return object()
+
+    monkeypatch.setattr(
+        "openevo_chembench.supervised_transfer_v1.experiment."
+        "build_supervised_core_bridge_at_roots_v1",
+        fake_bridge,
+    )
+    experiment._new_ephemeral_bridge("scope", CHEMBENCH4K_CATEGORIES[0])
+    assert bridge_arguments["codex_executable"] == inputs.managed_codex.executable
 
 
 def test_probe_smoke_admits_only_probe_smoke_arms(tmp_path: Path) -> None:

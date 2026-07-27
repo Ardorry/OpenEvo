@@ -414,9 +414,13 @@ def test_successful_taskwise_invocation_writes_content_free_private_receipt(
     assert receipt.completion_observed is True
     assert receipt.cleanup_status == "COMPLETE"
     assert receipt.residual_root_count == 0
+    assert receipt.codex_executable_sha256 == hashlib.sha256(
+        Path("/bin/true").read_bytes()
+    ).hexdigest()
     path = next((tmp_path / "diagnostics").glob("success_*.json"))
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     serialized = path.read_text(encoding="utf-8")
+    assert '"schema_version":"taskwise_executor_private_success_v2"' in serialized
     for forbidden in (
         "public sentinel",
         "target_scores",

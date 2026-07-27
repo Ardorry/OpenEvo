@@ -29,8 +29,8 @@
     },
     {
       "destination_file": "benchmarks/chembench/src/openevo_chembench/local_codex_executor.py",
-      "destination_sha256": "83031a2ae91a23dbc1ee4c6c46639119982170b069344070e28c432b65ad875c",
-      "modification_summary": "extended with exact three-target supervised context injection and binding",
+      "destination_sha256": "4d8417a2a4014fb2b40d9de46d4957aa61fe60d2ae03bc62a4dad1a6c70d0d0b",
+      "modification_summary": "extended with exact three-target supervised context injection plus digest-bound real Codex success receipts",
       "source_commit": "d795ee3d6d654ab175ab8b3c9929c4db318180c5",
       "source_file": "benchmarks/chembench/src/openevo_chembench/local_codex_executor.py",
       "source_repository": "/home/lhy-h/work/openevo_chembench/OpenEvo",
@@ -47,7 +47,7 @@
     },
     {
       "destination_file": "benchmarks/chembench/src/openevo_chembench/taskwise_core_evolution_v1.py",
-      "destination_sha256": "6a87d558cf9ad67cf286258875bd6b94ffc1c8b15264e47aa125fbaa0541f91c",
+      "destination_sha256": "1120fd2425b08d43648d7cca24fc52d4f87e1c977c8bafa408daad979c7d66af",
       "modification_summary": "extended with one supervised reflector and three verified Core target lifecycles",
       "source_commit": "d795ee3d6d654ab175ab8b3c9929c4db318180c5",
       "source_file": "benchmarks/chembench/src/openevo_chembench/taskwise_core_evolution_v1.py",

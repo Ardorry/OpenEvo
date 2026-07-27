@@ -3915,6 +3915,7 @@ def build_supervised_core_bridge_at_roots_v1(
     *,
     state_root: Path,
     framework_lock: Path,
+    codex_executable: Path,
     timeout_seconds: int,
     memory_limits: SupervisedMemoryLimitsV1 = SUPERVISED_MEMORY_LIMITS_V1,
 ) -> TaskwiseCoreEvolutionBridgeV1:
@@ -3925,8 +3926,12 @@ def build_supervised_core_bridge_at_roots_v1(
         or not state_root.is_absolute()
         or not isinstance(framework_lock, Path)
         or not framework_lock.is_absolute()
+        or not isinstance(codex_executable, Path)
+        or not codex_executable.is_absolute()
     ):
-        raise TypeError("Core state and framework lock roots must be absolute Paths")
+        raise TypeError(
+            "Core state, framework lock, and Codex executable must be absolute Paths"
+        )
     if type(memory_limits) is not SupervisedMemoryLimitsV1:
         raise TypeError("supervised memory limits must be exact")
     if (
@@ -3968,6 +3973,7 @@ def build_supervised_core_bridge_at_roots_v1(
             expected_record_count=1,
             expected_source_split=SUPERVISED_TRAIN_SOURCE_SPLIT,
             private_audit_root=private_audit_root,
+            real_codex_binary=codex_executable,
             timeout_seconds=timeout_seconds,
         )
         if not boundary.preflight().available:
@@ -3984,6 +3990,7 @@ def build_supervised_core_bridge_at_roots_v1(
             expected_record_count=record_count,
             expected_source_split=SUPERVISED_TRAIN_SOURCE_SPLIT,
             private_audit_root=private_audit_root,
+            real_codex_binary=codex_executable,
             timeout_seconds=timeout_seconds,
         )
 

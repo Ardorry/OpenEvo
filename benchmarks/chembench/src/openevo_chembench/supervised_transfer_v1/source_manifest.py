@@ -26,7 +26,7 @@ _IMPORTED_FILES = (
     ),
     (
         "benchmarks/chembench/src/openevo_chembench/local_codex_executor.py",
-        "extended with exact three-target supervised context injection and binding",
+        "extended with exact three-target supervised context injection plus digest-bound real Codex success receipts",
     ),
     (
         "benchmarks/chembench/src/openevo_chembench/reflector_execution_boundary_v2.py",

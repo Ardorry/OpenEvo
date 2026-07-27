@@ -13,6 +13,9 @@ roots:
   state: state/chembench_supervised_transfer_v1
 model: gpt-5.5
 reasoning_effort: medium
+codex_runtime:
+  source: openevo_core_managed_codex_v1
+  root: state/chembench_supervised_transfer_v1/managed_codex
 codex_cli_version: BIND_VERIFIED_CODEX_AT_LAUNCH
 source_commit: BIND_CLEAN_HEAD_AT_LAUNCH
 reflector:

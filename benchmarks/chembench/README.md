@@ -41,6 +41,12 @@ lifecycle targets: `text_memory`, `skill_bundle`, and `agent_system`. Probe is
 evaluated at frozen checkpoints 0/10/20/30/40/50 without feedback or evolution;
 final Test compares one no-context completion with one completion using the
 complete frozen three-target category context.
+Both task sessions and reflectors use the Codex package version declared by
+OpenEvo Core's managed runtime contract. The repository pins
+`@openai/codex@0.144.1`; the benchmark runtime preparation materializes that
+exact package under its private state root, verifies its package metadata and
+native executable digest, and passes the same explicit native binary to both
+execution boundaries. Host `PATH` discovery is not admitted for this protocol.
 It must be reported as `RESEARCH_ONLY_SUPERVISED_EVOLUTION`,
 `TRAIN_ANSWER_SUPERVISION`, `FROZEN_UNSEEN_TEST_TRANSFER`, and
 `NOT_A_STANDARD_LEADERBOARD_SCORE`.
@@ -58,10 +64,16 @@ Non-paid preparation and validation use:
 
 ```bash
 benchmarks/chembench/scripts/run_chembench_supervised_transfer_v1.sh prepare
+benchmarks/chembench/scripts/prepare_supervised_transfer_v1_runtime.sh
 benchmarks/chembench/scripts/run_chembench_supervised_transfer_v1.sh verify
 benchmarks/chembench/scripts/run_chembench_supervised_transfer_v1.sh dry-run
-benchmarks/chembench/scripts/prepare_supervised_transfer_v1_runtime.sh
 ```
+
+Runtime preparation writes a deterministic managed-Codex receipt containing
+the Core-declared package/version and package/native-binary digests. Every
+preflight authority, formal run state, and final freeze binds that identity;
+missing installation, host-only Codex, or binary drift fails before a model
+call.
 
 Paid execution is deliberately split into two non-resumable run identities:
 

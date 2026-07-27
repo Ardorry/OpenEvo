@@ -16,6 +16,9 @@ from openevo_chembench.supervised_transfer_v1.common import (
     canonical_json_bytes,
     closed_mapping,
 )
+from openevo_chembench.supervised_transfer_v1.managed_codex import (
+    MANAGED_CODEX_SOURCE,
+)
 
 PROTOCOL_ID = "chembench_supervised_transfer_v1"
 CONFIG_SCHEMA = "chembench_supervised_transfer_config_v1"
@@ -29,6 +32,8 @@ STATE_ROOT = "state/chembench_supervised_transfer_v1"
 MANIFEST_ROOT = "benchmarks/chembench/manifests/supervised_transfer_v1"
 SOURCE_COMMIT_PLACEHOLDER = "BIND_CLEAN_HEAD_AT_LAUNCH"
 CODEX_VERSION_PLACEHOLDER = "BIND_VERIFIED_CODEX_AT_LAUNCH"
+CODEX_RUNTIME_SOURCE = MANAGED_CODEX_SOURCE
+CODEX_RUNTIME_ROOT = f"{STATE_ROOT}/managed_codex"
 
 TRAIN_PER_CATEGORY = 50
 PROBE_PER_CATEGORY = 10
@@ -176,6 +181,8 @@ class SupervisedTransferConfigV1:
     result_root: str
     state_root: str
     framework_lock: str
+    codex_runtime_source: str
+    codex_runtime_root: str
     codex_cli_version: str
     source_commit: str
     reflector_method_id: str
@@ -209,8 +216,16 @@ class SupervisedTransferConfigV1:
             (self.result_root, "result_root"),
             (self.state_root, "state_root"),
             (self.framework_lock, "framework_lock"),
+            (self.codex_runtime_root, "codex_runtime_root"),
         ):
             _clean_relative_path(value, field_name)
+        if (
+            self.codex_runtime_source != CODEX_RUNTIME_SOURCE
+            or self.codex_runtime_root != CODEX_RUNTIME_ROOT
+        ):
+            raise SupervisedTransferConfigError(
+                "Codex runtime must use the OpenEvo-managed package"
+            )
         if self.reflector_method_id != "text_memory_expel_reflector":
             raise SupervisedTransferConfigError("only the verified Core reflector is admitted")
         if (
@@ -260,6 +275,10 @@ class SupervisedTransferConfigV1:
             "roots": {"results": self.result_root, "state": self.state_root},
             "model": self.model,
             "reasoning_effort": self.reasoning_effort,
+            "codex_runtime": {
+                "source": self.codex_runtime_source,
+                "root": self.codex_runtime_root,
+            },
             "codex_cli_version": self.codex_cli_version,
             "source_commit": self.source_commit,
             "reflector": {
@@ -314,6 +333,7 @@ def load_supervised_transfer_config_v1(path: Path) -> SupervisedTransferConfigV1
                 "roots",
                 "model",
                 "reasoning_effort",
+                "codex_runtime",
                 "codex_cli_version",
                 "source_commit",
                 "reflector",
@@ -347,6 +367,11 @@ def load_supervised_transfer_config_v1(path: Path) -> SupervisedTransferConfigV1
         root["reflector"],
         keys=frozenset({"method_id", "timeout_seconds", "framework_lock"}),
         field_name="reflector",
+    )
+    codex_runtime = closed_mapping(
+        root["codex_runtime"],
+        keys=frozenset({"source", "root"}),
+        field_name="codex_runtime",
     )
     executor = closed_mapping(
         root["executor"],
@@ -420,6 +445,8 @@ def load_supervised_transfer_config_v1(path: Path) -> SupervisedTransferConfigV1
         state_root=roots["state"],
         model=root["model"],
         reasoning_effort=root["reasoning_effort"],
+        codex_runtime_source=codex_runtime["source"],
+        codex_runtime_root=codex_runtime["root"],
         codex_cli_version=root["codex_cli_version"],
         source_commit=root["source_commit"],
         reflector_method_id=reflector["method_id"],
@@ -431,6 +458,8 @@ def load_supervised_transfer_config_v1(path: Path) -> SupervisedTransferConfigV1
 
 
 __all__ = [
+    "CODEX_RUNTIME_ROOT",
+    "CODEX_RUNTIME_SOURCE",
     "CODEX_VERSION_PLACEHOLDER",
     "CONFIG_SCHEMA",
     "CONTROL_TRAIN_PROTOCOL_ID",

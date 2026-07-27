@@ -56,6 +56,10 @@ from openevo_chembench.supervised_transfer_v1.config import (
 from openevo_chembench.supervised_transfer_v1.context_binding import (
     SupervisedAgentRequestV1,
 )
+from openevo_chembench.supervised_transfer_v1.managed_codex import (
+    OpenEvoManagedCodexIdentityV1,
+    load_managed_codex_v1,
+)
 from openevo_chembench.supervised_transfer_v1.packet import (
     SupervisedEvolutionPacketV1,
 )
@@ -146,6 +150,7 @@ class ExperimentInputsV1:
     split_receipt_sha256: str
     source_commit: str
     codex_cli_version: str
+    managed_codex: OpenEvoManagedCodexIdentityV1
     test_manifest: str
 
 
@@ -204,7 +209,10 @@ def load_experiment_inputs_v1(
     source_commit = _git_output(repository, ("rev-parse", "HEAD"))
     if _git_output(repository, ("diff", "--", "src/openevo")):
         raise SupervisedExperimentError("SRC_OPENEVO_NOT_PRISTINE")
-    codex_version = _codex_version(repository)
+    managed_codex = load_managed_codex_v1(
+        repository_root=repository,
+        managed_root_relative=config.codex_runtime_root,
+    )
     return ExperimentInputsV1(
         repository_root=repository,
         config=config,
@@ -215,7 +223,8 @@ def load_experiment_inputs_v1(
         manifest_root=manifests,
         split_receipt_sha256=sha256_bytes(split_receipt.read_bytes()),
         source_commit=source_commit,
-        codex_cli_version=codex_version,
+        codex_cli_version=managed_codex.codex_cli_version,
+        managed_codex=managed_codex,
         test_manifest=test_manifest,
     )
 
@@ -254,6 +263,7 @@ def build_complete_dry_run_v1(inputs: ExperimentInputsV1) -> dict[str, object]:
     }
     if sum(call_plan.values()) != TOTAL_MODEL_CALLS:
         raise SupervisedExperimentError("DRY_RUN_CALL_BUDGET_INVALID")
+    benchmark_source_clean = not _benchmark_source_status(inputs.repository_root)
     return {
         "schema_version": DRY_RUN_SCHEMA,
         "protocol_id": PROTOCOL_ID,
@@ -315,11 +325,15 @@ def build_complete_dry_run_v1(inputs: ExperimentInputsV1) -> dict[str, object]:
         "split_receipt_sha256": inputs.split_receipt_sha256,
         "source_commit": inputs.source_commit,
         "codex_cli_version": inputs.codex_cli_version,
+        "codex_runtime_source": inputs.managed_codex.source,
+        "codex_runtime_identity_sha256": inputs.managed_codex.digest,
+        "codex_executable_sha256": inputs.managed_codex.executable_sha256,
         "reflector_input_scope": "Train only",
         "probe_evolution_jobs": 0,
         "test_evolution_jobs": 0,
         "test_manifest": inputs.test_manifest,
-        "ready_for_paid_smoke": True,
+        "benchmark_source_clean": benchmark_source_clean,
+        "ready_for_paid_smoke": benchmark_source_clean,
     }
 
 
@@ -348,6 +362,10 @@ class SupervisedTransferExperimentV1:
             or preflight_run_id == run_id
         ):
             raise ValueError("formal runs require a distinct preflight run ID")
+        if (inputs.repository_root / ".git").exists() and _benchmark_source_status(
+            inputs.repository_root
+        ):
+            raise SupervisedExperimentError("BENCHMARK_SOURCE_NOT_COMMITTED")
         self.inputs = inputs
         self.run_id = run_id
         self.run_mode = run_mode
@@ -374,6 +392,9 @@ class SupervisedTransferExperimentV1:
             "stage": "INITIALIZED",
             "source_commit": inputs.source_commit,
             "split_receipt_sha256": inputs.split_receipt_sha256,
+            "codex_runtime_source": inputs.managed_codex.source,
+            "codex_runtime_identity_sha256": inputs.managed_codex.digest,
+            "codex_executable_sha256": inputs.managed_codex.executable_sha256,
             "test_manifest": inputs.test_manifest,
             "preflight_run_id": preflight_run_id,
             "task_sessions": 0,
@@ -493,6 +514,7 @@ class SupervisedTransferExperimentV1:
             LocalCodexCLIExecutor(
                 config=control_config,
                 task_timeout_seconds=self.inputs.config.executor.timeout_seconds,
+                codex_executable=self.inputs.managed_codex.executable,
                 diagnostic_root=self.state_root / "private/executor/control",
             )
         )
@@ -500,6 +522,7 @@ class SupervisedTransferExperimentV1:
             LocalCodexCLIExecutor(
                 config=online_config,
                 task_timeout_seconds=self.inputs.config.executor.timeout_seconds,
+                codex_executable=self.inputs.managed_codex.executable,
                 diagnostic_root=self.state_root / "private/executor/online",
             )
         )
@@ -512,6 +535,7 @@ class SupervisedTransferExperimentV1:
             bridge = build_supervised_core_bridge_at_roots_v1(
                 state_root=(self.state_root / "private/core" / category).resolve(),
                 framework_lock=framework_lock,
+                codex_executable=self.inputs.managed_codex.executable,
                 timeout_seconds=self.inputs.config.reflector_timeout_seconds,
             )
             self._bridges[category] = stack.enter_context(bridge)
@@ -861,6 +885,9 @@ class SupervisedTransferExperimentV1:
             "protocol_id": PROTOCOL_ID,
             "source_commit": self.inputs.source_commit,
             "split_receipt_sha256": self.inputs.split_receipt_sha256,
+            "codex_runtime_source": self.inputs.managed_codex.source,
+            "codex_runtime_identity_sha256": self.inputs.managed_codex.digest,
+            "codex_executable_sha256": self.inputs.managed_codex.executable_sha256,
             "test_manifest": self.inputs.test_manifest,
             "test_manifest_sha256": sha256_bytes(
                 (
@@ -912,6 +939,15 @@ class SupervisedTransferExperimentV1:
             ),
         ):
             raise SupervisedExperimentError("BENCHMARK_SOURCE_CHANGED_DURING_FORMAL_RUN")
+        current_codex = load_managed_codex_v1(
+            repository_root=repository,
+            managed_root_relative=self.inputs.config.codex_runtime_root,
+        )
+        if (
+            current_codex.digest != self.inputs.managed_codex.digest
+            or current_codex.executable != self.inputs.managed_codex.executable
+        ):
+            raise SupervisedExperimentError("MANAGED_CODEX_CHANGED_DURING_FORMAL_RUN")
 
     def _run_final_test(
         self,
@@ -1314,6 +1350,7 @@ class SupervisedTransferExperimentV1:
             framework_lock=(
                 self.inputs.repository_root / self.inputs.config.framework_lock
             ).resolve(),
+            codex_executable=self.inputs.managed_codex.executable,
             timeout_seconds=self.inputs.config.reflector_timeout_seconds,
         )
 
@@ -1505,22 +1542,6 @@ def _uid_order_sha256(tasks: Iterable[PrivateChemBench4KTask]) -> str:
     return sha256_bytes(("\n".join(task.uid for task in tasks) + "\n").encode("ascii"))
 
 
-def _codex_version(repository: Path) -> str:
-    completed = subprocess.run(
-        ("codex", "--version"),
-        cwd=repository,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=20,
-    )
-    value = completed.stdout.strip()
-    if completed.returncode != 0 or re.fullmatch(r"codex-cli [0-9]+\.[0-9]+\.[0-9]+", value) is None:
-        raise SupervisedExperimentError("CODEX_VERSION_UNAVAILABLE")
-    return value
-
-
 def _git_output(repository: Path, arguments: tuple[str, ...]) -> str:
     completed = subprocess.run(
         ("git", *arguments),
@@ -1534,6 +1555,19 @@ def _git_output(repository: Path, arguments: tuple[str, ...]) -> str:
     if completed.returncode != 0:
         raise SupervisedExperimentError("GIT_IDENTITY_UNAVAILABLE")
     return completed.stdout.strip()
+
+
+def _benchmark_source_status(repository: Path) -> str:
+    return _git_output(
+        repository,
+        (
+            "status",
+            "--short",
+            "--untracked-files=all",
+            "--",
+            "benchmarks/chembench",
+        ),
+    )
 
 
 def _create_file(path: Path, mode: int) -> None:

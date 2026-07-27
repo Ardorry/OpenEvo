@@ -221,6 +221,8 @@ def inspect_preflight_evidence_v1(
         or row.get("codex_cli_version") != inputs.codex_cli_version.removeprefix(
             "codex-cli "
         )
+        or row.get("codex_executable_sha256")
+        != inputs.managed_codex.executable_sha256
         or row.get("executor_policy_sha256") != expected_policy
         for row in success_rows
     ):
@@ -239,6 +241,8 @@ def inspect_preflight_evidence_v1(
         or row.get("retry_allowed") is not False
         or row.get("resume_allowed") is not False
         or row.get("replacement_completion_allowed") is not False
+        or row.get("real_codex_sha256")
+        != inputs.managed_codex.executable_sha256
         for row in reflector_receipts
     ):
         raise PreflightAuthorityError("PREFLIGHT_CLEANUP_OR_REFLECTOR_INVALID")
@@ -248,6 +252,10 @@ def inspect_preflight_evidence_v1(
         or state.get("source_commit") != inputs.source_commit
         or state.get("run_mode") != "preflight"
         or state.get("split_receipt_sha256") != inputs.split_receipt_sha256
+        or state.get("codex_runtime_source") != inputs.managed_codex.source
+        or state.get("codex_runtime_identity_sha256") != inputs.managed_codex.digest
+        or state.get("codex_executable_sha256")
+        != inputs.managed_codex.executable_sha256
         or state.get("task_sessions") != 253
         or state.get("reflector_completions") != 19
         or state.get("core_jobs") != PREFLIGHT_CORE_JOBS
@@ -398,6 +406,10 @@ def _effective_identity(inputs: ExperimentInputsV1) -> dict[str, object]:
         "model": inputs.config.model,
         "reasoning_effort": inputs.config.reasoning_effort,
         "codex_cli_version": inputs.codex_cli_version,
+        "codex_runtime_source": inputs.managed_codex.source,
+        "codex_runtime_identity_sha256": inputs.managed_codex.digest,
+        "codex_executable_sha256": inputs.managed_codex.executable_sha256,
+        "codex_managed_receipt_sha256": inputs.managed_codex.receipt_sha256,
         "executor_policy_sha256": policies[0],
         "framework_lock_sha256": sha256_bytes(framework_lock.read_bytes()),
         "verified_registry_digest": registry.snapshot.registry_digest,
@@ -470,7 +482,7 @@ def _load_success_receipts(state_root: Path) -> tuple[list[dict[str, Any]], str]
     executor_root = state_root / "private/executor"
     for path in sorted(executor_root.glob("*/*.json")):
         payload = json.loads(path.read_text(encoding="utf-8"))
-        if payload.get("schema_version") != "taskwise_executor_private_success_v1":
+        if payload.get("schema_version") != "taskwise_executor_private_success_v2":
             continue
         rows.append(payload)
         raw = path.read_bytes()
