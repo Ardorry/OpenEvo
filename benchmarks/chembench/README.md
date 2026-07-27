@@ -45,8 +45,9 @@ Both task sessions and reflectors use the Codex package version declared by
 OpenEvo Core's managed runtime contract. The repository pins
 `@openai/codex@0.144.1`; the benchmark runtime preparation materializes that
 exact package under its private state root, verifies its package metadata and
-native executable digest, and passes the same explicit native binary to both
-execution boundaries. Host `PATH` discovery is not admitted for this protocol.
+native executable digest, and gives each execution boundary a separately
+materialized executable with that same pinned digest. Host `PATH` discovery is
+not admitted for this protocol.
 It must be reported as `RESEARCH_ONLY_SUPERVISED_EVOLUTION`,
 `TRAIN_ANSWER_SUPERVISION`, `FROZEN_UNSEEN_TEST_TRANSFER`, and
 `NOT_A_STANDARD_LEADERBOARD_SCORE`.
@@ -106,6 +107,34 @@ checkpoint. A missing, mismatched, or partially resolved target fails closed,
 and neither Probe nor Test can evolve any target. Formal Online Train therefore
 uses 900 reflector calls but 2,700 verified Core jobs, approved artifacts, and
 context resolutions.
+
+### Supervised three-target transfer v2
+
+`chembench_supervised_transfer_v2` is isolated from v1 and uses only one frozen
+Train split and one permanently frozen Test split. Each Train item has four new
+task sessions and three intervening evolution cycles. One structured reflector
+call per cycle supplies distinct `text_memory`, `skill_bundle`, and
+`agent_system` components; all three components then pass independent verified
+Core plan-bound jobs, typed artifact validation, promotion, and context
+resolution. Thus the paid plan is 1,800 Control task calls, 1,800 Online task
+calls, 1,350 reflector calls, and 900 final-Test task calls (5,850 total), while
+the three target lifecycles still produce 4,050 Core jobs and artifacts.
+
+Candidate sessions are submitted through the OpenEvo Rollout/Gateway
+`TaskRequest` path and the official `CodexHarness` in `managed_science` runtime.
+The resulting controller trajectory binds the SHA-256 identity of the verified
+OpenEvo Rollout JSONL transcript. The supervised packet projection remains a
+private benchmark transformation, but every Core event and artifact lineage
+binds that ordered source-execution provenance digest; transcript content is
+not copied into the lineage.
+
+The candidate boundary uses the Core subscription harness capability profile.
+Its zero-tool rule is enforced as a transcript-audit fail-closed condition: any
+observed tool event invalidates the task/run. It is not described as preventive
+removal of every Core harness capability. The reflector boundary is separately
+Bubblewrap-isolated and hard-disables tool, web-search, shell, approval, and MCP
+features. Both boundaries independently materialize and verify the same pinned
+Codex native executable digest and never fall back to the host `PATH`.
 
 An explicitly unpaired online-only Pilot500 entry point is also available for
 mechanism and descriptive analysis. It uses no control evidence, cannot issue

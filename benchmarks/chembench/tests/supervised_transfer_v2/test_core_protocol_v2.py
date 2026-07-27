@@ -168,13 +168,34 @@ def _attempt(
         attempt=RawAttempt(
             response=response,
             transcript_reference=TranscriptReference(
-                f"synthetic-transcript-{task_index}-{round_index}"
+                "openevo-rollout-jsonl:sha256:"
+                + _sha(f"synthetic-transcript-{task_index}-{round_index}")
             ),
         ),
         safe_feedback=safe_signal_from_private_evaluation(evaluation),
         dataset_sha256=task.dataset_sha256,
     )
     return trajectory, evaluation
+
+
+def test_trajectory_rejects_non_openevo_transcript_reference() -> None:
+    task = _task(0)
+    evaluation = ChemBench4KPrivateEvaluator().evaluate(task=task, raw_completion="A")
+    with pytest.raises(ValueError, match="not bound to an OpenEvo Rollout transcript"):
+        SupervisedTrajectoryV2.from_attempt(
+            task_uid=task.uid,
+            task_index=0,
+            category=task.category,
+            round_index=0,
+            session_id="supervised-v2-session-0-0",
+            prompt=_prompt(task),
+            attempt=RawAttempt(
+                response="A",
+                transcript_reference=TranscriptReference("synthetic-transcript"),
+            ),
+            safe_feedback=safe_signal_from_private_evaluation(evaluation),
+            dataset_sha256=task.dataset_sha256,
+        )
 
 
 def _memory(evidence_digest: str) -> str:
@@ -331,6 +352,16 @@ def test_three_cycles_create_nine_jobs_and_carry_all_targets(
         with bridge._store.connect() as connection:
             assert connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 12
             assert connection.execute("SELECT COUNT(*) FROM contexts").fetchone()[0] == 12
+            text_job_configs = [
+                json.loads(row["config_json"])
+                for row in connection.execute(
+                    "SELECT config_json FROM jobs "
+                    "WHERE method = 'text_memory_expel_reflector' ORDER BY rowid"
+                ).fetchall()
+            ]
+            event_rows = connection.execute(
+                "SELECT source, payload_path FROM events ORDER BY rowid"
+            ).fetchall()
             counts = dict(
                 connection.execute(
                     "SELECT type, COUNT(*) FROM artifacts "
@@ -338,6 +369,25 @@ def test_three_cycles_create_nine_jobs_and_carry_all_targets(
                     "GROUP BY type"
                 ).fetchall()
             )
+        event_provenance = set()
+        for row in event_rows:
+            assert row["source"] == "chembench.supervised_transfer.core.v2"
+            payload = json.loads(Path(row["payload_path"]).read_text(encoding="utf-8"))
+            trajectory_metadata = payload["payload"]["session_result"]["trajectory"][
+                "metadata"
+            ]
+            session_metadata = payload["payload"]["session_result"]["metadata"]
+            assert (
+                trajectory_metadata["source_execution_provenance_sha256"]
+                == session_metadata["source_execution_provenance_sha256"]
+            )
+            event_provenance.add(
+                trajectory_metadata["source_execution_provenance_sha256"]
+            )
+        assert event_provenance == {
+            config["lineage"]["source_execution_provenance_sha256"]
+            for config in text_job_configs
+        }
         assert counts == {"agent_system": 4, "skill_bundle": 4, "text_memory": 4}
     finally:
         bridge.close()
@@ -376,7 +426,9 @@ class _FakeExecutor:
         )
         return RawAttempt(
             response="A",
-            transcript_reference=TranscriptReference(f"synthetic:{request.session_id}"),
+            transcript_reference=TranscriptReference(
+                "openevo-rollout-jsonl:sha256:" + _sha(request.session_id)
+            ),
         )
 
     def consume_context_receipt(self, session_id):

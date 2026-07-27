@@ -22,6 +22,7 @@ from openevo_chembench.taskwise_feedback_v1 import (
 
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _SESSION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,255}\Z", re.ASCII)
+_OPENEVO_ROLLOUT_TRANSCRIPT_PREFIX = "openevo-rollout-jsonl:sha256:"
 _FORBIDDEN_KEYS = frozenset(
     {
         "answer_mapping",
@@ -63,6 +64,7 @@ class SupervisedTrajectoryV2:
     category: str
     round_index: Literal[0, 1, 2]
     session_id: str
+    source_transcript_sha256: str
     public_prompt_sha256: str
     public_prompt: str
     raw_completion: str
@@ -79,6 +81,7 @@ class SupervisedTrajectoryV2:
         for value, field_name in (
             (self.trajectory_id, "trajectory_id"),
             (self.task_uid, "task_uid"),
+            (self.source_transcript_sha256, "source_transcript_sha256"),
             (self.public_prompt_sha256, "public_prompt_sha256"),
             (self.dataset_sha256, "dataset_sha256"),
         ):
@@ -129,6 +132,7 @@ class SupervisedTrajectoryV2:
             raise TypeError("attempt must be exact RawAttempt")
         if prompt.uid != task_uid or prompt.category != category:
             raise ValueError("prompt identity does not match the trajectory task")
+        source_transcript_sha256 = _source_transcript_sha256(attempt)
         prompt_sha256 = _sha256(prompt.text.encode("utf-8"))
         identity = {
             "schema_version": "supervised_trajectory_identity_v2",
@@ -138,6 +142,7 @@ class SupervisedTrajectoryV2:
             "category": category,
             "round_index": round_index,
             "session_id": session_id,
+            "source_transcript_sha256": source_transcript_sha256,
             "public_prompt_sha256": prompt_sha256,
             "raw_completion_sha256": _sha256(attempt.response.encode("utf-8")),
             "safe_feedback_digest": safe_feedback.digest,
@@ -151,6 +156,7 @@ class SupervisedTrajectoryV2:
             category=category,
             round_index=round_index,
             session_id=session_id,
+            source_transcript_sha256=source_transcript_sha256,
             public_prompt_sha256=prompt_sha256,
             public_prompt=prompt.text,
             raw_completion=attempt.response,
@@ -168,6 +174,7 @@ class SupervisedTrajectoryV2:
             "category": self.category,
             "round_index": self.round_index,
             "session_id": self.session_id,
+            "source_transcript_sha256": self.source_transcript_sha256,
             "public_prompt_sha256": self.public_prompt_sha256,
             "raw_completion_sha256": _sha256(self.raw_completion.encode("utf-8")),
             "safe_feedback_digest": self.safe_feedback.digest,
@@ -190,6 +197,7 @@ class SupervisedTrajectoryV2:
             "category": self.category,
             "round_index": self.round_index,
             "session_id": self.session_id,
+            "source_transcript_sha256": self.source_transcript_sha256,
             "public_prompt_sha256": self.public_prompt_sha256,
             "public_prompt": self.public_prompt,
             "raw_completion": self.raw_completion,
@@ -255,6 +263,36 @@ def ordered_supervised_safe_feedback_digest_v2(
     )
 
 
+def ordered_source_execution_provenance_digest_v2(
+    trajectories: tuple[SupervisedTrajectoryV2, ...],
+) -> str:
+    """Bind each controller trajectory to its official Rollout transcript identity."""
+
+    ordered_supervised_trajectory_digest_v2(trajectories)
+    return _sha256(
+        _canonical_bytes(
+            [
+                {
+                    "trajectory_id": item.trajectory_id,
+                    "session_id": item.session_id,
+                    "source_transcript_sha256": item.source_transcript_sha256,
+                }
+                for item in trajectories
+            ]
+        )
+    )
+
+
+def _source_transcript_sha256(attempt: RawAttempt) -> str:
+    reference = attempt.transcript_reference.reference
+    if not reference.startswith(_OPENEVO_ROLLOUT_TRANSCRIPT_PREFIX):
+        raise ValueError("attempt is not bound to an OpenEvo Rollout transcript")
+    digest = reference.removeprefix(_OPENEVO_ROLLOUT_TRANSCRIPT_PREFIX)
+    if _SHA256.fullmatch(digest) is None:
+        raise ValueError("OpenEvo Rollout transcript reference digest is invalid")
+    return digest
+
+
 def _assert_no_private_keys(value: object) -> None:
     if isinstance(value, Mapping):
         for key, item in value.items():
@@ -270,6 +308,7 @@ def _assert_no_private_keys(value: object) -> None:
 
 __all__ = [
     "SupervisedTrajectoryV2",
+    "ordered_source_execution_provenance_digest_v2",
     "ordered_supervised_safe_feedback_digest_v2",
     "ordered_supervised_trajectory_digest_v2",
 ]

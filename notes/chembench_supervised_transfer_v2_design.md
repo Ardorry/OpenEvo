@@ -26,6 +26,15 @@ wheel environment. A private service receipt binds the source commit, topology,
 wheel, runtime Python, Rollout/Gateway process identities and health state; a
 formal executor refuses to submit without that live binding.
 
+The task result is accepted only from the official Rollout `TaskStatus`
+trajectory. The controller extracts and audits its transcript, stores only the
+transcript SHA-256 as an opaque reference, and makes that digest part of the
+supervised trajectory identity. Each Train packet projection into an OpenEvo
+dataset event and each resulting artifact lineage bind the ordered source
+execution provenance digest. This closes the adapter projection back to the
+official task sessions without copying transcript content into reflector-visible
+lineage.
+
 The managed subscription runtime needs provider transport, so the candidate
 container permits model network transport. Tool use remains fail closed: MCP is
 empty, approval is `never`, the instruction prohibits tools, and any Codex tool
@@ -34,8 +43,9 @@ inside the pinned Core managed-runtime image and is re-attested before a paid
 run.
 
 Reflector calls are initiated only while an OpenEvo plan-bound job is leased by
-the Core worker. The benchmark-local provider runs the same pinned Codex native
-binary in a separate Bubblewrap boundary. It stages an explicitly validated
+the Core worker. The benchmark-local provider runs a separate materialization
+of the same pinned Codex native digest in a separate Bubblewrap boundary. It
+stages an explicitly validated
 subscription-auth source into a private temporary home, exposes no repository,
 dataset or future task path, disables MCP and rejects every tool event. Raw
 reflector output cannot become runtime context: all three projections must pass

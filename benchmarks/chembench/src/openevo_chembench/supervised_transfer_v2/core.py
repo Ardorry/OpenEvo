@@ -98,6 +98,7 @@ from openevo_chembench.supervised_transfer_v2.reflector_boundary import (
 )
 from openevo_chembench.supervised_transfer_v2.trajectory import (
     SupervisedTrajectoryV2,
+    ordered_source_execution_provenance_digest_v2,
     ordered_supervised_safe_feedback_digest_v2,
     ordered_supervised_trajectory_digest_v2,
 )
@@ -739,6 +740,7 @@ class SupervisedArtifactLineageReceiptV1(_FrozenModel):
     predecessor_memory_sha256: str | None
     trajectory_ids: tuple[str, ...]
     trajectory_digest: str
+    source_execution_provenance_sha256: str
     safe_feedback_digest: str
     memory_limits_sha256: str
     memory_inspection_sha256: str
@@ -758,6 +760,7 @@ class SupervisedArtifactLineageReceiptV1(_FrozenModel):
         "reflector_prompt_sha256",
         "predecessor_memory_sha256",
         "trajectory_digest",
+        "source_execution_provenance_sha256",
         "safe_feedback_digest",
         "memory_limits_sha256",
         "memory_inspection_sha256",
@@ -863,6 +866,7 @@ class TaskwiseCoreUpdateResultV1(_FrozenModel):
     predecessor: TaskwiseCorePredecessorV1 | None
     trajectory_ids: tuple[str, ...]
     trajectory_digest: str
+    source_execution_provenance_sha256: str
     safe_feedback_digest: str
     validator_input_digest: str
     memory_limits_sha256: str
@@ -904,6 +908,7 @@ class TaskwiseCoreUpdateResultV1(_FrozenModel):
     @field_validator(
         "task_uid",
         "trajectory_digest",
+        "source_execution_provenance_sha256",
         "safe_feedback_digest",
         "validator_input_digest",
         "memory_limits_sha256",
@@ -1064,6 +1069,9 @@ class TaskwiseCoreUpdateResultV1(_FrozenModel):
                 ),
                 trajectory_ids=self.trajectory_ids,
                 trajectory_digest=self.trajectory_digest,
+                source_execution_provenance_sha256=(
+                    self.source_execution_provenance_sha256
+                ),
                 safe_feedback_digest=self.safe_feedback_digest,
                 memory_limits_sha256=self.memory_limits_sha256,
                 memory_inspection_sha256=self.memory_inspection.digest,
@@ -1539,6 +1547,9 @@ class TaskwiseCoreEvolutionBridgeV1:
         self._require_next_predecessor(request)
 
         trajectory_digest = ordered_supervised_trajectory_digest_v2(request.trajectories)
+        source_execution_provenance_sha256 = (
+            ordered_source_execution_provenance_digest_v2(request.trajectories)
+        )
         safe_feedback_digest = ordered_supervised_safe_feedback_digest_v2(request.trajectories)
         global_update_ordinal = 1 if self._head is None else self._head.global_update_ordinal + 1
         packet = request.supervised_packet
@@ -1561,6 +1572,10 @@ class TaskwiseCoreEvolutionBridgeV1:
                         packet=packet,
                         record=record,
                         policy_version=policy_version,
+                        source_trajectories=request.trajectories,
+                        source_execution_provenance_sha256=(
+                            source_execution_provenance_sha256
+                        ),
                     )
                 )
             expected_record_count = len(packet_records)
@@ -1616,6 +1631,7 @@ class TaskwiseCoreEvolutionBridgeV1:
             request=request,
             global_update_ordinal=global_update_ordinal,
             trajectory_digest=trajectory_digest,
+            source_execution_provenance_sha256=source_execution_provenance_sha256,
             safe_feedback_digest=safe_feedback_digest,
             validator_input_digest=validator_input_digest,
             dataset_artifact_id=dataset.artifact_id,
@@ -2433,17 +2449,24 @@ class TaskwiseCoreEvolutionBridgeV1:
         packet: SupervisedEvolutionPacketV2,
         record: dict[str, Any],
         policy_version: str,
+        source_trajectories: tuple[SupervisedTrajectoryV2, ...],
+        source_execution_provenance_sha256: str,
     ) -> EventIngestRequest:
         """Ingest one bounded packet part as a real private Core trajectory event."""
 
         if type(packet) is not SupervisedEvolutionPacketV2 or not isinstance(record, dict):
             raise TypeError("supervised Core event inputs are invalid")
+        expected_trajectory_ids = tuple(item.trajectory_id for item in source_trajectories)
         if (
             record.get("source_split") != SUPERVISED_TRAIN_SOURCE_SPLIT
             or record.get("packet_sha256") != packet.digest
             or type(record.get("uid")) is not str
             or type(record.get("content")) is not str
             or record.get("packet_part_count") != len(packet.reflector_records())
+            or expected_trajectory_ids
+            != tuple(item.trajectory_id for item in packet.round_evidence)
+            or source_execution_provenance_sha256
+            != ordered_source_execution_provenance_digest_v2(source_trajectories)
         ):
             raise TaskwiseCoreEvolutionError("TASKWISE_SUPERVISED_PACKET_BINDING_INVALID")
         reward = 1.0 if packet.prediction_correct else 0.0
@@ -2461,6 +2484,9 @@ class TaskwiseCoreEvolutionBridgeV1:
                 "packet_part_count": record["packet_part_count"],
                 "input_schema_sha256": PACKET_INPUT_SCHEMA_DIGEST,
                 "reflector_prompt_sha256": REFLECTOR_PROMPT_DIGEST,
+                "source_execution_provenance_sha256": (
+                    source_execution_provenance_sha256
+                ),
             },
             "traces": [
                 {
@@ -2481,12 +2507,15 @@ class TaskwiseCoreEvolutionBridgeV1:
                         "capture_mode": "supervised_train_answer_projection",
                         "token_level_metrics_available": False,
                         "packet_part": part,
+                        "source_execution_provenance_sha256": (
+                            source_execution_provenance_sha256
+                        ),
                     },
                 }
             ],
         }
         return EventIngestRequest(
-            source="chembench.supervised_transfer.core.v1",
+            source="chembench.supervised_transfer.core.v2",
             event_type=_EVENT_TYPE,
             source_event_id=f"{BRIDGE_ID}:{policy_version}:{record['uid']}",
             task_id=task_id,
@@ -2508,6 +2537,9 @@ class TaskwiseCoreEvolutionBridgeV1:
                         "bridge_id": BRIDGE_ID,
                         "packet_sha256": packet.digest,
                         "packet_part": part,
+                        "source_execution_provenance_sha256": (
+                            source_execution_provenance_sha256
+                        ),
                     },
                 }
             },
@@ -2519,6 +2551,7 @@ class TaskwiseCoreEvolutionBridgeV1:
         request: TaskwiseCoreUpdateRequestV1,
         global_update_ordinal: int,
         trajectory_digest: str,
+        source_execution_provenance_sha256: str,
         safe_feedback_digest: str,
         validator_input_digest: str,
         dataset_artifact_id: str,
@@ -2544,6 +2577,9 @@ class TaskwiseCoreEvolutionBridgeV1:
             "global_update_ordinal": global_update_ordinal,
             "trajectory_ids": [trajectory.trajectory_id for trajectory in request.trajectories],
             "trajectory_digest": trajectory_digest,
+            "source_execution_provenance_sha256": (
+                source_execution_provenance_sha256
+            ),
             "safe_feedback_digest": safe_feedback_digest,
             "validator_input_digest": validator_input_digest,
             "reflector_timeout_seconds": self._reflector_timeout_seconds,
@@ -2603,6 +2639,9 @@ class TaskwiseCoreEvolutionBridgeV1:
             "global_update_ordinal": result.global_update_ordinal,
             "trajectory_ids": list(result.trajectory_ids),
             "trajectory_digest": result.trajectory_digest,
+            "source_execution_provenance_sha256": (
+                result.source_execution_provenance_sha256
+            ),
             "safe_feedback_digest": result.safe_feedback_digest,
             "validator_input_digest": result.validator_input_digest,
             "reflector_timeout_seconds": result.reflector_timeout_seconds,
@@ -3067,6 +3106,9 @@ class TaskwiseCoreEvolutionBridgeV1:
                     trajectory.trajectory_id for trajectory in request.trajectories
                 ),
                 trajectory_digest=trajectory_digest,
+                source_execution_provenance_sha256=(
+                    ordered_source_execution_provenance_digest_v2(request.trajectories)
+                ),
                 safe_feedback_digest=safe_feedback_digest,
                 validator_input_digest=validator_input_digest,
                 memory_limits_sha256=self._memory_limits.digest,
