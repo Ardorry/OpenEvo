@@ -1,0 +1,15 @@
+{
+  "actual_exposed_uid_count": 508,
+  "manifest_sha256": "b69d64e7e8b98d53923c5e90124bd4b83864abefc96db4d2ac8c9bc669503bbe",
+  "old_blocked_receipt_sha256": "43e64dce6a4c357b5811042140b7a908820fa13e9fe0aefc0f9eab4da11ab18e",
+  "old_blocker_preserved": true,
+  "old_v1_manifest_sha256": "389c6ad25283b801f3bbe0061437a7891e2af80f17c01cd81aa901883eb4f660",
+  "scanned_file_count": 3370,
+  "scanned_inventory_sha256": "adbdfd28d44109d39ec2d74671ff01958b19820f8afc6a624d9618070fa82d0c",
+  "schema_version": "historical_exposure_receipt_v2",
+  "source_repository_commit": "d795ee3d6d654ab175ab8b3c9929c4db318180c5",
+  "status": "PASS",
+  "strict_never_executed_uid_count": 3501,
+  "summary_sha256": "073e797db7ac9573ff48f3eada24dcc6eab96e7afe370f4a28d28106acd2296a",
+  "taxonomy_contract_sha256": "192f6b924e2fb093c7802de30168ce4d04779c3834e03dad0eb2a3d080ee1d50"
+}

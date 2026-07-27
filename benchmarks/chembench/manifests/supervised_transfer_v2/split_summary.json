@@ -1,0 +1,80 @@
+{
+  "actual_exposure_counts": {
+    "reserve": 141,
+    "test": 0,
+    "train": 367
+  },
+  "counts": {
+    "reserve": 3109,
+    "test": 450,
+    "train": 450
+  },
+  "dataset_combined_sha256": "cb6c17c54d4c0cf103b38f12e9ce05663515b05bfdc342d83e3245d39f3a4b3a",
+  "dataset_repository": "AI4Chem/ChemBench4K",
+  "dataset_revision": "f8ad41a980170f4c5d0cc97e57722d06887c8f53",
+  "exposure_definition": {
+    "excluded_from_test": [
+      "HUMAN_ITEM_REVIEWED",
+      "PRIVATE_EVALUATED",
+      "REFLECTOR_SUPERVISED",
+      "TASK_MODEL_ATTEMPTED",
+      "TASK_MODEL_EXECUTED"
+    ],
+    "manifest_listed_only_excluded": false,
+    "reason": "manifest listing alone is not a model, evaluator, reflector, or item-review exposure"
+  },
+  "file_sha256": {
+    "reserve_public_manifest.jsonl": "10c21546817976fc492e2992888d4c9db585ab7a2d1020500819381fe2d97dcb",
+    "test_private_manifest.jsonl": "d6a338e7593fb25ea3166e8b7e634f147c10ebe5f931531576f2763924f1ac6b",
+    "test_public_manifest.jsonl": "3b5f34992fadea2e50a2b177f8a611b7475c2019f4bbd6e5bc43326e8d4a3065",
+    "train_private_manifest.jsonl": "c99c01da1546423d6dd5ccbd12e1116190dffed3ace95f04d1e22b826753ef4c",
+    "train_public_manifest.jsonl": "6b63a789d0d24562a74c586d53e68af4edb7935fe5690cdc68cb011080cfb4c3"
+  },
+  "historical_exposure_manifest_v2_sha256": "b69d64e7e8b98d53923c5e90124bd4b83864abefc96db4d2ac8c9bc669503bbe",
+  "ordered_uid_sha256": {
+    "reserve": "11a5b04deab2d47b74cef376e3851dbf09e55857880f904fc6d0da8f037efbb5",
+    "test": "4da80955442fd0875bd800c08a5167300750a94e18cf967086f304f5fc5450f3",
+    "train": "11f9570647de84e52983c051f1ce26430b078975e89a20d077948f35f57156f0"
+  },
+  "per_category_counts": {
+    "reserve": {
+      "Caption2mol": 700,
+      "Mol2caption": 199,
+      "Name_Conversion": 699,
+      "Product_Prediction": 200,
+      "Property_Prediction": 609,
+      "Retrosynthesis": 200,
+      "Solvent_Prediction": 200,
+      "Temperature_Prediction": 102,
+      "Yield_Prediction": 200
+    },
+    "test": {
+      "Caption2mol": 50,
+      "Mol2caption": 50,
+      "Name_Conversion": 50,
+      "Product_Prediction": 50,
+      "Property_Prediction": 50,
+      "Retrosynthesis": 50,
+      "Solvent_Prediction": 50,
+      "Temperature_Prediction": 50,
+      "Yield_Prediction": 50
+    },
+    "train": {
+      "Caption2mol": 50,
+      "Mol2caption": 50,
+      "Name_Conversion": 50,
+      "Product_Prediction": 50,
+      "Property_Prediction": 50,
+      "Retrosynthesis": 50,
+      "Solvent_Prediction": 50,
+      "Temperature_Prediction": 50,
+      "Yield_Prediction": 50
+    }
+  },
+  "protocol_id": "chembench_supervised_transfer_v2",
+  "schema_version": "ChemBenchSupervisedTransferSplitSummaryV2",
+  "seed": "openevo-chembench-supervised-transfer-v2-train-test",
+  "split_generation_code_sha256": "c95bf38375f21cc4fe74f61990e6e08aa2b2d62eff62492d4532458e93aa9576",
+  "train_supplemented_never_executed_count": 83,
+  "train_test_intersection_count": 0
+}

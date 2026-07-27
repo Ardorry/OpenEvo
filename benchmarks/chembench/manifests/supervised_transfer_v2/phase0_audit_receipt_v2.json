@@ -1,0 +1,22 @@
+{
+  "dataset_combined_sha256": "cb6c17c54d4c0cf103b38f12e9ce05663515b05bfdc342d83e3245d39f3a4b3a",
+  "dataset_revision": "f8ad41a980170f4c5d0cc97e57722d06887c8f53",
+  "historical_actual_exposed_count": 508,
+  "historical_exposure_manifest_sha256": "b69d64e7e8b98d53923c5e90124bd4b83864abefc96db4d2ac8c9bc669503bbe",
+  "historical_never_executed_count": 3501,
+  "model_calls_made": 0,
+  "old_source_commit": "d795ee3d6d654ab175ab8b3c9929c4db318180c5",
+  "protocol_id": "chembench_supervised_transfer_v2",
+  "reserve_count": 3109,
+  "schema_version": "SupervisedTransferPhase0AuditReceiptV2",
+  "source_commit": "ac0330174ccc4f221ebb1ed02f7ed022abd024bb",
+  "split_isolation_receipt_sha256": "450251433fd30fe8efda7ae214e7163ec67372ef982a85440ccdb82073dbe275",
+  "split_summary_sha256": "67d951ae7d62e864277e3bc0f17072d35d30365ddd034e151bb79a5ddd136196",
+  "src_openevo_pristine": true,
+  "status": "PASS",
+  "test_actual_exposure_count": 0,
+  "test_count": 450,
+  "train_count": 450,
+  "v1_mutated": false,
+  "v1_snapshot_sha256": "0f2308dd1139bae1d2da6f950598e17e993bded2a01c7aa236cd6684dab9d02c"
+}

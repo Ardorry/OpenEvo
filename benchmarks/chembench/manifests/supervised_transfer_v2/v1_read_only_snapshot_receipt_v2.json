@@ -1,0 +1,30 @@
+{
+  "protocol_id": "chembench_supervised_transfer_v2",
+  "root_summaries": [
+    {
+      "exists": true,
+      "file_count": 19,
+      "root": "benchmarks/chembench/manifests/supervised_transfer_v1",
+      "total_bytes": 10936587,
+      "tree_sha256": "8a7f753ae2cab45ae5dd7f4c2ecfed41a6312b75b360afcc8bba71b56f34a1d0"
+    },
+    {
+      "exists": true,
+      "file_count": 43,
+      "root": "results/chembench_supervised_transfer_v1",
+      "total_bytes": 3535323,
+      "tree_sha256": "a863ff6c183a94de83de7d6438f35036cafc727369459469785b84e1a05e7c70"
+    },
+    {
+      "exists": true,
+      "file_count": 28357,
+      "root": "state/chembench_supervised_transfer_v1",
+      "total_bytes": 973987487,
+      "tree_sha256": "0fef824fe97959ddd22dac646dc2d27e86e4ec07639a417c721cf15e19834ffd"
+    }
+  ],
+  "schema_version": "V1ReadOnlySnapshotReceiptV2",
+  "v1_file_count": 28419,
+  "v1_roots_sha256": "80c5aa0ce6ac11f51363b3f8a0ebc50ed2545d3b6857fbae3e9bcfae594247e3",
+  "v1_total_bytes": 988459397
+}

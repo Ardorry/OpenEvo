@@ -1,0 +1,17 @@
+{
+  "artifact_provenance_uid_allowlist_sha256": "712454b8a982df92c398f7fa349469cc333d4a3e9c13408c5bad09a1697d32a0",
+  "historical_exposure_manifest_v2_sha256": "b69d64e7e8b98d53923c5e90124bd4b83864abefc96db4d2ac8c9bc669503bbe",
+  "manifest_regeneration_policy": "byte-for-byte",
+  "protocol_id": "chembench_supervised_transfer_v2",
+  "reflector_uid_allowlist_partition": "train",
+  "reflector_uid_allowlist_sha256": "712454b8a982df92c398f7fa349469cc333d4a3e9c13408c5bad09a1697d32a0",
+  "schema_version": "SplitIsolationReceiptV2",
+  "split_summary_sha256": "67d951ae7d62e864277e3bc0f17072d35d30365ddd034e151bb79a5ddd136196",
+  "status": "PASS",
+  "test_actual_exposure_count": 0,
+  "test_artifact_set_policy": "frozen_before_first_test_call",
+  "test_consumption_policy": "one-valid-completion-per-uid-per-arm",
+  "test_evolution_jobs_allowed": false,
+  "test_ordered_uid_sha256": "4da80955442fd0875bd800c08a5167300750a94e18cf967086f304f5fc5450f3",
+  "train_test_uid_disjoint": true
+}
