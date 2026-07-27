@@ -29,8 +29,8 @@
     },
     {
       "destination_file": "benchmarks/chembench/src/openevo_chembench/local_codex_executor.py",
-      "destination_sha256": "bed80ffd0d92086b131ddb2c42043f1b7fcc135d5049c6e8b3483fbd6c14c2de",
-      "modification_summary": "unchanged reuse of the isolated Codex task executor",
+      "destination_sha256": "83031a2ae91a23dbc1ee4c6c46639119982170b069344070e28c432b65ad875c",
+      "modification_summary": "extended with exact three-target supervised context injection and binding",
       "source_commit": "d795ee3d6d654ab175ab8b3c9929c4db318180c5",
       "source_file": "benchmarks/chembench/src/openevo_chembench/local_codex_executor.py",
       "source_repository": "/home/lhy-h/work/openevo_chembench/OpenEvo",
@@ -38,8 +38,8 @@
     },
     {
       "destination_file": "benchmarks/chembench/src/openevo_chembench/reflector_execution_boundary_v2.py",
-      "destination_sha256": "d002c8a132e8fed586131e144b5c0a958483d8f00180256979ceb04830386bae",
-      "modification_summary": "extended for bounded Train-only supervised packets and current Codex policy",
+      "destination_sha256": "c27036bde12f598d0b26e47e2a1c6fc9fd18e08620112894f6b9e47fbd3129e4",
+      "modification_summary": "extended for bounded Train-only supervised memory, skill, and agent-system output",
       "source_commit": "d795ee3d6d654ab175ab8b3c9929c4db318180c5",
       "source_file": "benchmarks/chembench/src/openevo_chembench/reflector_execution_boundary_v2.py",
       "source_repository": "/home/lhy-h/work/openevo_chembench/OpenEvo",
@@ -47,8 +47,8 @@
     },
     {
       "destination_file": "benchmarks/chembench/src/openevo_chembench/taskwise_core_evolution_v1.py",
-      "destination_sha256": "e40c021c4fae6ac17d1647f6070b22c730caf9c8f4e6b0244713ce08c59dff7f",
-      "modification_summary": "extended with a typed supervised packet through the verified Core lifecycle",
+      "destination_sha256": "6a87d558cf9ad67cf286258875bd6b94ffc1c8b15264e47aa125fbaa0541f91c",
+      "modification_summary": "extended with one supervised reflector and three verified Core target lifecycles",
       "source_commit": "d795ee3d6d654ab175ab8b3c9929c4db318180c5",
       "source_file": "benchmarks/chembench/src/openevo_chembench/taskwise_core_evolution_v1.py",
       "source_repository": "/home/lhy-h/work/openevo_chembench/OpenEvo",

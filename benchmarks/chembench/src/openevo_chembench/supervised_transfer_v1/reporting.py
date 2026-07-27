@@ -47,6 +47,7 @@ def build_all_reports_v1(
     probe_rows = _probe_rows(private_rows, checkpoint_zero_rows=checkpoint_zero)
     test_rows, test_summary, per_category = _test_rows(private_rows)
     memory_rows, rule_rows, evidence_rows = _memory_rows(public_rows, run_state_root)
+    auxiliary_rows = _auxiliary_growth_rows(public_rows)
     transition_rows = _transition_rows(probe_rows, test_rows)
 
     outputs = {
@@ -55,6 +56,7 @@ def build_all_reports_v1(
         "test_paired_results.csv": _csv_bytes(test_rows),
         "per_category_results.csv": _csv_bytes(per_category),
         "memory_growth.csv": _csv_bytes(memory_rows),
+        "auxiliary_context_growth.csv": _csv_bytes(auxiliary_rows),
         "rule_status_counts.csv": _csv_bytes(rule_rows),
         "correctness_transitions.csv": _csv_bytes(transition_rows),
         "memory_evidence_count_distribution.csv": _csv_bytes(evidence_rows),
@@ -68,6 +70,7 @@ def build_all_reports_v1(
         test_summary,
         per_category,
         memory_rows,
+        auxiliary_rows,
         rule_rows,
         transition_rows,
         evidence_rows,
@@ -378,6 +381,37 @@ def _memory_rows(
     return memory_rows, rule_rows, evidence_rows
 
 
+def _auxiliary_growth_rows(
+    public_rows: list[dict[str, Any]],
+) -> list[dict[str, object]]:
+    result: list[dict[str, object]] = []
+    for row in public_rows:
+        if (
+            row.get("kind") != "REFLECTOR_SUPERVISED"
+            or row.get("stage") != "ONLINE_TRAIN"
+            or row.get("update_index") != 2
+        ):
+            continue
+        auxiliary = row.get("auxiliary_targets")
+        if not isinstance(auxiliary, list) or len(auxiliary) != 2:
+            raise RuntimeError("formal auxiliary target evidence is incomplete")
+        for item in auxiliary:
+            if not isinstance(item, dict) or not isinstance(item.get("inspection"), dict):
+                raise TypeError("formal auxiliary inspection is invalid")
+            inspection = item["inspection"]
+            result.append(
+                {
+                    "category": row["category"],
+                    "training_items": int(row["task_index"]) + 1,
+                    "target_id": item["target_id"],
+                    "utf8_bytes": inspection["utf8_byte_count"],
+                    "estimated_tokens": inspection["estimated_token_count"],
+                    "source_evidence_count": inspection["source_evidence_count"],
+                }
+            )
+    return result
+
+
 def _transition_rows(
     probe_rows: list[dict[str, object]],
     test_rows: list[dict[str, object]],
@@ -412,6 +446,7 @@ def _write_charts(
     test_summary: dict[str, object],
     categories: list[dict[str, object]],
     memory: list[dict[str, object]],
+    auxiliary: list[dict[str, object]],
     rules: list[dict[str, object]],
     transitions: list[dict[str, object]],
     evidence: list[dict[str, object]],
@@ -472,6 +507,24 @@ def _write_charts(
     plt.xlabel("Training items")
     plt.ylabel("Memory UTF-8 bytes")
     save("memory_size.png")
+
+    for target in ("skill_bundle", "agent_system"):
+        by_checkpoint: dict[int, list[int]] = defaultdict(list)
+        for row in auxiliary:
+            if row["target_id"] == target:
+                by_checkpoint[int(row["training_items"])].append(
+                    int(row["utf8_bytes"])
+                )
+        checkpoints = sorted(by_checkpoint)
+        plt.plot(
+            checkpoints,
+            [sum(by_checkpoint[key]) / len(by_checkpoint[key]) for key in checkpoints],
+            label=target,
+        )
+    plt.xlabel("Training items per category")
+    plt.ylabel("Mean auxiliary UTF-8 bytes")
+    plt.legend()
+    save("auxiliary_context_size.png")
 
     totals = defaultdict(lambda: [0, 0])
     for row in rules:
@@ -565,12 +618,16 @@ def _render_final_markdown(
             "- Probe and Test created zero evolution jobs.",
             f"- Final Test used the preregistered `{test_manifest}` manifest once.",
             "- Reflector packets were Train-only and answer-supervised.",
-            "- The frozen category artifact set was fixed before Test.",
+            (
+                "- Each frozen category context contained exactly one text-memory, "
+                "skill-bundle, and agent-system artifact fixed before Test."
+            ),
             f"- Infrastructure failures recorded: {infrastructure_failures}.",
             "",
             (
                 f"Training rows: {len(train_rows)}; Probe curve rows: {len(probe_rows)}; "
-                f"memory measurements: {len(memory_rows)}."
+                f"memory measurements: {len(memory_rows)}; auxiliary context "
+                "growth is reported separately."
             ),
             "",
         ]

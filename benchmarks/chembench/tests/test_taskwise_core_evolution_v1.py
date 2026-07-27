@@ -223,14 +223,18 @@ def _memory_with_do_items(items: tuple[str, ...]) -> str:
 """
 
 
-def _supervised_memory() -> str:
-    return """# Category Memory: Name_Conversion
+def _supervised_memory(*, evidence_digest: str) -> str:
+    return f"""# Category Memory: Name_Conversion
 
 ## Confirmed Principles
 - None.
 
 ## Provisional Principles
-- Rule ID=NC-P-001; Status=provisional; Category=Name_Conversion; Trigger=an unambiguous molecular formula; Principle=apply deterministic nomenclature constraints; Action=enumerate compatible functional groups before naming; Validation=round-trip the proposed name to the formula; Evidence Count=1; Evidence=1f43d5d7d7e56e5d.
+{("- Rule ID=NC-P-001; Status=provisional; Category=Name_Conversion; "
+  "Trigger=an unambiguous molecular formula; Principle=apply deterministic "
+  "nomenclature constraints; Action=enumerate compatible functional groups "
+  "before naming; Validation=round-trip the proposed name to the formula; "
+  f"Evidence Count=1; Evidence Digests={evidence_digest}")}
 
 ## Common Failure Modes
 - Treating a plausible synonym as unique without a formula round-trip check.
@@ -403,8 +407,9 @@ def test_supervised_packet_runs_real_core_dataset_job_artifact_context_lifecycle
         session_id=trajectory.session_id,
     )
     inspection = inspect_supervised_category_memory_v1(
-        _supervised_memory().encode(),
+        _supervised_memory(evidence_digest=packet.digest).encode(),
         category=task.category,
+        allowed_evidence_digests=frozenset({packet.digest}),
     )
     assert inspection.passed
     assert len(packet.reflector_records()) > 2
@@ -412,7 +417,7 @@ def test_supervised_packet_runs_real_core_dataset_job_artifact_context_lifecycle
     monkeypatch.setattr(
         core_methods,
         "_generate_reflector_markdown",
-        lambda *_args, **_kwargs: _supervised_memory(),
+        lambda *_args, **_kwargs: _supervised_memory(evidence_digest=packet.digest),
     )
     bridge = TaskwiseCoreEvolutionBridgeV1(
         db_path=tmp_path / "supervised" / "evolution.sqlite3",
@@ -438,6 +443,28 @@ def test_supervised_packet_runs_real_core_dataset_job_artifact_context_lifecycle
         )
         assert result.supervised_packet_sha256 == packet.digest
         assert result.supervised_category == task.category
+        assert [
+            artifact.target_id for artifact in result.supervised_auxiliary_artifacts
+        ] == ["skill_bundle", "agent_system"]
+        runtime_context = bridge.issue_runtime_context(result)
+        assert runtime_context.memory.core_artifact_id == result.core_artifact_id
+        assert runtime_context.skill.core_artifact_id == (
+            result.supervised_auxiliary_artifacts[0].core_artifact_id
+        )
+        assert runtime_context.agent_system.core_artifact_id == (
+            result.supervised_auxiliary_artifacts[1].core_artifact_id
+        )
+        with bridge._store.connect() as connection:
+            assert connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 3
+            artifact_types = {
+                row[0]: row[1]
+                for row in connection.execute(
+                    "SELECT type, COUNT(*) FROM artifacts GROUP BY type"
+                ).fetchall()
+            }
+        assert artifact_types["text_memory"] == 1
+        assert artifact_types["skill_bundle"] == 1
+        assert artifact_types["agent_system"] == 1
         assert result.records_visible_to_reflector == len(packet.reflector_records())
         assert result.memory_inspection == inspection
         assert result.validation_receipt.passed
@@ -453,6 +480,137 @@ def test_supervised_packet_runs_real_core_dataset_job_artifact_context_lifecycle
             len(packet.reflector_records()),
         )
         assert tuple(job) == ("succeeded", METHOD_ID)
+    finally:
+        bridge.close()
+
+
+def test_supervised_second_update_binds_all_three_predecessor_targets(
+    tmp_path: Path,
+    executable_registry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_trajectory = _trajectory(
+        task_index=0,
+        round_index=0,
+        correct=False,
+        response="B",
+    )
+    task = PrivateChemBench4KTask(
+        uid=first_trajectory.task_uid,
+        category=first_trajectory.category,
+        source_split="test",
+        source_index=0,
+        question="private-public-question-0",
+        A="private-option-alpha",
+        B="private-option-beta",
+        C="private-option-gamma",
+        D="private-option-delta",
+        target="A",
+        dataset_revision=CHEMBENCH4K_REVISION,
+        dataset_sha256=first_trajectory.dataset_sha256,
+    )
+    evaluator = ChemBench4KPrivateEvaluator()
+    first_packet = SupervisedEvolutionPacketV1.from_evaluation(
+        task=task,
+        training_task_ordinal=1,
+        round_index=0,
+        evaluation=evaluator.evaluate(task=task, raw_completion="B"),
+        predecessor_memory=None,
+        predecessor_artifact_id=None,
+        session_id=first_trajectory.session_id,
+    )
+    active_digest = [first_packet.digest]
+    monkeypatch.setattr(
+        core_methods,
+        "_generate_reflector_markdown",
+        lambda *_args, **_kwargs: _supervised_memory(
+            evidence_digest=active_digest[-1]
+        ),
+    )
+    bridge = TaskwiseCoreEvolutionBridgeV1(
+        db_path=tmp_path / "supervised-chain" / "evolution.sqlite3",
+        artifact_root=tmp_path / "supervised-chain" / "artifacts",
+        executable_registry=executable_registry,
+        memory_limits=SUPERVISED_MEMORY_LIMITS_V1,
+    )
+    try:
+        first = bridge.apply_update(
+            TaskwiseCoreUpdateRequestV1(
+                task_uid=task.uid,
+                task_index=0,
+                round_index=0,
+                update_index=1,
+                trajectories=(first_trajectory,),
+                predecessor=None,
+                validator_forbidden_literals=(
+                    taskwise_core._trajectory_forbidden_literals(first_trajectory)
+                ),
+                supervised_packet=first_packet,
+            ),
+            test_only_allow_synthetic_reflector=True,
+        )
+        predecessor_context = bridge.issue_runtime_context(first)
+        second_trajectory = _trajectory(
+            task_index=0,
+            round_index=1,
+            correct=True,
+            response="A",
+        )
+        second_packet = SupervisedEvolutionPacketV1.from_evaluation(
+            task=task,
+            training_task_ordinal=1,
+            round_index=1,
+            evaluation=evaluator.evaluate(task=task, raw_completion="A"),
+            predecessor_memory=predecessor_context.memory.markdown,
+            predecessor_artifact_id=predecessor_context.memory.core_artifact_id,
+            predecessor_skill=predecessor_context.skill.markdown,
+            predecessor_skill_artifact_id=(
+                predecessor_context.skill.core_artifact_id
+            ),
+            predecessor_agent_system=predecessor_context.agent_system.markdown,
+            predecessor_agent_system_artifact_id=(
+                predecessor_context.agent_system.core_artifact_id
+            ),
+            session_id=second_trajectory.session_id,
+        )
+        active_digest.append(second_packet.digest)
+        second = bridge.apply_update(
+            TaskwiseCoreUpdateRequestV1(
+                task_uid=task.uid,
+                task_index=0,
+                round_index=1,
+                update_index=2,
+                trajectories=(first_trajectory, second_trajectory),
+                predecessor=first.predecessor_identity(),
+                validator_forbidden_literals=(
+                    *taskwise_core._trajectory_forbidden_literals(first_trajectory),
+                    *taskwise_core._trajectory_forbidden_literals(second_trajectory),
+                ),
+                supervised_packet=second_packet,
+            ),
+            test_only_allow_synthetic_reflector=True,
+        )
+        bridge.issue_runtime_context(second)
+        first_auxiliary = {
+            item.target_id: item for item in first.supervised_auxiliary_artifacts
+        }
+        with bridge._store.connect() as connection:
+            rows = connection.execute(
+                "SELECT method, config_json FROM jobs "
+                "WHERE method IN ('skill_bundle', 'agent_system') ORDER BY rowid"
+            ).fetchall()
+            assert connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 6
+            assert connection.execute("SELECT COUNT(*) FROM contexts").fetchone()[0] == 6
+        assert len(rows) == 4
+        for row in rows[-2:]:
+            config = json.loads(row["config_json"])
+            target = str(row["method"])
+            assert config["lineage"]["predecessor_artifact_id"] == (
+                first_auxiliary[target].core_artifact_id
+            )
+            assert config["lineage"]["predecessor_payload_sha256"] == (
+                first_auxiliary[target].artifact_payload_sha256
+            )
     finally:
         bridge.close()
 

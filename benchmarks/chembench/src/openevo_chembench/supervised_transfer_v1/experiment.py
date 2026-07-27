@@ -27,12 +27,14 @@ from openevo_chembench.chembench4k_models import (
     RenderedChemBench4KPrompt,
 )
 from openevo_chembench.chembench4k_prompt import render_official_five_shot_prompt
-from openevo_chembench.frozen_runtime_v2 import CoreResolvedTextMemoryV2
 from openevo_chembench.local_codex_executor import (
     LocalCodexCLIExecutor,
     LocalCodexExecutionError,
 )
 from openevo_chembench.models import RawAttempt
+from openevo_chembench.supervised_transfer_v1.artifacts import (
+    CoreResolvedSupervisedContextV1,
+)
 from openevo_chembench.supervised_transfer_v1.common import (
     canonical_json_bytes,
     canonical_pretty_json_bytes,
@@ -41,11 +43,18 @@ from openevo_chembench.supervised_transfer_v1.common import (
     write_public_file,
 )
 from openevo_chembench.supervised_transfer_v1.config import (
+    FORMAL_CORE_ARTIFACTS,
+    FORMAL_CORE_JOBS,
+    PREFLIGHT_CORE_ARTIFACTS,
+    PREFLIGHT_CORE_JOBS,
     PROTOCOL_ID,
     ROUNDS_PER_TRAIN_TASK,
     TOTAL_MODEL_CALLS,
     TRAIN_CHECKPOINTS,
     SupervisedTransferConfigV1,
+)
+from openevo_chembench.supervised_transfer_v1.context_binding import (
+    SupervisedAgentRequestV1,
 )
 from openevo_chembench.supervised_transfer_v1.packet import (
     SupervisedEvolutionPacketV1,
@@ -71,12 +80,11 @@ from openevo_chembench.taskwise_core_evolution_v1 import (
     build_supervised_core_bridge_at_roots_v1,
 )
 from openevo_chembench.taskwise_feedback_v1 import safe_signal_from_private_evaluation
-from openevo_chembench.taskwise_online_runner_v1 import TaskwiseAgentRequestV1
 from openevo_chembench.taskwise_trajectory_v1 import TaskwiseTrajectoryV1
 
 DRY_RUN_SCHEMA = "chembench_supervised_transfer_dry_run_v1"
 RUN_STATE_SCHEMA = "chembench_supervised_transfer_run_state_v1"
-FROZEN_RECEIPT_SCHEMA = "FrozenTransferReceiptV1"
+FROZEN_RECEIPT_SCHEMA = "FrozenTransferReceiptV2"
 TEST_USE_RECEIPT_SCHEMA = "FrozenTestManifestUseReceiptV1"
 SPLIT_ISOLATION_RECEIPT = "split_isolation_receipt_v2.json"
 FORMAL_TASK_CALLS = TOTAL_MODEL_CALLS - 900 - (90 * 2)
@@ -109,8 +117,8 @@ _STAGE_TRANSITIONS: dict[str, frozenset[str]] = {
     "PROBE_CHECKPOINT_20": frozenset({"ONLINE_TRAIN"}),
     "PROBE_CHECKPOINT_30": frozenset({"ONLINE_TRAIN"}),
     "PROBE_CHECKPOINT_40": frozenset({"ONLINE_TRAIN"}),
-    "PROBE_CHECKPOINT_50": frozenset({"FREEZE_FINAL_MEMORY"}),
-    "FREEZE_FINAL_MEMORY": frozenset({"FINAL_TEST"}),
+    "PROBE_CHECKPOINT_50": frozenset({"FREEZE_FINAL_CONTEXT"}),
+    "FREEZE_FINAL_CONTEXT": frozenset({"FINAL_TEST"}),
     "FINAL_TEST": frozenset({"REPORTING"}),
     "REPORTING": frozenset({"COMPLETED"}),
 }
@@ -150,12 +158,12 @@ class SessionOutcomeV1:
 
 
 @dataclass(frozen=True, slots=True)
-class FrozenMemorySetV1:
+class FrozenContextSetV1:
     checkpoint: int
-    memories: dict[str, CoreResolvedTextMemoryV2 | None]
-    artifact_ids: dict[str, str | None]
-    payload_sha256: dict[str, str | None]
-    context_sha256: dict[str, str | None]
+    contexts: dict[str, CoreResolvedSupervisedContextV1 | None]
+    artifact_ids: dict[str, dict[str, str | None]]
+    payload_sha256: dict[str, dict[str, str | None]]
+    context_sha256: dict[str, dict[str, str | None]]
 
 
 def utc_now() -> str:
@@ -254,12 +262,19 @@ def build_complete_dry_run_v1(inputs: ExperimentInputsV1) -> dict[str, object]:
         "planned_model_calls": TOTAL_MODEL_CALLS,
         "planned_task_calls": FORMAL_TASK_CALLS,
         "planned_reflector_calls": FORMAL_REFLECTOR_CALLS,
+        "planned_core_jobs": FORMAL_CORE_JOBS,
+        "planned_core_artifacts": FORMAL_CORE_ARTIFACTS,
         "smoke_canary_task_calls": SMOKE_CANARY_TASK_CALLS,
         "smoke_canary_reflector_calls": SMOKE_CANARY_REFLECTOR_CALLS,
         "preflight_task_calls": 253,
         "preflight_reflector_calls": 19,
+        "preflight_core_jobs": PREFLIGHT_CORE_JOBS,
+        "preflight_core_artifacts": PREFLIGHT_CORE_ARTIFACTS,
         "formal_task_calls": FORMAL_TASK_CALLS,
         "formal_reflector_calls": FORMAL_REFLECTOR_CALLS,
+        "formal_core_jobs": FORMAL_CORE_JOBS,
+        "formal_core_artifacts": FORMAL_CORE_ARTIFACTS,
+        "evolution_targets": ["text_memory", "skill_bundle", "agent_system"],
         "preflight_stage_order": [
             "SUPERVISED_UPDATE_SMOKE",
             "ONLINE_CANARY",
@@ -273,7 +288,7 @@ def build_complete_dry_run_v1(inputs: ExperimentInputsV1) -> dict[str, object]:
             "ONLINE_CORE_INITIALIZATION",
             "ONLINE_TRAIN",
             "PROBE_CHECKPOINT_10_20_30_40_50",
-            "FREEZE_FINAL_MEMORY",
+            "FREEZE_FINAL_CONTEXT",
             "FINAL_TEST",
             "REPORTING",
             "COMPLETED",
@@ -378,7 +393,7 @@ class SupervisedTransferExperimentV1:
         self._heads: dict[str, TaskwiseCoreUpdateResultV1 | None] = {
             category: None for category in CHEMBENCH4K_CATEGORIES
         }
-        self._frozen_checkpoints: dict[int, FrozenMemorySetV1] = {}
+        self._frozen_checkpoints: dict[int, FrozenContextSetV1] = {}
 
     def run_preflight(self) -> dict[str, object]:
         if self.run_mode != "preflight":
@@ -433,7 +448,7 @@ class SupervisedTransferExperimentV1:
                 self._open_formal_bridges(stack)
                 self._freeze_checkpoint(0)
                 self._run_online_train_with_probes(control, online)
-                frozen = self._freeze_final_memory()
+                frozen = self._freeze_final_context()
                 self._run_final_test(frozen, control, online)
             self._set_stage("REPORTING")
             from openevo_chembench.supervised_transfer_v1.reporting import (
@@ -509,7 +524,7 @@ class SupervisedTransferExperimentV1:
             outcome = self._execute_session(
                 executor,
                 task=task,
-                memory=None,
+                context=None,
                 logical_arm="online_smoke",
                 executor_arm="online",
                 task_ordinal=0,
@@ -530,7 +545,7 @@ class SupervisedTransferExperimentV1:
                     supervised_packet=packet,
                 )
             )
-            bridge.issue_runtime_memory(result)
+            bridge.issue_runtime_context(result)
             self._record_core_result("SUPERVISED_UPDATE_SMOKE", task.category, result)
 
     def _run_online_canary(self, executor: LocalCodexCLIExecutor) -> None:
@@ -556,7 +571,7 @@ class SupervisedTransferExperimentV1:
                 self._execute_session(
                     executor,
                     task=task,
-                    memory=None,
+                    context=None,
                     logical_arm="control_canary",
                     executor_arm="control",
                     task_ordinal=ordinal,
@@ -577,7 +592,7 @@ class SupervisedTransferExperimentV1:
                 self._execute_session(
                     control,
                     task=task,
-                    memory=None,
+                    context=None,
                     logical_arm=logical_arm,
                     executor_arm="control",
                     task_ordinal=ordinal,
@@ -592,7 +607,7 @@ class SupervisedTransferExperimentV1:
                 self._execute_session(
                     executor,
                     task=task,
-                    memory=None,
+                    context=None,
                     logical_arm="control_train",
                     executor_arm="control",
                     task_ordinal=ordinal,
@@ -635,13 +650,13 @@ class SupervisedTransferExperimentV1:
         bridge: TaskwiseCoreEvolutionBridgeV1,
         stage: str,
         persist_formal_head: bool,
-    ) -> CoreResolvedTextMemoryV2:
+    ) -> CoreResolvedSupervisedContextV1:
         head = bridge.current_head()
-        memory0 = None if head is None else bridge.issue_runtime_memory(head)
+        context0 = None if head is None else bridge.issue_runtime_context(head)
         round0 = self._execute_session(
             executor,
             task=task,
-            memory=memory0,
+            context=context0,
             logical_arm="online_train" if persist_formal_head else "online_canary",
             executor_arm="online",
             task_ordinal=category_ordinal,
@@ -649,7 +664,7 @@ class SupervisedTransferExperimentV1:
             stage=stage,
         )
         trajectory0 = self._trajectory(task, category_ordinal, 0, round0)
-        packet0 = self._packet(task, category_ordinal, 0, round0, memory0)
+        packet0 = self._packet(task, category_ordinal, 0, round0, context0)
         update1 = bridge.apply_update(
             TaskwiseCoreUpdateRequestV1(
                 task_uid=task.uid,
@@ -662,13 +677,13 @@ class SupervisedTransferExperimentV1:
                 supervised_packet=packet0,
             )
         )
-        memory1 = bridge.issue_runtime_memory(update1)
+        context1 = bridge.issue_runtime_context(update1)
         self._record_core_result(stage, task.category, update1)
 
         round1 = self._execute_session(
             executor,
             task=task,
-            memory=memory1,
+            context=context1,
             logical_arm="online_train" if persist_formal_head else "online_canary",
             executor_arm="online",
             task_ordinal=category_ordinal,
@@ -676,7 +691,7 @@ class SupervisedTransferExperimentV1:
             stage=stage,
         )
         trajectory1 = self._trajectory(task, category_ordinal, 1, round1)
-        packet1 = self._packet(task, category_ordinal, 1, round1, memory1)
+        packet1 = self._packet(task, category_ordinal, 1, round1, context1)
         update2 = bridge.apply_update(
             TaskwiseCoreUpdateRequestV1(
                 task_uid=task.uid,
@@ -692,12 +707,12 @@ class SupervisedTransferExperimentV1:
                 supervised_packet=packet1,
             )
         )
-        memory2 = bridge.issue_runtime_memory(update2)
+        context2 = bridge.issue_runtime_context(update2)
         self._record_core_result(stage, task.category, update2)
         self._execute_session(
             executor,
             task=task,
-            memory=memory2,
+            context=context2,
             logical_arm="online_train" if persist_formal_head else "online_canary",
             executor_arm="online",
             task_ordinal=category_ordinal,
@@ -706,12 +721,12 @@ class SupervisedTransferExperimentV1:
         )
         if persist_formal_head:
             self._heads[task.category] = update2
-        return memory2
+        return context2
 
     def _run_probe_checkpoint(
         self,
         checkpoint: int,
-        frozen: FrozenMemorySetV1,
+        frozen: FrozenContextSetV1,
         control: LocalCodexCLIExecutor,
         online: LocalCodexCLIExecutor,
     ) -> None:
@@ -721,7 +736,7 @@ class SupervisedTransferExperimentV1:
             self._execute_session(
                 control,
                 task=task,
-                memory=None,
+                context=None,
                 logical_arm="control_probe",
                 executor_arm="control",
                 task_ordinal=ordinal,
@@ -729,15 +744,15 @@ class SupervisedTransferExperimentV1:
                 stage=f"PROBE_CHECKPOINT_{checkpoint:02d}",
                 checkpoint=checkpoint,
             )
-            memory = frozen.memories[task.category]
-            executor = control if memory is None else online
+            context = frozen.contexts[task.category]
+            executor = control if context is None else online
             self._execute_session(
                 executor,
                 task=task,
-                memory=memory,
+                context=context,
                 logical_arm="online_probe",
-                executor_arm="control" if memory is None else "online",
-                task_ordinal=ordinal + 1 if memory is not None else ordinal,
+                executor_arm="control" if context is None else "online",
+                task_ordinal=ordinal,
                 round_index=0,
                 stage=f"PROBE_CHECKPOINT_{checkpoint:02d}",
                 checkpoint=checkpoint,
@@ -745,43 +760,74 @@ class SupervisedTransferExperimentV1:
         if self._formal_core_job_count() != jobs_before:
             raise SupervisedExperimentError("PROBE_CREATED_EVOLUTION_JOB")
 
-    def _freeze_checkpoint(self, checkpoint: int) -> FrozenMemorySetV1:
+    def _freeze_checkpoint(self, checkpoint: int) -> FrozenContextSetV1:
         existing = self._frozen_checkpoints.get(checkpoint)
         if existing is not None:
             return existing
-        memories: dict[str, CoreResolvedTextMemoryV2 | None] = {}
-        artifacts: dict[str, str | None] = {}
-        payloads: dict[str, str | None] = {}
-        contexts: dict[str, str | None] = {}
+        runtime_contexts: dict[str, CoreResolvedSupervisedContextV1 | None] = {}
+        artifacts: dict[str, dict[str, str | None]] = {}
+        payloads: dict[str, dict[str, str | None]] = {}
+        context_digests: dict[str, dict[str, str | None]] = {}
         for category in CHEMBENCH4K_CATEGORIES:
             head = self._heads[category]
-            memory = None if head is None else self._bridges[category].issue_runtime_memory(head)
-            memories[category] = memory
-            artifacts[category] = None if memory is None else memory.core_artifact_id
-            payloads[category] = None if memory is None else memory.artifact_payload_sha256
-            contexts[category] = None if memory is None else memory.context_resolution_digest
-            checkpoint_path = (
-                self.state_root
-                / "private/checkpoint_memory"
-                / category
-                / f"checkpoint_{checkpoint:02d}.md"
+            context = (
+                None
+                if head is None
+                else self._bridges[category].issue_runtime_context(head)
             )
-            write_private_file(
-                checkpoint_path,
-                (
-                    b"# Empty generation-zero category memory\n"
-                    if memory is None
-                    else memory.markdown.encode("utf-8")
-                ),
-                replace=False,
-            )
+            runtime_contexts[category] = context
+            target_values = {
+                "text_memory": None if context is None else context.memory,
+                "skill_bundle": None if context is None else context.skill,
+                "agent_system": None if context is None else context.agent_system,
+            }
+            artifacts[category] = {
+                target: None if value is None else value.core_artifact_id
+                for target, value in target_values.items()
+            }
+            payloads[category] = {
+                target: None if value is None else value.artifact_payload_sha256
+                for target, value in target_values.items()
+            }
+            context_digests[category] = {
+                target: None if value is None else value.context_resolution_digest
+                for target, value in target_values.items()
+            }
+            for target, value in target_values.items():
+                checkpoint_path = (
+                    self.state_root
+                    / "private/checkpoint_context"
+                    / target
+                    / category
+                    / f"checkpoint_{checkpoint:02d}.md"
+                )
+                markdown = (
+                    f"# Empty generation-zero category {target}\n"
+                    if value is None
+                    else value.markdown
+                )
+                write_private_file(
+                    checkpoint_path,
+                    markdown.encode("utf-8"),
+                    replace=False,
+                )
+                if target == "text_memory":
+                    write_private_file(
+                        self.state_root
+                        / "private/checkpoint_memory"
+                        / category
+                        / f"checkpoint_{checkpoint:02d}.md",
+                        markdown.encode("utf-8"),
+                        replace=False,
+                    )
         receipt = {
-            "schema_version": "CategoryMemoryCheckpointReceiptV1",
+            "schema_version": "CategoryContextCheckpointReceiptV1",
             "protocol_id": PROTOCOL_ID,
             "checkpoint": checkpoint,
+            "target_order": ["text_memory", "skill_bundle", "agent_system"],
             "artifact_ids": artifacts,
             "artifact_payload_sha256": payloads,
-            "context_resolution_sha256": contexts,
+            "context_resolution_sha256": context_digests,
             "train_items_per_category": checkpoint,
             "probe_feedback_used": False,
             "created_at_utc": utc_now(),
@@ -790,22 +836,26 @@ class SupervisedTransferExperimentV1:
             self.result_root / "public/checkpoints" / f"checkpoint_{checkpoint:02d}.json",
             canonical_pretty_json_bytes(receipt),
         )
-        frozen = FrozenMemorySetV1(
+        frozen = FrozenContextSetV1(
             checkpoint=checkpoint,
-            memories=memories,
+            contexts=runtime_contexts,
             artifact_ids=artifacts,
             payload_sha256=payloads,
-            context_sha256=contexts,
+            context_sha256=context_digests,
         )
         self._frozen_checkpoints[checkpoint] = frozen
         return frozen
 
-    def _freeze_final_memory(self) -> FrozenMemorySetV1:
-        self._set_stage("FREEZE_FINAL_MEMORY")
+    def _freeze_final_context(self) -> FrozenContextSetV1:
+        self._set_stage("FREEZE_FINAL_CONTEXT")
         self._require_source_still_frozen()
         frozen = self._freeze_checkpoint(50)
-        if any(value is None for value in frozen.artifact_ids.values()):
-            raise SupervisedExperimentError("FINAL_MEMORY_SET_INCOMPLETE")
+        if any(
+            value is None
+            for category in frozen.artifact_ids.values()
+            for value in category.values()
+        ):
+            raise SupervisedExperimentError("FINAL_CONTEXT_SET_INCOMPLETE")
         receipt = {
             "schema_version": FROZEN_RECEIPT_SCHEMA,
             "protocol_id": PROTOCOL_ID,
@@ -821,7 +871,8 @@ class SupervisedTransferExperimentV1:
             "artifact_ids": frozen.artifact_ids,
             "artifact_payload_sha256": frozen.payload_sha256,
             "context_resolution_sha256": frozen.context_sha256,
-            "memory_provenance": "Train-only SupervisedEvolutionPacketV1",
+            "context_targets": ["text_memory", "skill_bundle", "agent_system"],
+            "context_provenance": "Train-only SupervisedEvolutionPacketV1",
             "probe_feedback_used": False,
             "test_feedback_used": False,
             "core_job_count": self._formal_core_job_count(),
@@ -864,7 +915,7 @@ class SupervisedTransferExperimentV1:
 
     def _run_final_test(
         self,
-        frozen: FrozenMemorySetV1,
+        frozen: FrozenContextSetV1,
         control: LocalCodexCLIExecutor,
         online: LocalCodexCLIExecutor,
     ) -> None:
@@ -911,7 +962,7 @@ class SupervisedTransferExperimentV1:
             self._execute_test_session(
                 control,
                 task=task,
-                memory=None,
+                context=None,
                 logical_arm="control_test",
                 executor_arm="control",
                 task_ordinal=ordinal,
@@ -921,10 +972,10 @@ class SupervisedTransferExperimentV1:
             self._execute_test_session(
                 online,
                 task=task,
-                memory=frozen.memories[task.category],
+                context=frozen.contexts[task.category],
                 logical_arm="online_test",
                 executor_arm="online",
-                task_ordinal=ordinal + 1,
+                task_ordinal=ordinal,
                 round_index=0,
                 stage="FINAL_TEST",
             )
@@ -967,7 +1018,7 @@ class SupervisedTransferExperimentV1:
         executor: LocalCodexCLIExecutor,
         *,
         task: PrivateChemBench4KTask,
-        memory: CoreResolvedTextMemoryV2 | None,
+        context: CoreResolvedSupervisedContextV1 | None,
         logical_arm: str,
         executor_arm: Literal["control", "online"],
         task_ordinal: int,
@@ -978,7 +1029,7 @@ class SupervisedTransferExperimentV1:
     ) -> SessionOutcomeV1:
         self._require_session_admission(
             task=task,
-            memory=memory,
+            context=context,
             logical_arm=logical_arm,
             task_ordinal=task_ordinal,
             round_index=round_index,
@@ -1011,10 +1062,10 @@ class SupervisedTransferExperimentV1:
         }
         self._append_private(attempt_event)
         try:
-            attempt = executor.execute_taskwise(
-                TaskwiseAgentRequestV1(
+            attempt = executor.execute_supervised(
+                SupervisedAgentRequestV1(
                     rendered_public_prompt=prompt.text,
-                    resolved_text_memory=memory,
+                    resolved_context=context,
                     session_id=session_id,
                     arm=executor_arm,
                     task_ordinal=task_ordinal,
@@ -1023,8 +1074,8 @@ class SupervisedTransferExperimentV1:
                     task_uid=task.uid,
                 )
             )
-            context = executor.consume_taskwise_context_receipt(session_id)
-            context.require_match()
+            binding = executor.consume_supervised_context_receipt(session_id)
+            binding.require_match()
             evaluation = self._evaluator.evaluate(task=task, raw_completion=attempt.response)
         except BaseException:
             self._state["infrastructure_failures"] = (
@@ -1048,8 +1099,16 @@ class SupervisedTransferExperimentV1:
             "official_parse_status": evaluation.official.status.value,
             "strict_prediction": evaluation.strict.prediction,
             "strict_parse_status": evaluation.strict.status.value,
-            "memory_artifact_id": None if memory is None else memory.core_artifact_id,
-            "context_binding_sha256": context.digest,
+            "memory_artifact_id": (
+                None if context is None else context.memory.core_artifact_id
+            ),
+            "skill_artifact_id": (
+                None if context is None else context.skill.core_artifact_id
+            ),
+            "agent_system_artifact_id": (
+                None if context is None else context.agent_system.core_artifact_id
+            ),
+            "context_binding_sha256": binding.digest,
             "completed_at_utc": utc_now(),
         }
         private = {
@@ -1074,14 +1133,14 @@ class SupervisedTransferExperimentV1:
             evaluation=evaluation,
             attempt=attempt,
             session_id=session_id,
-            context_binding=context.to_public_dict(),
+            context_binding=binding.to_public_dict(),
         )
 
     def _require_session_admission(
         self,
         *,
         task: PrivateChemBench4KTask,
-        memory: CoreResolvedTextMemoryV2 | None,
+        context: CoreResolvedSupervisedContextV1 | None,
         logical_arm: str,
         task_ordinal: int,
         round_index: int,
@@ -1110,10 +1169,20 @@ class SupervisedTransferExperimentV1:
             raise SupervisedExperimentError("SESSION_ARM_STAGE_INVALID")
         if task.uid not in {item.uid for item in expected_partition}:
             raise SupervisedExperimentError("SESSION_PARTITION_SCOPE_INVALID")
-        if logical_arm.startswith("control") and memory is not None:
-            raise SupervisedExperimentError("CONTROL_MEMORY_INJECTION_INVALID")
-        if logical_arm == "online_test" and memory is None:
-            raise SupervisedExperimentError("TEST_FROZEN_MEMORY_MISSING")
+        if logical_arm.startswith("control") and context is not None:
+            raise SupervisedExperimentError("CONTROL_CONTEXT_INJECTION_INVALID")
+        if logical_arm == "online_test" and context is None:
+            raise SupervisedExperimentError("TEST_FROZEN_CONTEXT_MISSING")
+        if (
+            logical_arm == "online_probe"
+            and stage != "PROBE_CHECKPOINT_00"
+            and context is None
+        ):
+            raise SupervisedExperimentError("PROBE_FROZEN_CONTEXT_MISSING")
+        if logical_arm in {"online_train", "online_canary"} and (
+            task_ordinal > 0 or round_index > 0
+        ) and context is None:
+            raise SupervisedExperimentError("ONLINE_CONTEXT_MISSING")
         if (
             stage == "CONTROL_TRAIN"
             and int(self._state["task_sessions"]) == 0
@@ -1146,18 +1215,34 @@ class SupervisedTransferExperimentV1:
         category_ordinal: int,
         round_index: Literal[0, 1],
         outcome: SessionOutcomeV1,
-        predecessor: CoreResolvedTextMemoryV2 | None,
+        predecessor: CoreResolvedSupervisedContextV1 | None,
     ) -> SupervisedEvolutionPacketV1:
         return SupervisedEvolutionPacketV1.from_evaluation(
             task=task,
             training_task_ordinal=category_ordinal + 1,
             round_index=round_index,
             evaluation=outcome.evaluation,
-            predecessor_memory=None if predecessor is None else predecessor.markdown,
+            predecessor_memory=(
+                None if predecessor is None else predecessor.memory.markdown
+            ),
             predecessor_artifact_id=(
-                None if predecessor is None else predecessor.core_artifact_id
+                None if predecessor is None else predecessor.memory.core_artifact_id
             ),
             session_id=outcome.session_id,
+            predecessor_skill=(
+                None if predecessor is None else predecessor.skill.markdown
+            ),
+            predecessor_skill_artifact_id=(
+                None if predecessor is None else predecessor.skill.core_artifact_id
+            ),
+            predecessor_agent_system=(
+                None if predecessor is None else predecessor.agent_system.markdown
+            ),
+            predecessor_agent_system_artifact_id=(
+                None
+                if predecessor is None
+                else predecessor.agent_system.core_artifact_id
+            ),
         )
 
     def _record_core_result(
@@ -1187,14 +1272,34 @@ class SupervisedTransferExperimentV1:
                 "context_resolution_sha256": result.context_resolution_digest,
                 "validation_receipt_sha256": result.validation_receipt_sha256,
                 "memory_metrics": result.memory_inspection.to_public_payload(),
+                "auxiliary_targets": [
+                    {
+                        "target_id": artifact.target_id,
+                        "method_id": artifact.method_id,
+                        "method_descriptor_sha256": artifact.method_descriptor_digest,
+                        "job_id": artifact.job_id,
+                        "artifact_id": artifact.core_artifact_id,
+                        "artifact_payload_sha256": artifact.artifact_payload_sha256,
+                        "context_resolution_sha256": (
+                            artifact.context_resolution_digest
+                        ),
+                        "inspection": artifact.inspection.to_public_payload(),
+                    }
+                    for artifact in result.supervised_auxiliary_artifacts
+                ],
                 "completed_at_utc": utc_now(),
             }
         )
         self._state["reflector_completions"] = (
             int(self._state["reflector_completions"]) + 1
         )
-        self._state["core_jobs"] = int(self._state["core_jobs"]) + 1
-        self._state["core_artifacts"] = int(self._state["core_artifacts"]) + 1
+        target_count = 1 + len(result.supervised_auxiliary_artifacts)
+        if target_count != 3:
+            raise SupervisedExperimentError("CORE_TARGET_SET_INCOMPLETE")
+        self._state["core_jobs"] = int(self._state["core_jobs"]) + target_count
+        self._state["core_artifacts"] = (
+            int(self._state["core_artifacts"]) + target_count
+        )
         self._state["round_or_update"] = f"update_{result.update_index}"
         self._state["last_progress_utc"] = utc_now()
         self._write_state()
@@ -1270,10 +1375,24 @@ class SupervisedTransferExperimentV1:
     def _require_stage_counters(self, stage: str) -> None:
         sessions = int(self._state["task_sessions"])
         reflectors = int(self._state["reflector_completions"])
-        if stage == "PROBE_CHECKPOINT_00" and (sessions, reflectors) != (73, 19):
+        jobs = int(self._state["core_jobs"])
+        artifacts = int(self._state["core_artifacts"])
+        if stage == "PROBE_CHECKPOINT_00" and (
+            sessions,
+            reflectors,
+            jobs,
+            artifacts,
+        ) != (73, 19, PREFLIGHT_CORE_JOBS, PREFLIGHT_CORE_ARTIFACTS):
             raise SupervisedExperimentError("PREFLIGHT_STAGE_COUNTER_INVALID")
-        if stage == "ONLINE_CORE_INITIALIZATION" and (sessions, reflectors) != (
+        if stage == "ONLINE_CORE_INITIALIZATION" and (
+            sessions,
+            reflectors,
+            jobs,
+            artifacts,
+        ) != (
             1_350,
+            0,
+            0,
             0,
         ):
             raise SupervisedExperimentError("CONTROL_TRAIN_NOT_COMPLETE")
@@ -1282,13 +1401,26 @@ class SupervisedTransferExperimentV1:
             expected_sessions = 1_350 + (27 * checkpoint) + (
                 180 * ((checkpoint // 10) - 1)
             )
-            if (sessions, reflectors) != (expected_sessions, 18 * checkpoint):
+            expected_core = 54 * checkpoint
+            if (sessions, reflectors, jobs, artifacts) != (
+                expected_sessions,
+                18 * checkpoint,
+                expected_core,
+                expected_core,
+            ):
                 raise SupervisedExperimentError("ONLINE_TRAIN_CHECKPOINT_COUNTER_INVALID")
-        if stage == "FREEZE_FINAL_MEMORY" and (sessions, reflectors) != (3_600, 900):
+        if stage == "FREEZE_FINAL_CONTEXT" and (
+            sessions,
+            reflectors,
+            jobs,
+            artifacts,
+        ) != (3_600, 900, FORMAL_CORE_JOBS, FORMAL_CORE_ARTIFACTS):
             raise SupervisedExperimentError("FORMAL_TRAIN_PROBE_NOT_COMPLETE")
-        if stage == "REPORTING" and (sessions, reflectors) != (
+        if stage == "REPORTING" and (sessions, reflectors, jobs, artifacts) != (
             FORMAL_TASK_CALLS,
             FORMAL_REFLECTOR_CALLS,
+            FORMAL_CORE_JOBS,
+            FORMAL_CORE_ARTIFACTS,
         ):
             raise SupervisedExperimentError("FINAL_TEST_NOT_COMPLETE")
 
@@ -1442,7 +1574,7 @@ def _closed_exception_code(exc: BaseException) -> str:
 __all__ = [
     "DRY_RUN_SCHEMA",
     "ExperimentInputsV1",
-    "FrozenMemorySetV1",
+    "FrozenContextSetV1",
     "SupervisedExperimentError",
     "SupervisedTransferExperimentV1",
     "build_complete_dry_run_v1",

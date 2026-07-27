@@ -19,8 +19,16 @@ from openevo_chembench.reflector_execution_boundary_v2 import (
 from openevo_chembench.supervised_transfer_v1 import (
     source_manifest as source_manifest_module,
 )
+from openevo_chembench.supervised_transfer_v1.artifacts import (
+    inspect_supervised_auxiliary_artifact_v1,
+)
 from openevo_chembench.supervised_transfer_v1.common import canonical_pretty_json_bytes
 from openevo_chembench.supervised_transfer_v1.config import (
+    EVOLUTION_TARGET_METHODS,
+    FORMAL_CORE_ARTIFACTS,
+    FORMAL_CORE_JOBS,
+    PREFLIGHT_CORE_ARTIFACTS,
+    PREFLIGHT_CORE_JOBS,
     TOTAL_MODEL_CALLS,
     load_supervised_transfer_config_v1,
 )
@@ -85,6 +93,13 @@ def test_config_freezes_roots_model_and_exact_call_budget() -> None:
     assert config.model == "gpt-5.5"
     assert config.reasoning_effort == "medium"
     assert config.call_budget["total_model_calls"] == TOTAL_MODEL_CALLS == 5580
+    assert dict(EVOLUTION_TARGET_METHODS) == {
+        "text_memory": "text_memory_expel_reflector",
+        "skill_bundle": "skill_bundle",
+        "agent_system": "agent_system",
+    }
+    assert (FORMAL_CORE_JOBS, FORMAL_CORE_ARTIFACTS) == (2700, 2700)
+    assert (PREFLIGHT_CORE_JOBS, PREFLIGHT_CORE_ARTIFACTS) == (57, 57)
 
 
 def test_supervised_dataset_manifest_is_complete_and_byte_stable() -> None:
@@ -143,6 +158,105 @@ def test_packet_exposes_complete_long_option_in_bounded_core_records() -> None:
         for record in records
         if record["field"] == "reflector_prompt_sha256"
     }
+
+
+def test_packet_binds_complete_three_target_predecessor_context() -> None:
+    task = PrivateChemBench4KTask(
+        uid="a" * 64,
+        category="Name_Conversion",
+        source_split="test",
+        source_index=1,
+        question="Choose the chemically consistent representation.",
+        A="first",
+        B="second",
+        C="third",
+        D="fourth",
+        target="A",
+        dataset_revision=CHEMBENCH4K_REVISION,
+        dataset_sha256="b" * 64,
+    )
+    evaluation = ChemBench4KPrivateEvaluator().evaluate(task=task, raw_completion="B")
+    skill = "# Category Skill: Name_Conversion\n\n## When To Use\n- named structures\n"
+    agent_system = (
+        "# Category Agent System: Name_Conversion\n\n"
+        "## Directives\n- validate nomenclature\n"
+    )
+    packet = SupervisedEvolutionPacketV1.from_evaluation(
+        task=task,
+        training_task_ordinal=2,
+        round_index=1,
+        evaluation=evaluation,
+        predecessor_memory="# Category Memory: Name_Conversion\n",
+        predecessor_artifact_id="memory-artifact-0001",
+        predecessor_skill=skill,
+        predecessor_skill_artifact_id="skill-artifact-0001",
+        predecessor_agent_system=agent_system,
+        predecessor_agent_system_artifact_id="agent-artifact-0001",
+        session_id="supervised-session-0002",
+    )
+    records = packet.reflector_records()
+
+    def reconstructed(field: str) -> str:
+        return "".join(
+            row["content"].partition(" value=")[2]
+            for row in records
+            if row["field"] == field
+        )
+
+    assert reconstructed("predecessor_skill") == " ".join(skill.split())
+    assert reconstructed("predecessor_agent_system") == " ".join(
+        agent_system.split()
+    )
+    assert len(records) <= 1024
+    with pytest.raises(ValueError, match="predecessor context"):
+        SupervisedEvolutionPacketV1.from_evaluation(
+            task=task,
+            training_task_ordinal=2,
+            round_index=1,
+            evaluation=evaluation,
+            predecessor_memory=None,
+            predecessor_artifact_id=None,
+            predecessor_skill=skill,
+            predecessor_skill_artifact_id="skill-artifact-0001",
+            session_id="supervised-session-0003",
+        )
+
+
+def test_auxiliary_artifact_validator_is_train_evidence_and_leakage_closed() -> None:
+    evidence = "c" * 64
+    skill = b"""# Category Skill: Name_Conversion
+
+## When To Use
+- When a nomenclature task requires structural consistency.
+
+## Workflow
+1. Identify the principal functional group before assigning locants.
+
+## Validation Checks
+- Round-trip the candidate name into a compatible structure.
+
+## Failure Guards
+- Reject a name that violates functional-group precedence.
+"""
+    passed = inspect_supervised_auxiliary_artifact_v1(
+        skill,
+        target_id="skill_bundle",
+        category="Name_Conversion",
+        source_evidence_digests=(evidence,),
+        allowed_evidence_digests=frozenset({evidence}),
+        forbidden_literals=("unrelated-long-literal-that-is-not-present",),
+    )
+    assert passed.passed
+    rejected = inspect_supervised_auxiliary_artifact_v1(
+        skill.replace(b"principal functional group", b"private option literal"),
+        target_id="skill_bundle",
+        category="Name_Conversion",
+        source_evidence_digests=(evidence,),
+        allowed_evidence_digests=frozenset({"d" * 64}),
+        forbidden_literals=("private option literal",),
+    )
+    assert "auxiliary_evidence_outside_train_chain" in rejected.finding_codes
+    assert any(code.startswith("auxiliary_leak_") for code in rejected.finding_codes)
 
 
 def test_all_historically_exposed_pool_blocks_probe_and_test_split() -> None:
@@ -412,7 +526,7 @@ def test_desktop_export_excludes_item_level_paired_csv(
     )
 
 
-def test_reporting_writes_all_nine_preregistered_charts(tmp_path: Path) -> None:
+def test_reporting_writes_all_multitarget_preregistered_charts(tmp_path: Path) -> None:
     train = [
         {"arm": arm, "round": round_index, "accuracy": 0.5}
         for arm in ("control_train", "online_train")
@@ -462,6 +576,15 @@ def test_reporting_writes_all_nine_preregistered_charts(tmp_path: Path) -> None:
         {"control_accuracy": 0.5, "online_accuracy": 0.6},
         category_rows,
         memory,
+        [
+            {
+                "category": category_rows[0]["category"],
+                "training_items": 1,
+                "target_id": target,
+                "utf8_bytes": 80,
+            }
+            for target in ("skill_bundle", "agent_system")
+        ],
         rules,
         [
             {
@@ -472,4 +595,4 @@ def test_reporting_writes_all_nine_preregistered_charts(tmp_path: Path) -> None:
         ],
         [{"evidence_count": 1, "rule_count": 4}],
     )
-    assert len(tuple(tmp_path.glob("*.png"))) == 9
+    assert len(tuple(tmp_path.glob("*.png"))) == 10

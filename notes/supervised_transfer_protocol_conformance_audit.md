@@ -3,6 +3,20 @@
 Protocol: `chembench_supervised_transfer_v1`
 Audit decision: `MECHANISM_MISMATCH_FOUND`
 
+## Multi-target mechanism amendment
+
+The first audit below evaluated the original memory-only treatment. A later
+mechanism review confirmed that baseline commit
+`cd319dc5f5528ff1ad60f381e44ac9c0fa095aa7` did not evolve `skill_bundle` or
+`agent_system`. The benchmark-local implementation now uses one supervised
+reflector call and three verified Core target lifecycles per update, with
+complete same-category predecessor chains and frozen three-target Probe/Test
+contexts. See `notes/supervised_transfer_multitarget_mechanism_audit.md`.
+
+The overall decision remains `MECHANISM_MISMATCH_FOUND` only because a fresh
+paid preflight authority has not yet been produced for the new source. The old
+single-target preflight authorities cannot be reused.
+
 ## Conforming mechanisms
 
 ### Frozen split

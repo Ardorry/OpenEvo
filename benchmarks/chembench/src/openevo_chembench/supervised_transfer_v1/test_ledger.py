@@ -180,8 +180,8 @@ def _verify_completed_test_evidence(
         or state.get("stage") != "FINAL_TEST"
         or state.get("task_sessions") != 4_500
         or state.get("reflector_completions") != 900
-        or state.get("core_jobs") != 900
-        or state.get("core_artifacts") != 900
+        or state.get("core_jobs") != 2_700
+        or state.get("core_artifacts") != 2_700
         or len(public_test) != 900
         or len(private_test) != 900
         or len(public_sessions) != 900
@@ -191,12 +191,26 @@ def _verify_completed_test_evidence(
         or arm_counts != {"control_test": 450, "online_test": 450}
         or any(
             row.get("logical_arm") == "control_test"
-            and row.get("memory_artifact_id") is not None
+            and any(
+                row.get(field) is not None
+                for field in (
+                    "memory_artifact_id",
+                    "skill_artifact_id",
+                    "agent_system_artifact_id",
+                )
+            )
             for row in public_test
         )
         or any(
             row.get("logical_arm") == "online_test"
-            and row.get("memory_artifact_id") is None
+            and any(
+                row.get(field) is None
+                for field in (
+                    "memory_artifact_id",
+                    "skill_artifact_id",
+                    "agent_system_artifact_id",
+                )
+            )
             for row in public_test
         )
         or any(

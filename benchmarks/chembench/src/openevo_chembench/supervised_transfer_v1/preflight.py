@@ -19,6 +19,11 @@ from openevo_chembench.supervised_transfer_v1.common import (
     sha256_bytes,
     write_public_file,
 )
+from openevo_chembench.supervised_transfer_v1.config import (
+    EVOLUTION_TARGET_METHODS,
+    PREFLIGHT_CORE_ARTIFACTS,
+    PREFLIGHT_CORE_JOBS,
+)
 from openevo_chembench.taskwise_config_v1 import load_taskwise_config_v1
 
 if TYPE_CHECKING:
@@ -154,17 +159,28 @@ def inspect_preflight_evidence_v1(
     observed_core_counts = Counter(str(row.get("stage")) for row in core_rows)
     if dict(observed_core_counts) != _EXPECTED_CORE_COUNTS:
         raise PreflightAuthorityError("PREFLIGHT_CORE_CARDINALITY_INVALID")
+    if any(not _valid_multitarget_core_row(row) for row in core_rows):
+        raise PreflightAuthorityError("PREFLIGHT_CORE_TARGET_SET_INVALID")
 
     train_uids = {task.uid for task in inputs.train}
     probe_uids = {task.uid for task in inputs.probe}
     if any(row.get("task_uid") not in train_uids for row in core_rows):
         raise PreflightAuthorityError("PREFLIGHT_REFLECTOR_SCOPE_INVALID")
-    if any(
-        row.get("stage", "").startswith("PROBE")
-        and row.get("memory_artifact_id") is not None
-        for row in task_rows
-    ):
-        raise PreflightAuthorityError("PREFLIGHT_PROBE_MEMORY_INVALID")
+    context_fields = (
+        "memory_artifact_id",
+        "skill_artifact_id",
+        "agent_system_artifact_id",
+    )
+    for row in task_rows:
+        values = tuple(row.get(field) for field in context_fields)
+        expects_context = (
+            row.get("logical_arm") == "online_canary"
+            and row.get("round_index") in (1, 2)
+        )
+        if expects_context and any(value is None for value in values):
+            raise PreflightAuthorityError("PREFLIGHT_ONLINE_CONTEXT_INVALID")
+        if not expects_context and any(value is not None for value in values):
+            raise PreflightAuthorityError("PREFLIGHT_CONTEXT_SCOPE_INVALID")
     checkpoint_probe = [
         row for row in task_rows if row.get("stage") == "PROBE_CHECKPOINT_00"
     ]
@@ -234,8 +250,8 @@ def inspect_preflight_evidence_v1(
         or state.get("split_receipt_sha256") != inputs.split_receipt_sha256
         or state.get("task_sessions") != 253
         or state.get("reflector_completions") != 19
-        or state.get("core_jobs") != 19
-        or state.get("core_artifacts") != 19
+        or state.get("core_jobs") != PREFLIGHT_CORE_JOBS
+        or state.get("core_artifacts") != PREFLIGHT_CORE_ARTIFACTS
         or any(
             state.get(name) != 0
             for name in (
@@ -267,9 +283,11 @@ def inspect_preflight_evidence_v1(
         or set(artifact_ids) != set(CHEMBENCH4K_CATEGORIES)
         or set(payloads) != set(CHEMBENCH4K_CATEGORIES)
         or set(contexts) != set(CHEMBENCH4K_CATEGORIES)
-        or any(value is not None for value in artifact_ids.values())
-        or any(value is not None for value in payloads.values())
-        or any(value is not None for value in contexts.values())
+        or checkpoint.get("target_order")
+        != ["text_memory", "skill_bundle", "agent_system"]
+        or any(not _empty_checkpoint_targets(value) for value in artifact_ids.values())
+        or any(not _empty_checkpoint_targets(value) for value in payloads.values())
+        or any(not _empty_checkpoint_targets(value) for value in contexts.values())
     ):
         raise PreflightAuthorityError("PREFLIGHT_CHECKPOINT_ZERO_INVALID")
 
@@ -290,8 +308,9 @@ def inspect_preflight_evidence_v1(
         "stage_reflector_counts": dict(sorted(_EXPECTED_CORE_COUNTS.items())),
         "task_sessions": 253,
         "reflector_completions": 19,
-        "core_jobs": 19,
-        "core_artifacts": 19,
+        "core_jobs": PREFLIGHT_CORE_JOBS,
+        "core_artifacts": PREFLIGHT_CORE_ARTIFACTS,
+        "evolution_targets": dict(EVOLUTION_TARGET_METHODS),
         "security_findings": 0,
         "context_findings": 0,
         "artifact_findings": 0,
@@ -300,6 +319,38 @@ def inspect_preflight_evidence_v1(
         "probe_evolution_jobs": 0,
         "test_model_calls": 0,
         "checkpoint_zero_aggregate_rows": probe_rows,
+    }
+
+
+def _valid_multitarget_core_row(row: dict[str, Any]) -> bool:
+    auxiliary = row.get("auxiliary_targets")
+    if not isinstance(auxiliary, list) or len(auxiliary) != 2:
+        return False
+    expected = dict(EVOLUTION_TARGET_METHODS)
+    if row.get("method_id") != expected["text_memory"]:
+        return False
+    for item, target in zip(auxiliary, ("skill_bundle", "agent_system"), strict=True):
+        if not isinstance(item, dict):
+            return False
+        inspection = item.get("inspection")
+        if (
+            item.get("target_id") != target
+            or item.get("method_id") != expected[target]
+            or not item.get("job_id")
+            or not item.get("artifact_id")
+            or not isinstance(inspection, dict)
+            or inspection.get("target_id") != target
+            or inspection.get("finding_codes") != []
+        ):
+            return False
+    return True
+
+
+def _empty_checkpoint_targets(value: object) -> bool:
+    return isinstance(value, dict) and value == {
+        "text_memory": None,
+        "skill_bundle": None,
+        "agent_system": None,
     }
 
 
@@ -323,6 +374,7 @@ def _effective_identity(inputs: ExperimentInputsV1) -> dict[str, object]:
         raise PreflightAuthorityError("PREFLIGHT_EXECUTOR_POLICY_DIVERGED")
     framework_lock = repository / inputs.config.framework_lock
     registry = load_verified_framework_registry(framework_lock)
+    target_methods = dict(EVOLUTION_TARGET_METHODS)
     manifests = inputs.manifest_root
     return {
         "source_commit": inputs.source_commit,
@@ -349,6 +401,11 @@ def _effective_identity(inputs: ExperimentInputsV1) -> dict[str, object]:
         "executor_policy_sha256": policies[0],
         "framework_lock_sha256": sha256_bytes(framework_lock.read_bytes()),
         "verified_registry_digest": registry.snapshot.registry_digest,
+        "evolution_targets": target_methods,
+        "evolution_method_identity_sha256": {
+            target: registry.snapshot.identity_digest_for("method", method)
+            for target, method in EVOLUTION_TARGET_METHODS
+        },
     }
 
 

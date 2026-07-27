@@ -53,7 +53,7 @@ PROTOCOL_ID = "chembench4k_frozen_generalization_v2"
 TASKWISE_PROTOCOL_ID = "taskwise_online_evolution_v1"
 SUPERVISED_TRANSFER_PROTOCOL_ID = "chembench_supervised_transfer_v1"
 EXPECTED_RECORDS = 45
-MAX_BOUNDARY_RECORDS = 512
+MAX_BOUNDARY_RECORDS = 1024
 TASKWISE_SOURCE_SPLIT = "taskwise_safe_signal"
 SUPERVISED_TRAIN_SOURCE_SPLIT = "supervised_train"
 _ALLOWED_SOURCE_SPLITS = frozenset(
@@ -143,6 +143,7 @@ _TASKWISE_OPERATIONAL_LINE_RE = re.compile(
 _TASKWISE_EXACT_H1 = "# General Chemistry Memory"
 _SUPERVISED_SECTION_NORMALIZATION_ID = "supervised_memory_section_merge_v1"
 _SUPERVISED_STRUCTURED_RENDER_ID = "supervised_memory_structured_render_v2"
+_SUPERVISED_MULTITARGET_RENDER_ID = "supervised_multitarget_structured_render_v1"
 _SUPERVISED_OUTPUT_SCHEMA_NAME = "supervised_memory_output_schema.json"
 _NO_OUTPUT_NORMALIZATION_ID = "none"
 _SUPERVISED_EXACT_SECTIONS = (
@@ -175,6 +176,23 @@ _SUPERVISED_RULE_VALUE_FIELDS = (
     "validation",
     "evidence_count",
     "evidence_digests",
+)
+_SUPERVISED_SKILL_FIELDS = (
+    "skill_when_to_use",
+    "skill_workflow",
+    "skill_validation_checks",
+    "skill_failure_guards",
+    "skill_evidence_digests",
+)
+_SUPERVISED_AGENT_DIRECTIVE_FIELDS = (
+    "trigger",
+    "instruction",
+    "validation",
+    "evidence_digests",
+)
+_SUPERVISED_AGENT_FIELDS = (
+    "agent_system_directives",
+    "agent_system_output_discipline",
 )
 
 
@@ -222,10 +240,52 @@ _SUPERVISED_OUTPUT_SCHEMA = {
             }
             for _heading, field, maximum in _SUPERVISED_STRUCTURED_SECTION_FIELDS
         },
+        **{
+            field: {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": maximum,
+            }
+            for field, maximum in (
+                ("skill_when_to_use", 12),
+                ("skill_workflow", 24),
+                ("skill_validation_checks", 24),
+                ("skill_failure_guards", 16),
+                ("agent_system_output_discipline", 8),
+            )
+        },
+        "skill_evidence_digests": {
+            "type": "array",
+            "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "minItems": 1,
+            "maxItems": 64,
+        },
+        "agent_system_directives": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "trigger": {"type": "string"},
+                    "instruction": {"type": "string"},
+                    "validation": {"type": "string"},
+                    "evidence_digests": {
+                        "type": "array",
+                        "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "minItems": 1,
+                        "maxItems": 64,
+                    },
+                },
+                "required": list(_SUPERVISED_AGENT_DIRECTIVE_FIELDS),
+            },
+            "maxItems": 24,
+        },
     },
     "required": [
         "category",
         *(field for _heading, field, _maximum in _SUPERVISED_STRUCTURED_SECTION_FIELDS),
+        *_SUPERVISED_SKILL_FIELDS,
+        *_SUPERVISED_AGENT_FIELDS,
     ],
 }
 _SUPERVISED_OUTPUT_SCHEMA_BYTES = (
@@ -249,19 +309,36 @@ _TASKWISE_PROMPT_CONTRACT = (
     "superseded rules instead of growing memory without bound."
 )
 _SUPERVISED_PROMPT_CONTRACT = (
-    "Supervised category-memory output requirements:\n"
+    "Supervised category memory, skill, and agent-system output requirements:\n"
     "- Reconstruct the ordered PACKET_PART records and use only that Train packet "
     "plus the supplied existing memory.\n"
-    "- Return one complete replacement memory, never an append-only patch or a copy "
-    "followed by revised sections.\n"
-    "- The CLI enforces a JSON object with `category` and eleven required section "
-    "arrays. Populate every array; use an empty array only when the section has no "
-    "current entries. Do not emit Markdown headings or bullet markers inside values.\n"
+    "- predecessor_skill and predecessor_agent_system contain the complete approved "
+    "same-category predecessor projections after generation zero. Merge, refine, or "
+    "retire them explicitly; never replace the chain with advice based only on the "
+    "current item.\n"
+    "- Return one complete replacement memory inside one complete replacement "
+    "three-target context, never an append-only patch or a copy followed by revised "
+    "sections.\n"
+    "- The CLI enforces one JSON object containing `category`, eleven required section "
+    "arrays for memory, five skill fields (four content arrays plus one evidence-"
+    "digest array), and two agent-system fields. Populate every field. Memory "
+    "arrays may be empty when they have no current entries, but every skill array, "
+    "agent_system_directives, and agent_system_output_discipline must contain at "
+    "least one concrete transferable item. Do not emit Markdown headings or bullet "
+    "markers inside scalar values.\n"
     "- The section keys are confirmed_principles, provisional_principles, "
     "common_failure_modes, option_elimination_checks, retired_or_contradicted, "
     "output_discipline, do, avoid, validate, when_applicable, and "
     "retired_or_superseded. The isolated wrapper renders these fields into the exact "
     "ordered category-memory Markdown contract.\n"
+    "- skill_when_to_use contains concrete applicability triggers; skill_workflow "
+    "contains ordered chemistry reasoning actions; skill_validation_checks contains "
+    "executable checks; skill_failure_guards contains specific failure prevention; "
+    "skill_evidence_digests contains supporting Train packet digests. The wrapper "
+    "renders a category-specific SKILL.md.\n"
+    "- agent_system_directives contains objects with trigger, instruction, validation, "
+    "and evidence_digests. agent_system_output_discipline contains concise final-answer "
+    "rules. The wrapper renders category-specific agent-system instructions.\n"
     "- confirmed_principles, provisional_principles, and retired_or_contradicted "
     "contain closed rule objects. Every object has rule_id, trigger, principle, "
     "action, validation, evidence_count, and evidence_digests. The wrapper binds "
@@ -275,8 +352,10 @@ _SUPERVISED_PROMPT_CONTRACT = (
     "- Before returning, compare the draft against every packet question and option. "
     "Paraphrase any shared contiguous span of four or more complete tokens and 32 or "
     "more characters; retain only the abstract chemistry principle.\n"
-    "- Keep each array element to one concise bullet body. The wrapper emits `- None.` "
-    "for an empty array and never invents a chemistry rule."
+    "- Every skill or agent-system claim derived from the current item must copy the "
+    "exact packet_sha256 as evidence; never invent evidence.\n"
+    "- Keep each array element to one concise, transferable item. The wrapper emits "
+    "`- None.` for an empty array and never invents chemistry content."
 )
 
 ReflectorCodexPolicyProbeRunnerV2 = Callable[
@@ -525,6 +604,7 @@ class ReflectorExecutionReceiptV2:
                     _NO_OUTPUT_NORMALIZATION_ID,
                     _SUPERVISED_SECTION_NORMALIZATION_ID,
                     _SUPERVISED_STRUCTURED_RENDER_ID,
+                    _SUPERVISED_MULTITARGET_RENDER_ID,
                 }
                 or type(normalization_applied) is not bool
                 or (
@@ -536,6 +616,7 @@ class ReflectorExecutionReceiptV2:
                     in {
                         _SUPERVISED_SECTION_NORMALIZATION_ID,
                         _SUPERVISED_STRUCTURED_RENDER_ID,
+                        _SUPERVISED_MULTITARGET_RENDER_ID,
                     }
                     and source_split != SUPERVISED_TRAIN_SOURCE_SPLIT
                 )
@@ -593,6 +674,46 @@ class ReflectorExecutionReceiptV2:
 
 
 @dataclass(frozen=True, slots=True)
+class SupervisedStructuredAuxiliaryOutputV1:
+    """Verified non-memory projections from one supervised reflector response."""
+
+    category: str
+    skill_markdown: str
+    agent_system_markdown: str
+    skill_source_sha256: str
+    agent_system_source_sha256: str
+    skill_markdown_sha256: str
+    agent_system_markdown_sha256: str
+    skill_evidence_digests: tuple[str, ...]
+    agent_system_evidence_digests: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if self.category not in CHEMBENCH4K_CATEGORIES:
+            raise ValueError("supervised auxiliary category is not frozen")
+        for field in (
+            self.skill_source_sha256,
+            self.agent_system_source_sha256,
+            self.skill_markdown_sha256,
+            self.agent_system_markdown_sha256,
+            *self.skill_evidence_digests,
+            *self.agent_system_evidence_digests,
+        ):
+            if _SHA256_RE.fullmatch(field) is None:
+                raise ValueError("supervised auxiliary digest is invalid")
+        if (
+            hashlib.sha256(self.skill_markdown.encode("utf-8")).hexdigest()
+            != self.skill_markdown_sha256
+            or hashlib.sha256(self.agent_system_markdown.encode("utf-8")).hexdigest()
+            != self.agent_system_markdown_sha256
+            or len(set(self.skill_evidence_digests))
+            != len(self.skill_evidence_digests)
+            or len(set(self.agent_system_evidence_digests))
+            != len(self.agent_system_evidence_digests)
+        ):
+            raise ValueError("supervised auxiliary output binding is invalid")
+
+
+@dataclass(frozen=True, slots=True)
 class ReflectorBoundaryActivationV2:
     invocation_id: str
     wrapper_path: Path
@@ -602,6 +723,33 @@ class ReflectorBoundaryActivationV2:
     expected_real_codex_sha256: str
     expected_protocol_id: str
     expected_source_split: str
+
+    def load_supervised_auxiliary_output_for_audit(
+        self,
+    ) -> SupervisedStructuredAuxiliaryOutputV1:
+        """Recompute the bound skill/system projections from the private event stream."""
+
+        receipt = self.load_receipt_for_audit()
+        if (
+            receipt.status is not ReflectorBoundaryStatusV2.COMPLETED
+            or receipt.source_split != SUPERVISED_TRAIN_SOURCE_SPLIT
+            or receipt.output_normalization_id != _SUPERVISED_MULTITARGET_RENDER_ID
+        ):
+            raise ReflectorBoundaryError("REFLECTOR_AUXILIARY_OUTPUT_UNAVAILABLE")
+        event_path = self.receipt_path.parent / "events.jsonl"
+        try:
+            event_response, _usage, _event_digest = _parse_jsonl_transcript(
+                event_path.read_text(encoding="utf-8")
+            )
+        except (OSError, UnicodeError, LocalCodexExecutionError) as exc:
+            raise ReflectorBoundaryError("REFLECTOR_AUXILIARY_OUTPUT_UNAVAILABLE") from exc
+        source_message = event_response.strip() + "\n"
+        if (
+            receipt.source_last_message_sha256
+            != hashlib.sha256(source_message.encode("utf-8")).hexdigest()
+        ):
+            raise ReflectorBoundaryError("REFLECTOR_AUXILIARY_OUTPUT_UNAVAILABLE")
+        return _render_supervised_structured_auxiliary(source_message)
 
     def require_receipt(self) -> ReflectorExecutionReceiptV2:
         """Require a successful, cleaned, zero-tool wrapper invocation."""
@@ -676,10 +824,10 @@ class ReflectorBoundaryActivationV2:
                 raise ReflectorBoundaryError("REFLECTOR_WRAPPER_RECEIPT_BINDING_INVALID") from exc
             if receipt.source_split == SUPERVISED_TRAIN_SOURCE_SPLIT:
                 source_message = event_response.strip() + "\n"
-                if (
-                    receipt.output_normalization_id
-                    == _SUPERVISED_STRUCTURED_RENDER_ID
-                ):
+                if receipt.output_normalization_id in {
+                    _SUPERVISED_STRUCTURED_RENDER_ID,
+                    _SUPERVISED_MULTITARGET_RENDER_ID,
+                }:
                     normalized_message = _render_supervised_structured_memory(
                         source_message
                     )
@@ -1147,9 +1295,10 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
                 source_last_message_sha256 = hashlib.sha256(
                     output_text.encode("utf-8")
                 ).hexdigest()
+                normalization = _supervised_structured_normalization_id(output_text)
                 output_text = _render_supervised_structured_memory(output_text)
                 output_normalization_applied = True
-                output_normalization_id = _SUPERVISED_STRUCTURED_RENDER_ID
+                output_normalization_id = normalization
                 content = output_text.encode("utf-8")
             else:
                 source_last_message_sha256 = hashlib.sha256(content).hexdigest()
@@ -1437,11 +1586,18 @@ def _render_supervised_structured_memory(response: str) -> str:
         payload = json.loads(response)
     except (json.JSONDecodeError, RecursionError) as exc:
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID") from exc
-    expected_keys = {
+    legacy_keys = {
         "category",
         *(field for _heading, field, _maximum in _SUPERVISED_STRUCTURED_SECTION_FIELDS),
     }
-    if type(payload) is not dict or set(payload) != expected_keys:
+    multitarget_keys = {
+        *legacy_keys,
+        *_SUPERVISED_SKILL_FIELDS,
+        *_SUPERVISED_AGENT_FIELDS,
+    }
+    if type(payload) is not dict or (
+        set(payload) != legacy_keys and set(payload) != multitarget_keys
+    ):
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
     category = payload["category"]
     if type(category) is not str or category not in CHEMBENCH4K_CATEGORIES:
@@ -1479,6 +1635,192 @@ def _render_supervised_structured_memory(response: str) -> str:
     if len(encoded) > _MAX_LAST_MESSAGE_BYTES:
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
     return encoded.decode("utf-8")
+
+
+def _supervised_structured_normalization_id(response: str) -> str:
+    """Select the auditable renderer identity from the exact closed key set."""
+
+    try:
+        payload = json.loads(response)
+    except (json.JSONDecodeError, RecursionError) as exc:
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID") from exc
+    if type(payload) is not dict:
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+    legacy_keys = {
+        "category",
+        *(field for _heading, field, _maximum in _SUPERVISED_STRUCTURED_SECTION_FIELDS),
+    }
+    multitarget_keys = {
+        *legacy_keys,
+        *_SUPERVISED_SKILL_FIELDS,
+        *_SUPERVISED_AGENT_FIELDS,
+    }
+    if set(payload) == multitarget_keys:
+        return _SUPERVISED_MULTITARGET_RENDER_ID
+    if set(payload) == legacy_keys:
+        return _SUPERVISED_STRUCTURED_RENDER_ID
+    raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+
+
+def _render_supervised_structured_auxiliary(
+    response: str,
+) -> SupervisedStructuredAuxiliaryOutputV1:
+    """Render and bind the skill and agent-system parts of one closed response."""
+
+    if type(response) is not str:
+        raise TypeError("supervised structured response must be text")
+    try:
+        payload = json.loads(response)
+    except (json.JSONDecodeError, RecursionError) as exc:
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID") from exc
+    expected_keys = {
+        "category",
+        *(field for _heading, field, _maximum in _SUPERVISED_STRUCTURED_SECTION_FIELDS),
+        *_SUPERVISED_SKILL_FIELDS,
+        *_SUPERVISED_AGENT_FIELDS,
+    }
+    if type(payload) is not dict or set(payload) != expected_keys:
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+    category = payload["category"]
+    if type(category) is not str or category not in CHEMBENCH4K_CATEGORIES:
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+
+    skill_limits = {
+        "skill_when_to_use": 12,
+        "skill_workflow": 24,
+        "skill_validation_checks": 24,
+        "skill_failure_guards": 16,
+    }
+    skill_values: dict[str, list[str]] = {}
+    for field, maximum in skill_limits.items():
+        values = payload[field]
+        if type(values) is not list or not values or len(values) > maximum:
+            raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+        skill_values[field] = [
+            _normalize_supervised_structured_value(value)
+            for value in values
+            if type(value) is str
+        ]
+        if len(skill_values[field]) != len(values):
+            raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+    skill_lines = [
+        f"# Category Skill: {category}",
+        "",
+        "## When To Use",
+        *(f"- {value}" for value in skill_values["skill_when_to_use"]),
+        "",
+        "## Workflow",
+        *(
+            f"{index}. {value}"
+            for index, value in enumerate(skill_values["skill_workflow"], start=1)
+        ),
+        "",
+        "## Validation Checks",
+        *(f"- {value}" for value in skill_values["skill_validation_checks"]),
+        "",
+        "## Failure Guards",
+        *(f"- {value}" for value in skill_values["skill_failure_guards"]),
+    ]
+    skill_markdown = "\n".join(skill_lines).rstrip() + "\n"
+    skill_evidence = payload["skill_evidence_digests"]
+    if type(skill_evidence) is not list or not skill_evidence or len(skill_evidence) > 64:
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+    normalized_skill_evidence: list[str] = []
+    for digest in skill_evidence:
+        if type(digest) is not str or _SHA256_RE.fullmatch(digest) is None:
+            raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+        normalized_skill_evidence.append(digest)
+    if len(set(normalized_skill_evidence)) != len(normalized_skill_evidence):
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+
+    directives = payload["agent_system_directives"]
+    discipline = payload["agent_system_output_discipline"]
+    if (
+        type(directives) is not list
+        or not directives
+        or len(directives) > 24
+        or type(discipline) is not list
+        or not discipline
+        or len(discipline) > 8
+    ):
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+    rendered_directives: list[str] = []
+    agent_evidence: set[str] = set()
+    normalized_directive_sources: list[dict[str, object]] = []
+    for directive in directives:
+        if type(directive) is not dict or set(directive) != set(
+            _SUPERVISED_AGENT_DIRECTIVE_FIELDS
+        ):
+            raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+        trigger = _normalize_supervised_structured_value(directive["trigger"])
+        instruction = _normalize_supervised_structured_value(directive["instruction"])
+        validation = _normalize_supervised_structured_value(directive["validation"])
+        digests = directive["evidence_digests"]
+        if type(digests) is not list or not digests or len(digests) > 64:
+            raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+        normalized_digests: list[str] = []
+        for digest in digests:
+            if type(digest) is not str or _SHA256_RE.fullmatch(digest) is None:
+                raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+            normalized_digests.append(digest)
+            agent_evidence.add(digest)
+        if len(set(normalized_digests)) != len(normalized_digests):
+            raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+        normalized_directive_sources.append(
+            {
+                "trigger": trigger,
+                "instruction": instruction,
+                "validation": validation,
+                "evidence_digests": normalized_digests,
+            }
+        )
+        rendered_directives.append(
+            f"When {trigger}, {instruction} Validate by {validation}"
+        )
+    normalized_discipline = [
+        _normalize_supervised_structured_value(value)
+        for value in discipline
+        if type(value) is str
+    ]
+    if len(normalized_discipline) != len(discipline):
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+    agent_lines = [
+        f"# Category Agent System: {category}",
+        "",
+        "## Directives",
+        *(f"- {value}" for value in rendered_directives),
+        "",
+        "## Output Discipline",
+        *(f"- {value}" for value in normalized_discipline),
+    ]
+    agent_system_markdown = "\n".join(agent_lines).rstrip() + "\n"
+    if (
+        len(skill_markdown.encode("utf-8")) > _MAX_LAST_MESSAGE_BYTES
+        or len(agent_system_markdown.encode("utf-8")) > _MAX_LAST_MESSAGE_BYTES
+    ):
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+
+    skill_source = {
+        field: payload[field]
+        for field in _SUPERVISED_SKILL_FIELDS
+    }
+    agent_source = {
+        "agent_system_directives": normalized_directive_sources,
+        "agent_system_output_discipline": normalized_discipline,
+    }
+    return SupervisedStructuredAuxiliaryOutputV1(
+        category=category,
+        skill_markdown=skill_markdown,
+        agent_system_markdown=agent_system_markdown,
+        skill_source_sha256=_canonical_sha256(skill_source),
+        agent_system_source_sha256=_canonical_sha256(agent_source),
+        skill_markdown_sha256=hashlib.sha256(skill_markdown.encode("utf-8")).hexdigest(),
+        agent_system_markdown_sha256=hashlib.sha256(
+            agent_system_markdown.encode("utf-8")
+        ).hexdigest(),
+        skill_evidence_digests=tuple(sorted(normalized_skill_evidence)),
+        agent_system_evidence_digests=tuple(sorted(agent_evidence)),
+    )
 
 
 def _normalize_supervised_structured_value(value: str) -> str:

@@ -4,7 +4,9 @@ Each update is a complete current-task trajectory prefix.  The bridge ingests
 that prefix as Core events, creates a new immutable dataset artifact and
 plan-bound job, dispatches the registered ``text_memory_expel_reflector``
 method, accepts only its typed Core artifact, validates and promotes it, and
-finally resolves the artifact through Core context projection.
+finally resolves the artifact through Core context projection.  Supervised
+transfer additionally binds the reflector's closed skill and agent-system
+projections and runs each through its own verified plan-bound Core lifecycle.
 
 The lineage is one global stream across tasks.  Task ``N`` update 1 must name
 task ``N-1`` update 2 as its predecessor.  Adapter-local reflector/artifact
@@ -75,6 +77,13 @@ from openevo_chembench.reflector_execution_boundary_v2 import (
     TASKWISE_SOURCE_SPLIT,
     ReflectorBoundaryStatusV2,
     ReflectorExecutionBoundaryV2,
+    SupervisedStructuredAuxiliaryOutputV1,
+)
+from openevo_chembench.supervised_transfer_v1.artifacts import (
+    CoreResolvedSupervisedContextV1,
+    SupervisedAuxiliaryInspectionV1,
+    _issue_core_resolved_auxiliary_v1,
+    inspect_supervised_auxiliary_artifact_v1,
 )
 from openevo_chembench.supervised_transfer_v1.memory import (
     SUPERVISED_MEMORY_LIMITS_V1,
@@ -101,16 +110,22 @@ from openevo_chembench.taskwise_trajectory_v1 import (
 )
 
 PROTOCOL_ID = "taskwise_online_evolution_v1"
+SUPERVISED_PROTOCOL_ID = "chembench_supervised_transfer_v1"
 BRIDGE_ID = "openevo_core_taskwise_text_memory_v1"
 METHOD_ID = "text_memory_expel_reflector"
 REFLECTOR_PROJECTION_ID = "taskwise_reflector_trajectory_projection_v1"
 SUPERVISED_REFLECTOR_PROJECTION_ID = "SupervisedEvolutionPacketV1"
 TARGET_ID = "text_memory"
+_AUXILIARY_TARGET_METHODS = (
+    ("skill_bundle", "skill_bundle"),
+    ("agent_system", "agent_system"),
+)
 MODEL = "gpt-5.5"
 CORE_LEASE_GRACE_SECONDS = 120
 MAX_CORE_LEASE_SECONDS = 86_400
 DEFAULT_REFLECTOR_TIMEOUT_SECONDS = 600
 ABSOLUTE_MAX_MEMORY_FILE_BYTES = 64 * 1024
+_MAX_AUXILIARY_PAYLOAD_BYTES = 24_576
 MAX_MANIFEST_BYTES = 1024 * 1024
 _EVENT_TYPE = "openevo.session_completed"
 _EVENT_SOURCE = "chembench4k.taskwise_core.v1"
@@ -777,6 +792,63 @@ class SupervisedArtifactLineageReceiptV1(_FrozenModel):
         return canonical_digest(self)
 
 
+class SupervisedAuxiliaryCoreArtifactV1(_FrozenModel):
+    """Complete Core identity for one supervised skill or agent-system artifact."""
+
+    schema_version: Literal["SupervisedAuxiliaryCoreArtifactV1"] = (
+        "SupervisedAuxiliaryCoreArtifactV1"
+    )
+    target_id: Literal["skill_bundle", "agent_system"]
+    method_id: Literal["skill_bundle", "agent_system"]
+    plan_id: str
+    plan_digest: str
+    job_id: str
+    method_descriptor_digest: str
+    method_identity_digest: str
+    core_artifact_id: str
+    core_artifact_manifest_sha256: str
+    artifact_payload_sha256: str
+    artifact_lineage_sha256: str
+    source_component_sha256: str
+    inspection: SupervisedAuxiliaryInspectionV1
+    inspection_sha256: str
+    core_context_id: str
+    context_resolution_digest: str
+    resolved_content: str
+    resolved_content_sha256: str
+
+    @field_validator(
+        "plan_digest",
+        "method_descriptor_digest",
+        "method_identity_digest",
+        "core_artifact_manifest_sha256",
+        "artifact_payload_sha256",
+        "artifact_lineage_sha256",
+        "source_component_sha256",
+        "inspection_sha256",
+        "context_resolution_digest",
+        "resolved_content_sha256",
+    )
+    @classmethod
+    def _digest(cls, value: str) -> str:
+        if _SHA256_RE.fullmatch(value) is None:
+            raise ValueError("auxiliary Core digest must be SHA-256")
+        return value
+
+    @model_validator(mode="after")
+    def _binding(self) -> SupervisedAuxiliaryCoreArtifactV1:
+        if (
+            self.target_id != self.method_id
+            or self.inspection.target_id != self.target_id
+            or not self.inspection.passed
+            or self.inspection.digest != self.inspection_sha256
+            or _sha256_bytes(self.resolved_content.encode("utf-8"))
+            != self.resolved_content_sha256
+        ):
+            raise ValueError("auxiliary Core artifact binding is invalid")
+        return self
+
+
 class TaskwiseCoreUpdateResultV1(_FrozenModel):
     """Core evidence for one approved global update."""
 
@@ -800,8 +872,8 @@ class TaskwiseCoreUpdateResultV1(_FrozenModel):
     dataset_id: str
     dataset_artifact_id: str
     dataset_manifest_sha256: str
-    configured_max_records: int = Field(ge=1, le=512)
-    records_visible_to_reflector: int = Field(ge=1, le=512)
+    configured_max_records: int = Field(ge=1, le=1024)
+    records_visible_to_reflector: int = Field(ge=1, le=1024)
     reflector_input_digest: str
     reflector_timeout_seconds: int = Field(gt=0)
     core_lease_seconds: int = Field(gt=0)
@@ -829,6 +901,7 @@ class TaskwiseCoreUpdateResultV1(_FrozenModel):
     supervised_category: str | None = None
     supervised_input_schema_sha256: str | None = None
     supervised_reflector_prompt_sha256: str | None = None
+    supervised_auxiliary_artifacts: tuple[SupervisedAuxiliaryCoreArtifactV1, ...] = ()
 
     @field_validator(
         "task_uid",
@@ -918,6 +991,14 @@ class TaskwiseCoreUpdateResultV1(_FrozenModel):
                 or self.supervised_input_schema_sha256 != PACKET_INPUT_SCHEMA_DIGEST
                 or self.supervised_reflector_prompt_sha256 != REFLECTOR_PROMPT_DIGEST
                 or not self.memory_inspection.passed
+                or tuple(
+                    artifact.target_id for artifact in self.supervised_auxiliary_artifacts
+                )
+                != ("skill_bundle", "agent_system")
+                or any(
+                    artifact.inspection.category != self.supervised_category
+                    for artifact in self.supervised_auxiliary_artifacts
+                )
             ):
                 raise ValueError("supervised memory inspection is not approved")
         elif (
@@ -927,6 +1008,7 @@ class TaskwiseCoreUpdateResultV1(_FrozenModel):
             or self.supervised_category is not None
             or self.supervised_input_schema_sha256 is not None
             or self.supervised_reflector_prompt_sha256 is not None
+            or self.supervised_auxiliary_artifacts
             or not self.memory_inspection.passed
         ):
             raise ValueError("memory inspection is not an approved protocol-limit result")
@@ -1345,6 +1427,8 @@ class TaskwiseCoreEvolutionBridgeV1:
         self._core_lease_seconds = _core_lease_seconds(self._reflector_timeout_seconds)
         self._registry = require_verified_executable_registry(executable_registry)
         self._require_method()
+        if type(memory_limits) is SupervisedMemoryLimitsV1:
+            self._require_auxiliary_methods()
         self._memory_limits = memory_limits
         db = Path(db_path).resolve()
         db.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -1366,6 +1450,7 @@ class TaskwiseCoreEvolutionBridgeV1:
         self._history: dict[str, TaskwiseCoreUpdateResultV1] = {}
         self._validator_inputs: dict[str, tuple[str, ...]] = {}
         self._seen_forbidden_literals: tuple[str, ...] = ()
+        self._seen_supervised_packet_digests: tuple[str, ...] = ()
         self._terminal_finding: str | None = None
         try:
             self._store = EvolutionStore(
@@ -1609,6 +1694,8 @@ class TaskwiseCoreEvolutionBridgeV1:
                 reflector_input_digest=execution["reflector_input_digest"],
                 reflector_receipt_digest=execution["reflector_receipt_digest"],
                 reflector_event_stream_digest=execution["reflector_event_stream_digest"],
+                auxiliary_output=execution["auxiliary_output"],
+                test_only_allow_synthetic_reflector=test_only_allow_synthetic_reflector,
             )
         except Exception:
             self._terminal_finding = "TASKWISE_CORE_UPDATE_FAILED"
@@ -1771,7 +1858,11 @@ class TaskwiseCoreEvolutionBridgeV1:
                 validator_forbidden_literals=literals,
             )
             prior_literals = literals
-        if self._taskwise_job_count() != len(rows):
+        expected_jobs = sum(
+            1 + len(result.supervised_auxiliary_artifacts)
+            for result in self._history.values()
+        )
+        if self._taskwise_job_count() != expected_jobs:
             raise TaskwiseCoreEvolutionError("TASKWISE_PRIVATE_CHECKPOINT_COUNT_MISMATCH")
 
     def _accept_verified_checkpoint(
@@ -1784,6 +1875,12 @@ class TaskwiseCoreEvolutionBridgeV1:
         self._history[result.core_artifact_id] = result
         self._validator_inputs[result.core_artifact_id] = validator_forbidden_literals
         self._seen_forbidden_literals = validator_forbidden_literals
+        if result.supervised_packet_sha256 is not None:
+            self._seen_supervised_packet_digests = tuple(
+                dict.fromkeys(
+                    (*self._seen_supervised_packet_digests, result.supervised_packet_sha256)
+                )
+            )
 
     def _taskwise_job_count(self) -> int:
         with self._store.connect() as connection:
@@ -1926,6 +2023,12 @@ class TaskwiseCoreEvolutionBridgeV1:
                 payload,
                 category=result.supervised_category,
                 limits=self._memory_limits,
+                allowed_evidence_digests=frozenset(
+                    (
+                        *self._seen_supervised_packet_digests,
+                        result.supervised_packet_sha256,
+                    )
+                ),
             )
         if inspection != result.memory_inspection:
             raise TaskwiseCoreEvolutionError("TASKWISE_MEMORY_INSPECTION_DRIFT")
@@ -1956,7 +2059,205 @@ class TaskwiseCoreEvolutionBridgeV1:
             or _sha256_bytes(resolved.encode("utf-8")) != result.resolved_memory_sha256
         ):
             raise TaskwiseCoreEvolutionError("TASKWISE_CONTEXT_IDENTITY_DRIFT")
+        if result.supervised_packet_sha256 is not None:
+            allowed_evidence = frozenset(
+                (*self._seen_supervised_packet_digests, result.supervised_packet_sha256)
+            )
+            prior_result = (
+                None
+                if result.predecessor is None
+                else self._history.get(result.predecessor.core_artifact_id)
+            )
+            prior_auxiliary = {
+                artifact.target_id: artifact
+                for artifact in (
+                    ()
+                    if prior_result is None
+                    else prior_result.supervised_auxiliary_artifacts
+                )
+            }
+            for auxiliary in result.supervised_auxiliary_artifacts:
+                self._verify_auxiliary_artifact(
+                    result=result,
+                    auxiliary=auxiliary,
+                    predecessor=prior_auxiliary.get(auxiliary.target_id),
+                    forbidden_literals=forbidden,
+                    allowed_evidence=allowed_evidence,
+                )
         return result
+
+    def _verify_auxiliary_artifact(
+        self,
+        *,
+        result: TaskwiseCoreUpdateResultV1,
+        auxiliary: SupervisedAuxiliaryCoreArtifactV1,
+        predecessor: SupervisedAuxiliaryCoreArtifactV1 | None,
+        forbidden_literals: tuple[str, ...],
+        allowed_evidence: frozenset[str],
+    ) -> None:
+        with self._store.connect() as connection:
+            job_row = connection.execute(
+                "SELECT state, method, plan_id, method_identity_digest, config_json "
+                "FROM jobs WHERE job_id = ?",
+                (auxiliary.job_id,),
+            ).fetchone()
+            artifact_row = connection.execute(
+                "SELECT type, state, promoted, manifest_path FROM artifacts "
+                "WHERE artifact_id = ?",
+                (auxiliary.core_artifact_id,),
+            ).fetchone()
+            context_row = connection.execute(
+                "SELECT cm.manifest_json, c.response_json, "
+                "c.selected_artifact_ids_json "
+                "FROM context_materializations AS cm "
+                "JOIN contexts AS c USING(context_id) "
+                "WHERE cm.context_id = ?",
+                (auxiliary.core_context_id,),
+            ).fetchone()
+        if (
+            job_row is None
+            or job_row["state"] != "succeeded"
+            or job_row["method"] != auxiliary.method_id
+            or job_row["plan_id"] != auxiliary.plan_id
+            or job_row["method_identity_digest"] != auxiliary.method_identity_digest
+        ):
+            raise TaskwiseCoreEvolutionError("TASKWISE_JOB_IDENTITY_DRIFT")
+        try:
+            job_config = json.loads(str(job_row["config_json"]))
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise TaskwiseCoreEvolutionError("TASKWISE_JOB_IDENTITY_DRIFT") from exc
+        job_lineage = (
+            job_config.get("lineage") if isinstance(job_config, dict) else None
+        )
+        if (
+            not isinstance(job_lineage, dict)
+            or job_config.get("content") != auxiliary.resolved_content
+            or job_lineage.get("protocol_id") != SUPERVISED_PROTOCOL_ID
+            or job_lineage.get("category") != result.supervised_category
+            or job_lineage.get("target_id") != auxiliary.target_id
+            or job_lineage.get("method_id") != auxiliary.method_id
+            or job_lineage.get("supervised_packet_sha256")
+            != result.supervised_packet_sha256
+            or job_lineage.get("source_component_sha256")
+            != auxiliary.source_component_sha256
+            or job_lineage.get("source_evidence_digests")
+            != list(auxiliary.inspection.source_evidence_digests)
+            or job_lineage.get("dataset_artifact_id") != result.dataset_artifact_id
+            or job_lineage.get("global_update_ordinal")
+            != result.global_update_ordinal
+            or job_lineage.get("validator_input_digest")
+            != result.validator_input_digest
+            or job_lineage.get("predecessor_artifact_id")
+            != (None if predecessor is None else predecessor.core_artifact_id)
+            or job_lineage.get("predecessor_payload_sha256")
+            != (None if predecessor is None else predecessor.artifact_payload_sha256)
+        ):
+            raise TaskwiseCoreEvolutionError("TASKWISE_CORE_LINEAGE_INVALID")
+        expected_type = auxiliary.target_id
+        if (
+            artifact_row is None
+            or artifact_row["type"] != expected_type
+            or artifact_row["state"] != "active"
+            or artifact_row["promoted"] != 1
+        ):
+            raise TaskwiseCoreEvolutionError("TASKWISE_HEAD_STATE_INVALID")
+        artifact = self._store.get_artifact(auxiliary.core_artifact_id)
+        payload_root = _safe_core_file_path(
+            artifact.uri,
+            allowed_root=self._store.files.root,
+        )
+        payload_path = (
+            payload_root / "SKILL.md"
+            if auxiliary.target_id == "skill_bundle"
+            else payload_root
+        )
+        payload = _read_bounded_regular_file(
+            payload_path,
+            maximum=ABSOLUTE_MAX_MEMORY_FILE_BYTES,
+        )
+        lineage = self._artifact_lineage(auxiliary.core_artifact_id)
+        execution = lineage.get("openevo_execution")
+        input_bindings = None if not isinstance(execution, dict) else execution.get(
+            "input_bindings"
+        )
+        expected_prior_ids = (
+            [] if predecessor is None else [predecessor.core_artifact_id]
+        )
+        bindings_valid = (
+            isinstance(input_bindings, list)
+            and len(input_bindings) == 2
+            and isinstance(input_bindings[0], dict)
+            and isinstance(input_bindings[1], dict)
+            and input_bindings[0].get("binding_id") == "current_dataset"
+            and input_bindings[0].get("artifact_ids")
+            == [result.dataset_artifact_id]
+            and input_bindings[1].get("binding_id") == "prior_target_artifacts"
+            and input_bindings[1].get("artifact_ids") == expected_prior_ids
+            and all(
+                isinstance(binding, dict)
+                and isinstance(binding.get("artifact_digests"), list)
+                and len(binding["artifact_digests"]) == len(binding["artifact_ids"])
+                and all(
+                    isinstance(value, str)
+                    and _SHA256_RE.fullmatch(value) is not None
+                    for value in binding["artifact_digests"]
+                )
+                for binding in input_bindings
+            )
+        )
+        if (
+            _sha256_bytes(payload) != auxiliary.artifact_payload_sha256
+            or canonical_digest(lineage) != auxiliary.artifact_lineage_sha256
+            or not isinstance(execution, dict)
+            or execution.get("job_id") != auxiliary.job_id
+            or execution.get("plan_id") != auxiliary.plan_id
+            or execution.get("plan_digest") != auxiliary.plan_digest
+            or execution.get("target_id") != auxiliary.target_id
+            or execution.get("method_id") != auxiliary.method_id
+            or execution.get("method_identity_digest")
+            != auxiliary.method_identity_digest
+            or not bindings_valid
+        ):
+            raise TaskwiseCoreEvolutionError("TASKWISE_CORE_LINEAGE_INVALID")
+        inspection = inspect_supervised_auxiliary_artifact_v1(
+            payload,
+            target_id=auxiliary.target_id,
+            category=result.supervised_category or "",
+            source_evidence_digests=auxiliary.inspection.source_evidence_digests,
+            allowed_evidence_digests=allowed_evidence,
+            forbidden_literals=forbidden_literals,
+        )
+        if inspection != auxiliary.inspection:
+            raise TaskwiseCoreEvolutionError("TASKWISE_VALIDATION_RECEIPT_DRIFT")
+        manifest_path = Path(str(artifact_row["manifest_path"]))
+        if (
+            _sha256_bytes(
+                _read_bounded_regular_file(manifest_path, maximum=MAX_MANIFEST_BYTES)
+            )
+            != auxiliary.core_artifact_manifest_sha256
+            or context_row is None
+        ):
+            raise TaskwiseCoreEvolutionError("TASKWISE_HEAD_IDENTITY_DRIFT")
+        try:
+            materialized = MaterializedContext.model_validate_json(
+                str(context_row["manifest_json"])
+            )
+            response = MaterializedContext.model_validate_json(
+                str(context_row["response_json"])
+            )
+            selected_ids = json.loads(str(context_row["selected_artifact_ids_json"]))
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise TaskwiseCoreEvolutionError("TASKWISE_CONTEXT_IDENTITY_DRIFT") from exc
+        if (
+            response != materialized
+            or materialized.context_id != auxiliary.core_context_id
+            or selected_ids != [auxiliary.core_artifact_id]
+            or materialized.selection.artifact_ids != (auxiliary.core_artifact_id,)
+            or canonical_digest(materialized) != auxiliary.context_resolution_digest
+            or payload.decode("utf-8") != auxiliary.resolved_content
+            or _sha256_bytes(payload) != auxiliary.resolved_content_sha256
+        ):
+            raise TaskwiseCoreEvolutionError("TASKWISE_CONTEXT_IDENTITY_DRIFT")
 
     def issue_runtime_memory(
         self,
@@ -1971,6 +2272,59 @@ class TaskwiseCoreEvolutionBridgeV1:
             context_resolution_digest=result.context_resolution_digest,
             resolved_memory_sha256=result.resolved_memory_sha256,
             markdown=result.resolved_memory,
+        )
+
+    def issue_runtime_context(
+        self,
+        result: TaskwiseCoreUpdateResultV1,
+    ) -> CoreResolvedSupervisedContextV1:
+        """Issue the exact approved memory, skill, and agent-system context."""
+
+        self.verify_update_result(result)
+        if tuple(
+            artifact.target_id for artifact in result.supervised_auxiliary_artifacts
+        ) != ("skill_bundle", "agent_system"):
+            raise TaskwiseCoreEvolutionError("TASKWISE_RUNTIME_CONTEXT_INCOMPLETE")
+        by_target = {
+            artifact.target_id: artifact
+            for artifact in result.supervised_auxiliary_artifacts
+        }
+        return CoreResolvedSupervisedContextV1(
+            memory=_issue_core_resolved_text_memory_v2(
+                core_artifact_id=result.core_artifact_id,
+                artifact_payload_sha256=result.artifact_payload_sha256,
+                context_resolution_digest=result.context_resolution_digest,
+                resolved_memory_sha256=result.resolved_memory_sha256,
+                markdown=result.resolved_memory,
+            ),
+            skill=_issue_core_resolved_auxiliary_v1(
+                target_id="skill_bundle",
+                core_artifact_id=by_target["skill_bundle"].core_artifact_id,
+                artifact_payload_sha256=by_target[
+                    "skill_bundle"
+                ].artifact_payload_sha256,
+                context_resolution_digest=by_target[
+                    "skill_bundle"
+                ].context_resolution_digest,
+                resolved_content_sha256=by_target[
+                    "skill_bundle"
+                ].resolved_content_sha256,
+                markdown=by_target["skill_bundle"].resolved_content,
+            ),
+            agent_system=_issue_core_resolved_auxiliary_v1(
+                target_id="agent_system",
+                core_artifact_id=by_target["agent_system"].core_artifact_id,
+                artifact_payload_sha256=by_target[
+                    "agent_system"
+                ].artifact_payload_sha256,
+                context_resolution_digest=by_target[
+                    "agent_system"
+                ].context_resolution_digest,
+                resolved_content_sha256=by_target[
+                    "agent_system"
+                ].resolved_content_sha256,
+                markdown=by_target["agent_system"].resolved_content,
+            ),
         )
 
     def _require_next_predecessor(self, request: TaskwiseCoreUpdateRequestV1) -> None:
@@ -1990,6 +2344,29 @@ class TaskwiseCoreEvolutionBridgeV1:
             if predecessor_id in self._history:
                 raise TaskwiseCoreEvolutionError("TASKWISE_LINEAGE_ROLLBACK")
             raise TaskwiseCoreEvolutionError("TASKWISE_LINEAGE_FORK")
+        packet = request.supervised_packet
+        if (packet is None) != (head.supervised_packet_sha256 is None):
+            raise TaskwiseCoreEvolutionError("TASKWISE_LINEAGE_FORK")
+        if packet is not None:
+            by_target = {
+                value.target_id: value
+                for value in head.supervised_auxiliary_artifacts
+            }
+            if set(by_target) != {"skill_bundle", "agent_system"}:
+                raise TaskwiseCoreEvolutionError("TASKWISE_HEAD_STATE_INVALID")
+            if (
+                packet.predecessor_skill_artifact_id
+                != by_target["skill_bundle"].core_artifact_id
+                or packet.predecessor_skill
+                != by_target["skill_bundle"].resolved_content
+                or packet.predecessor_agent_system_artifact_id
+                != by_target["agent_system"].core_artifact_id
+                or packet.predecessor_agent_system
+                != by_target["agent_system"].resolved_content
+            ):
+                raise TaskwiseCoreEvolutionError(
+                    "TASKWISE_PREDECESSOR_BINDING_INVALID"
+                )
         if head.update_index == 1:
             expected_position = (
                 head.task_uid,
@@ -2430,10 +2807,11 @@ class TaskwiseCoreEvolutionBridgeV1:
         trajectory_digest: str,
         expected_record_count: int,
         test_only_allow_synthetic_reflector: bool,
-    ) -> dict[str, str | None]:
+    ) -> dict[str, Any]:
         reflector_input_digest: str
         reflector_receipt_digest: str | None = None
         reflector_event_stream_digest: str | None = None
+        auxiliary_output: SupervisedStructuredAuxiliaryOutputV1 | None = None
         client = _StoreWorkerClient(self._store)
         if test_only_allow_synthetic_reflector:
             reflector_input_digest = trajectory_digest
@@ -2518,6 +2896,10 @@ class TaskwiseCoreEvolutionBridgeV1:
                     raise TaskwiseCoreEvolutionError("TASKWISE_REFLECTOR_BOUNDARY_FAILED")
                 reflector_receipt_digest = receipt.digest
                 reflector_event_stream_digest = receipt.event_stream_sha256
+                if request.supervised_packet is not None:
+                    auxiliary_output = (
+                        activation.load_supervised_auxiliary_output_for_audit()
+                    )
         if not claimed or client.completed is None or client.completed.get("job_id") != job_id:
             raise TaskwiseCoreEvolutionError("TASKWISE_CORE_JOB_FAILED")
         artifact_ids = client.completed.get("artifact_ids")
@@ -2528,6 +2910,7 @@ class TaskwiseCoreEvolutionBridgeV1:
             "reflector_input_digest": reflector_input_digest,
             "reflector_receipt_digest": reflector_receipt_digest,
             "reflector_event_stream_digest": reflector_event_stream_digest,
+            "auxiliary_output": auxiliary_output,
         }
 
     def _validate_promote_resolve(
@@ -2551,6 +2934,8 @@ class TaskwiseCoreEvolutionBridgeV1:
         reflector_input_digest: str | None,
         reflector_receipt_digest: str | None,
         reflector_event_stream_digest: str | None,
+        auxiliary_output: SupervisedStructuredAuxiliaryOutputV1 | None,
+        test_only_allow_synthetic_reflector: bool,
     ) -> TaskwiseCoreUpdateResultV1:
         failure_metadata = {
             "request": request,
@@ -2640,6 +3025,9 @@ class TaskwiseCoreEvolutionBridgeV1:
                     payload,
                     category=packet.category,
                     limits=self._memory_limits,
+                    allowed_evidence_digests=frozenset(
+                        (*self._seen_supervised_packet_digests, packet.digest)
+                    ),
                 )
             failure_metadata["artifact_payload_sha256"] = payload_sha256
             failure_metadata["memory_inspection_sha256"] = inspection.digest
@@ -2712,6 +3100,22 @@ class TaskwiseCoreEvolutionBridgeV1:
                 context,
                 expected_artifact_id=artifact_id,
             )
+            if packet is None:
+                if auxiliary_output is not None:
+                    raise TaskwiseCoreEvolutionError("TASKWISE_TYPED_ARTIFACT_INVALID")
+                auxiliary_artifacts: tuple[SupervisedAuxiliaryCoreArtifactV1, ...] = ()
+            else:
+                if auxiliary_output is None and test_only_allow_synthetic_reflector:
+                    auxiliary_output = _synthetic_supervised_auxiliary_output(packet)
+                if auxiliary_output is None or auxiliary_output.category != packet.category:
+                    raise TaskwiseCoreEvolutionError("TASKWISE_TYPED_ARTIFACT_INVALID")
+                auxiliary_artifacts = self._materialize_auxiliary_artifacts(
+                    request=request,
+                    dataset_artifact_id=dataset_artifact_id,
+                    global_update_ordinal=global_update_ordinal,
+                    forbidden_literals=forbidden_literals,
+                    auxiliary_output=auxiliary_output,
+                )
             return TaskwiseCoreUpdateResultV1(
                 task_uid=request.task_uid,
                 task_index=request.task_index,
@@ -2762,6 +3166,7 @@ class TaskwiseCoreEvolutionBridgeV1:
                 supervised_reflector_prompt_sha256=(
                     None if packet is None else REFLECTOR_PROMPT_DIGEST
                 ),
+                supervised_auxiliary_artifacts=auxiliary_artifacts,
             )
         except Exception as exc:
             self._raise_private_core_failure(
@@ -2770,6 +3175,351 @@ class TaskwiseCoreEvolutionBridgeV1:
                 cause=exc,
                 **failure_metadata,
             )
+
+    def _materialize_auxiliary_artifacts(
+        self,
+        *,
+        request: TaskwiseCoreUpdateRequestV1,
+        dataset_artifact_id: str,
+        global_update_ordinal: int,
+        forbidden_literals: tuple[str, ...],
+        auxiliary_output: SupervisedStructuredAuxiliaryOutputV1,
+    ) -> tuple[SupervisedAuxiliaryCoreArtifactV1, ...]:
+        """Create verified skill/system jobs from one reflector-bound response."""
+
+        packet = request.supervised_packet
+        if packet is None or auxiliary_output.category != packet.category:
+            raise TaskwiseCoreEvolutionError("TASKWISE_TYPED_ARTIFACT_INVALID")
+        allowed_evidence = frozenset(
+            (*self._seen_supervised_packet_digests, packet.digest)
+        )
+        prior_by_target = {
+            artifact.target_id: artifact
+            for artifact in (
+                () if self._head is None else self._head.supervised_auxiliary_artifacts
+            )
+        }
+        specifications = (
+            (
+                "skill_bundle",
+                "skill_bundle",
+                auxiliary_output.skill_markdown,
+                auxiliary_output.skill_source_sha256,
+                auxiliary_output.skill_evidence_digests,
+            ),
+            (
+                "agent_system",
+                "agent_system",
+                auxiliary_output.agent_system_markdown,
+                auxiliary_output.agent_system_source_sha256,
+                auxiliary_output.agent_system_evidence_digests,
+            ),
+        )
+        results: list[SupervisedAuxiliaryCoreArtifactV1] = []
+        for target_id, method_id, content, source_digest, evidence_digests in specifications:
+            if packet.digest not in evidence_digests:
+                raise TaskwiseCoreEvolutionError(
+                    "TASKWISE_ARTIFACT_VALIDATION_FAILED"
+                )
+            prior = prior_by_target.get(target_id)
+            results.append(
+                self._materialize_one_auxiliary_artifact(
+                    request=request,
+                    dataset_artifact_id=dataset_artifact_id,
+                    global_update_ordinal=global_update_ordinal,
+                    forbidden_literals=forbidden_literals,
+                    allowed_evidence=allowed_evidence,
+                    target_id=target_id,
+                    method_id=method_id,
+                    content=content,
+                    source_component_sha256=source_digest,
+                    source_evidence_digests=evidence_digests,
+                    predecessor=prior,
+                )
+            )
+        return tuple(results)
+
+    def _materialize_one_auxiliary_artifact(
+        self,
+        *,
+        request: TaskwiseCoreUpdateRequestV1,
+        dataset_artifact_id: str,
+        global_update_ordinal: int,
+        forbidden_literals: tuple[str, ...],
+        allowed_evidence: frozenset[str],
+        target_id: str,
+        method_id: str,
+        content: str,
+        source_component_sha256: str,
+        source_evidence_digests: tuple[str, ...],
+        predecessor: SupervisedAuxiliaryCoreArtifactV1 | None,
+    ) -> SupervisedAuxiliaryCoreArtifactV1:
+        if (target_id, method_id) not in _AUXILIARY_TARGET_METHODS:
+            raise TaskwiseCoreEvolutionError("TASKWISE_REGISTERED_METHOD_INVALID")
+        descriptor = self._registry.snapshot.methods.get(method_id)
+        if (
+            descriptor is None
+            or method_id not in self._registry.method_handles
+            or descriptor.target_id != target_id
+            or descriptor.output_artifact_types != (target_id,)
+            or tuple(binding.binding_id for binding in descriptor.input_bindings)
+            != ("current_dataset", "prior_target_artifacts")
+        ):
+            raise TaskwiseCoreEvolutionError("TASKWISE_REGISTERED_METHOD_INVALID")
+        selection_config: dict[str, object] = {"content": content}
+        if target_id == "agent_system":
+            selection_config["target_path"] = "AGENTS.md"
+        selection = EvolutionTargetSelection(
+            target_id=target_id,
+            enabled=True,
+            method_id=method_id,
+            config=selection_config,
+        )
+        identity = canonical_digest(
+            {
+                "protocol_id": request.supervised_packet.protocol_id,
+                "packet_sha256": request.supervised_packet.digest,
+                "target_id": target_id,
+                "source_component_sha256": source_component_sha256,
+                "global_update_ordinal": global_update_ordinal,
+                "predecessor_artifact_id": (
+                    None if predecessor is None else predecessor.core_artifact_id
+                ),
+            }
+        )
+        profile = EvolutionExecutionProfile(
+            execution_mode="self_deployed",
+            capture_mode="transcript",
+            harness_id="codex",
+        )
+        plan = self._registry.snapshot.compile_plan(
+            plan_id=f"{_JOB_PREFIX}.{target_id}.{identity[:32]}",
+            selections=(selection,),
+            profile=profile,
+        )
+        job_type = f"{_JOB_PREFIX}.{target_id}.{identity[:24]}"
+        prior_ids = () if predecessor is None else (predecessor.core_artifact_id,)
+        expected_lineage = {
+            "protocol_id": request.supervised_packet.protocol_id,
+            "category": request.supervised_packet.category,
+            "target_id": target_id,
+            "method_id": method_id,
+            "supervised_packet_sha256": request.supervised_packet.digest,
+            "source_component_sha256": source_component_sha256,
+            "source_evidence_digests": list(source_evidence_digests),
+            "global_update_ordinal": global_update_ordinal,
+            "dataset_artifact_id": dataset_artifact_id,
+            "predecessor_artifact_id": (
+                None if predecessor is None else predecessor.core_artifact_id
+            ),
+            "predecessor_payload_sha256": (
+                None if predecessor is None else predecessor.artifact_payload_sha256
+            ),
+            "validator_input_digest": _validator_input_digest(forbidden_literals),
+        }
+        created = self._store.create_plan_bound_job(
+            PlanBoundJobCreateRequest(
+                plan=plan,
+                target_id=target_id,
+                job_type=job_type,
+                input_bindings=(
+                    PlannedInputBinding(
+                        binding_id="current_dataset",
+                        artifact_ids=(dataset_artifact_id,),
+                    ),
+                    PlannedInputBinding(
+                        binding_id="prior_target_artifacts",
+                        artifact_ids=prior_ids,
+                    ),
+                ),
+                core_config={
+                    "name": f"Supervised category {target_id} update",
+                    "promoted": False,
+                    "lineage": expected_lineage,
+                    "compatibility": {
+                        "agent_harness": ["codex"],
+                        "auth_mode": ["subscription"],
+                        "base_model": [MODEL],
+                        "task_tags": [request.supervised_packet.protocol_id],
+                    },
+                    "tags": [
+                        request.supervised_packet.protocol_id,
+                        BRIDGE_ID,
+                        "supervised-multitarget-projection",
+                    ],
+                },
+            ),
+            snapshot=self._registry.snapshot,
+        )
+        client = _StoreWorkerClient(self._store)
+        claimed = run_once(
+            client,
+            worker_id=(
+                f"{BRIDGE_ID}-{target_id}-task-{request.task_index}-"
+                f"update-{request.update_index}"
+            ),
+            capabilities=[job_type],
+            artifact_root=self._store.files.root,
+            lease_seconds=self._core_lease_seconds,
+            executable_registry=self._registry,
+        )
+        if (
+            not claimed
+            or client.completed is None
+            or client.completed.get("job_id") != created.job_id
+            or not isinstance(client.completed.get("artifact_ids"), list)
+            or len(client.completed["artifact_ids"]) != 1
+        ):
+            raise TaskwiseCoreEvolutionError("TASKWISE_CORE_JOB_FAILED")
+        artifact_id = str(client.completed["artifact_ids"][0])
+        artifact = self._store.get_artifact(artifact_id)
+        expected_type = (
+            ArtifactType.SKILL_BUNDLE
+            if target_id == "skill_bundle"
+            else ArtifactType.AGENT_SYSTEM
+        )
+        if (
+            artifact.type is not expected_type
+            or artifact.state is not ArtifactState.ACTIVE
+            or artifact.promoted
+        ):
+            raise TaskwiseCoreEvolutionError("TASKWISE_TYPED_ARTIFACT_INVALID")
+        payload_root = _safe_core_file_path(
+            artifact.uri,
+            allowed_root=self._store.files.root,
+        )
+        payload_path = payload_root / "SKILL.md" if target_id == "skill_bundle" else payload_root
+        payload = _read_bounded_regular_file(
+            payload_path,
+            maximum=ABSOLUTE_MAX_MEMORY_FILE_BYTES,
+        )
+        if payload != content.encode("utf-8"):
+            raise TaskwiseCoreEvolutionError("TASKWISE_ARTIFACT_VALIDATION_FAILED")
+        inspection = inspect_supervised_auxiliary_artifact_v1(
+            payload,
+            target_id=target_id,  # type: ignore[arg-type]
+            category=request.supervised_packet.category,
+            source_evidence_digests=source_evidence_digests,
+            allowed_evidence_digests=allowed_evidence,
+            forbidden_literals=forbidden_literals,
+        )
+        if not inspection.passed:
+            raise TaskwiseCoreEvolutionError("TASKWISE_ARTIFACT_VALIDATION_FAILED")
+        lineage = self._artifact_lineage(artifact_id)
+        execution = lineage.get("openevo_execution")
+        input_bindings = None if not isinstance(execution, dict) else execution.get(
+            "input_bindings"
+        )
+        bindings_valid = (
+            isinstance(input_bindings, list)
+            and len(input_bindings) == 2
+            and isinstance(input_bindings[0], dict)
+            and isinstance(input_bindings[1], dict)
+            and input_bindings[0].get("binding_id") == "current_dataset"
+            and input_bindings[0].get("artifact_ids") == [dataset_artifact_id]
+            and input_bindings[1].get("binding_id") == "prior_target_artifacts"
+            and input_bindings[1].get("artifact_ids") == list(prior_ids)
+            and all(
+                isinstance(binding, dict)
+                and isinstance(binding.get("artifact_digests"), list)
+                and len(binding["artifact_digests"]) == len(binding["artifact_ids"])
+                and all(
+                    isinstance(value, str) and _SHA256_RE.fullmatch(value) is not None
+                    for value in binding["artifact_digests"]
+                )
+                for binding in input_bindings
+            )
+        )
+        if (
+            not isinstance(execution, dict)
+            or execution.get("job_id") != created.job_id
+            or execution.get("plan_id") != plan.plan_id
+            or execution.get("plan_digest") != canonical_digest(plan)
+            or execution.get("target_id") != target_id
+            or execution.get("method_id") != method_id
+            or execution.get("method_identity_digest")
+            != self._registry.snapshot.identity_digest_for(
+                DescriptorKind.METHOD,
+                method_id,
+            )
+            or execution.get("registry_snapshot_digest")
+            != plan.registry_snapshot_digest
+            or not bindings_valid
+        ):
+            raise TaskwiseCoreEvolutionError("TASKWISE_CORE_LINEAGE_INVALID")
+        promoted = self._store.update_artifact_promotion(artifact_id, promoted=True)
+        if not promoted.promoted:
+            raise TaskwiseCoreEvolutionError("TASKWISE_ARTIFACT_PROMOTION_FAILED")
+        manifest_path = self._store.files.artifact_manifest_path(
+            str(expected_type),
+            artifact_id,
+        )
+        context = self._store.resolve_materialized_context(
+            ContextProjectionResolveRequest(
+                task_id=(
+                    f"supervised-{target_id}-task-{request.task_index:08d}-"
+                    f"after-update-{request.update_index}"
+                ),
+                instruction=f"Resolve approved supervised {target_id} for the next session.",
+                agent={
+                    "harness": "codex",
+                    "settings": {"auth_mode": "subscription"},
+                },
+                base_model=MODEL,
+                policy_version=request.supervised_packet.protocol_id,
+                metadata={
+                    "task_tags": [request.supervised_packet.protocol_id],
+                    "evolution": {"context_artifact_ids": [artifact_id]},
+                },
+                execution_profile=self._execution_profile(),
+                destination_roots=RuntimeDestinationRoots(
+                    target_data="/openevo/session/evolution",
+                    harness_skills="/openevo/session/evolution/skills",
+                    harness_instruction="/workspace/repository",
+                ),
+                target_limits={
+                    target_id: TargetConsumptionLimits(
+                        max_artifacts=1,
+                        max_text_chars=_MAX_AUXILIARY_PAYLOAD_BYTES,
+                        max_text_bytes=_MAX_AUXILIARY_PAYLOAD_BYTES,
+                        max_payload_bytes=_MAX_AUXILIARY_PAYLOAD_BYTES,
+                        max_adapters=0,
+                    )
+                },
+            )
+        )
+        if (
+            context.selection.artifact_ids != (artifact_id,)
+            or len(context.projections) != 1
+            or context.projections[0].target_id != target_id
+            or context.projections[0].artifact_ids != (artifact_id,)
+        ):
+            raise TaskwiseCoreEvolutionError("TASKWISE_CONTEXT_IDENTITY_DRIFT")
+        return SupervisedAuxiliaryCoreArtifactV1(
+            target_id=target_id,
+            method_id=method_id,
+            plan_id=plan.plan_id,
+            plan_digest=canonical_digest(plan),
+            job_id=created.job_id,
+            method_descriptor_digest=canonical_digest(descriptor),
+            method_identity_digest=self._registry.snapshot.identity_digest_for(
+                DescriptorKind.METHOD,
+                method_id,
+            ),
+            core_artifact_id=artifact_id,
+            core_artifact_manifest_sha256=_sha256_bytes(
+                _read_bounded_regular_file(manifest_path, maximum=MAX_MANIFEST_BYTES)
+            ),
+            artifact_payload_sha256=_sha256_bytes(payload),
+            artifact_lineage_sha256=canonical_digest(lineage),
+            source_component_sha256=source_component_sha256,
+            inspection=inspection,
+            inspection_sha256=inspection.digest,
+            core_context_id=context.context_id,
+            context_resolution_digest=canonical_digest(context),
+            resolved_content=payload.decode("utf-8"),
+            resolved_content_sha256=_sha256_bytes(payload),
+        )
 
     def _raise_private_core_failure(
         self,
@@ -2893,6 +3643,20 @@ class TaskwiseCoreEvolutionBridgeV1:
             != ("dataset_inputs", "prior_target_artifacts")
         ):
             raise TaskwiseCoreEvolutionError("TASKWISE_REGISTERED_METHOD_INVALID")
+
+    def _require_auxiliary_methods(self) -> None:
+        snapshot = self._registry.snapshot
+        for target_id, method_id in _AUXILIARY_TARGET_METHODS:
+            if method_id not in snapshot.methods or method_id not in self._registry.method_handles:
+                raise TaskwiseCoreEvolutionError("TASKWISE_REGISTERED_METHOD_MISSING")
+            descriptor = snapshot.methods[method_id]
+            if (
+                descriptor.target_id != target_id
+                or descriptor.output_artifact_types != (target_id,)
+                or tuple(binding.binding_id for binding in descriptor.input_bindings)
+                != ("current_dataset", "prior_target_artifacts")
+            ):
+                raise TaskwiseCoreEvolutionError("TASKWISE_REGISTERED_METHOD_INVALID")
 
     @staticmethod
     def _execution_profile() -> EvolutionExecutionProfile:
@@ -3789,6 +4553,42 @@ def _canonical_json(value: Any) -> str:
         separators=(",", ":"),
         ensure_ascii=False,
         allow_nan=False,
+    )
+
+
+def _synthetic_supervised_auxiliary_output(
+    packet: SupervisedEvolutionPacketV1,
+) -> SupervisedStructuredAuxiliaryOutputV1:
+    """Deterministic no-model projection used only by explicit synthetic tests."""
+
+    skill = (
+        f"# Category Skill: {packet.category}\n\n"
+        "## When To Use\n- When solving this chemistry category.\n\n"
+        "## Workflow\n1. Apply the category principle before comparing choices.\n\n"
+        "## Validation Checks\n- Validate the conclusion against chemical constraints.\n\n"
+        "## Failure Guards\n- Reject unsupported shortcuts before finalizing.\n"
+    )
+    agent = (
+        f"# Category Agent System: {packet.category}\n\n"
+        "## Directives\n"
+        "- When solving this category, use explicit chemistry constraints. "
+        "Validate by checking the selected choice against those constraints.\n\n"
+        "## Output Discipline\n- Return exactly the requested option format.\n"
+    )
+    return SupervisedStructuredAuxiliaryOutputV1(
+        category=packet.category,
+        skill_markdown=skill,
+        agent_system_markdown=agent,
+        skill_source_sha256=canonical_digest(
+            {"synthetic": True, "target": "skill_bundle", "packet": packet.digest}
+        ),
+        agent_system_source_sha256=canonical_digest(
+            {"synthetic": True, "target": "agent_system", "packet": packet.digest}
+        ),
+        skill_markdown_sha256=_sha256_bytes(skill.encode("utf-8")),
+        agent_system_markdown_sha256=_sha256_bytes(agent.encode("utf-8")),
+        skill_evidence_digests=(packet.digest,),
+        agent_system_evidence_digests=(packet.digest,),
     )
 
 

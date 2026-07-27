@@ -29,6 +29,8 @@ from openevo_chembench.supervised_transfer_v1.pause import (
 )
 from openevo_chembench.supervised_transfer_v1.preflight import (
     _aggregate_checkpoint_zero,
+    _empty_checkpoint_targets,
+    _valid_multitarget_core_row,
 )
 from openevo_chembench.supervised_transfer_v1.reporting import _probe_rows
 from openevo_chembench.supervised_transfer_v1.test_ledger import (
@@ -131,7 +133,7 @@ def test_probe_smoke_admits_only_probe_smoke_arms(tmp_path: Path) -> None:
     for arm in ("control_probe_smoke", "online_probe_smoke"):
         experiment._require_session_admission(
             task=cast(Any, probe_task),
-            memory=None,
+            context=None,
             logical_arm=arm,
             task_ordinal=0,
             round_index=0,
@@ -140,12 +142,42 @@ def test_probe_smoke_admits_only_probe_smoke_arms(tmp_path: Path) -> None:
     with pytest.raises(SupervisedExperimentError, match="SESSION_ARM_STAGE_INVALID"):
         experiment._require_session_admission(
             task=cast(Any, probe_task),
-            memory=None,
+            context=None,
             logical_arm="control_probe",
             task_ordinal=0,
             round_index=0,
             stage="PROBE_SMOKE",
         )
+
+
+def test_preflight_requires_complete_multitarget_core_evidence() -> None:
+    row = {
+        "method_id": "text_memory_expel_reflector",
+        "auxiliary_targets": [
+            {
+                "target_id": target,
+                "method_id": target,
+                "job_id": f"job-{target}",
+                "artifact_id": f"artifact-{target}",
+                "inspection": {
+                    "target_id": target,
+                    "finding_codes": [],
+                },
+            }
+            for target in ("skill_bundle", "agent_system")
+        ],
+    }
+    assert _valid_multitarget_core_row(row)
+    row["auxiliary_targets"] = row["auxiliary_targets"][:1]
+    assert not _valid_multitarget_core_row(row)
+    assert _empty_checkpoint_targets(
+        {
+            "text_memory": None,
+            "skill_bundle": None,
+            "agent_system": None,
+        }
+    )
+    assert not _empty_checkpoint_targets({"text_memory": None})
 
 
 def test_formal_run_calls_control_before_bridges_or_online(
@@ -189,24 +221,28 @@ def test_formal_run_calls_control_before_bridges_or_online(
         experiment._set_stage("ONLINE_TRAIN")
         experiment._state["task_sessions"] = 3_420
         experiment._state["reflector_completions"] = 900
+        experiment._state["core_jobs"] = 2_700
+        experiment._state["core_artifacts"] = 2_700
         experiment._set_stage("PROBE_CHECKPOINT_50")
         experiment._state["task_sessions"] = 3_600
 
     def freeze_final() -> object:
-        actions.append("FREEZE_FINAL_MEMORY")
-        experiment._set_stage("FREEZE_FINAL_MEMORY")
+        actions.append("FREEZE_FINAL_CONTEXT")
+        experiment._set_stage("FREEZE_FINAL_CONTEXT")
         return object()
 
     def final_test(_frozen: object, _control: object, _online: object) -> None:
         actions.append("FINAL_TEST")
         experiment._set_stage("FINAL_TEST")
         experiment._state["task_sessions"] = 4_500
+        experiment._state["core_jobs"] = 2_700
+        experiment._state["core_artifacts"] = 2_700
 
     monkeypatch.setattr(experiment, "_run_control_train", control_train)
     monkeypatch.setattr(experiment, "_open_formal_bridges", open_bridges)
     monkeypatch.setattr(experiment, "_freeze_checkpoint", freeze_checkpoint)
     monkeypatch.setattr(experiment, "_run_online_train_with_probes", online_train)
-    monkeypatch.setattr(experiment, "_freeze_final_memory", freeze_final)
+    monkeypatch.setattr(experiment, "_freeze_final_context", freeze_final)
     monkeypatch.setattr(experiment, "_run_final_test", final_test)
     monkeypatch.setattr(
         "openevo_chembench.supervised_transfer_v1.reporting.build_all_reports_v1",
@@ -392,9 +428,49 @@ def test_pause_process_scan_excludes_current_audit_ancestor_commands(
         lambda: 50,
     )
 
-    snapshot = _relevant_process_snapshot()
+    snapshot = _relevant_process_snapshot(
+        repository_root=Path.cwd(),
+        run_id="paused-run-0001",
+    )
 
-    assert [row["pid"] for row in snapshot] == [200]
+    assert snapshot == []
+
+
+def test_pause_process_scan_is_scoped_to_repository_and_includes_descendants(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path.resolve()
+    process_rows = (
+        "100 50 100 100 S python record-pause\n"
+        "50 40 40 40 S bash audit-parent\n"
+        "40 1 40 40 S tool-runner\n"
+        "200 1 200 200 S python /repo/other/run-formal --run-id other-run-0001\n"
+        "201 200 201 201 S codex exec other-call\n"
+        f"300 1 300 300 S python {repository}/run-formal --run-id formal-run-0001\n"
+        "301 300 301 301 S codex exec current-call"
+    )
+    monkeypatch.setattr(
+        "openevo_chembench.supervised_transfer_v1.pause.subprocess.run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=0,
+            stdout=process_rows,
+        ),
+    )
+    monkeypatch.setattr(
+        "openevo_chembench.supervised_transfer_v1.pause.os.getpid",
+        lambda: 100,
+    )
+    monkeypatch.setattr(
+        "openevo_chembench.supervised_transfer_v1.pause.os.getppid",
+        lambda: 50,
+    )
+    snapshot = _relevant_process_snapshot(
+        repository_root=repository,
+        run_id="formal-run-0001",
+    )
+
+    assert [row["pid"] for row in snapshot] == [300, 301]
 
 
 def test_test_manifest_ledger_is_global_single_use_and_recovery_is_evidence_gated(
@@ -497,8 +573,8 @@ def test_test_manifest_ledger_is_global_single_use_and_recovery_is_evidence_gate
         "stage": "FINAL_TEST",
         "task_sessions": 4_500,
         "reflector_completions": 900,
-        "core_jobs": 900,
-        "core_artifacts": 900,
+        "core_jobs": 2_700,
+        "core_artifacts": 2_700,
     }
     (final_public / "run_state.json").write_text(json.dumps(final_state))
     (final_public / "frozen_transfer_receipt_v1.json").write_bytes(frozen_raw)
@@ -517,6 +593,10 @@ def test_test_manifest_ledger_is_global_single_use_and_recovery_is_evidence_gate
                 "task_uid": "b",
                 "session_id": session_id,
                 "memory_artifact_id": None if arm == "control_test" else "artifact",
+                "skill_artifact_id": None if arm == "control_test" else "skill",
+                "agent_system_artifact_id": (
+                    None if arm == "control_test" else "agent-system"
+                ),
             }
             public_rows.append(row)
             private_rows.append({**row, "kind": "PRIVATE_EVALUATED"})

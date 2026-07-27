@@ -46,6 +46,10 @@ _EVIDENCE_COUNT_RE = re.compile(
 _STATUS_RE = re.compile(
     r"\bStatus\s*[:=]\s*(provisional|confirmed|retired)\b", re.IGNORECASE
 )
+_EVIDENCE_DIGESTS_RE = re.compile(
+    r"\bEvidence\s+Digests\s*[:=]\s*([^;]+)\s*\Z",
+    re.IGNORECASE,
+)
 _REQUIRED_RULE_FIELDS = (
     "rule id",
     "status",
@@ -186,6 +190,7 @@ def inspect_supervised_category_memory_v1(
     *,
     category: str,
     limits: SupervisedMemoryLimitsV1 = SUPERVISED_MEMORY_LIMITS_V1,
+    allowed_evidence_digests: frozenset[str] | None = None,
 ) -> SupervisedMemoryInspectionV1:
     """Validate exact headings, rule evidence states, and artifact capacity."""
 
@@ -195,6 +200,14 @@ def inspect_supervised_category_memory_v1(
         raise ValueError("memory category is not frozen")
     if type(limits) is not SupervisedMemoryLimitsV1:
         raise TypeError("limits must be exact SupervisedMemoryLimitsV1")
+    if allowed_evidence_digests is not None and (
+        type(allowed_evidence_digests) is not frozenset
+        or any(
+            re.fullmatch(r"[0-9a-f]{64}", value) is None
+            for value in allowed_evidence_digests
+        )
+    ):
+        raise TypeError("allowed evidence must be a frozen SHA-256 set or None")
     findings: set[str] = set()
     byte_count = len(payload)
     if byte_count > limits.max_utf8_bytes:
@@ -261,6 +274,7 @@ def inspect_supervised_category_memory_v1(
                 continue
             status = status_match.group(1).casefold()
             evidence_count = int(evidence_match.group(1))
+            evidence_digests_match = _EVIDENCE_DIGESTS_RE.search(item)
             expected_status = {
                 "Confirmed Principles": "confirmed",
                 "Provisional Principles": "provisional",
@@ -272,6 +286,29 @@ def inspect_supervised_category_memory_v1(
                 findings.add("memory_confirmed_evidence_insufficient")
             if status == "provisional" and evidence_count != 1:
                 findings.add("memory_provisional_evidence_invalid")
+            if allowed_evidence_digests is not None:
+                if evidence_digests_match is None:
+                    findings.add("memory_evidence_digest_schema_invalid")
+                else:
+                    encoded_digests = evidence_digests_match.group(1).strip()
+                    digests = (
+                        ()
+                        if encoded_digests.casefold() == "none"
+                        else tuple(
+                            value.strip() for value in encoded_digests.split(",")
+                        )
+                    )
+                    if (
+                        len(digests) != evidence_count
+                        or len(set(digests)) != len(digests)
+                        or any(
+                            re.fullmatch(r"[0-9a-f]{64}", value) is None
+                            for value in digests
+                        )
+                    ):
+                        findings.add("memory_evidence_digest_schema_invalid")
+                    elif not set(digests).issubset(allowed_evidence_digests):
+                        findings.add("memory_evidence_outside_train_chain")
 
     def substantive_count(section: str) -> int:
         return sum(

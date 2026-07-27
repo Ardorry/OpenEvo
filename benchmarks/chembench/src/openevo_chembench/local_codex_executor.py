@@ -35,6 +35,12 @@ from openevo_chembench.runtime_context import (
     AgentArtifactContext,
     AgentRoundRequest,
 )
+from openevo_chembench.supervised_transfer_v1.context_binding import (
+    SupervisedAgentRequestV1,
+    SupervisedContextBindingReceiptV1,
+    SupervisedSessionContextBindingV1,
+    issue_supervised_context_binding_receipt_v1,
+)
 from openevo_chembench.taskwise_config_v1 import (
     TaskwiseExperimentConfigV1,
     canonical_taskwise_config_bytes,
@@ -46,7 +52,6 @@ from openevo_chembench.taskwise_context_binding_v1 import (
 )
 from openevo_chembench.taskwise_online_runner_v1 import TaskwiseAgentRequestV1
 from openevo_chembench.v2_config import FrozenExperimentConfigV2
-
 
 _CODEX_VERSION = re.compile(r"codex-cli ([0-9A-Za-z.+-]+)")
 _TASKWISE_RUNTIME_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{7,127}\Z", re.ASCII)
@@ -643,9 +648,10 @@ class LocalCodexCLIExecutor:
         "_pending_cleanup",
         "_reasoning_effort",
         "_security_violation",
+        "_supervised_context_receipts",
         "_task_timeout_seconds",
-        "_taskwise_mode",
         "_taskwise_context_receipts",
+        "_taskwise_mode",
         "_taskwise_session_ids",
         "_v2_mode",
     )
@@ -736,6 +742,10 @@ class LocalCodexCLIExecutor:
         self._taskwise_context_receipts: dict[
             str,
             TaskwiseContextBindingReceiptV1,
+        ] = {}
+        self._supervised_context_receipts: dict[
+            str,
+            SupervisedContextBindingReceiptV1,
         ] = {}
         self._taskwise_session_ids: set[str] = set()
         self._task_timeout_seconds = float(task_timeout_seconds)
@@ -1002,6 +1012,102 @@ class LocalCodexCLIExecutor:
             return self._taskwise_context_receipts.pop(session_id)
         except KeyError as exc:
             raise RuntimeError("taskwise context receipt is unavailable") from exc
+
+    def build_supervised_prompt(self, request: SupervisedAgentRequestV1) -> str:
+        """Compile one supervised session with either zero or all three targets."""
+
+        if not self._taskwise_mode:
+            raise TypeError("build_supervised_prompt requires taskwise executor mode")
+        if type(request) is not SupervisedAgentRequestV1:
+            raise TypeError("build_supervised_prompt requires exact request type")
+        config = self._config
+        if type(config) is not TaskwiseExperimentConfigV1:
+            raise AssertionError("taskwise executor config type changed")
+        if request.arm != config.arm:
+            raise LocalCodexExecutionError(LocalCodexExecutionErrorCode.PROMPT_AUDIT_FAILED)
+        if config.arm == "control" and request.resolved_context is not None:
+            raise LocalCodexExecutionError(LocalCodexExecutionErrorCode.PROMPT_AUDIT_FAILED)
+        _audit_runtime_payload(request.to_runtime_payload())
+        sections = [
+            (
+                "Runtime policy:\n"
+                "- Solve only from the supplied public prompt and, when present, "
+                "the approved Core-resolved category context.\n"
+                "- Do not use shell, commands, files, network, web, browser, "
+                "MCP, plugins, apps, subagents, or external tools.\n"
+                "- Reply exactly as required by the public prompt."
+            )
+        ]
+        context = request.resolved_context
+        if context is not None:
+            sections.extend(
+                (
+                    "Approved Core-resolved category memory:\n" + context.memory.markdown,
+                    "Approved Core-resolved category skill:\n" + context.skill.markdown,
+                    (
+                        "Approved Core-resolved category agent system:\n"
+                        + context.agent_system.markdown
+                    ),
+                )
+            )
+        sections.append(request.rendered_public_prompt)
+        prompt = "\n\n".join(sections)
+        if not prompt.endswith(request.rendered_public_prompt):
+            raise AssertionError("official rendered prompt was not preserved")
+        _audit_compiled_prompt(prompt)
+        return prompt
+
+    def execute_supervised(self, request: SupervisedAgentRequestV1) -> RawAttempt:
+        """Execute one immutable supervised session and bind all target bytes."""
+
+        if not self._taskwise_mode:
+            raise TypeError("execute_supervised requires taskwise executor mode")
+        if type(request) is not SupervisedAgentRequestV1:
+            raise TypeError("execute_supervised requires exact request type")
+        if request.session_id in self._taskwise_session_ids:
+            raise LocalCodexExecutionError(LocalCodexExecutionErrorCode.PROMPT_AUDIT_FAILED)
+        self._taskwise_session_ids.add(request.session_id)
+        prompt = self.build_supervised_prompt(request)
+        expected = SupervisedSessionContextBindingV1.from_context(
+            session_id=request.session_id,
+            context=request.resolved_context,
+        )
+        actual = SupervisedSessionContextBindingV1.from_injected_context(
+            session_id=request.session_id,
+            context=request.resolved_context,
+        )
+        receipt = issue_supervised_context_binding_receipt_v1(
+            expected=expected,
+            actual=actual,
+        )
+        receipt.require_match()
+        attempt = self._execute_prompt_once(
+            prompt,
+            diagnostic_context=_InvocationDiagnosticContext(
+                run_id=request.run_id,
+                task_uid=request.task_uid,
+                task_index=request.task_ordinal,
+                round_index=request.round_index,
+                session_id=request.session_id,
+            ),
+        )
+        if request.session_id in self._supervised_context_receipts:
+            raise RuntimeError("supervised context receipt was issued twice")
+        self._supervised_context_receipts[request.session_id] = receipt
+        return attempt
+
+    def consume_supervised_context_receipt(
+        self,
+        session_id: str,
+    ) -> SupervisedContextBindingReceiptV1:
+        """Return the one-shot three-target receipt for a completed session."""
+
+        if type(session_id) is not str:
+            raise TypeError("session ID must be a string")
+        try:
+            return self._supervised_context_receipts.pop(session_id)
+        except KeyError as exc:
+            raise RuntimeError("supervised context receipt is unavailable") from exc
 
     def _execute_prompt_once(
         self,

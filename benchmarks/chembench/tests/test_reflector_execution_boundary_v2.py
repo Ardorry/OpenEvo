@@ -465,6 +465,20 @@ def test_supervised_boundary_records_and_binds_structured_render(
         "validate": ["bounds"],
         "when_applicable": ["yield"],
         "retired_or_superseded": [],
+        "skill_when_to_use": ["when a yield estimate is requested"],
+        "skill_workflow": ["apply mass-balance bounds before comparing choices"],
+        "skill_validation_checks": ["verify the estimate is physically bounded"],
+        "skill_failure_guards": ["reject unsupported yields above full conversion"],
+        "skill_evidence_digests": ["1" * 64],
+        "agent_system_directives": [
+            {
+                "trigger": "when solving yield prediction",
+                "instruction": "apply explicit mass-balance constraints",
+                "validation": "check physical bounds before selecting an option",
+                "evidence_digests": ["1" * 64],
+            }
+        ],
+        "agent_system_output_discipline": ["return one uppercase option"],
     }
     response = json.dumps(structured, sort_keys=True, separators=(",", ":"))
     fake = tmp_path / "fake-codex"
@@ -502,7 +516,7 @@ def test_supervised_boundary_records_and_binds_structured_render(
     assert completed.returncode == 0
     receipt = activation.require_receipt()
     output = (upstream / "last-message.md").read_text(encoding="utf-8")
-    assert receipt.output_normalization_id == "supervised_memory_structured_render_v2"
+    assert receipt.output_normalization_id == "supervised_multitarget_structured_render_v1"
     assert receipt.output_normalization_applied is True
     assert receipt.source_last_message_sha256 != receipt.last_message_sha256
     assert receipt.last_message_sha256 == hashlib.sha256(output.encode()).hexdigest()
@@ -512,6 +526,13 @@ def test_supervised_boundary_records_and_binds_structured_render(
     assert inspect_supervised_category_memory_v1(
         output.encode("utf-8"), category="Yield_Prediction"
     ).passed
+    auxiliary = activation.load_supervised_auxiliary_output_for_audit()
+    assert auxiliary.category == "Yield_Prediction"
+    assert auxiliary.skill_markdown.startswith("# Category Skill: Yield_Prediction")
+    assert auxiliary.agent_system_markdown.startswith(
+        "# Category Agent System: Yield_Prediction"
+    )
+    assert auxiliary.skill_evidence_digests == ("1" * 64,)
 
 
 def test_supervised_structured_render_rejects_missing_or_ambiguous_sections() -> None:

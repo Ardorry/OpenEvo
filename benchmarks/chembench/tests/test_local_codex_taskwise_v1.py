@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 import stat
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -17,6 +17,14 @@ from openevo_chembench.local_codex_executor import (
     LocalCodexExecutionError,
     LocalCommandResult,
     load_taskwise_success_receipts_v1,
+)
+from openevo_chembench.supervised_transfer_v1.artifacts import (
+    CoreResolvedSupervisedContextV1,
+    _issue_core_resolved_auxiliary_v1,
+)
+from openevo_chembench.supervised_transfer_v1.context_binding import (
+    SupervisedAgentRequestV1,
+    SupervisedContextBindingError,
 )
 from openevo_chembench.taskwise_config_v1 import (
     ONLINE_PROTOCOL_ID,
@@ -121,6 +129,62 @@ def _request(
     )
 
 
+def _supervised_context() -> CoreResolvedSupervisedContextV1:
+    memory = _memory()
+    skill_markdown = (
+        "# Category Skill: Name_Conversion\n\n"
+        "## When To Use\n- Use for naming tasks.\n\n"
+        "## Workflow\n1. Apply nomenclature precedence.\n\n"
+        "## Validation Checks\n- Round-trip the name.\n\n"
+        "## Failure Guards\n- Reject incompatible locants.\n"
+    )
+    agent_markdown = (
+        "# Category Agent System: Name_Conversion\n\n"
+        "## Directives\n- Apply explicit chemical constraints.\n\n"
+        "## Output Discipline\n- Return one uppercase option.\n"
+    )
+    return CoreResolvedSupervisedContextV1(
+        memory=memory,
+        skill=_issue_core_resolved_auxiliary_v1(
+            target_id="skill_bundle",
+            core_artifact_id="art_skill_1",
+            artifact_payload_sha256="c" * 64,
+            context_resolution_digest="d" * 64,
+            resolved_content_sha256=hashlib.sha256(skill_markdown.encode()).hexdigest(),
+            markdown=skill_markdown,
+        ),
+        agent_system=_issue_core_resolved_auxiliary_v1(
+            target_id="agent_system",
+            core_artifact_id="art_agent_1",
+            artifact_payload_sha256="e" * 64,
+            context_resolution_digest="f" * 64,
+            resolved_content_sha256=hashlib.sha256(agent_markdown.encode()).hexdigest(),
+            markdown=agent_markdown,
+        ),
+    )
+
+
+def _supervised_request(
+    *,
+    session_id: str,
+    context: CoreResolvedSupervisedContextV1 | None,
+) -> SupervisedAgentRequestV1:
+    return SupervisedAgentRequestV1(
+        rendered_public_prompt=_request(
+            session_id="temporary-request-id",
+            task_ordinal=0,
+            round_index=0,
+        ).rendered_public_prompt,
+        resolved_context=context,
+        session_id=session_id,
+        arm="online",
+        task_ordinal=0,
+        round_index=1,
+        run_id="supervised-run-0001",
+        task_uid="1" * 64,
+    )
+
+
 def _transcript() -> str:
     events = (
         {"type": "thread.started"},
@@ -178,6 +242,61 @@ def test_taskwise_prompt_contains_only_public_prompt_and_core_memory(
     assert "round_index" not in prompt
     assert "General Chemistry Memory" in prompt
     assert prompt.endswith(request.rendered_public_prompt)
+
+
+def test_supervised_prompt_and_receipt_bind_all_three_core_targets(
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+
+    def runner(_command, prompt, _cwd, _environment, _timeout):
+        calls.append(prompt)
+        return LocalCommandResult(returncode=0, stdout=_transcript(), stderr="")
+
+    executor = _executor(tmp_path, runner)
+    context = _supervised_context()
+    request = _supervised_request(
+        session_id="supervised-session-0001",
+        context=context,
+    )
+
+    prompt = executor.build_supervised_prompt(request)
+    assert context.memory.markdown in prompt
+    assert context.skill.markdown in prompt
+    assert context.agent_system.markdown in prompt
+    assert request.session_id not in prompt
+    assert prompt.endswith(request.rendered_public_prompt)
+
+    assert executor.execute_supervised(request).response == "A"
+    receipt = executor.consume_supervised_context_receipt(request.session_id)
+    assert receipt.passed is True
+    assert [value.target_id for value in receipt.actual.targets] == [
+        "text_memory",
+        "skill_bundle",
+        "agent_system",
+    ]
+    assert len(calls) == 1
+
+
+def test_supervised_context_digest_mismatch_fails_before_model_call(
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+
+    def runner(*_args):
+        calls.append("called")
+        return LocalCommandResult(returncode=0, stdout=_transcript(), stderr="")
+
+    executor = _executor(tmp_path, runner)
+    context = _supervised_context()
+    object.__setattr__(context.skill, "markdown", context.skill.markdown + "tampered\n")
+    request = _supervised_request(
+        session_id="supervised-session-0002",
+        context=context,
+    )
+    with pytest.raises(SupervisedContextBindingError):
+        executor.execute_supervised(request)
+    assert calls == []
 
 
 def test_first_online_round_must_not_receive_unapproved_memory(tmp_path: Path) -> None:

@@ -19,6 +19,10 @@ reflector:
   method_id: text_memory_expel_reflector
   timeout_seconds: 600
   framework_lock: state/chembench_supervised_transfer_v1/framework/framework-lock.json
+evolution_targets:
+  text_memory: text_memory_expel_reflector
+  skill_bundle: skill_bundle
+  agent_system: agent_system
 executor:
   backend: local_codex_cli
   harness: codex_cli
@@ -55,3 +59,9 @@ call_budget:
   probe_task_calls: 1080
   test_task_calls: 900
   total_model_calls: 5580
+core_lifecycle_budget:
+  jobs_per_update: 3
+  formal_jobs: 2700
+  formal_artifacts: 2700
+  preflight_jobs: 57
+  preflight_artifacts: 57

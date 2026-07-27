@@ -35,9 +35,12 @@ not standard ChemBench4K accuracy and not leaderboard-comparable.
 `chembench_supervised_transfer_v1` is a separate research-only protocol. Its
 nine category-local reflectors may see full Train questions, options,
 predictions, targets, correctness, and predecessor memory. Each category has
-50 Train, 10 Probe, and 50 primary Test items. Probe is evaluated at frozen
-checkpoints 0/10/20/30/40/50 without feedback or evolution; final Test compares
-one no-memory completion with one completion using the frozen category memory.
+50 Train, 10 Probe, and 50 primary Test items. Each supervised update makes one
+reflector call whose closed response is promoted through three independent Core
+lifecycle targets: `text_memory`, `skill_bundle`, and `agent_system`. Probe is
+evaluated at frozen checkpoints 0/10/20/30/40/50 without feedback or evolution;
+final Test compares one no-context completion with one completion using the
+complete frozen three-target category context.
 It must be reported as `RESEARCH_ONLY_SUPERVISED_EVOLUTION`,
 `TRAIN_ANSWER_SUPERVISION`, `FROZEN_UNSEEN_TEST_TRANSFER`, and
 `NOT_A_STANDARD_LEADERBOARD_SCORE`.
@@ -83,6 +86,14 @@ so a fresh run ID cannot consume Primary Test a second time. Recovery Test 01
 requires a source-change invalidation backed by the failed Test run; score does
 not authorize recovery. Both commands require the dedicated non-editable Core
 runtime.
+
+Control never creates or receives any of the three evolution targets. Online
+Train carries the complete category-local context to the next immutable
+session; Online Probe and Final Test inject the matching frozen three-target
+checkpoint. A missing, mismatched, or partially resolved target fails closed,
+and neither Probe nor Test can evolve any target. Formal Online Train therefore
+uses 900 reflector calls but 2,700 verified Core jobs, approved artifacts, and
+context resolutions.
 
 An explicitly unpaired online-only Pilot500 entry point is also available for
 mechanism and descriptive analysis. It uses no control evidence, cannot issue

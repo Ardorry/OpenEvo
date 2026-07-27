@@ -40,13 +40,17 @@ PACKET_INPUT_SCHEMA = {
         "error_taxonomy",
         "predecessor_memory",
         "predecessor_artifact_id",
+        "predecessor_skill",
+        "predecessor_skill_artifact_id",
+        "predecessor_agent_system",
+        "predecessor_agent_system_artifact_id",
         "trajectory_id",
     ],
     "schema_version": PACKET_SCHEMA,
 }
 PACKET_INPUT_SCHEMA_DIGEST = sha256_bytes(canonical_json_bytes(PACKET_INPUT_SCHEMA))
 
-REFLECTOR_INSTRUCTION = """Supervised category-memory update contract:
+REFLECTOR_INSTRUCTION = """Supervised category-context update contract:
 1. Analyze this concrete chemistry training item and why the correct option holds.
 2. Diagnose the gap between the model prediction and the correct answer.
 3. Abstract only transferable rules for the packet category.
@@ -56,13 +60,17 @@ REFLECTOR_INSTRUCTION = """Supervised category-memory update contract:
 6. Evidence from only one independent training item stays provisional.
 7. Confirm a rule only after at least two independent training items support it.
 8. Resolve contradictions explicitly; unsupported advice is provisional or retired.
-9. Return bounded category-specific memory. Preserve the Core-required Do, Avoid,
-   Validate, When Applicable, and Retired Or Superseded level-2 headings.
-10. The first non-empty line must be '# Category Memory: <category>' for this packet."""
+9. Return one bounded category-specific structured response containing text memory,
+   a reusable skill workflow, and agent-system directives. Preserve the Core-required
+   memory sections and make skill/system rules independently actionable.
+10. Memory, skill, and agent-system outputs must use only Train evidence represented
+    by this packet and its approved predecessor context; they must never contain a
+    task-to-answer mapping."""
 REFLECTOR_PROMPT_DIGEST = sha256_bytes(REFLECTOR_INSTRUCTION.encode("utf-8"))
 
 _CHUNK_PAYLOAD_CHARACTERS = 136
-_MAX_CHUNKS = 512
+_MAX_CHUNKS = 1024
+_MAX_PREDECESSOR_COMPONENT_BYTES = 24_576
 
 
 class SupervisedErrorCodeV1(str, Enum):
@@ -96,6 +104,10 @@ class SupervisedEvolutionPacketV1:
     predecessor_memory: str | None
     predecessor_artifact_id: str | None
     trajectory_id: str
+    predecessor_skill: str | None = None
+    predecessor_skill_artifact_id: str | None = None
+    predecessor_agent_system: str | None = None
+    predecessor_agent_system_artifact_id: str | None = None
     schema_version: str = PACKET_SCHEMA
 
     def __repr__(self) -> str:
@@ -156,13 +168,36 @@ class SupervisedEvolutionPacketV1:
         if expected_outcome not in self.error_taxonomy:
             raise ValueError("error taxonomy lacks the correctness outcome")
         if self.predecessor_memory is None:
-            if self.predecessor_artifact_id is not None:
-                raise ValueError("predecessor artifact cannot exist without predecessor memory")
+            if any(
+                value is not None
+                for value in (
+                    self.predecessor_artifact_id,
+                    self.predecessor_skill,
+                    self.predecessor_skill_artifact_id,
+                    self.predecessor_agent_system,
+                    self.predecessor_agent_system_artifact_id,
+                )
+            ):
+                raise ValueError("generation-zero packet cannot contain predecessor context")
         else:
-            if not self.predecessor_memory.strip() or not self.predecessor_artifact_id:
-                raise ValueError("predecessor memory requires a non-path artifact ID")
-            if "/" in self.predecessor_artifact_id or "\\" in self.predecessor_artifact_id:
-                raise ValueError("predecessor artifact ID must not be a path")
+            for content, artifact_id, field_name in (
+                (
+                    self.predecessor_memory,
+                    self.predecessor_artifact_id,
+                    "memory",
+                ),
+                (
+                    self.predecessor_skill,
+                    self.predecessor_skill_artifact_id,
+                    "skill",
+                ),
+                (
+                    self.predecessor_agent_system,
+                    self.predecessor_agent_system_artifact_id,
+                    "agent_system",
+                ),
+            ):
+                _validate_predecessor_component(content, artifact_id, field_name)
 
     @classmethod
     def from_evaluation(
@@ -175,6 +210,10 @@ class SupervisedEvolutionPacketV1:
         predecessor_memory: str | None,
         predecessor_artifact_id: str | None,
         session_id: str,
+        predecessor_skill: str | None = None,
+        predecessor_skill_artifact_id: str | None = None,
+        predecessor_agent_system: str | None = None,
+        predecessor_agent_system_artifact_id: str | None = None,
     ) -> SupervisedEvolutionPacketV1:
         if type(task) is not PrivateChemBench4KTask or task.source_split != "test":
             raise TypeError("supervised packet requires one private frozen test-pool task")
@@ -214,6 +253,20 @@ class SupervisedEvolutionPacketV1:
                 if predecessor_memory is None
                 else sha256_bytes(predecessor_memory.encode("utf-8"))
             ),
+            "predecessor_skill_artifact_id": predecessor_skill_artifact_id,
+            "predecessor_skill_sha256": (
+                None
+                if predecessor_skill is None
+                else sha256_bytes(predecessor_skill.encode("utf-8"))
+            ),
+            "predecessor_agent_system_artifact_id": (
+                predecessor_agent_system_artifact_id
+            ),
+            "predecessor_agent_system_sha256": (
+                None
+                if predecessor_agent_system is None
+                else sha256_bytes(predecessor_agent_system.encode("utf-8"))
+            ),
         }
         return cls(
             protocol_id=PROTOCOL_ID,
@@ -233,6 +286,12 @@ class SupervisedEvolutionPacketV1:
             predecessor_memory=predecessor_memory,
             predecessor_artifact_id=predecessor_artifact_id,
             trajectory_id=sha256_bytes(canonical_json_bytes(trajectory_identity)),
+            predecessor_skill=predecessor_skill,
+            predecessor_skill_artifact_id=predecessor_skill_artifact_id,
+            predecessor_agent_system=predecessor_agent_system,
+            predecessor_agent_system_artifact_id=(
+                predecessor_agent_system_artifact_id
+            ),
         )
 
     def to_private_payload(self) -> dict[str, Any]:
@@ -254,6 +313,12 @@ class SupervisedEvolutionPacketV1:
             "error_taxonomy": [code.value for code in self.error_taxonomy],
             "predecessor_memory": self.predecessor_memory,
             "predecessor_artifact_id": self.predecessor_artifact_id,
+            "predecessor_skill": self.predecessor_skill,
+            "predecessor_skill_artifact_id": self.predecessor_skill_artifact_id,
+            "predecessor_agent_system": self.predecessor_agent_system,
+            "predecessor_agent_system_artifact_id": (
+                self.predecessor_agent_system_artifact_id
+            ),
             "trajectory_id": self.trajectory_id,
         }
 
@@ -305,6 +370,22 @@ class SupervisedEvolutionPacketV1:
                     "predecessor_artifact_id",
                     self.predecessor_artifact_id or "<none>",
                 ),
+                (
+                    "predecessor_skill",
+                    self.predecessor_skill or "<generation-zero-empty>",
+                ),
+                (
+                    "predecessor_skill_artifact_id",
+                    self.predecessor_skill_artifact_id or "<none>",
+                ),
+                (
+                    "predecessor_agent_system",
+                    self.predecessor_agent_system or "<generation-zero-empty>",
+                ),
+                (
+                    "predecessor_agent_system_artifact_id",
+                    self.predecessor_agent_system_artifact_id or "<none>",
+                ),
                 ("trajectory_id", self.trajectory_id),
                 ("packet_sha256", self.digest),
                 ("input_schema_sha256", PACKET_INPUT_SCHEMA_DIGEST),
@@ -351,6 +432,23 @@ class SupervisedEvolutionPacketV1:
                 }
             )
         return tuple(records)
+
+
+def _validate_predecessor_component(
+    content: str | None,
+    artifact_id: str | None,
+    field_name: str,
+) -> None:
+    if (
+        type(content) is not str
+        or not content.strip()
+        or len(content.encode("utf-8")) > _MAX_PREDECESSOR_COMPONENT_BYTES
+        or type(artifact_id) is not str
+        or not artifact_id
+        or "/" in artifact_id
+        or "\\" in artifact_id
+    ):
+        raise ValueError(f"predecessor {field_name} binding is invalid")
 
 
 __all__ = [

@@ -36,6 +36,12 @@ TEST_PER_CATEGORY = 50
 TRAIN_CHECKPOINTS = (0, 10, 20, 30, 40, 50)
 ROUNDS_PER_TRAIN_TASK = 3
 UPDATES_PER_ONLINE_TASK = 2
+EVOLUTION_TARGET_METHODS = (
+    ("text_memory", "text_memory_expel_reflector"),
+    ("skill_bundle", "skill_bundle"),
+    ("agent_system", "agent_system"),
+)
+CORE_JOBS_PER_UPDATE = len(EVOLUTION_TARGET_METHODS)
 
 CONTROL_TRAIN_TASK_CALLS = 450 * ROUNDS_PER_TRAIN_TASK
 ONLINE_TRAIN_TASK_CALLS = 450 * ROUNDS_PER_TRAIN_TASK
@@ -49,6 +55,10 @@ TOTAL_MODEL_CALLS = (
     + PROBE_TASK_CALLS
     + TEST_TASK_CALLS
 )
+FORMAL_CORE_JOBS = REFLECTOR_CALLS * CORE_JOBS_PER_UPDATE
+FORMAL_CORE_ARTIFACTS = FORMAL_CORE_JOBS
+PREFLIGHT_CORE_JOBS = 19 * CORE_JOBS_PER_UPDATE
+PREFLIGHT_CORE_ARTIFACTS = PREFLIGHT_CORE_JOBS
 
 
 class SupervisedTransferConfigError(ValueError):
@@ -257,6 +267,7 @@ class SupervisedTransferConfigV1:
                 "timeout_seconds": self.reflector_timeout_seconds,
                 "framework_lock": self.framework_lock,
             },
+            "evolution_targets": dict(EVOLUTION_TARGET_METHODS),
             "executor": self.executor.to_payload(),
             "memory_limits": self.memory_limits.to_payload(),
             "split": {
@@ -273,6 +284,13 @@ class SupervisedTransferConfigV1:
                 "select_best_round": False,
             },
             "call_budget": self.call_budget,
+            "core_lifecycle_budget": {
+                "jobs_per_update": CORE_JOBS_PER_UPDATE,
+                "formal_jobs": FORMAL_CORE_JOBS,
+                "formal_artifacts": FORMAL_CORE_ARTIFACTS,
+                "preflight_jobs": PREFLIGHT_CORE_JOBS,
+                "preflight_artifacts": PREFLIGHT_CORE_ARTIFACTS,
+            },
         }
 
     @property
@@ -299,11 +317,13 @@ def load_supervised_transfer_config_v1(path: Path) -> SupervisedTransferConfigV1
                 "codex_cli_version",
                 "source_commit",
                 "reflector",
+                "evolution_targets",
                 "executor",
                 "memory_limits",
                 "split",
                 "train",
                 "call_budget",
+                "core_lifecycle_budget",
             }
         ),
         field_name="config",
@@ -372,10 +392,21 @@ def load_supervised_transfer_config_v1(path: Path) -> SupervisedTransferConfigV1
         "test_task_calls": TEST_TASK_CALLS,
         "total_model_calls": TOTAL_MODEL_CALLS,
     }
+    expected_core_lifecycle = {
+        "jobs_per_update": CORE_JOBS_PER_UPDATE,
+        "formal_jobs": FORMAL_CORE_JOBS,
+        "formal_artifacts": FORMAL_CORE_ARTIFACTS,
+        "preflight_jobs": PREFLIGHT_CORE_JOBS,
+        "preflight_artifacts": PREFLIGHT_CORE_ARTIFACTS,
+    }
     if root["split"] != expected_split or root["train"] != expected_train:
         raise SupervisedTransferConfigError("split/train contract is not frozen")
     if root["call_budget"] != expected_calls:
         raise SupervisedTransferConfigError("call budget is not frozen")
+    if root["evolution_targets"] != dict(EVOLUTION_TARGET_METHODS):
+        raise SupervisedTransferConfigError("evolution target set is not frozen")
+    if root["core_lifecycle_budget"] != expected_core_lifecycle:
+        raise SupervisedTransferConfigError("Core lifecycle budget is not frozen")
     return SupervisedTransferConfigV1(
         schema_version=root["schema_version"],
         protocol_id=root["protocol_id"],

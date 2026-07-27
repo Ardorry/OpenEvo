@@ -56,7 +56,10 @@ def record_administrative_pause_v1(
         raise AdministrativePauseError("PAUSE_RUN_IDENTITY_INVALID")
     if state.get("status") in _TERMINAL:
         raise AdministrativePauseError("PAUSE_RUN_ALREADY_TERMINAL")
-    process_snapshot = _relevant_process_snapshot()
+    process_snapshot = _relevant_process_snapshot(
+        repository_root=repository,
+        run_id=run_id,
+    )
     if process_snapshot:
         raise AdministrativePauseError("PAUSE_RELEVANT_PROCESS_STILL_ACTIVE")
     receipt = {
@@ -89,7 +92,21 @@ def record_administrative_pause_v1(
     return receipt, sha256_bytes(encoded)
 
 
-def _relevant_process_snapshot() -> list[dict[str, Any]]:
+def _relevant_process_snapshot(
+    *,
+    repository_root: Path,
+    run_id: str,
+) -> list[dict[str, Any]]:
+    """Return only processes owned by this repository/run process tree.
+
+    Other independent ChemBench repositories may legitimately run Codex at the
+    same time. A bare ``codex exec`` marker is therefore not sufficient to
+    block an administrative receipt in this repository. Anchor the scan to an
+    exact repository path or run ID, then include all descendants of those
+    anchors so detached Codex/reflector process groups remain visible.
+    """
+
+    repository = repository_root.resolve(strict=True)
     completed = subprocess.run(
         ("ps", "-eo", "pid=,ppid=,pgid=,sid=,stat=,cmd="),
         stdin=subprocess.DEVNULL,
@@ -122,9 +139,25 @@ def _relevant_process_snapshot() -> list[dict[str, Any]]:
     while cursor > 0 and cursor not in excluded:
         excluded.add(cursor)
         cursor = parent_by_pid.get(cursor, 0)
+    anchors = {
+        pid
+        for pid, _ppid, _pgid, _sid, _status, command in rows
+        if pid not in excluded
+        and _is_relevant_command(command)
+        and (os.fspath(repository) in command or run_id in command)
+    }
+    relevant_pids = set(anchors)
+    changed = True
+    while changed:
+        changed = False
+        for pid, ppid, *_rest in rows:
+            if pid not in excluded and ppid in relevant_pids and pid not in relevant_pids:
+                relevant_pids.add(pid)
+                changed = True
+
     relevant: list[dict[str, Any]] = []
     for pid, ppid, pgid, sid, status, command in rows:
-        if pid in excluded or not _is_relevant_command(command):
+        if pid not in relevant_pids:
             continue
         relevant.append(
             {

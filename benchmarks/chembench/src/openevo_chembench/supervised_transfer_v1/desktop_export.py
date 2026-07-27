@@ -24,6 +24,7 @@ _PATH_RE = re.compile(r"(?:/home/|/mnt/|[A-Za-z]:\\|(?:data|results|state)/)\S*"
 _QUESTION_RE = re.compile(r"(?im)^\s*(?:question|[ABCD]\.)\s*:\s*.+$")
 _DESKTOP_SAFE_CSVS = frozenset(
     {
+        "auxiliary_context_growth.csv",
         "correctness_transitions.csv",
         "memory_evidence_count_distribution.csv",
         "memory_growth.csv",
@@ -56,36 +57,63 @@ def export_desktop_audit_v1(
         raise RuntimeError("DESKTOP_AUDIT_DIRECTORY_EXISTS")
     root.mkdir(mode=0o755)
 
-    memory_root = run_state_root / "private/checkpoint_memory"
-    exported_memories: dict[tuple[str, int], str] = {}
-    for category in CHEMBENCH4K_CATEGORIES:
-        for checkpoint in (0, 10, 20, 30, 40, 50):
-            source = memory_root / category / f"checkpoint_{checkpoint:02d}.md"
-            if not source.is_file():
-                continue
-            sanitized = _sanitize_memory(source.read_text(encoding="utf-8"))
-            destination = root / "memory" / category / f"checkpoint_{checkpoint:02d}.md"
-            write_public_file(destination, sanitized.encode("utf-8"))
-            exported_memories[(category, checkpoint)] = sanitized
-    for category in CHEMBENCH4K_CATEGORIES:
-        checkpoints = sorted(
-            checkpoint for candidate, checkpoint in exported_memories if candidate == category
-        )
-        for left, right in pairwise(checkpoints):
-            diff = "".join(
-                difflib.unified_diff(
-                    exported_memories[(category, left)].splitlines(keepends=True),
-                    exported_memories[(category, right)].splitlines(keepends=True),
-                    fromfile=f"checkpoint_{left:02d}",
-                    tofile=f"checkpoint_{right:02d}",
+    context_root = run_state_root / "private/checkpoint_context"
+    exported_context: dict[tuple[str, str, int], str] = {}
+    target_directories = {
+        "text_memory": "memory",
+        "skill_bundle": "skill",
+        "agent_system": "agent_system",
+    }
+    for target, directory in target_directories.items():
+        for category in CHEMBENCH4K_CATEGORIES:
+            for checkpoint in (0, 10, 20, 30, 40, 50):
+                source = (
+                    context_root
+                    / target
+                    / category
+                    / f"checkpoint_{checkpoint:02d}.md"
                 )
+                if not source.is_file():
+                    continue
+                sanitized = _sanitize_memory(source.read_text(encoding="utf-8"))
+                destination = (
+                    root / directory / category / f"checkpoint_{checkpoint:02d}.md"
+                )
+                write_public_file(destination, sanitized.encode("utf-8"))
+                exported_context[(target, category, checkpoint)] = sanitized
+        for category in CHEMBENCH4K_CATEGORIES:
+            checkpoints = sorted(
+                checkpoint
+                for candidate_target, candidate_category, checkpoint in exported_context
+                if candidate_target == target and candidate_category == category
             )
-            write_public_file(
-                root / "diffs" / category / f"checkpoint_{left:02d}_to_{right:02d}.diff",
-                diff.encode("utf-8"),
-            )
+            for left, right in pairwise(checkpoints):
+                diff = "".join(
+                    difflib.unified_diff(
+                        exported_context[(target, category, left)].splitlines(
+                            keepends=True
+                        ),
+                        exported_context[(target, category, right)].splitlines(
+                            keepends=True
+                        ),
+                        fromfile=f"checkpoint_{left:02d}",
+                        tofile=f"checkpoint_{right:02d}",
+                    )
+                )
+                write_public_file(
+                    root
+                    / "diffs"
+                    / directory
+                    / category
+                    / f"checkpoint_{left:02d}_to_{right:02d}.diff",
+                    diff.encode("utf-8"),
+                )
 
-    rules = _collect_rules(exported_memories.values())
+    rules = _collect_rules(
+        value
+        for (target, _category, _checkpoint), value in exported_context.items()
+        if target == "text_memory"
+    )
     for filename, values in rules.items():
         write_public_file(
             root / "rules" / filename,
@@ -128,7 +156,8 @@ def export_desktop_audit_v1(
         "# OpenEvo ChemBench Supervised Transfer Audit\n\n"
         f"Phase: {phase}\n\n"
         "Research-only supervised evolution. Train answers were visible only to the "
-        "Train reflector. Probe and Test never evolved memory. This package excludes "
+        "Train reflector. Probe and Test never evolved memory, skill, or agent-system "
+        "artifacts. This package excludes "
         "questions, options, targets, UID mappings, auth, proxy settings, private packets, "
         "feedback, and event streams.\n"
     )

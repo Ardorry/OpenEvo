@@ -26,15 +26,15 @@ _IMPORTED_FILES = (
     ),
     (
         "benchmarks/chembench/src/openevo_chembench/local_codex_executor.py",
-        "unchanged reuse of the isolated Codex task executor",
+        "extended with exact three-target supervised context injection and binding",
     ),
     (
         "benchmarks/chembench/src/openevo_chembench/reflector_execution_boundary_v2.py",
-        "extended for bounded Train-only supervised packets and current Codex policy",
+        "extended for bounded Train-only supervised memory, skill, and agent-system output",
     ),
     (
         "benchmarks/chembench/src/openevo_chembench/taskwise_core_evolution_v1.py",
-        "extended with a typed supervised packet through the verified Core lifecycle",
+        "extended with one supervised reflector and three verified Core target lifecycles",
     ),
     (
         "benchmarks/chembench/src/openevo_chembench/taskwise_cli_v1.py",
