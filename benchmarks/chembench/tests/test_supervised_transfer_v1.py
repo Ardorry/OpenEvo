@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -14,6 +15,9 @@ from openevo_chembench.chembench4k_models import (
 )
 from openevo_chembench.reflector_execution_boundary_v2 import (
     _normalize_supervised_memory_sections,
+)
+from openevo_chembench.supervised_transfer_v1 import (
+    source_manifest as source_manifest_module,
 )
 from openevo_chembench.supervised_transfer_v1.common import canonical_pretty_json_bytes
 from openevo_chembench.supervised_transfer_v1.config import (
@@ -252,6 +256,58 @@ def test_source_import_manifest_is_content_free_and_byte_stable() -> None:
         "source_sha256" in row and "destination_sha256" in row
         for row in payload["records"]
     )
+
+
+def test_source_import_manifest_reads_committed_source_not_dirty_worktree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    old = tmp_path / "old"
+    repository = tmp_path / "repository"
+    relative = "benchmarks/chembench/src/openevo_chembench/example.py"
+    source = old / relative
+    destination = repository / relative
+    source.parent.mkdir(parents=True)
+    destination.parent.mkdir(parents=True)
+    committed = b"committed source\n"
+    source.write_bytes(committed)
+    destination.write_bytes(b"adapted destination\n")
+    subprocess.run(("git", "init", str(old)), check=True, capture_output=True)
+    subprocess.run(("git", "-C", str(old), "add", relative), check=True)
+    subprocess.run(
+        (
+            "git",
+            "-C",
+            str(old),
+            "-c",
+            "user.name=ChemBench Test",
+            "-c",
+            "user.email=chembench-test@example.invalid",
+            "commit",
+            "-m",
+            "source snapshot",
+        ),
+        check=True,
+        capture_output=True,
+    )
+    monkeypatch.setattr(
+        source_manifest_module,
+        "_IMPORTED_FILES",
+        ((relative, "test adaptation"),),
+    )
+    before = render_source_import_manifest_v1(
+        repository_root=repository,
+        old_repository=old,
+    )
+    source.write_bytes(b"dirty mutable worktree\n")
+    after = render_source_import_manifest_v1(
+        repository_root=repository,
+        old_repository=old,
+    )
+    assert after == before
+    assert json.loads(after)["records"][0]["source_sha256"] == hashlib.sha256(
+        committed
+    ).hexdigest()
 
 
 def test_category_memory_requires_confirmed_evidence_and_all_sections() -> None:

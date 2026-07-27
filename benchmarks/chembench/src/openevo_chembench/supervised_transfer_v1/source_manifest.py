@@ -73,17 +73,17 @@ def build_source_import_manifest_v1(
     old_commit = _git(old, "rev-parse", "HEAD")
     records = []
     for relative, summary in _IMPORTED_FILES:
-        source = old / relative
         destination = repository / relative
-        if not source.is_file() or not destination.is_file():
+        if not destination.is_file():
             raise RuntimeError("source import path is unavailable")
+        source_bytes = _git_bytes(old, "show", f"{old_commit}:{relative}")
         records.append(
             {
                 "source_repository": str(old),
                 "source_commit": old_commit,
                 "source_file": relative,
                 "destination_file": relative,
-                "source_sha256": sha256_bytes(source.read_bytes()),
+                "source_sha256": sha256_bytes(source_bytes),
                 "destination_sha256": sha256_bytes(destination.read_bytes()),
                 "modification_summary": summary,
             }
@@ -110,17 +110,20 @@ def render_source_import_manifest_v1(
 
 
 def _git(repository: Path, *arguments: str) -> str:
+    return _git_bytes(repository, *arguments).decode("utf-8").strip()
+
+
+def _git_bytes(repository: Path, *arguments: str) -> bytes:
     completed = subprocess.run(
         ("git", "-C", str(repository), *arguments),
         stdin=subprocess.DEVNULL,
         capture_output=True,
-        text=True,
         timeout=30,
         check=False,
     )
     if completed.returncode != 0:
         raise RuntimeError("source repository identity is unavailable")
-    return completed.stdout.strip()
+    return completed.stdout
 
 
 __all__ = [

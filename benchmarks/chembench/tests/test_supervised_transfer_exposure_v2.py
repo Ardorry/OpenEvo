@@ -3,12 +3,18 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from openevo_chembench.chembench4k_dataset import ChemBench4KDatasetLoader
 from openevo_chembench.chembench4k_models import CHEMBENCH4K_REVISION
 from openevo_chembench.supervised_transfer_v1.common import canonical_json_bytes, sha256_bytes
 from openevo_chembench.supervised_transfer_v1.exposure_v2 import (
     ExposureLabelV2,
+    HistoricalExposureV2Error,
+    audit_post_freeze_exposure_isolation_v2,
     build_historical_exposure_bundle_v2,
+    load_historical_exposure_artifacts_v2,
+    write_historical_exposure_artifacts_v2,
 )
 from openevo_chembench.supervised_transfer_v1.split_v2 import (
     generate_balanced_split_v2,
@@ -65,6 +71,15 @@ def _synthetic_bundle(
 
 def _labels(bundle, uid: str) -> set[str]:
     return set(next(item for item in bundle.items if item.uid == uid).labels)
+
+
+def _frozen_bundle():
+    bundle, _digests = load_historical_exposure_artifacts_v2(
+        destination_root=MANIFEST_ROOT.resolve(),
+        old_v1_manifest_sha256=OLD_V1_SHA256,
+        old_blocked_receipt_sha256=OLD_BLOCKER_SHA256,
+    )
+    return bundle
 
 
 def test_manifest_listing_alone_remains_holdout_eligible(tmp_path: Path) -> None:
@@ -204,12 +219,7 @@ def test_multiple_evidence_uses_all_strict_labels(tmp_path: Path) -> None:
 
 
 def test_full_manifest_no_longer_makes_never_executed_pool_zero() -> None:
-    loader = _loader()
-    bundle = build_historical_exposure_bundle_v2(
-        test_tasks=loader.load_split("test"),
-        old_repository=OLD_REPOSITORY,
-        source_repository_commit="d795ee3d6d654ab175ab8b3c9929c4db318180c5",
-    )
+    bundle = _frozen_bundle()
     assert len(bundle.items) == 4009
     assert len(bundle.actual_exposed_uids) == 508
     assert len(bundle.strict_holdout_uids) == 3501
@@ -227,11 +237,7 @@ def test_v1_blocked_receipt_and_exposure_remain_byte_immutable() -> None:
 
 def test_v2_split_is_balanced_isolated_and_deterministic(tmp_path: Path) -> None:
     loader = _loader()
-    bundle = build_historical_exposure_bundle_v2(
-        test_tasks=loader.load_split("test"),
-        old_repository=OLD_REPOSITORY,
-        source_repository_commit="d795ee3d6d654ab175ab8b3c9929c4db318180c5",
-    )
+    bundle = _frozen_bundle()
     first = generate_balanced_split_v2(loader, exposure_bundle=bundle)
     second = generate_balanced_split_v2(loader, exposure_bundle=bundle)
     assert {name: len(tasks) for name, tasks in first.partitions().items()} == {
@@ -256,6 +262,71 @@ def test_v2_split_is_balanced_isolated_and_deterministic(tmp_path: Path) -> None
         for name, path in generated.paths.items()
         if name.endswith("_private_manifest.jsonl")
     )
+
+
+def test_frozen_exposure_artifacts_round_trip_from_canonical_evidence(tmp_path: Path) -> None:
+    tasks, bundle = _synthetic_bundle(tmp_path / "source", evidence={})
+    destination = (tmp_path / "frozen").resolve()
+    destination.mkdir()
+    expected = write_historical_exposure_artifacts_v2(
+        bundle,
+        destination_root=destination,
+        old_v1_manifest_sha256=OLD_V1_SHA256,
+        old_blocked_receipt_sha256=OLD_BLOCKER_SHA256,
+    )
+    loaded, actual = load_historical_exposure_artifacts_v2(
+        destination_root=destination,
+        old_v1_manifest_sha256=OLD_V1_SHA256,
+        old_blocked_receipt_sha256=OLD_BLOCKER_SHA256,
+    )
+    assert loaded == bundle
+    assert actual == expected
+    assert set(loaded.strict_holdout_uids) == {task.uid for task in tasks}
+
+
+def test_post_freeze_new_execution_outside_holdout_is_recorded(tmp_path: Path) -> None:
+    tasks, frozen = _synthetic_bundle(tmp_path / "frozen", evidence={})
+    attempted = {
+        "task_uid": tasks[0].uid,
+        "category": tasks[0].category,
+        "session_id": "post-freeze-attempt",
+        "completion_observed": False,
+    }
+    _tasks, live = _synthetic_bundle(
+        tmp_path / "live",
+        evidence={"run/private/failures.jsonl": [attempted]},
+    )
+    audit = audit_post_freeze_exposure_isolation_v2(
+        frozen_bundle=frozen,
+        live_bundle=live,
+        frozen_holdout_uids=frozenset(task.uid for task in tasks[1:]),
+    )
+    assert audit.new_actual_exposed_uid_count == 1
+    assert audit.holdout_overlap_count == 0
+
+
+def test_post_freeze_execution_of_frozen_holdout_fails_closed(tmp_path: Path) -> None:
+    tasks, frozen = _synthetic_bundle(tmp_path / "frozen", evidence={})
+    completed = {
+        "kind": "completion",
+        "task_uid": tasks[1].uid,
+        "category": tasks[1].category,
+        "session_id": "post-freeze-completion",
+        "round_index": 0,
+    }
+    _tasks, live = _synthetic_bundle(
+        tmp_path / "live",
+        evidence={"run/public/events.jsonl": [completed]},
+    )
+    with pytest.raises(
+        HistoricalExposureV2Error,
+        match="post-freeze actual exposure intersects frozen holdout",
+    ):
+        audit_post_freeze_exposure_isolation_v2(
+            frozen_bundle=frozen,
+            live_bundle=live,
+            frozen_holdout_uids=frozenset({tasks[1].uid}),
+        )
 
 
 def test_public_v2_manifests_have_no_private_keys() -> None:

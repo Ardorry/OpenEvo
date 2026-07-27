@@ -142,7 +142,7 @@ _TASKWISE_OPERATIONAL_LINE_RE = re.compile(
 )
 _TASKWISE_EXACT_H1 = "# General Chemistry Memory"
 _SUPERVISED_SECTION_NORMALIZATION_ID = "supervised_memory_section_merge_v1"
-_SUPERVISED_STRUCTURED_RENDER_ID = "supervised_memory_structured_render_v1"
+_SUPERVISED_STRUCTURED_RENDER_ID = "supervised_memory_structured_render_v2"
 _SUPERVISED_OUTPUT_SCHEMA_NAME = "supervised_memory_output_schema.json"
 _NO_OUTPUT_NORMALIZATION_ID = "none"
 _SUPERVISED_EXACT_SECTIONS = (
@@ -162,6 +162,49 @@ _SUPERVISED_STRUCTURED_SECTION_FIELDS = (
     ("When Applicable", "when_applicable", 40),
     ("Retired Or Superseded", "retired_or_superseded", 24),
 )
+_SUPERVISED_RULE_SECTION_FIELDS = {
+    "confirmed_principles": ("confirmed", 2),
+    "provisional_principles": ("provisional", 1),
+    "retired_or_contradicted": ("retired", 0),
+}
+_SUPERVISED_RULE_VALUE_FIELDS = (
+    "rule_id",
+    "trigger",
+    "principle",
+    "action",
+    "validation",
+    "evidence_count",
+    "evidence_digests",
+)
+
+
+def _supervised_rule_output_schema(*, minimum_evidence: int) -> dict[str, object]:
+    """Return the closed JSON schema for one model-authored chemistry rule."""
+
+    evidence_schema: dict[str, object] = {"type": "integer", "minimum": minimum_evidence}
+    if minimum_evidence == 1:
+        evidence_schema["maximum"] = 1
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "rule_id": {"type": "string"},
+            "trigger": {"type": "string"},
+            "principle": {"type": "string"},
+            "action": {"type": "string"},
+            "validation": {"type": "string"},
+            "evidence_count": evidence_schema,
+            "evidence_digests": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": minimum_evidence,
+                "maxItems": 64,
+            },
+        },
+        "required": list(_SUPERVISED_RULE_VALUE_FIELDS),
+    }
+
+
 _SUPERVISED_OUTPUT_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -170,7 +213,11 @@ _SUPERVISED_OUTPUT_SCHEMA = {
         **{
             field: {
                 "type": "array",
-                "items": {"type": "string"},
+                "items": (
+                    _supervised_rule_output_schema(minimum_evidence=rule_contract[1])
+                    if (rule_contract := _SUPERVISED_RULE_SECTION_FIELDS.get(field))
+                    else {"type": "string"}
+                ),
                 "maxItems": maximum,
             }
             for _heading, field, maximum in _SUPERVISED_STRUCTURED_SECTION_FIELDS
@@ -215,8 +262,10 @@ _SUPERVISED_PROMPT_CONTRACT = (
     "output_discipline, do, avoid, validate, when_applicable, and "
     "retired_or_superseded. The isolated wrapper renders these fields into the exact "
     "ordered category-memory Markdown contract.\n"
-    "- Every principle rule is one bullet with Rule ID, Status, Category, Trigger, "
-    "Principle, Action, Validation, Evidence Count, and Evidence digest fields.\n"
+    "- confirmed_principles, provisional_principles, and retired_or_contradicted "
+    "contain closed rule objects. Every object has rule_id, trigger, principle, "
+    "action, validation, evidence_count, and evidence_digests. The wrapper binds "
+    "Status from the section and Category from the top-level category.\n"
     "- A provisional rule has Evidence Count 1. A confirmed rule requires at least "
     "two independent training-item evidence digests. Never copy a question, option, "
     "answer mapping, UID, ordinal, or path.\n"
@@ -1392,14 +1441,21 @@ def _render_supervised_structured_memory(response: str) -> str:
             raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
         items: list[str] = []
         for value in values:
-            if type(value) is not str or len(value.encode("utf-8")) > 4096:
-                raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
-            normalized = " ".join(value.split()).strip()
-            if normalized.startswith(("- ", "* ")):
-                normalized = normalized[2:].strip()
-            if not normalized:
-                raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
-            items.append(normalized)
+            rule_contract = _SUPERVISED_RULE_SECTION_FIELDS.get(field)
+            if rule_contract is not None:
+                items.append(
+                    _render_supervised_rule(
+                        value,
+                        category=category,
+                        status=rule_contract[0],
+                        minimum_evidence=rule_contract[1],
+                    )
+                )
+            else:
+                if type(value) is not str or len(value.encode("utf-8")) > 4096:
+                    raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+                normalized = _normalize_supervised_structured_value(value)
+                items.append(normalized)
         rendered.append(f"## {heading}")
         rendered.extend(f"- {item}" for item in (items or ["None."]))
         if index != len(_SUPERVISED_STRUCTURED_SECTION_FIELDS) - 1:
@@ -1408,6 +1464,61 @@ def _render_supervised_structured_memory(response: str) -> str:
     if len(encoded) > _MAX_LAST_MESSAGE_BYTES:
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
     return encoded.decode("utf-8")
+
+
+def _normalize_supervised_structured_value(value: str) -> str:
+    """Normalize one model-authored scalar without adding semantic content."""
+
+    normalized = " ".join(value.split()).strip()
+    if normalized.startswith(("- ", "* ")):
+        normalized = normalized[2:].strip()
+    if not normalized or "\n" in normalized or len(normalized.encode("utf-8")) > 4096:
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+    return normalized
+
+
+def _render_supervised_rule(
+    value: object,
+    *,
+    category: str,
+    status: str,
+    minimum_evidence: int,
+) -> str:
+    """Render a closed rule object into the existing validator's canonical form."""
+
+    if type(value) is not dict or set(value) != set(_SUPERVISED_RULE_VALUE_FIELDS):
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+    text_fields = {
+        field: _normalize_supervised_structured_value(value[field])
+        for field in ("rule_id", "trigger", "principle", "action", "validation")
+        if type(value[field]) is str
+    }
+    if len(text_fields) != 5:
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+    evidence_count = value["evidence_count"]
+    if type(evidence_count) is not int or evidence_count < minimum_evidence:
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+    if status == "provisional" and evidence_count != 1:
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+    evidence_digests = value["evidence_digests"]
+    if type(evidence_digests) is not list or len(evidence_digests) > 64:
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+    normalized_digests: list[str] = []
+    for digest in evidence_digests:
+        if type(digest) is not str or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+        normalized_digests.append(digest)
+    if evidence_count > 0 and not normalized_digests:
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+    if len(set(normalized_digests)) != evidence_count:
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+    evidence = ",".join(normalized_digests) if normalized_digests else "none"
+    return (
+        f"Rule ID: {text_fields['rule_id']}; Status: {status}; Category: {category}; "
+        f"Trigger: {text_fields['trigger']}; Principle: {text_fields['principle']}; "
+        f"Action: {text_fields['action']}; Validation: {text_fields['validation']}; "
+        f"Evidence Count: {evidence_count}; Evidence Digests: {evidence}"
+    )
 
 
 def _reflector_hardening_arguments(

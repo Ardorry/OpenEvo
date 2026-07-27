@@ -36,8 +36,9 @@ from openevo_chembench.supervised_transfer_v1.exposure import (
     load_historical_exposure_manifest,
 )
 from openevo_chembench.supervised_transfer_v1.exposure_v2 import (
+    audit_post_freeze_exposure_isolation_v2,
     build_historical_exposure_bundle_v2,
-    verify_historical_exposure_artifacts_v2,
+    load_historical_exposure_artifacts_v2,
     write_historical_exposure_artifacts_v2,
 )
 from openevo_chembench.supervised_transfer_v1.pause import (
@@ -254,13 +255,7 @@ def _verify(args: argparse.Namespace, *, command: str) -> dict[str, object]:
     )
     if dataset_manifest_path.read_bytes() != dataset_manifest_bytes:
         raise RuntimeError("supervised dataset manifest does not match regeneration")
-    exposure = build_historical_exposure_bundle_v2(
-        test_tasks=loader.load_split("test"),
-        old_repository=old_repository,
-        source_repository_commit=old_commit,
-    )
-    exposure_digests = verify_historical_exposure_artifacts_v2(
-        exposure,
+    exposure, exposure_digests = load_historical_exposure_artifacts_v2(
         destination_root=manifest_root,
         old_v1_manifest_sha256=old_v1_sha256,
         old_blocked_receipt_sha256=old_blocker_sha256,
@@ -274,6 +269,21 @@ def _verify(args: argparse.Namespace, *, command: str) -> dict[str, object]:
     verified = verify_split_artifacts_v2(
         expected=rendered,
         destination_root=manifest_root,
+    )
+    live_exposure = build_historical_exposure_bundle_v2(
+        test_tasks=loader.load_split("test"),
+        old_repository=old_repository,
+        source_repository_commit=old_commit,
+    )
+    holdout_uids = frozenset(
+        task.uid
+        for partition in (split.probe, split.test_primary, *split.recovery_tests)
+        for task in partition
+    )
+    post_freeze_audit = audit_post_freeze_exposure_isolation_v2(
+        frozen_bundle=exposure,
+        live_bundle=live_exposure,
+        frozen_holdout_uids=holdout_uids,
     )
     source_manifest = render_source_import_manifest_v1(
         repository_root=WORKSPACE_ROOT,
@@ -301,6 +311,12 @@ def _verify(args: argparse.Namespace, *, command: str) -> dict[str, object]:
         "historical_exposure_receipt_v2_sha256": exposure_digests[
             "historical_exposure_receipt_v2.json"
         ],
+        "post_freeze_live_exposure_manifest_v2_sha256": live_exposure.manifest_sha256,
+        "post_freeze_new_actual_exposed_uid_count": (
+            post_freeze_audit.new_actual_exposed_uid_count
+        ),
+        "post_freeze_holdout_overlap_count": post_freeze_audit.holdout_overlap_count,
+        "post_freeze_exposure_audit_sha256": post_freeze_audit.digest,
         "split_summary_sha256": verified.split_summary_sha256,
         "split_isolation_receipt_sha256": verified.isolation_receipt_sha256,
         "source_import_manifest_sha256": sha256_bytes(source_manifest),
@@ -313,6 +329,7 @@ def _verify(args: argparse.Namespace, *, command: str) -> dict[str, object]:
         "old_blocked_receipt_sha256": old_blocker_sha256,
         "src_openevo_pristine": True,
         "regeneration_byte_stable": True,
+        "historical_evidence_snapshot_policy": "frozen_snapshot_plus_live_holdout_audit_v2",
         "train_probe_test_strictly_isolated": True,
         "reflector_uid_allowlist": "train-only",
         "probe_test_evolution_jobs_allowed": False,

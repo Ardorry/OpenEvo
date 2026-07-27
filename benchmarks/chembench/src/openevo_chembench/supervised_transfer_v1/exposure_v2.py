@@ -101,6 +101,8 @@ class HistoricalExposureItemV2:
             raise ValueError("manifest-listed-only cannot accompany another label")
         if ExposureLabelV2.PROMPT_RENDERED_ONLY in label_set and label_set & ACTUAL_EXPOSURE_LABELS_V2:
             raise ValueError("prompt-rendered-only cannot accompany actual exposure")
+        if type(self.human_item_reviewed) is not bool:
+            raise ValueError("human review flag must be boolean")
         if self.human_item_reviewed != (
             ExposureLabelV2.HUMAN_ITEM_REVIEWED in label_set
         ):
@@ -164,7 +166,12 @@ class HistoricalExposureBundleV2:
     def __post_init__(self) -> None:
         require_git_commit(self.source_repository_commit, "source_repository_commit")
         require_sha256(self.scanned_inventory_sha256, "scanned_inventory_sha256")
-        if self.scanned_file_count < 1 or self.aggregate_review_evidence_count < 0:
+        if (
+            type(self.scanned_file_count) is not int
+            or type(self.aggregate_review_evidence_count) is not int
+            or self.scanned_file_count < 1
+            or self.aggregate_review_evidence_count < 0
+        ):
             raise ValueError("exposure scan counts are invalid")
         if tuple(sorted(self.items, key=lambda item: item.uid)) != self.items:
             raise ValueError("exposure items are not UID-sorted")
@@ -279,6 +286,56 @@ class HistoricalExposureBundleV2:
                 old_blocked_receipt_sha256=old_blocked_receipt_sha256,
             )
         )
+
+
+@dataclass(frozen=True, slots=True)
+class PostFreezeExposureAuditV2:
+    """Content-free proof that later evidence did not consume frozen holdouts."""
+
+    frozen_manifest_sha256: str
+    live_manifest_sha256: str
+    new_actual_exposed_uid_count: int
+    frozen_holdout_uid_count: int
+    holdout_overlap_count: int
+    new_actual_exposed_uid_set_sha256: str
+    holdout_overlap_uid_set_sha256: str
+
+    def __post_init__(self) -> None:
+        for value, name in (
+            (self.frozen_manifest_sha256, "frozen_manifest_sha256"),
+            (self.live_manifest_sha256, "live_manifest_sha256"),
+            (self.new_actual_exposed_uid_set_sha256, "new_actual_exposed_uid_set_sha256"),
+            (self.holdout_overlap_uid_set_sha256, "holdout_overlap_uid_set_sha256"),
+        ):
+            require_sha256(value, name)
+        for value in (
+            self.new_actual_exposed_uid_count,
+            self.frozen_holdout_uid_count,
+            self.holdout_overlap_count,
+        ):
+            if type(value) is not int or value < 0:
+                raise ValueError("post-freeze exposure counts are invalid")
+        if self.holdout_overlap_count:
+            raise HistoricalExposureV2Error(
+                "post-freeze actual exposure intersects frozen holdout"
+            )
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "schema_version": "HistoricalExposurePostFreezeIsolationAuditV2",
+            "status": "PASS",
+            "frozen_manifest_sha256": self.frozen_manifest_sha256,
+            "live_manifest_sha256": self.live_manifest_sha256,
+            "new_actual_exposed_uid_count": self.new_actual_exposed_uid_count,
+            "frozen_holdout_uid_count": self.frozen_holdout_uid_count,
+            "holdout_overlap_count": self.holdout_overlap_count,
+            "new_actual_exposed_uid_set_sha256": self.new_actual_exposed_uid_set_sha256,
+            "holdout_overlap_uid_set_sha256": self.holdout_overlap_uid_set_sha256,
+        }
+
+    @property
+    def digest(self) -> str:
+        return sha256_bytes(canonical_json_bytes(self.to_payload()))
 
 
 @dataclass(slots=True)
@@ -512,6 +569,137 @@ def verify_historical_exposure_artifacts_v2(
     return {name: sha256_bytes(payload) for name, payload in expected.items()}
 
 
+def load_historical_exposure_artifacts_v2(
+    *,
+    destination_root: Path,
+    old_v1_manifest_sha256: str,
+    old_blocked_receipt_sha256: str,
+) -> tuple[HistoricalExposureBundleV2, dict[str, str]]:
+    """Load the frozen evidence snapshot and rederive every canonical artifact byte."""
+
+    if not isinstance(destination_root, Path) or not destination_root.is_absolute():
+        raise TypeError("destination_root must be an absolute Path")
+    manifest_path = destination_root / "historical_exposure_manifest_v2.json"
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise HistoricalExposureV2Error("frozen exposure manifest is unavailable") from exc
+    required_manifest_keys = {
+        "schema_version",
+        "source_repository_commit",
+        "scanned_file_count",
+        "scanned_inventory_sha256",
+        "item_count",
+        "items",
+    }
+    if type(payload) is not dict or set(payload) != required_manifest_keys:
+        raise HistoricalExposureV2Error("frozen exposure manifest schema is invalid")
+    if payload["schema_version"] != EXPOSURE_MANIFEST_SCHEMA_V2:
+        raise HistoricalExposureV2Error("frozen exposure manifest version is invalid")
+    raw_items = payload["items"]
+    if type(raw_items) is not list or payload["item_count"] != len(raw_items):
+        raise HistoricalExposureV2Error("frozen exposure item count is invalid")
+    required_item_keys = {
+        "uid",
+        "category",
+        "labels",
+        "first_exposure_time",
+        "first_exposure_protocol",
+        "attempt_count",
+        "completion_count",
+        "evaluation_count",
+        "reflector_input_count",
+        "human_item_reviewed",
+        "evidence_digests",
+        "evidence_source_types",
+    }
+    items: list[HistoricalExposureItemV2] = []
+    try:
+        for raw in raw_items:
+            if type(raw) is not dict or set(raw) != required_item_keys:
+                raise HistoricalExposureV2Error("frozen exposure item schema is invalid")
+            if type(raw["labels"]) is not list or type(raw["evidence_digests"]) is not list:
+                raise HistoricalExposureV2Error("frozen exposure item collection is invalid")
+            if type(raw["evidence_source_types"]) is not list:
+                raise HistoricalExposureV2Error("frozen exposure source types are invalid")
+            items.append(
+                HistoricalExposureItemV2(
+                    uid=raw["uid"],
+                    category=raw["category"],
+                    labels=tuple(raw["labels"]),
+                    first_exposure_time=raw["first_exposure_time"],
+                    first_exposure_protocol=raw["first_exposure_protocol"],
+                    attempt_count=raw["attempt_count"],
+                    completion_count=raw["completion_count"],
+                    evaluation_count=raw["evaluation_count"],
+                    reflector_input_count=raw["reflector_input_count"],
+                    human_item_reviewed=raw["human_item_reviewed"],
+                    evidence_digests=tuple(raw["evidence_digests"]),
+                    evidence_source_types=tuple(raw["evidence_source_types"]),
+                )
+            )
+        bundle = HistoricalExposureBundleV2(
+            source_repository_commit=payload["source_repository_commit"],
+            scanned_file_count=payload["scanned_file_count"],
+            scanned_inventory_sha256=payload["scanned_inventory_sha256"],
+            aggregate_review_evidence_count=json.loads(
+                (destination_root / "historical_exposure_summary_v2.json").read_text(
+                    encoding="utf-8"
+                )
+            )["aggregate_review_evidence_count"],
+            items=tuple(items),
+        )
+    except (KeyError, OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        if isinstance(exc, HistoricalExposureV2Error):
+            raise
+        raise HistoricalExposureV2Error("frozen exposure artifact is invalid") from exc
+    digests = verify_historical_exposure_artifacts_v2(
+        bundle,
+        destination_root=destination_root,
+        old_v1_manifest_sha256=old_v1_manifest_sha256,
+        old_blocked_receipt_sha256=old_blocked_receipt_sha256,
+    )
+    return bundle, digests
+
+
+def audit_post_freeze_exposure_isolation_v2(
+    *,
+    frozen_bundle: HistoricalExposureBundleV2,
+    live_bundle: HistoricalExposureBundleV2,
+    frozen_holdout_uids: frozenset[str],
+) -> PostFreezeExposureAuditV2:
+    """Reject later real execution of any UID reserved as Probe or Test."""
+
+    if type(frozen_bundle) is not HistoricalExposureBundleV2:
+        raise TypeError("frozen_bundle must be exact HistoricalExposureBundleV2")
+    if type(live_bundle) is not HistoricalExposureBundleV2:
+        raise TypeError("live_bundle must be exact HistoricalExposureBundleV2")
+    if type(frozen_holdout_uids) is not frozenset or any(
+        type(uid) is not str for uid in frozen_holdout_uids
+    ):
+        raise TypeError("frozen_holdout_uids must be a frozenset of strings")
+    known_uids = frozenset(item.uid for item in frozen_bundle.items)
+    if frozenset(item.uid for item in live_bundle.items) != known_uids:
+        raise HistoricalExposureV2Error("live exposure dataset identity changed")
+    if not frozen_holdout_uids or not frozen_holdout_uids <= known_uids:
+        raise HistoricalExposureV2Error("frozen holdout identity is invalid")
+    new_actual = live_bundle.actual_exposed_uids - frozen_bundle.actual_exposed_uids
+    overlap = live_bundle.actual_exposed_uids & frozen_holdout_uids
+
+    def uid_set_digest(values: frozenset[str]) -> str:
+        return sha256_bytes(("\n".join(sorted(values)) + "\n").encode("utf-8"))
+
+    return PostFreezeExposureAuditV2(
+        frozen_manifest_sha256=frozen_bundle.manifest_sha256,
+        live_manifest_sha256=live_bundle.manifest_sha256,
+        new_actual_exposed_uid_count=len(new_actual),
+        frozen_holdout_uid_count=len(frozen_holdout_uids),
+        holdout_overlap_count=len(overlap),
+        new_actual_exposed_uid_set_sha256=uid_set_digest(frozenset(new_actual)),
+        holdout_overlap_uid_set_sha256=uid_set_digest(frozenset(overlap)),
+    )
+
+
 def _classify_result_record(
     record: dict[str, Any],
     *,
@@ -737,7 +925,10 @@ __all__ = [
     "HistoricalExposureBundleV2",
     "HistoricalExposureItemV2",
     "HistoricalExposureV2Error",
+    "PostFreezeExposureAuditV2",
+    "audit_post_freeze_exposure_isolation_v2",
     "build_historical_exposure_bundle_v2",
+    "load_historical_exposure_artifacts_v2",
     "verify_historical_exposure_artifacts_v2",
     "write_historical_exposure_artifacts_v2",
 ]

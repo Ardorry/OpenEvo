@@ -30,6 +30,9 @@ from openevo_chembench.reflector_execution_boundary_v2 import (
     _run_process_group,
     inspect_reflector_codex_policy_v2,
 )
+from openevo_chembench.supervised_transfer_v1.memory import (
+    inspect_supervised_category_memory_v1,
+)
 
 
 def _canonical_sha256(value: object) -> str:
@@ -436,7 +439,17 @@ def test_supervised_boundary_records_and_binds_structured_render(
     structured = {
         "category": "Yield_Prediction",
         "confirmed_principles": [],
-        "provisional_principles": ["first body", "second body"],
+        "provisional_principles": [
+            {
+                "rule_id": "yield-range-v1",
+                "trigger": "a yield estimate is requested",
+                "principle": "mass balance bounds an isolated yield",
+                "action": "compare the proposed value with the limiting amount",
+                "validation": "reject values outside physical bounds",
+                "evidence_count": 1,
+                "evidence_digests": ["1" * 64],
+            }
+        ],
         "common_failure_modes": [],
         "option_elimination_checks": [],
         "retired_or_contradicted": [],
@@ -483,13 +496,16 @@ def test_supervised_boundary_records_and_binds_structured_render(
     assert completed.returncode == 0
     receipt = activation.require_receipt()
     output = (upstream / "last-message.md").read_text(encoding="utf-8")
-    assert receipt.output_normalization_id == "supervised_memory_structured_render_v1"
+    assert receipt.output_normalization_id == "supervised_memory_structured_render_v2"
     assert receipt.output_normalization_applied is True
     assert receipt.source_last_message_sha256 != receipt.last_message_sha256
     assert receipt.last_message_sha256 == hashlib.sha256(output.encode()).hexdigest()
     assert output.count("## Provisional Principles\n") == 1
     assert sum(line.startswith("## ") for line in output.splitlines()) == 11
-    assert "- first body" in output and "- second body" in output
+    assert "- Rule ID: yield-range-v1; Status: provisional;" in output
+    assert inspect_supervised_category_memory_v1(
+        output.encode("utf-8"), category="Yield_Prediction"
+    ).passed
 
 
 def test_supervised_structured_render_rejects_missing_or_ambiguous_sections() -> None:
@@ -513,6 +529,63 @@ def test_supervised_structured_render_rejects_missing_or_ambiguous_sections() ->
     assert rendered.count("- None.") == 11
 
     payload.pop("validate")
+    with pytest.raises(ReflectorBoundaryError, match="REFLECTOR_LAST_MESSAGE_INVALID"):
+        _render_supervised_structured_memory(json.dumps(payload))
+
+
+def test_supervised_structured_render_rejects_unstructured_retired_note() -> None:
+    payload = {
+        "category": "Yield_Prediction",
+        "confirmed_principles": [],
+        "provisional_principles": [],
+        "common_failure_modes": [],
+        "option_elimination_checks": [],
+        "retired_or_contradicted": ["retire the previous estimate"],
+        "output_discipline": [],
+        "do": [],
+        "avoid": [],
+        "validate": [],
+        "when_applicable": [],
+        "retired_or_superseded": [],
+    }
+    with pytest.raises(ReflectorBoundaryError, match="REFLECTOR_LAST_MESSAGE_INVALID"):
+        _render_supervised_structured_memory(json.dumps(payload))
+
+
+def test_supervised_structured_render_binds_rule_status_category_and_evidence() -> None:
+    payload = {
+        "category": "Yield_Prediction",
+        "confirmed_principles": [
+            {
+                "rule_id": "bounded-yield-v2",
+                "trigger": "a quantitative isolated yield is requested",
+                "principle": "stoichiometry and recovery bound the result",
+                "action": "calculate the limiting amount before estimating losses",
+                "validation": "check the estimate is between zero and full conversion",
+                "evidence_count": 2,
+                "evidence_digests": ["1" * 64, "2" * 64],
+            }
+        ],
+        "provisional_principles": [],
+        "common_failure_modes": [],
+        "option_elimination_checks": [],
+        "retired_or_contradicted": [],
+        "output_discipline": [],
+        "do": [],
+        "avoid": [],
+        "validate": [],
+        "when_applicable": [],
+        "retired_or_superseded": [],
+    }
+    rendered = _render_supervised_structured_memory(json.dumps(payload))
+    assert "Status: confirmed; Category: Yield_Prediction;" in rendered
+    inspection = inspect_supervised_category_memory_v1(
+        rendered.encode("utf-8"), category="Yield_Prediction"
+    )
+    assert inspection.passed
+    assert inspection.confirmed_rule_count == 1
+
+    payload["confirmed_principles"][0]["evidence_digests"] = ["1" * 64]
     with pytest.raises(ReflectorBoundaryError, match="REFLECTOR_LAST_MESSAGE_INVALID"):
         _render_supervised_structured_memory(json.dumps(payload))
 
