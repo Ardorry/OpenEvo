@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from openevo_chembench.supervised_transfer_v2.runtime_services import (
+    GatewayContainerIdentityV2,
     RuntimeProcessIdentityV2,
     RuntimeServicesV2Error,
     _runtime_metadata,
@@ -57,3 +58,22 @@ def test_runtime_process_receipt_rejects_unknown_fields() -> None:
 
     with pytest.raises(RuntimeServicesV2Error, match="RUNTIME_SERVICE_RECEIPT_INVALID"):
         RuntimeProcessIdentityV2.from_payload(payload)
+
+
+def test_gateway_container_receipt_is_closed_and_digest_bound() -> None:
+    payload = {
+        "container_name": "openevo-stv2-gateway-" + "a" * 24,
+        "container_id": "b" * 64,
+        "image_id": "sha256:" + "c" * 64,
+        "effective_topology_sha256": "d" * 64,
+        "docker_host_path_identity_sha256": "e" * 64,
+        "docker_engine_identity_sha256": "f" * 64,
+        "docker_launcher_sha256": "0" * 64,
+    }
+
+    identity = GatewayContainerIdentityV2.from_payload(payload)
+
+    assert identity.payload == payload
+    assert not any(value.startswith("/") for value in identity.payload.values())
+    with pytest.raises(RuntimeServicesV2Error, match="RUNTIME_SERVICE_RECEIPT_INVALID"):
+        GatewayContainerIdentityV2.from_payload({**payload, "host_path": "/forbidden"})

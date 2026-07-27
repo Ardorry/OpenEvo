@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import signal
 import stat
 import subprocess
@@ -26,6 +27,10 @@ from openevo_chembench.supervised_transfer_v1.common import (
     canonical_pretty_json_bytes,
     sha256_bytes,
 )
+from openevo_chembench.supervised_transfer_v2.managed_codex import (
+    codex_subscription_auth_source_v2,
+    load_managed_candidate_codex_v2,
+)
 
 SERVICE_RECEIPT_SCHEMA = "OpenEvoChemBenchRuntimeServicesReceiptV2"
 SERVICE_STOP_RECEIPT_SCHEMA = "OpenEvoChemBenchRuntimeServicesStopReceiptV2"
@@ -38,6 +43,14 @@ TOPOLOGY_RELATIVE = (
 )
 ROLLOUT_URL = "http://127.0.0.1:8080"
 GATEWAY_URL = "http://127.0.0.1:8100"
+GATEWAY_BOOTSTRAP_RELATIVE = (
+    "benchmarks/chembench/scripts/supervised_transfer_v2/gateway_service_bootstrap_v2.py"
+)
+GATEWAY_RUNTIME_MOUNT = "/openevo-v2-runtime"
+GATEWAY_AUTH_SOURCE_MOUNT = "/openevo-auth-source"
+GATEWAY_DOCKER_SOURCE_MOUNT = "/openevo-host-docker"
+GATEWAY_EFFECTIVE_TOPOLOGY = f"{GATEWAY_RUNTIME_MOUNT}/effective_topology.yaml"
+GATEWAY_BOOTSTRAP_RECEIPT = f"{GATEWAY_RUNTIME_MOUNT}/bootstrap_receipt.json"
 
 _RUN_ID_RE = re.compile(r"stv2-services-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8,16}\Z")
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
@@ -49,6 +62,10 @@ _SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 _HEALTH_TIMEOUT_SECONDS = 2.0
 _START_TIMEOUT_SECONDS = 30.0
 _STOP_GRACE_SECONDS = 15.0
+_GATEWAY_BOOTSTRAP_RECEIPT_SCHEMA = "OpenEvoChemBenchGatewayBootstrapReceiptV2"
+_GATEWAY_CONTAINER_LABEL_PROTOCOL = "openevo.chembench.protocol"
+_GATEWAY_CONTAINER_LABEL_RUN = "openevo.chembench.service_run_id"
+_GATEWAY_CONTAINER_LABEL_SOURCE = "openevo.chembench.source_commit"
 
 
 class RuntimeServicesV2Error(RuntimeError):
@@ -116,6 +133,60 @@ class RuntimeProcessIdentityV2:
 
 
 @dataclass(frozen=True, slots=True)
+class GatewayContainerIdentityV2:
+    container_name: str
+    container_id: str
+    image_id: str
+    effective_topology_sha256: str
+    docker_host_path_identity_sha256: str
+    docker_engine_identity_sha256: str
+    docker_launcher_sha256: str
+
+    @classmethod
+    def from_payload(cls, payload: object) -> GatewayContainerIdentityV2:
+        expected = {
+            "container_name",
+            "container_id",
+            "image_id",
+            "effective_topology_sha256",
+            "docker_host_path_identity_sha256",
+            "docker_engine_identity_sha256",
+            "docker_launcher_sha256",
+        }
+        if type(payload) is not dict or set(payload) != expected:
+            raise RuntimeServicesV2Error("RUNTIME_SERVICE_RECEIPT_INVALID")
+        if (
+            type(payload["container_name"]) is not str
+            or not payload["container_name"].startswith("openevo-stv2-gateway-")
+            or type(payload["image_id"]) is not str
+            or not payload["image_id"].startswith("sha256:")
+        ):
+            raise RuntimeServicesV2Error("RUNTIME_SERVICE_RECEIPT_INVALID")
+        for key in (
+            "container_id",
+            "effective_topology_sha256",
+            "docker_host_path_identity_sha256",
+            "docker_engine_identity_sha256",
+            "docker_launcher_sha256",
+        ):
+            if type(payload[key]) is not str or _SHA256_RE.fullmatch(payload[key]) is None:
+                raise RuntimeServicesV2Error("RUNTIME_SERVICE_RECEIPT_INVALID")
+        return cls(**payload)
+
+    @property
+    def payload(self) -> dict[str, str]:
+        return {
+            "container_name": self.container_name,
+            "container_id": self.container_id,
+            "image_id": self.image_id,
+            "effective_topology_sha256": self.effective_topology_sha256,
+            "docker_host_path_identity_sha256": self.docker_host_path_identity_sha256,
+            "docker_engine_identity_sha256": self.docker_engine_identity_sha256,
+            "docker_launcher_sha256": self.docker_launcher_sha256,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class OpenEvoRuntimeServicesIdentityV2:
     repository_root: Path
     service_run_id: str
@@ -123,10 +194,12 @@ class OpenEvoRuntimeServicesIdentityV2:
     framework_lock_sha256: str
     framework_wheel_sha256: str
     topology_sha256: str
+    gateway_bootstrap_sha256: str
     runtime_python_sha256: str
     openevo_version: str
     rollout: RuntimeProcessIdentityV2
     gateway: RuntimeProcessIdentityV2
+    gateway_container: GatewayContainerIdentityV2
     receipt_path: Path
     receipt_sha256: str
 
@@ -142,10 +215,12 @@ class OpenEvoRuntimeServicesIdentityV2:
             "framework_lock_sha256": self.framework_lock_sha256,
             "framework_wheel_sha256": self.framework_wheel_sha256,
             "topology_sha256": self.topology_sha256,
+            "gateway_bootstrap_sha256": self.gateway_bootstrap_sha256,
             "runtime_python_sha256": self.runtime_python_sha256,
             "openevo_version": self.openevo_version,
             "rollout_process": self.rollout.payload,
             "gateway_process": self.gateway.payload,
+            "gateway_container": self.gateway_container.payload,
             "receipt_sha256": self.receipt_sha256,
         }
 
@@ -154,8 +229,17 @@ class OpenEvoRuntimeServicesIdentityV2:
         return sha256_bytes(canonical_pretty_json_bytes(self.public_identity))
 
     def require_current(self) -> dict[str, object]:
-        for process in (self.rollout, self.gateway):
-            _require_process_identity(process)
+        _require_process_identity(self.rollout)
+        _require_process_identity(
+            self.gateway,
+            gateway_container_name=self.gateway_container.container_name,
+        )
+        _require_gateway_container_identity(
+            self.gateway_container,
+            repository_root=self.repository_root,
+            source_commit=self.source_commit,
+            service_run_id=self.service_run_id,
+        )
         health = _require_service_health()
         return {
             "runtime_services_identity_sha256": self.digest,
@@ -198,6 +282,13 @@ def start_runtime_services_v2(
     metadata = _runtime_metadata(paths)
     source_commit = _git(repository, "rev-parse", "HEAD")
     environment = _service_environment(repository)
+    candidate = load_managed_candidate_codex_v2(repository_root=repository)
+    auth_source = codex_subscription_auth_source_v2()
+    docker_launcher = _resolve_docker_launcher()
+    gateway_container_name = _gateway_container_name(service_run_id)
+    gateway_runtime_root = run_root / "gateway_runtime"
+    gateway_runtime_root.mkdir(mode=0o700)
+    gateway_runtime_root.chmod(0o700)
     processes: dict[str, subprocess.Popen[bytes]] = {}
     log_streams: list[Any] = []
     try:
@@ -206,18 +297,30 @@ def start_runtime_services_v2(
             descriptor = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             stream = os.fdopen(descriptor, "wb", buffering=0)
             log_streams.append(stream)
-            command = [
-                os.fspath(paths["runtime_python"]),
-                "-I",
-                "-m",
-                _EXPECTED_MODULES[service],
-                "--config",
-                os.fspath(paths["topology"]),
-                "--log-level",
-                "warning",
-            ]
-            if service == "gateway":
-                command.extend(("--node-id", "core-gateway"))
+            command = (
+                [
+                    os.fspath(paths["runtime_python"]),
+                    "-I",
+                    "-m",
+                    _EXPECTED_MODULES[service],
+                    "--config",
+                    os.fspath(paths["topology"]),
+                    "--log-level",
+                    "warning",
+                ]
+                if service == "rollout"
+                else _gateway_container_command(
+                    repository=repository,
+                    paths=paths,
+                    source_commit=source_commit,
+                    service_run_id=service_run_id,
+                    container_name=gateway_container_name,
+                    gateway_runtime_root=gateway_runtime_root,
+                    image_id=candidate.image_id,
+                    auth_source=auth_source,
+                    docker_launcher=docker_launcher,
+                )
+            )
             processes[service] = subprocess.Popen(
                 command,
                 stdin=subprocess.DEVNULL,
@@ -232,8 +335,21 @@ def start_runtime_services_v2(
                 url=f"{ROLLOUT_URL if service == 'rollout' else GATEWAY_URL}/health",
             )
         _wait_for_schedulable_rollout(processes["rollout"])
+        gateway_container = _load_gateway_container_identity(
+            gateway_runtime_root=gateway_runtime_root,
+            base_topology=paths["topology"],
+            container_name=gateway_container_name,
+            expected_image_id=candidate.image_id,
+            docker_launcher=docker_launcher,
+            source_commit=source_commit,
+            service_run_id=service_run_id,
+        )
         identities = {
-            service: _capture_process_identity(service, process.pid)
+            service: _capture_process_identity(
+                service,
+                process.pid,
+                gateway_container_name=(gateway_container_name if service == "gateway" else None),
+            )
             for service, process in processes.items()
         }
         health = _require_service_health()
@@ -246,6 +362,7 @@ def start_runtime_services_v2(
             "gateway_url": GATEWAY_URL,
             "rollout_process": identities["rollout"].payload,
             "gateway_process": identities["gateway"].payload,
+            "gateway_container": gateway_container.payload,
             "rollout_health_sha256": sha256_bytes(
                 canonical_pretty_json_bytes(health["rollout"])
             ),
@@ -267,7 +384,12 @@ def start_runtime_services_v2(
         )
         return load_runtime_services_v2(repository_root=repository)
     except BaseException:
-        _terminate_processes(processes)
+        _terminate_processes(
+            processes,
+            gateway_container_name=gateway_container_name,
+            source_commit=source_commit,
+            service_run_id=service_run_id,
+        )
         raise
     finally:
         for stream in log_streams:
@@ -313,12 +435,14 @@ def load_runtime_services_v2(
         "framework_lock_sha256",
         "framework_wheel_sha256",
         "topology_sha256",
+        "gateway_bootstrap_sha256",
         "runtime_python_sha256",
         "openevo_version",
         "rollout_url",
         "gateway_url",
         "rollout_process",
         "gateway_process",
+        "gateway_container",
         "rollout_health_sha256",
         "gateway_health_sha256",
     }
@@ -347,10 +471,14 @@ def load_runtime_services_v2(
         framework_lock_sha256=receipt["framework_lock_sha256"],
         framework_wheel_sha256=receipt["framework_wheel_sha256"],
         topology_sha256=receipt["topology_sha256"],
+        gateway_bootstrap_sha256=receipt["gateway_bootstrap_sha256"],
         runtime_python_sha256=receipt["runtime_python_sha256"],
         openevo_version=receipt["openevo_version"],
         rollout=RuntimeProcessIdentityV2.from_payload(receipt["rollout_process"]),
         gateway=RuntimeProcessIdentityV2.from_payload(receipt["gateway_process"]),
+        gateway_container=GatewayContainerIdentityV2.from_payload(
+            receipt["gateway_container"]
+        ),
         receipt_path=receipt_path,
         receipt_sha256=receipt_digest,
     )
@@ -362,8 +490,11 @@ def stop_runtime_services_v2(*, repository_root: Path) -> dict[str, object]:
     repository = _repository(repository_root)
     identity = load_runtime_services_v2(repository_root=repository)
     processes = {identity.rollout.service: identity.rollout, identity.gateway.service: identity.gateway}
-    for process in processes.values():
-        _require_process_identity(process)
+    _require_process_identity(identity.rollout)
+    _require_process_identity(
+        identity.gateway,
+        gateway_container_name=identity.gateway_container.container_name,
+    )
     for service in ("gateway", "rollout"):
         process = processes[service]
         try:
@@ -375,13 +506,26 @@ def stop_runtime_services_v2(*, repository_root: Path) -> dict[str, object]:
         time.sleep(0.1)
     for process in processes.values():
         if _process_exists(process.pid):
-            _require_process_identity(process)
+            _require_process_identity(
+                process,
+                gateway_container_name=(
+                    identity.gateway_container.container_name
+                    if process.service == "gateway"
+                    else None
+                ),
+            )
             os.killpg(process.process_group_id, signal.SIGKILL)
     deadline = time.monotonic() + 5.0
     while time.monotonic() < deadline and any(_process_exists(p.pid) for p in processes.values()):
         time.sleep(0.1)
     if any(_process_exists(p.pid) for p in processes.values()):
         raise RuntimeServicesV2Error("RUNTIME_SERVICE_CLEANUP_INCOMPLETE")
+    _remove_gateway_container_if_owned(
+        container_name=identity.gateway_container.container_name,
+        expected_container_id=identity.gateway_container.container_id,
+        source_commit=identity.source_commit,
+        service_run_id=identity.service_run_id,
+    )
     stop_receipt = {
         "schema_version": SERVICE_STOP_RECEIPT_SCHEMA,
         "service_run_id": identity.service_run_id,
@@ -419,6 +563,7 @@ def _runtime_paths(repository: Path) -> dict[str, Path]:
         "framework_lock": repository / FRAMEWORK_LOCK_RELATIVE,
         "framework_wheel": wheels[0],
         "topology": repository / TOPOLOGY_RELATIVE,
+        "gateway_bootstrap": repository / GATEWAY_BOOTSTRAP_RELATIVE,
     }
 
 
@@ -431,7 +576,7 @@ def _validate_runtime_inputs(paths: dict[str, Path]) -> None:
         raise RuntimeServicesV2Error("RUNTIME_SERVICE_INPUT_MISSING") from exc
     if not stat.S_ISREG(python_metadata.st_mode) or not os.access(runtime_python, os.X_OK):
         raise RuntimeServicesV2Error("RUNTIME_SERVICE_RUNTIME_INVALID")
-    for key in ("framework_lock", "framework_wheel", "topology"):
+    for key in ("framework_lock", "framework_wheel", "topology", "gateway_bootstrap"):
         path = paths[key]
         try:
             metadata = path.lstat()
@@ -462,9 +607,255 @@ def _runtime_metadata(paths: dict[str, Path]) -> dict[str, str]:
         "framework_lock_sha256": _sha256_file(paths["framework_lock"]),
         "framework_wheel_sha256": _sha256_file(paths["framework_wheel"]),
         "topology_sha256": _sha256_file(paths["topology"]),
+        "gateway_bootstrap_sha256": _sha256_file(paths["gateway_bootstrap"]),
         "runtime_python_sha256": _sha256_file(paths["runtime_python"].resolve(strict=True)),
         "openevo_version": version,
     }
+
+
+def _resolve_docker_launcher() -> Path:
+    selected = shutil.which("docker", path=os.defpath)
+    if selected is None:
+        raise RuntimeServicesV2Error("RUNTIME_SERVICE_DOCKER_UNAVAILABLE")
+    try:
+        resolved = Path(selected).resolve(strict=True)
+        metadata = resolved.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise RuntimeServicesV2Error("RUNTIME_SERVICE_DOCKER_UNAVAILABLE") from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != 0
+        or not stat.S_IMODE(metadata.st_mode) & 0o111
+        or metadata.st_size <= 0
+    ):
+        raise RuntimeServicesV2Error("RUNTIME_SERVICE_DOCKER_UNAVAILABLE")
+    return resolved
+
+
+def _gateway_container_name(service_run_id: str) -> str:
+    suffix = hashlib.sha256(service_run_id.encode("ascii")).hexdigest()[:24]
+    return f"openevo-stv2-gateway-{suffix}"
+
+
+def _gateway_container_command(
+    *,
+    repository: Path,
+    paths: dict[str, Path],
+    source_commit: str,
+    service_run_id: str,
+    container_name: str,
+    gateway_runtime_root: Path,
+    image_id: str,
+    auth_source: Path,
+    docker_launcher: Path,
+) -> list[str]:
+    socket_path = Path("/var/run/docker.sock")
+    try:
+        socket_metadata = socket_path.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise RuntimeServicesV2Error("RUNTIME_SERVICE_DOCKER_UNAVAILABLE") from exc
+    if not stat.S_ISSOCK(socket_metadata.st_mode):
+        raise RuntimeServicesV2Error("RUNTIME_SERVICE_DOCKER_UNAVAILABLE")
+    namespace = f"stv2-{hashlib.sha256(service_run_id.encode('ascii')).hexdigest()[:24]}"
+    shell = "\n".join(
+        (
+            "set -eu",
+            "umask 077",
+            f"cp {GATEWAY_DOCKER_SOURCE_MOUNT} /usr/bin/docker",
+            "chmod 0755 /usr/bin/docker",
+            "install -d -m 0700 -o 1000 -g 1000 /home/openevo/.codex",
+            (
+                f"install -m 0600 -o 1000 -g 1000 {GATEWAY_AUTH_SOURCE_MOUNT} "
+                "/home/openevo/.codex/auth.json"
+            ),
+            (
+                "exec setpriv --reuid 1000 --regid 1000 "
+                f"--groups {socket_metadata.st_gid} -- "
+                f"{os.fspath(paths['runtime_python'])} -I "
+                f"{os.fspath(paths['gateway_bootstrap'])} "
+                f"--base-config {os.fspath(paths['topology'])} "
+                f"--effective-config {GATEWAY_EFFECTIVE_TOPOLOGY} "
+                f"--receipt {GATEWAY_BOOTSTRAP_RECEIPT} "
+                f"--runtime-python {os.fspath(paths['runtime_python'])} "
+                f"--namespace {namespace}"
+            ),
+        )
+    )
+    return [
+        os.fspath(docker_launcher),
+        "run",
+        "--rm",
+        "--init",
+        "--name",
+        container_name,
+        "--user",
+        "0:0",
+        "--group-add",
+        str(socket_metadata.st_gid),
+        "--security-opt",
+        "no-new-privileges:true",
+        "--add-host",
+        "host.docker.internal:host-gateway",
+        "--publish",
+        "127.0.0.1:8100:8100",
+        "--label",
+        f"{_GATEWAY_CONTAINER_LABEL_PROTOCOL}=chembench_supervised_transfer_v2",
+        "--label",
+        f"{_GATEWAY_CONTAINER_LABEL_RUN}={service_run_id}",
+        "--label",
+        f"{_GATEWAY_CONTAINER_LABEL_SOURCE}={source_commit}",
+        "--mount",
+        "type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock",
+        "--mount",
+        (
+            f"type=bind,source={os.fspath(docker_launcher)},"
+            f"target={GATEWAY_DOCKER_SOURCE_MOUNT},readonly"
+        ),
+        "--mount",
+        (
+            f"type=bind,source={os.fspath(repository)},"
+            f"target={os.fspath(repository)},readonly"
+        ),
+        "--mount",
+        (
+            f"type=bind,source={os.fspath(gateway_runtime_root)},"
+            f"target={GATEWAY_RUNTIME_MOUNT}"
+        ),
+        "--mount",
+        (
+            f"type=bind,source={os.fspath(auth_source)},"
+            f"target={GATEWAY_AUTH_SOURCE_MOUNT},readonly"
+        ),
+        "--entrypoint",
+        "/bin/sh",
+        image_id,
+        "-ceu",
+        shell,
+    ]
+
+
+def _load_gateway_container_identity(
+    *,
+    gateway_runtime_root: Path,
+    base_topology: Path,
+    container_name: str,
+    expected_image_id: str,
+    docker_launcher: Path,
+    source_commit: str,
+    service_run_id: str,
+) -> GatewayContainerIdentityV2:
+    receipt_path = gateway_runtime_root / "bootstrap_receipt.json"
+    receipt = _read_private_json(receipt_path, maximum=16 * 1024)
+    expected_keys = {
+        "schema_version",
+        "base_topology_sha256",
+        "effective_topology_sha256",
+        "docker_engine_identity_sha256",
+        "docker_host_path_identity_sha256",
+        "container_id",
+    }
+    if type(receipt) is not dict or set(receipt) != expected_keys:
+        raise RuntimeServicesV2Error("RUNTIME_SERVICE_GATEWAY_BOOTSTRAP_INVALID")
+    for key in expected_keys - {"schema_version"}:
+        if type(receipt[key]) is not str or _SHA256_RE.fullmatch(receipt[key]) is None:
+            raise RuntimeServicesV2Error("RUNTIME_SERVICE_GATEWAY_BOOTSTRAP_INVALID")
+    effective = gateway_runtime_root / "effective_topology.yaml"
+    if (
+        receipt["schema_version"] != _GATEWAY_BOOTSTRAP_RECEIPT_SCHEMA
+        or receipt["base_topology_sha256"] != _sha256_file(base_topology)
+        or receipt["effective_topology_sha256"] != _sha256_file(effective)
+    ):
+        raise RuntimeServicesV2Error("RUNTIME_SERVICE_GATEWAY_BOOTSTRAP_INVALID")
+    inspected = _inspect_gateway_container(
+        container_name=container_name,
+        source_commit=source_commit,
+        service_run_id=service_run_id,
+    )
+    if inspected["container_id"] != receipt["container_id"]:
+        raise RuntimeServicesV2Error("RUNTIME_SERVICE_GATEWAY_CONTAINER_INVALID")
+    if inspected["image_id"] != expected_image_id:
+        raise RuntimeServicesV2Error("RUNTIME_SERVICE_GATEWAY_CONTAINER_INVALID")
+    return GatewayContainerIdentityV2(
+        container_name=container_name,
+        container_id=str(receipt["container_id"]),
+        image_id=expected_image_id,
+        effective_topology_sha256=str(receipt["effective_topology_sha256"]),
+        docker_host_path_identity_sha256=str(receipt["docker_host_path_identity_sha256"]),
+        docker_engine_identity_sha256=str(receipt["docker_engine_identity_sha256"]),
+        docker_launcher_sha256=_sha256_file(docker_launcher),
+    )
+
+
+def _inspect_gateway_container(
+    *,
+    container_name: str,
+    source_commit: str,
+    service_run_id: str,
+) -> dict[str, str]:
+    docker = _resolve_docker_launcher()
+    completed = subprocess.run(
+        (os.fspath(docker), "container", "inspect", container_name),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env={"PATH": _SAFE_PATH, "HOME": "/proc/self", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"},
+        cwd="/",
+    )
+    try:
+        rows = json.loads(completed.stdout)
+        row = rows[0]
+        labels = row["Config"]["Labels"]
+        state = row["State"]
+    except (IndexError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise RuntimeServicesV2Error("RUNTIME_SERVICE_GATEWAY_CONTAINER_INVALID") from exc
+    expected_labels = {
+        _GATEWAY_CONTAINER_LABEL_PROTOCOL: "chembench_supervised_transfer_v2",
+        _GATEWAY_CONTAINER_LABEL_RUN: service_run_id,
+        _GATEWAY_CONTAINER_LABEL_SOURCE: source_commit,
+    }
+    if (
+        completed.returncode != 0
+        or not isinstance(row, dict)
+        or not isinstance(labels, dict)
+        or any(labels.get(key) != value for key, value in expected_labels.items())
+        or not isinstance(state, dict)
+        or state.get("Running") is not True
+        or type(row.get("Id")) is not str
+        or _SHA256_RE.fullmatch(row["Id"]) is None
+        or type(row.get("Image")) is not str
+        or not row["Image"].startswith("sha256:")
+    ):
+        raise RuntimeServicesV2Error("RUNTIME_SERVICE_GATEWAY_CONTAINER_INVALID")
+    return {"container_id": row["Id"], "image_id": row["Image"]}
+
+
+def _require_gateway_container_identity(
+    expected: GatewayContainerIdentityV2,
+    *,
+    repository_root: Path,
+    source_commit: str,
+    service_run_id: str,
+) -> None:
+    current = _inspect_gateway_container(
+        container_name=expected.container_name,
+        source_commit=source_commit,
+        service_run_id=service_run_id,
+    )
+    effective = (
+        repository_root
+        / SERVICE_ROOT_RELATIVE
+        / "runs"
+        / service_run_id
+        / "gateway_runtime/effective_topology.yaml"
+    )
+    if (
+        current["container_id"] != expected.container_id
+        or current["image_id"] != expected.image_id
+        or _sha256_file(_resolve_docker_launcher()) != expected.docker_launcher_sha256
+        or _sha256_file(effective) != expected.effective_topology_sha256
+    ):
+        raise RuntimeServicesV2Error("RUNTIME_SERVICE_GATEWAY_CONTAINER_DRIFT")
 
 
 def _service_environment(repository: Path) -> dict[str, str]:
@@ -558,6 +949,8 @@ def _get_json(url: str) -> dict[str, Any]:
 def _capture_process_identity(
     service: Literal["rollout", "gateway"],
     pid: int,
+    *,
+    gateway_container_name: str | None = None,
 ) -> RuntimeProcessIdentityV2:
     proc = Path("/proc") / str(pid)
     try:
@@ -568,10 +961,21 @@ def _capture_process_identity(
         session_id = os.getsid(pid)
     except (OSError, ValueError) as exc:
         raise RuntimeServicesV2Error("RUNTIME_SERVICE_PROCESS_IDENTITY_INVALID") from exc
+    expected_command = (
+        f"-m\x00{_EXPECTED_MODULES[service]}\x00".encode()
+        if service == "rollout"
+        else GATEWAY_BOOTSTRAP_RELATIVE.encode()
+    )
+    expected_container = (
+        None
+        if service == "rollout"
+        else f"--name\x00{gateway_container_name}\x00".encode()
+    )
     if (
         process_group_id != pid
         or session_id != pid
-        or f"-m\x00{_EXPECTED_MODULES[service]}\x00".encode() not in cmdline
+        or expected_command not in cmdline
+        or (expected_container is not None and expected_container not in cmdline)
     ):
         raise RuntimeServicesV2Error("RUNTIME_SERVICE_PROCESS_IDENTITY_INVALID")
     return RuntimeProcessIdentityV2(
@@ -585,8 +989,16 @@ def _capture_process_identity(
     )
 
 
-def _require_process_identity(expected: RuntimeProcessIdentityV2) -> None:
-    current = _capture_process_identity(expected.service, expected.pid)
+def _require_process_identity(
+    expected: RuntimeProcessIdentityV2,
+    *,
+    gateway_container_name: str | None = None,
+) -> None:
+    current = _capture_process_identity(
+        expected.service,
+        expected.pid,
+        gateway_container_name=gateway_container_name,
+    )
     if current != expected:
         raise RuntimeServicesV2Error("RUNTIME_SERVICE_PROCESS_IDENTITY_DRIFT")
 
@@ -602,7 +1014,13 @@ def _proc_start_time_ticks(path: Path) -> int:
     return int(fields[19], 10)
 
 
-def _terminate_processes(processes: dict[str, subprocess.Popen[bytes]]) -> None:
+def _terminate_processes(
+    processes: dict[str, subprocess.Popen[bytes]],
+    *,
+    gateway_container_name: str,
+    source_commit: str,
+    service_run_id: str,
+) -> None:
     for process in reversed(tuple(processes.values())):
         if process.poll() is None:
             try:
@@ -622,6 +1040,63 @@ def _terminate_processes(processes: dict[str, subprocess.Popen[bytes]]) -> None:
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
             pass
+    _remove_gateway_container_if_owned(
+        container_name=gateway_container_name,
+        expected_container_id=None,
+        source_commit=source_commit,
+        service_run_id=service_run_id,
+    )
+
+
+def _remove_gateway_container_if_owned(
+    *,
+    container_name: str,
+    expected_container_id: str | None,
+    source_commit: str,
+    service_run_id: str,
+) -> None:
+    docker = _resolve_docker_launcher()
+    inspected = subprocess.run(
+        (os.fspath(docker), "container", "inspect", container_name),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env={"PATH": _SAFE_PATH, "HOME": "/proc/self", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"},
+        cwd="/",
+    )
+    if inspected.returncode != 0:
+        return
+    try:
+        rows = json.loads(inspected.stdout)
+        row = rows[0]
+        labels = row["Config"]["Labels"]
+        container_id = row["Id"]
+    except (IndexError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise RuntimeServicesV2Error("RUNTIME_SERVICE_CLEANUP_OWNERSHIP_INVALID") from exc
+    if (
+        not isinstance(labels, dict)
+        or labels.get(_GATEWAY_CONTAINER_LABEL_PROTOCOL)
+        != "chembench_supervised_transfer_v2"
+        or labels.get(_GATEWAY_CONTAINER_LABEL_RUN) != service_run_id
+        or labels.get(_GATEWAY_CONTAINER_LABEL_SOURCE) != source_commit
+        or type(container_id) is not str
+        or _SHA256_RE.fullmatch(container_id) is None
+        or (expected_container_id is not None and container_id != expected_container_id)
+    ):
+        raise RuntimeServicesV2Error("RUNTIME_SERVICE_CLEANUP_OWNERSHIP_INVALID")
+    removed = subprocess.run(
+        (os.fspath(docker), "container", "rm", "--force", container_id),
+        check=False,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=15,
+        env={"PATH": _SAFE_PATH, "HOME": "/proc/self", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"},
+        cwd="/",
+    )
+    if removed.returncode != 0:
+        raise RuntimeServicesV2Error("RUNTIME_SERVICE_CLEANUP_INCOMPLETE")
 
 
 def _read_private_json(path: Path, *, maximum: int) -> object:
@@ -701,6 +1176,7 @@ def _process_exists(pid: int) -> bool:
 
 
 __all__ = [
+    "GatewayContainerIdentityV2",
     "OpenEvoRuntimeServicesIdentityV2",
     "RuntimeServicesV2Error",
     "load_runtime_services_v2",
