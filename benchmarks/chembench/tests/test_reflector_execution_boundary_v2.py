@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from openevo_chembench.reflector_execution_boundary_v2 import (
+    _SUPERVISED_OUTPUT_SCHEMA,
     SUPERVISED_TRAIN_SOURCE_SPLIT,
     TASKWISE_SOURCE_SPLIT,
     ReflectorBoundaryError,
@@ -368,6 +369,11 @@ def test_supervised_prompt_requires_one_complete_memory_and_unique_headings() ->
     assert "isolated wrapper renders" in projected
     assert "four or more complete tokens" in projected
     assert "retain only the abstract chemistry principle" in projected
+    assert "exact lowercase `packet_sha256`" in projected
+    evidence_items = _SUPERVISED_OUTPUT_SCHEMA["properties"]["provisional_principles"][
+        "items"
+    ]["properties"]["evidence_digests"]["items"]
+    assert evidence_items["pattern"] == "^[0-9a-f]{64}$"
 
 
 def test_supervised_section_normalizer_merges_only_duplicate_exact_sections() -> None:
@@ -1073,6 +1079,95 @@ def test_zero_exit_empty_event_stream_is_rejected(
     assert not (upstream / "last-message.md").exists()
     receipt = activation.load_receipt_for_audit()
     assert receipt.status is ReflectorBoundaryStatusV2.INVALID_INVOCATION
+
+
+def test_invalid_supervised_structured_render_receipt_remains_auditable(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "private-supervised.jsonl"
+    records = [
+        {
+            "uid": hashlib.sha256(b"supervised-invalid-render").hexdigest(),
+            "source_split": SUPERVISED_TRAIN_SOURCE_SPLIT,
+            "content": "private packet part",
+        }
+    ]
+    source.write_text(
+        json.dumps(records[0], sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    source.chmod(0o600)
+    auth = tmp_path / "auth.json"
+    auth.write_text("{}\n", encoding="utf-8")
+    auth.chmod(0o600)
+    structured = {
+        "category": "Yield_Prediction",
+        "confirmed_principles": [],
+        "provisional_principles": [
+            {
+                "rule_id": "invalid-evidence",
+                "trigger": "yield requested",
+                "principle": "mass balance constrains yield",
+                "action": "calculate a limiting amount",
+                "validation": "check physical bounds",
+                "evidence_count": 1,
+                "evidence_digests": ["not-a-real-lowercase-sha256".ljust(64, "x")],
+            }
+        ],
+        "common_failure_modes": [],
+        "option_elimination_checks": [],
+        "retired_or_contradicted": [],
+        "output_discipline": [],
+        "do": [],
+        "avoid": [],
+        "validate": [],
+        "when_applicable": [],
+        "retired_or_superseded": [],
+    }
+    fake = tmp_path / "fake-codex"
+    _fake_codex(
+        fake,
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "agent_message",
+                "text": json.dumps(structured, sort_keys=True, separators=(",", ":")),
+            },
+        },
+    )
+    temporary_parent = tmp_path / "temporary"
+    temporary_parent.mkdir(mode=0o700)
+    boundary = ReflectorExecutionBoundaryV2(
+        dev_artifact_path=source,
+        expected_records_sha256=_canonical_sha256(records),
+        expected_record_count=1,
+        expected_source_split=SUPERVISED_TRAIN_SOURCE_SPLIT,
+        private_audit_root=tmp_path / "audit",
+        real_codex_binary=fake,
+        auth_source=auth,
+        timeout_seconds=30,
+        temporary_parent=temporary_parent,
+        config_probe_runner=_passing_policy_probe,
+    )
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+
+    with boundary.activate() as activation:
+        completed = subprocess.run(
+            _upstream_args(upstream),
+            input="private supervised prompt",
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+
+    assert completed.returncode != 0
+    receipt = activation.load_receipt_for_audit()
+    assert receipt.status is ReflectorBoundaryStatusV2.INVALID_INVOCATION
+    assert receipt.source_last_message_sha256 is not None
+    assert receipt.last_message_sha256 is None
+    assert receipt.output_normalization_id == "none"
 
 
 def test_codex_failure_receipt_keeps_only_safe_private_diagnostics(

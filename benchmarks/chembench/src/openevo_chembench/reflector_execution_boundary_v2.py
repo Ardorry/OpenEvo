@@ -196,7 +196,7 @@ def _supervised_rule_output_schema(*, minimum_evidence: int) -> dict[str, object
             "evidence_count": evidence_schema,
             "evidence_digests": {
                 "type": "array",
-                "items": {"type": "string"},
+                "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                 "minItems": minimum_evidence,
                 "maxItems": 64,
             },
@@ -267,8 +267,11 @@ _SUPERVISED_PROMPT_CONTRACT = (
     "action, validation, evidence_count, and evidence_digests. The wrapper binds "
     "Status from the section and Category from the top-level category.\n"
     "- A provisional rule has Evidence Count 1. A confirmed rule requires at least "
-    "two independent training-item evidence digests. Never copy a question, option, "
-    "answer mapping, UID, ordinal, or path.\n"
+    "two independent training-item evidence digests. Copy the exact lowercase "
+    "`packet_sha256` PACKET_PART value when the current packet supports a rule, and "
+    "preserve prior rule evidence digests verbatim. Evidence Count must equal the "
+    "number of unique evidence_digests. Never invent a digest or copy a question, "
+    "option, answer mapping, UID, ordinal, or path.\n"
     "- Before returning, compare the draft against every packet question and option. "
     "Paraphrase any shared contiguous span of four or more complete tokens and 32 or "
     "more characters; retain only the abstract chemistry principle.\n"
@@ -501,6 +504,14 @@ class ReflectorExecutionReceiptV2:
             source_last_digest = payload["source_last_message_sha256"]
             normalization_id = payload["output_normalization_id"]
             normalization_applied = payload["output_normalization_applied"]
+            invalid_supervised_render = (
+                payload["status"] == ReflectorBoundaryStatusV2.INVALID_INVOCATION.value
+                and source_split == SUPERVISED_TRAIN_SOURCE_SPLIT
+                and source_last_digest is not None
+                and last_digest is None
+                and normalization_id == _NO_OUTPUT_NORMALIZATION_ID
+                and normalization_applied is False
+            )
             if (
                 (
                     source_last_digest is not None
@@ -528,10 +539,14 @@ class ReflectorExecutionReceiptV2:
                     }
                     and source_split != SUPERVISED_TRAIN_SOURCE_SPLIT
                 )
-                or (source_last_digest is None) != (last_digest is None)
+                or (
+                    (source_last_digest is None) != (last_digest is None)
+                    and not invalid_supervised_render
+                )
                 or (
                     not normalization_applied
                     and source_last_digest != last_digest
+                    and not invalid_supervised_render
                 )
             ):
                 raise ReflectorBoundaryError("REFLECTOR_RECEIPT_SCHEMA_INVALID")
