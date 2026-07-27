@@ -1733,7 +1733,7 @@ def _render_supervised_structured_auxiliary(
         f"# Category Skill: {category}",
         "",
         "## Name",
-        f"- chembench-{category.casefold().replace('_', '-')}-reasoning-v2",
+        f"- {category.casefold().replace('_', '-')}-chemistry-reasoning-v2",
         "",
         "## Description",
         f"- Reusable supervised-transfer workflow for {category} chemistry questions.",

@@ -135,6 +135,9 @@ removal of every Core harness capability. The reflector boundary is separately
 Bubblewrap-isolated and hard-disables tool, web-search, shell, approval, and MCP
 features. Both boundaries independently materialize and verify the same pinned
 Codex native executable digest and never fall back to the host `PATH`.
+The canonical v2 skill renderer uses category-scoped chemistry names only; it
+does not embed benchmark, manifest, dataset, run, or filesystem identifiers in
+the promoted `SKILL.md` payload.
 
 An explicitly unpaired online-only Pilot500 entry point is also available for
 mechanism and descriptive analysis. It uses no control evidence, cannot issue

@@ -27,6 +27,7 @@ from openevo_chembench.models import RawAttempt, TranscriptReference
 from openevo_chembench.supervised_transfer_v2.artifacts import (
     CoreResolvedSupervisedContextV2,
     _issue_core_resolved_auxiliary_v2,
+    inspect_supervised_auxiliary_artifact_v2,
 )
 from openevo_chembench.supervised_transfer_v2.config import (
     SupervisedTransferConfigV2,
@@ -56,6 +57,9 @@ from openevo_chembench.supervised_transfer_v2.memory import (
 )
 from openevo_chembench.supervised_transfer_v2.packet import (
     SupervisedEvolutionPacketV2,
+)
+from openevo_chembench.supervised_transfer_v2.reflector_boundary import (
+    _render_supervised_structured_auxiliary,
 )
 from openevo_chembench.supervised_transfer_v2.trajectory import (
     SupervisedTrajectoryV2,
@@ -107,6 +111,55 @@ def _registry(root: Path):
 
 def _sha(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
+
+
+def test_structured_skill_renderer_produces_validator_clean_artifact() -> None:
+    evidence = "1" * 64
+    response = json.dumps(
+        {
+            "category": "Yield_Prediction",
+            "confirmed_principles": [],
+            "provisional_principles": [],
+            "common_failure_modes": [],
+            "option_elimination_checks": [],
+            "retired_or_contradicted": [],
+            "output_discipline": ["Return one uppercase option."],
+            "do": ["Check physical bounds."],
+            "avoid": ["Avoid unsupported estimates."],
+            "validate": ["Verify the limiting amount."],
+            "when_applicable": ["Use for yield estimates."],
+            "retired_or_superseded": [],
+            "skill_when_to_use": ["When a yield estimate is requested."],
+            "skill_workflow": ["Apply mass-balance bounds before comparing choices."],
+            "skill_validation_checks": ["Verify the estimate is physically bounded."],
+            "skill_failure_guards": ["Reject values above full conversion."],
+            "skill_evidence_digests": [evidence],
+            "agent_system_directives": [
+                {
+                    "trigger": "solving a yield prediction",
+                    "instruction": "apply explicit mass-balance constraints",
+                    "validation": "check physical bounds before choosing",
+                    "evidence_digests": [evidence],
+                }
+            ],
+            "agent_system_output_discipline": ["Return one uppercase option."],
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    auxiliary = _render_supervised_structured_auxiliary(response)
+    inspection = inspect_supervised_auxiliary_artifact_v2(
+        auxiliary.skill_markdown.encode("utf-8"),
+        target_id="skill_bundle",
+        category="Yield_Prediction",
+        source_evidence_digests=auxiliary.skill_evidence_digests,
+        allowed_evidence_digests=frozenset({evidence}),
+        forbidden_literals=(),
+    )
+
+    assert inspection.passed
+    assert "chembench" not in auxiliary.skill_markdown.casefold()
 
 
 def _synthetic_runtime_services() -> SimpleNamespace:
