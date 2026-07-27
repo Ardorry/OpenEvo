@@ -32,6 +32,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from openevo_chembench.chembench4k_models import CHEMBENCH4K_CATEGORIES
 from openevo_chembench.local_codex_executor import (
     _DISABLED_CODEX_FEATURES,
     _MODEL_TRANSPORT_ENV_KEYS,
@@ -141,11 +142,58 @@ _TASKWISE_OPERATIONAL_LINE_RE = re.compile(
 )
 _TASKWISE_EXACT_H1 = "# General Chemistry Memory"
 _SUPERVISED_SECTION_NORMALIZATION_ID = "supervised_memory_section_merge_v1"
+_SUPERVISED_STRUCTURED_RENDER_ID = "supervised_memory_structured_render_v1"
+_SUPERVISED_OUTPUT_SCHEMA_NAME = "supervised_memory_output_schema.json"
 _NO_OUTPUT_NORMALIZATION_ID = "none"
 _SUPERVISED_EXACT_SECTIONS = (
     *SUPERVISED_MEMORY_REQUIRED_SECTIONS,
     *CORE_EXPEL_REQUIRED_SECTIONS,
 )
+_SUPERVISED_STRUCTURED_SECTION_FIELDS = (
+    ("Confirmed Principles", "confirmed_principles", 40),
+    ("Provisional Principles", "provisional_principles", 20),
+    ("Common Failure Modes", "common_failure_modes", 24),
+    ("Option Elimination Checks", "option_elimination_checks", 40),
+    ("Retired Or Contradicted", "retired_or_contradicted", 24),
+    ("Output Discipline", "output_discipline", 16),
+    ("Do", "do", 40),
+    ("Avoid", "avoid", 24),
+    ("Validate", "validate", 40),
+    ("When Applicable", "when_applicable", 40),
+    ("Retired Or Superseded", "retired_or_superseded", 24),
+)
+_SUPERVISED_OUTPUT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "category": {"type": "string", "enum": list(CHEMBENCH4K_CATEGORIES)},
+        **{
+            field: {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": maximum,
+            }
+            for _heading, field, maximum in _SUPERVISED_STRUCTURED_SECTION_FIELDS
+        },
+    },
+    "required": [
+        "category",
+        *(field for _heading, field, _maximum in _SUPERVISED_STRUCTURED_SECTION_FIELDS),
+    ],
+}
+_SUPERVISED_OUTPUT_SCHEMA_BYTES = (
+    json.dumps(
+        _SUPERVISED_OUTPUT_SCHEMA,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+    + "\n"
+).encode("utf-8")
+_SUPERVISED_OUTPUT_SCHEMA_SHA256 = hashlib.sha256(
+    _SUPERVISED_OUTPUT_SCHEMA_BYTES
+).hexdigest()
 _H2_LINE_RE = re.compile(r"^##\s+(.+?)\s*$", re.ASCII)
 _TASKWISE_PROMPT_CONTRACT = (
     "Taskwise benchmark output requirements:\n"
@@ -159,11 +207,14 @@ _SUPERVISED_PROMPT_CONTRACT = (
     "plus the supplied existing memory.\n"
     "- Return one complete replacement memory, never an append-only patch or a copy "
     "followed by revised sections.\n"
-    "- The first non-empty line must be `# Category Memory: <packet category>`.\n"
-    "- Use these exact level-2 headings in order: Confirmed Principles; "
-    "Provisional Principles; Common Failure Modes; Option Elimination Checks; "
-    "Retired Or Contradicted; Output Discipline; Do; Avoid; Validate; When Applicable; "
-    "Retired Or Superseded.\n"
+    "- The CLI enforces a JSON object with `category` and eleven required section "
+    "arrays. Populate every array; use an empty array only when the section has no "
+    "current entries. Do not emit Markdown headings or bullet markers inside values.\n"
+    "- The section keys are confirmed_principles, provisional_principles, "
+    "common_failure_modes, option_elimination_checks, retired_or_contradicted, "
+    "output_discipline, do, avoid, validate, when_applicable, and "
+    "retired_or_superseded. The isolated wrapper renders these fields into the exact "
+    "ordered category-memory Markdown contract.\n"
     "- Every principle rule is one bullet with Rule ID, Status, Category, Trigger, "
     "Principle, Action, Validation, Evidence Count, and Evidence digest fields.\n"
     "- A provisional rule has Evidence Count 1. A confirmed rule requires at least "
@@ -172,10 +223,8 @@ _SUPERVISED_PROMPT_CONTRACT = (
     "- Before returning, compare the draft against every packet question and option. "
     "Paraphrase any shared contiguous span of four or more complete tokens and 32 or "
     "more characters; retain only the abstract chemistry principle.\n"
-    "- Put `- None.` in a section with no current entries. Keep every compatibility "
-    "section non-empty and do not use additional level-2 headings.\n"
-    "- Emit every listed level-2 heading exactly once. Before returning, count the "
-    "headings: there must be exactly eleven, with no duplicate heading."
+    "- Keep each array element to one concise bullet body. The wrapper emits `- None.` "
+    "for an empty array and never invents a chemistry rule."
 )
 
 ReflectorCodexPolicyProbeRunnerV2 = Callable[
@@ -415,6 +464,7 @@ class ReflectorExecutionReceiptV2:
                 not in {
                     _NO_OUTPUT_NORMALIZATION_ID,
                     _SUPERVISED_SECTION_NORMALIZATION_ID,
+                    _SUPERVISED_STRUCTURED_RENDER_ID,
                 }
                 or type(normalization_applied) is not bool
                 or (
@@ -422,7 +472,11 @@ class ReflectorExecutionReceiptV2:
                     and normalization_applied
                 )
                 or (
-                    normalization_id == _SUPERVISED_SECTION_NORMALIZATION_ID
+                    normalization_id
+                    in {
+                        _SUPERVISED_SECTION_NORMALIZATION_ID,
+                        _SUPERVISED_STRUCTURED_RENDER_ID,
+                    }
                     and source_split != SUPERVISED_TRAIN_SOURCE_SPLIT
                 )
                 or (source_last_digest is None) != (last_digest is None)
@@ -558,13 +612,27 @@ class ReflectorBoundaryActivationV2:
                 raise ReflectorBoundaryError("REFLECTOR_WRAPPER_RECEIPT_BINDING_INVALID") from exc
             if receipt.source_split == SUPERVISED_TRAIN_SOURCE_SPLIT:
                 source_message = event_response.strip() + "\n"
-                normalized_message, normalization_applied = (
-                    _normalize_supervised_memory_sections(source_message)
-                )
                 if (
                     receipt.output_normalization_id
-                    != _SUPERVISED_SECTION_NORMALIZATION_ID
-                    or receipt.source_last_message_sha256
+                    == _SUPERVISED_STRUCTURED_RENDER_ID
+                ):
+                    normalized_message = _render_supervised_structured_memory(
+                        source_message
+                    )
+                    normalization_applied = True
+                elif (
+                    receipt.output_normalization_id
+                    == _SUPERVISED_SECTION_NORMALIZATION_ID
+                ):
+                    normalized_message, normalization_applied = (
+                        _normalize_supervised_memory_sections(source_message)
+                    )
+                else:
+                    raise ReflectorBoundaryError(
+                        "REFLECTOR_WRAPPER_RECEIPT_BINDING_INVALID"
+                    )
+                if (
+                    receipt.source_last_message_sha256
                     != hashlib.sha256(source_message.encode("utf-8")).hexdigest()
                     or receipt.last_message_sha256
                     != hashlib.sha256(normalized_message.encode("utf-8")).hexdigest()
@@ -931,6 +999,12 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
             layout["inputs"] / "dev_loo_dataset.jsonl",
             mode=0o400,
         )
+        if config["source_split"] == SUPERVISED_TRAIN_SOURCE_SPLIT:
+            _exclusive_write(
+                layout["inputs"] / _SUPERVISED_OUTPUT_SCHEMA_NAME,
+                _SUPERVISED_OUTPUT_SCHEMA_BYTES,
+                mode=0o400,
+            )
         records, records_digest = _read_and_validate_records(
             layout["inputs"] / "dev_loo_dataset.jsonl",
             expected_record_count=int(config["record_count"]),
@@ -943,7 +1017,12 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
             != config["dev_artifact_sha256"]
         ):
             raise ReflectorBoundaryError("REFLECTOR_DEV_ARTIFACT_BINDING_INVALID")
-        rewritten = _replace_upstream_paths(rewritten)
+        rewritten = _replace_upstream_paths(
+            rewritten,
+            supervised_structured_output=(
+                config["source_split"] == SUPERVISED_TRAIN_SOURCE_SPLIT
+            ),
+        )
         transport_environment = _materialize_reflector_transport_environment(layout)
         command = _bubblewrap_base_command(
             bwrap_binary=Path(config["bwrap_binary"]),
@@ -1004,10 +1083,9 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
                 source_last_message_sha256 = hashlib.sha256(
                     output_text.encode("utf-8")
                 ).hexdigest()
-                output_text, output_normalization_applied = (
-                    _normalize_supervised_memory_sections(output_text)
-                )
-                output_normalization_id = _SUPERVISED_SECTION_NORMALIZATION_ID
+                output_text = _render_supervised_structured_memory(output_text)
+                output_normalization_applied = True
+                output_normalization_id = _SUPERVISED_STRUCTURED_RENDER_ID
                 content = output_text.encode("utf-8")
             else:
                 source_last_message_sha256 = hashlib.sha256(content).hexdigest()
@@ -1177,11 +1255,21 @@ def _validate_and_rewrite_upstream_arguments(
     return host_output, list(arguments)
 
 
-def _replace_upstream_paths(arguments: list[str]) -> list[str]:
+def _replace_upstream_paths(
+    arguments: list[str],
+    *,
+    supervised_structured_output: bool = False,
+) -> list[str]:
     replaced = list(arguments)
     replaced[replaced.index("--output-last-message") + 1] = "/output/last-message.md"
     replaced[replaced.index("--cd") + 1] = "/work"
     insertion = len(replaced) - 1
+    if supervised_structured_output:
+        replaced[insertion:insertion] = [
+            "--output-schema",
+            f"/inputs/{_SUPERVISED_OUTPUT_SCHEMA_NAME}",
+        ]
+        insertion += 2
     existing_disabled = {
         replaced[index + 1] for index, value in enumerate(replaced[:-1]) if value == "--disable"
     }
@@ -1274,6 +1362,52 @@ def _normalize_supervised_memory_sections(memory: str) -> tuple[str, bool]:
         if index != len(_SUPERVISED_EXACT_SECTIONS) - 1:
             normalized.append("")
     return "\n".join(normalized).rstrip() + "\n", True
+
+
+def _render_supervised_structured_memory(response: str) -> str:
+    """Render the schema-constrained model response into canonical Markdown."""
+
+    if type(response) is not str:
+        raise TypeError("supervised structured response must be text")
+    try:
+        payload = json.loads(response)
+    except (json.JSONDecodeError, RecursionError) as exc:
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID") from exc
+    expected_keys = {
+        "category",
+        *(field for _heading, field, _maximum in _SUPERVISED_STRUCTURED_SECTION_FIELDS),
+    }
+    if type(payload) is not dict or set(payload) != expected_keys:
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+    category = payload["category"]
+    if type(category) is not str or category not in CHEMBENCH4K_CATEGORIES:
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+
+    rendered = [f"# Category Memory: {category}", ""]
+    for index, (heading, field, maximum) in enumerate(
+        _SUPERVISED_STRUCTURED_SECTION_FIELDS
+    ):
+        values = payload[field]
+        if type(values) is not list or len(values) > maximum:
+            raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+        items: list[str] = []
+        for value in values:
+            if type(value) is not str or len(value.encode("utf-8")) > 4096:
+                raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+            normalized = " ".join(value.split()).strip()
+            if normalized.startswith(("- ", "* ")):
+                normalized = normalized[2:].strip()
+            if not normalized:
+                raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+            items.append(normalized)
+        rendered.append(f"## {heading}")
+        rendered.extend(f"- {item}" for item in (items or ["None."]))
+        if index != len(_SUPERVISED_STRUCTURED_SECTION_FIELDS) - 1:
+            rendered.append("")
+    encoded = ("\n".join(rendered).rstrip() + "\n").encode("utf-8")
+    if len(encoded) > _MAX_LAST_MESSAGE_BYTES:
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+    return encoded.decode("utf-8")
 
 
 def _reflector_hardening_arguments(
@@ -1742,6 +1876,15 @@ def _bubblewrap_base_command(
             "/work",
         )
     )
+    structured_schema = layout["inputs"] / _SUPERVISED_OUTPUT_SCHEMA_NAME
+    if structured_schema.exists():
+        command.extend(
+            (
+                "--ro-bind",
+                os.fspath(structured_schema),
+                f"/inputs/{_SUPERVISED_OUTPUT_SCHEMA_NAME}",
+            )
+        )
     if include_codex:
         resolved = executable_source.resolve()
         command.extend(

@@ -25,6 +25,7 @@ from openevo_chembench.reflector_execution_boundary_v2 import (
     _normalize_supervised_memory_sections,
     _project_reflector_prompt,
     _reflector_hardening_arguments,
+    _render_supervised_structured_memory,
     _replace_upstream_paths,
     _run_process_group,
     inspect_reflector_codex_policy_v2,
@@ -222,6 +223,14 @@ def test_wrapper_preserves_upstream_args_and_adds_actual_disable_overrides(
     assert 'approval_policy="never"' in rewritten
     assert "agents.enabled=false" not in rewritten
 
+    structured = _replace_upstream_paths(
+        original,
+        supervised_structured_output=True,
+    )
+    schema_index = structured.index("--output-schema")
+    assert structured[schema_index + 1] == "/inputs/supervised_memory_output_schema.json"
+    assert structured[-1] == "-"
+
 
 @pytest.mark.parametrize(
     "extra_arguments",
@@ -352,8 +361,8 @@ def test_supervised_prompt_requires_one_complete_memory_and_unique_headings() ->
         source_split="supervised_train",
     )
     assert "one complete replacement memory" in projected
-    assert "exactly eleven" in projected
-    assert "no duplicate heading" in projected
+    assert "eleven required section arrays" in projected
+    assert "isolated wrapper renders" in projected
     assert "four or more complete tokens" in projected
     assert "retain only the abstract chemistry principle" in projected
 
@@ -405,7 +414,7 @@ def test_supervised_section_normalizer_merges_only_duplicate_exact_sections() ->
     assert applied is False
 
 
-def test_supervised_boundary_records_and_binds_section_normalization(
+def test_supervised_boundary_records_and_binds_structured_render(
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "private-supervised.jsonl"
@@ -424,36 +433,25 @@ def test_supervised_boundary_records_and_binds_section_normalization(
     auth = tmp_path / "auth.json"
     auth.write_text("{}\n", encoding="utf-8")
     auth.chmod(0o600)
-    memory = """# Category Memory: Yield_Prediction
-## Confirmed Principles
-- None.
-## Provisional Principles
-- first body
-## Provisional Principles
-- second body
-## Common Failure Modes
-- None.
-## Option Elimination Checks
-- None.
-## Retired Or Contradicted
-- None.
-## Output Discipline
-- one letter
-## Do
-- estimate
-## Avoid
-- guessing
-## Validate
-- bounds
-## When Applicable
-- yield
-## Retired Or Superseded
-- None.
-"""
+    structured = {
+        "category": "Yield_Prediction",
+        "confirmed_principles": [],
+        "provisional_principles": ["first body", "second body"],
+        "common_failure_modes": [],
+        "option_elimination_checks": [],
+        "retired_or_contradicted": [],
+        "output_discipline": ["one letter"],
+        "do": ["estimate"],
+        "avoid": ["guessing"],
+        "validate": ["bounds"],
+        "when_applicable": ["yield"],
+        "retired_or_superseded": [],
+    }
+    response = json.dumps(structured, sort_keys=True, separators=(",", ":"))
     fake = tmp_path / "fake-codex"
     _fake_codex(
         fake,
-        {"type": "item.completed", "item": {"type": "agent_message", "text": memory}},
+        {"type": "item.completed", "item": {"type": "agent_message", "text": response}},
     )
     temporary_parent = tmp_path / "temporary"
     temporary_parent.mkdir(mode=0o700)
@@ -485,12 +483,38 @@ def test_supervised_boundary_records_and_binds_section_normalization(
     assert completed.returncode == 0
     receipt = activation.require_receipt()
     output = (upstream / "last-message.md").read_text(encoding="utf-8")
-    assert receipt.output_normalization_id == "supervised_memory_section_merge_v1"
+    assert receipt.output_normalization_id == "supervised_memory_structured_render_v1"
     assert receipt.output_normalization_applied is True
     assert receipt.source_last_message_sha256 != receipt.last_message_sha256
     assert receipt.last_message_sha256 == hashlib.sha256(output.encode()).hexdigest()
     assert output.count("## Provisional Principles\n") == 1
+    assert sum(line.startswith("## ") for line in output.splitlines()) == 11
     assert "- first body" in output and "- second body" in output
+
+
+def test_supervised_structured_render_rejects_missing_or_ambiguous_sections() -> None:
+    payload = {
+        "category": "Yield_Prediction",
+        "confirmed_principles": [],
+        "provisional_principles": [],
+        "common_failure_modes": [],
+        "option_elimination_checks": [],
+        "retired_or_contradicted": [],
+        "output_discipline": [],
+        "do": [],
+        "avoid": [],
+        "validate": [],
+        "when_applicable": [],
+        "retired_or_superseded": [],
+    }
+    rendered = _render_supervised_structured_memory(json.dumps(payload))
+    assert rendered.startswith("# Category Memory: Yield_Prediction\n")
+    assert sum(line.startswith("## ") for line in rendered.splitlines()) == 11
+    assert rendered.count("- None.") == 11
+
+    payload.pop("validate")
+    with pytest.raises(ReflectorBoundaryError, match="REFLECTOR_LAST_MESSAGE_INVALID"):
+        _render_supervised_structured_memory(json.dumps(payload))
 
 
 def test_reflector_preflight_fails_closed_when_config_parser_rejects(
