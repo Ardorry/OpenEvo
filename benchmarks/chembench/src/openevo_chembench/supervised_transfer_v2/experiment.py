@@ -696,19 +696,9 @@ class SupervisedTransferExperimentV2:
         )
         forbidden = tuple(
             dict.fromkeys(
-                (
-                    task.uid,
-                    task.question,
-                    task.A,
-                    task.B,
-                    task.C,
-                    task.D,
-                    *(
-                        literal
-                        for trajectory in trajectories
-                        for literal in _trajectory_forbidden_literals(trajectory)
-                    ),
-                )
+                literal
+                for trajectory in trajectories
+                for literal in _trajectory_forbidden_literals(trajectory)
             )
         )
         return TaskwiseCoreUpdateRequestV1(

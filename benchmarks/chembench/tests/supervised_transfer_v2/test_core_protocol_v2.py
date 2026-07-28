@@ -41,6 +41,7 @@ from openevo_chembench.supervised_transfer_v2.context_binding import (
 from openevo_chembench.supervised_transfer_v2.core import (
     TaskwiseCoreEvolutionBridgeV1,
     TaskwiseCoreUpdateRequestV1,
+    _decode_validator_literal,
     _trajectory_forbidden_literals,
 )
 from openevo_chembench.supervised_transfer_v2.executor import (
@@ -450,8 +451,10 @@ class _SyntheticBridge:
     def __init__(self, bridge: TaskwiseCoreEvolutionBridgeV1, active: list[str]) -> None:
         self.bridge = bridge
         self.active = active
+        self.requests = []
 
     def apply_update(self, request):
+        self.requests.append(request)
         self.active.append(request.supervised_packet.digest)
         return self.bridge.apply_update(
             request,
@@ -589,12 +592,13 @@ def test_controller_runs_four_sessions_three_cycles_without_model_calls(
         memory_limits=SUPERVISED_MEMORY_LIMITS_V2,
     )
     executor = _FakeExecutor()
+    synthetic_bridge = _SyntheticBridge(bridge, active)
     experiment = SupervisedTransferExperimentV2(
         inputs=inputs,
         run_id="stv2-synthetic-controller-0001",
         run_mode="preflight",
         executor_factory=lambda _arm: executor,
-        bridge_factory=lambda _root, _category: _SyntheticBridge(bridge, active),
+        bridge_factory=lambda _root, _category: synthetic_bridge,
     )
     paid_plan = json.loads(
         (
@@ -619,7 +623,7 @@ def test_controller_runs_four_sessions_three_cycles_without_model_calls(
             executor,
             task=task,
             category_ordinal=0,
-            bridge=_SyntheticBridge(bridge, active),
+            bridge=synthetic_bridge,
             stage="ONLINE_TRAIN",
             persist_head=True,
         )
@@ -631,6 +635,15 @@ def test_controller_runs_four_sessions_three_cycles_without_model_calls(
         assert experiment._state["task_sessions"] == 4
         assert experiment._state["reflector_calls"] == 3
         assert experiment._state["core_jobs"] == 9
+        assert len(synthetic_bridge.requests) == 3
+        source_kinds = {
+            _decode_validator_literal(literal)[0]
+            for request in synthetic_bridge.requests
+            for literal in request.validator_forbidden_literals
+        }
+        assert "strict" not in source_kinds
+        assert source_kinds <= {"uid", "question", "option", "completion"}
+        assert {"uid", "option", "completion"} <= source_kinds
         with bridge._store.connect() as connection:
             assert connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 9
     finally:
