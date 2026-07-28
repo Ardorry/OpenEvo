@@ -214,6 +214,13 @@ class _FailedClient(_CompletedClient):
         }
 
 
+class _CompletedTaskFailedSessionClient(_FailedClient):
+    def get_task(self, task_id: str) -> dict[str, object]:
+        result = super().get_task(task_id)
+        result["status"] = "completed"
+        return result
+
+
 def test_owned_rollout_client_requires_runtime_service_attestation() -> None:
     with pytest.raises(ValueError, match="attested v2 service identity"):
         SupervisedManagedCodexExecutorV2(
@@ -337,6 +344,26 @@ def test_terminal_failure_reports_only_completion_presence_and_digest(
         arm="online",
         timeout_seconds=1200,
         rollout_client=_FailedClient(completion=completion),
+    )
+
+    with pytest.raises(SupervisedTaskExecutionErrorV2) as captured:
+        executor.execute(_request(arm="online", context=_context()))
+
+    assert captured.value.code is SupervisedTaskExecutionCodeV2.TASK_FAILED
+    assert captured.value.completion_exists is (completion is not None)
+    assert captured.value.completion_sha256 == (
+        None if completion is None else hashlib.sha256(completion.encode()).hexdigest()
+    )
+
+
+@pytest.mark.parametrize("completion", [None, "B"])
+def test_completed_rollout_task_with_failed_session_is_retry_classified_by_completion(
+    completion: str | None,
+) -> None:
+    executor = SupervisedManagedCodexExecutorV2(
+        arm="online",
+        timeout_seconds=1200,
+        rollout_client=_CompletedTaskFailedSessionClient(completion=completion),
     )
 
     with pytest.raises(SupervisedTaskExecutionErrorV2) as captured:

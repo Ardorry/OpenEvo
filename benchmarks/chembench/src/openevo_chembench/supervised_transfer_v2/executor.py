@@ -514,7 +514,19 @@ def _raw_attempt_from_task_status(status: TaskStatus, *, task_id: str) -> RawAtt
             completion_sha256=completion_sha256,
         )
     session = status.results[0]
-    if session.task_id != task_id or session.status is not SessionStatus.COMPLETED:
+    if session.task_id != task_id:
+        raise SupervisedTaskExecutionErrorV2(
+            SupervisedTaskExecutionCodeV2.SESSION_INVALID,
+            completion_exists=completion_exists,
+            completion_sha256=completion_sha256,
+        )
+    if session.status in {SessionStatus.ERROR, SessionStatus.TIMEOUT}:
+        raise SupervisedTaskExecutionErrorV2(
+            SupervisedTaskExecutionCodeV2.TASK_FAILED,
+            completion_exists=completion_exists,
+            completion_sha256=completion_sha256,
+        )
+    if session.status is not SessionStatus.COMPLETED:
         raise SupervisedTaskExecutionErrorV2(
             SupervisedTaskExecutionCodeV2.SESSION_INVALID,
             completion_exists=completion_exists,
