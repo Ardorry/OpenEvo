@@ -149,7 +149,14 @@ features. Both boundaries independently materialize and verify the same pinned
 Codex native executable digest and never fall back to the host `PATH`.
 The canonical v2 skill renderer uses category-scoped chemistry names only; it
 does not embed benchmark, manifest, dataset, run, or filesystem identifiers in
-the promoted `SKILL.md` payload.
+the promoted `SKILL.md` payload. The v2 structured renderer, rather than the
+reflector model, derives each rule's opaque supporting-task-set hash from the
+approved Train packet evidence digests. It also replaces explicit
+answer/option/choice/prediction-to-letter phrases with one fixed transferable
+phrase before the candidate artifact reaches the unchanged leakage validator.
+The private reflector transcript remains digest-bound to the raw source output;
+the normalization therefore cannot erase audit evidence, and any remaining UID,
+question, option, path, or answer-map leakage still fails closed.
 
 An explicitly unpaired online-only Pilot500 entry point is also available for
 mechanism and descriptive analysis. It uses no control evidence, cannot issue

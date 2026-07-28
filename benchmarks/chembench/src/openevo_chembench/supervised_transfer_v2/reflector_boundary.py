@@ -149,8 +149,8 @@ _TASKWISE_OPERATIONAL_LINE_RE = re.compile(
 )
 _TASKWISE_EXACT_H1 = "# General Chemistry Memory"
 _SUPERVISED_SECTION_NORMALIZATION_ID = "supervised_memory_section_merge_v2"
-_SUPERVISED_STRUCTURED_RENDER_ID = "supervised_memory_structured_render_v2"
-_SUPERVISED_MULTITARGET_RENDER_ID = "supervised_multitarget_structured_render_v2"
+_SUPERVISED_STRUCTURED_RENDER_ID = "supervised_memory_structured_render_v3"
+_SUPERVISED_MULTITARGET_RENDER_ID = "supervised_multitarget_structured_render_v3"
 _SUPERVISED_OUTPUT_SCHEMA_NAME = "supervised_memory_output_schema.json"
 _NO_OUTPUT_NORMALIZATION_ID = "none"
 _SUPERVISED_EXACT_SECTIONS = (
@@ -184,10 +184,20 @@ _SUPERVISED_RULE_VALUE_FIELDS = (
     "validation",
     "evidence_count",
     "evidence_digests",
-    "supporting_train_ordinals_hash",
     "first_seen_cycle",
     "last_confirmed_cycle",
     "contradiction_count",
+)
+_SUPERVISED_SUPPORTING_TASK_SET_HASH_DOMAIN = (
+    b"chembench-supervised-transfer-v2-supporting-task-set-v1\n"
+)
+_SUPERVISED_DIRECT_ANSWER_REFERENCE_RE = re.compile(
+    r"(?i:(?:the\s+)?(?:correct\s+)?(?:answer|option|choice|prediction)\s*"
+    r"(?:is|=|:|->|→)?\s*)"
+    r"(?<![A-Za-z0-9_])[ABCDabcd]\b(?![-‐‑‒–—=][A-Za-z0-9])|"
+    r"(?i:(?:choose|select|pick|return|output)\s+(?:only\s+)?)"
+    r"(?<![A-Za-z0-9_])[ABCD]\b(?![-‐‑‒–—=][A-Za-z0-9])",
+    re.ASCII,
 )
 _SUPERVISED_SKILL_FIELDS = (
     "skill_when_to_use",
@@ -230,10 +240,6 @@ def _supervised_rule_output_schema(*, minimum_evidence: int) -> dict[str, object
                 "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                 "minItems": minimum_evidence,
                 "maxItems": 64,
-            },
-            "supporting_train_ordinals_hash": {
-                "type": "string",
-                "pattern": "^[0-9a-f]{64}$",
             },
             "first_seen_cycle": {"type": "integer", "minimum": 1},
             "last_confirmed_cycle": {"type": "integer", "minimum": 1},
@@ -364,15 +370,18 @@ _SUPERVISED_PROMPT_CONTRACT = (
     "- confirmed_principles, provisional_principles, and retired_or_contradicted "
     "contain closed rule objects. Every object has rule_id, target_type=text_memory, "
     "trigger, principle, action, validation, evidence_count, evidence_digests, "
-    "supporting_train_ordinals_hash, first_seen_cycle, last_confirmed_cycle, and "
+    "first_seen_cycle, last_confirmed_cycle, and "
     "contradiction_count. The wrapper binds Status from the section and Category "
-    "from the top-level category.\n"
+    "from the top-level category, and derives Supporting Train Ordinals Hash from "
+    "the approved evidence-digest set; never author that hash yourself.\n"
     "- A provisional rule has Evidence Count 1. A confirmed rule requires at least "
     "two independent training-item evidence digests. Copy the exact lowercase "
     "`packet_sha256` PACKET_PART value when the current packet supports a rule, and "
     "preserve prior rule evidence digests verbatim. Evidence Count must equal the "
     "number of unique evidence_digests. Never invent a digest or copy a question, "
     "option, answer mapping, UID, ordinal, or path.\n"
+    "- Never write a standalone A/B/C/D answer letter in any model-authored text "
+    "field. Refer to the chemically supported choice without naming its letter.\n"
     "- Before returning, compare the draft against every packet question and option. "
     "Paraphrase any shared contiguous span of four or more complete tokens and 32 or "
     "more characters; retain only the abstract chemistry principle.\n"
@@ -1859,14 +1868,35 @@ def _render_supervised_structured_auxiliary(
 
 
 def _normalize_supervised_structured_value(value: str) -> str:
-    """Normalize one model-authored scalar without adding semantic content."""
+    """Normalize one scalar and remove explicit answer-letter mappings."""
 
     normalized = " ".join(value.split()).strip()
     if normalized.startswith(("- ", "* ")):
         normalized = normalized[2:].strip()
+    normalized = _SUPERVISED_DIRECT_ANSWER_REFERENCE_RE.sub(
+        "the chemically supported choice",
+        normalized,
+    )
+    normalized = " ".join(normalized.split()).strip()
     if not normalized or "\n" in normalized or len(normalized.encode("utf-8")) > 4096:
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
     return normalized
+
+
+def _supporting_task_set_hash(evidence_digests: Sequence[str]) -> str:
+    """Bind one rule to its ordered unique Train packet evidence without raw ordinals."""
+
+    normalized = tuple(sorted(set(evidence_digests)))
+    if (
+        not normalized
+        or len(normalized) != len(evidence_digests)
+        or any(_SHA256_RE.fullmatch(value) is None for value in normalized)
+    ):
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+    payload = _SUPERVISED_SUPPORTING_TASK_SET_HASH_DOMAIN + _canonical_json(
+        list(normalized)
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _render_supervised_rule(
@@ -1885,15 +1915,12 @@ def _render_supervised_rule(
         for field in ("rule_id", "trigger", "principle", "action", "validation")
         if type(value[field]) is str
     }
-    supporting_hash = value["supporting_train_ordinals_hash"]
     first_seen_cycle = value["first_seen_cycle"]
     last_confirmed_cycle = value["last_confirmed_cycle"]
     contradiction_count = value["contradiction_count"]
     if (
         len(text_fields) != 5
         or value["target_type"] != "text_memory"
-        or type(supporting_hash) is not str
-        or _SHA256_RE.fullmatch(supporting_hash) is None
         or type(first_seen_cycle) is not int
         or first_seen_cycle < 1
         or type(last_confirmed_cycle) is not int
@@ -1919,6 +1946,7 @@ def _render_supervised_rule(
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
     if len(set(normalized_digests)) != evidence_count:
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+    supporting_hash = _supporting_task_set_hash(normalized_digests)
     evidence = ",".join(normalized_digests) if normalized_digests else "none"
     return (
         f"Rule ID: {text_fields['rule_id']}; Status: {status}; Category: {category}; "

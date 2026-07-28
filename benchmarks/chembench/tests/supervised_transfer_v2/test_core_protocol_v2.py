@@ -41,6 +41,7 @@ from openevo_chembench.supervised_transfer_v2.context_binding import (
 from openevo_chembench.supervised_transfer_v2.core import (
     TaskwiseCoreEvolutionBridgeV1,
     TaskwiseCoreUpdateRequestV1,
+    _contains_answer_map,
     _decode_validator_literal,
     _trajectory_forbidden_literals,
 )
@@ -60,7 +61,11 @@ from openevo_chembench.supervised_transfer_v2.packet import (
     SupervisedEvolutionPacketV2,
 )
 from openevo_chembench.supervised_transfer_v2.reflector_boundary import (
+    _SUPERVISED_OUTPUT_SCHEMA,
+    ReflectorBoundaryError,
     _render_supervised_structured_auxiliary,
+    _render_supervised_structured_memory,
+    _supporting_task_set_hash,
 )
 from openevo_chembench.supervised_transfer_v2.trajectory import (
     SupervisedTrajectoryV2,
@@ -161,6 +166,52 @@ def test_structured_skill_renderer_produces_validator_clean_artifact() -> None:
 
     assert inspection.passed
     assert "chembench" not in auxiliary.skill_markdown.casefold()
+
+
+def test_structured_memory_renderer_owns_supporting_hash_and_scrubs_answer_map() -> None:
+    evidence = "1" * 64
+    rule = {
+        "rule_id": "bounded-yield-v2",
+        "target_type": "text_memory",
+        "trigger": "when the answer is C for a bounded estimate",
+        "principle": "mass balance bounds the physically possible result",
+        "action": "select option C only after checking the limiting amount",
+        "validation": "verify the chosen value remains within physical bounds",
+        "evidence_count": 1,
+        "evidence_digests": [evidence],
+        "first_seen_cycle": 1,
+        "last_confirmed_cycle": 1,
+        "contradiction_count": 0,
+    }
+    payload = {
+        "category": "Yield_Prediction",
+        "confirmed_principles": [],
+        "provisional_principles": [rule],
+        "common_failure_modes": [],
+        "option_elimination_checks": [],
+        "retired_or_contradicted": [],
+        "output_discipline": [],
+        "do": [],
+        "avoid": [],
+        "validate": [],
+        "when_applicable": [],
+        "retired_or_superseded": [],
+    }
+
+    rendered = _render_supervised_structured_memory(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    )
+
+    assert _contains_answer_map(rendered) is False
+    assert "answer is C" not in rendered
+    assert "option C" not in rendered
+    assert _supporting_task_set_hash((evidence,)) in rendered
+    rule_schema = _SUPERVISED_OUTPUT_SCHEMA["properties"]["provisional_principles"]
+    assert "supporting_train_ordinals_hash" not in rule_schema["items"]["properties"]
+
+    rule["supporting_train_ordinals_hash"] = _sha("model-authored-uid")
+    with pytest.raises(ReflectorBoundaryError, match="REFLECTOR_LAST_MESSAGE_INVALID"):
+        _render_supervised_structured_memory(json.dumps(payload))
 
 
 def _synthetic_runtime_services() -> SimpleNamespace:
