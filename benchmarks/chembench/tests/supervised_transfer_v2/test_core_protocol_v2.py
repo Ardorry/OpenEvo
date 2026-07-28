@@ -40,7 +40,9 @@ from openevo_chembench.supervised_transfer_v2.context_binding import (
 )
 from openevo_chembench.supervised_transfer_v2.core import (
     TaskwiseCoreEvolutionBridgeV1,
+    TaskwiseCoreEvolutionError,
     TaskwiseCoreUpdateRequestV1,
+    _bind_auxiliary_source_evidence,
     _contains_answer_map,
     _decode_validator_literal,
     _trajectory_forbidden_literals,
@@ -212,6 +214,28 @@ def test_structured_memory_renderer_owns_supporting_hash_and_scrubs_answer_map()
     rule["supporting_train_ordinals_hash"] = _sha("model-authored-uid")
     with pytest.raises(ReflectorBoundaryError, match="REFLECTOR_LAST_MESSAGE_INVALID"):
         _render_supervised_structured_memory(json.dumps(payload))
+
+
+def test_core_owns_current_auxiliary_packet_provenance() -> None:
+    previous = _sha("previous-packet")
+    current = _sha("current-packet")
+    allowed = frozenset({previous, current})
+
+    assert _bind_auxiliary_source_evidence(
+        reported_evidence_digests=(previous,),
+        allowed_evidence_digests=allowed,
+        current_packet_digest=current,
+    ) == (current,)
+
+    with pytest.raises(
+        TaskwiseCoreEvolutionError,
+        match="TASKWISE_ARTIFACT_VALIDATION_FAILED",
+    ):
+        _bind_auxiliary_source_evidence(
+            reported_evidence_digests=(_sha("invented-or-private-identifier"),),
+            allowed_evidence_digests=allowed,
+            current_packet_digest=current,
+        )
 
 
 def _synthetic_runtime_services() -> SimpleNamespace:

@@ -156,7 +156,13 @@ answer/option/choice/prediction-to-letter phrases with one fixed transferable
 phrase before the candidate artifact reaches the unchanged leakage validator.
 The private reflector transcript remains digest-bound to the raw source output;
 the normalization therefore cannot erase audit evidence, and any remaining UID,
-question, option, path, or answer-map leakage still fails closed.
+question, option, path, or answer-map leakage still fails closed. For
+`skill_bundle` and `agent_system`, model-reported evidence digests must be a
+subset of the already approved category Train chain, but Core—not the model—
+binds each successor artifact's direct source evidence to the current packet.
+Earlier support remains reachable through the typed predecessor-artifact
+lineage, so a model omission cannot sever provenance and an invented digest
+cannot enter it.
 
 An explicitly unpaired online-only Pilot500 entry point is also available for
 mechanism and descriptive analysis. It uses no control evidence, cannot issue

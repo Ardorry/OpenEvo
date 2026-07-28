@@ -3197,8 +3197,11 @@ class TaskwiseCoreEvolutionBridgeV1:
         )
         results: list[SupervisedAuxiliaryCoreArtifactV2] = []
         for target_id, method_id, content, source_digest, evidence_digests in specifications:
-            if packet.digest not in evidence_digests:
-                raise TaskwiseCoreEvolutionError("TASKWISE_ARTIFACT_VALIDATION_FAILED")
+            source_evidence_digests = _bind_auxiliary_source_evidence(
+                reported_evidence_digests=evidence_digests,
+                allowed_evidence_digests=allowed_evidence,
+                current_packet_digest=packet.digest,
+            )
             prior = prior_by_target.get(target_id)
             results.append(
                 self._materialize_one_auxiliary_artifact(
@@ -3211,7 +3214,7 @@ class TaskwiseCoreEvolutionBridgeV1:
                     method_id=method_id,
                     content=content,
                     source_component_sha256=source_digest,
-                    source_evidence_digests=evidence_digests,
+                    source_evidence_digests=source_evidence_digests,
                     predecessor=prior,
                 )
             )
@@ -4055,6 +4058,38 @@ def _trajectory_forbidden_literals(
                     values.append(_encode_validator_literal(source_kind, remainder))
                 break
     return _deduplicate_literals(values)
+
+
+def _bind_auxiliary_source_evidence(
+    *,
+    reported_evidence_digests: tuple[str, ...],
+    allowed_evidence_digests: frozenset[str],
+    current_packet_digest: str,
+) -> tuple[str, ...]:
+    """Bind auxiliary source provenance to the current Core-owned Train packet.
+
+    The model may report a subset of already-seen packet digests while merging a
+    predecessor. It cannot author artifact provenance: the current packet is the
+    only direct source for this update, while older support remains reachable
+    through the predecessor artifact lineage.
+    """
+
+    if (
+        type(current_packet_digest) is not str
+        or _SHA256_RE.fullmatch(current_packet_digest) is None
+        or type(reported_evidence_digests) is not tuple
+        or not reported_evidence_digests
+        or any(
+            type(value) is not str or _SHA256_RE.fullmatch(value) is None
+            for value in reported_evidence_digests
+        )
+        or len(set(reported_evidence_digests)) != len(reported_evidence_digests)
+        or type(allowed_evidence_digests) is not frozenset
+        or current_packet_digest not in allowed_evidence_digests
+        or not set(reported_evidence_digests).issubset(allowed_evidence_digests)
+    ):
+        raise TaskwiseCoreEvolutionError("TASKWISE_ARTIFACT_VALIDATION_FAILED")
+    return (current_packet_digest,)
 
 
 def _taskwise_reflector_records(
