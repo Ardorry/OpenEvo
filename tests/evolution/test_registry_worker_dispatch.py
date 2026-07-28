@@ -360,6 +360,10 @@ def test_protected_methods_cross_plan_store_verified_worker_and_publication(
                     "reflector_llm": {
                         "model": "reflector-model",
                         "provider": "codex_cli",
+                        "runtime": {
+                            "mode": "legacy_path",
+                            "path_fallback_allowed": True,
+                        },
                     }
                 },
             ),

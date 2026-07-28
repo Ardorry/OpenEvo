@@ -360,6 +360,10 @@ def test_successor_materialization_privately_consumes_only_exact_sealed_outputs(
                     "reflector_llm": {
                         "provider": "codex_cli",
                         "model": "gpt-5.1-codex-mini",
+                        "runtime": {
+                            "mode": "legacy_path",
+                            "path_fallback_allowed": True,
+                        },
                     },
                 },
             ),

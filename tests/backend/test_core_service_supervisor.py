@@ -647,7 +647,10 @@ def test_total_startup_deadline_rolls_back_partial_group(
         tmp_path,
         framework_lock,
         health=health,
-        startup_timeout=0.03,
+        # The evolution worker now receives its own sealed Codex credential
+        # authority before startup, so retain enough budget to reach the
+        # deliberately blocked rollout readiness probe.
+        startup_timeout=0.1,
     )
     try:
         started = time.monotonic()
@@ -2163,7 +2166,7 @@ def test_local_managed_runtime_probe_binds_image_codex_and_private_auth(
             DOCKER_EXECUTABLE_PATH,
             "image",
             "inspect",
-            "openevo/science-runtime:0.1.1",
+            MANAGED_RUNTIME_RELEASES["managed_science"].loaded_image_id,
         ),
     ]
     assert all(call[0] != os.fspath(polluted_docker) for call in command_runner.calls)
@@ -2751,7 +2754,7 @@ def test_local_managed_runtime_probe_rejects_wrong_release_digest_before_run(
                 DOCKER_EXECUTABLE_PATH,
                 "image",
                 "inspect",
-                "openevo/science-runtime:0.1.1",
+                MANAGED_RUNTIME_RELEASES["managed_science"].loaded_image_id,
             ),
             ProbeCommandResult(1, b"", b"No such image"),
             ServiceRunReadinessCode.RUNTIME_IMAGE_UNAVAILABLE,

@@ -6,6 +6,8 @@ import sys
 import time
 
 from openevo.evolution.framework import load_verified_framework_registry
+from openevo.evolution.framework.execution import MethodExecutionServices
+from openevo.evolution.managed_reflector import ManagedCodexReflectorService
 from openevo.evolution.methods import METHOD_REGISTRY
 from openevo.evolution.server import create_app
 from openevo.evolution.worker import EvolutionWorkerClient, run_once
@@ -14,6 +16,7 @@ from openevo.internal_auth import (
     read_internal_service_identity,
     verified_private_file_sha256,
 )
+from openevo.gateway.session_files import PreparedCodexCredentialSnapshot
 
 
 _MAX_FRAMEWORK_LOCK_BYTES = 4 * 1024 * 1024
@@ -39,6 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     worker.add_argument("--sleep-seconds", type=float, default=5.0)
     worker.add_argument("--lease-seconds", type=int, default=600)
     worker.add_argument("--framework-lock", type=Path)
+    worker.add_argument("--managed-reflector-root", type=Path)
     return parser
 
 
@@ -106,30 +110,62 @@ def main(argv: list[str] | None = None) -> int:
             )
         ):
             raise RuntimeError("worker framework lock does not match the service generation")
-    with EvolutionWorkerClient(
-        args.base_url,
-        headers=(internal_identity.request_headers() if internal_identity is not None else None),
-    ) as client:
-        if internal_identity is not None:
-            client.register_internal_worker(
-                worker_id=args.worker_id,
-                framework_lock_digest=internal_identity.framework_lock_digest,
-                generation_digest=internal_identity.generation_digest,
-                registry_digest=internal_identity.registry_digest,
-            )
-        while True:
-            claimed = run_once(
-                client,
-                worker_id=args.worker_id,
-                capabilities=capabilities,
-                artifact_root=artifact_root,
-                lease_seconds=args.lease_seconds,
-                executable_registry=registry,
-            )
-            if args.once:
-                return 0
-            if not claimed:
-                time.sleep(args.sleep_seconds)
+    credential_snapshot = PreparedCodexCredentialSnapshot.from_inherited_environment(
+        required=internal_identity is not None,
+    )
+    if internal_identity is not None and args.managed_reflector_root is None:
+        raise RuntimeError("release-owned worker requires a managed reflector root")
+    reflector_service = (
+        ManagedCodexReflectorService(
+            root=args.managed_reflector_root,
+            credential_snapshot=credential_snapshot,
+        )
+        if credential_snapshot is not None and args.managed_reflector_root is not None
+        else None
+    )
+    method_services = MethodExecutionServices(
+        harness=_UnavailableCliHarnessService(),
+        reflector=reflector_service,
+    )
+    try:
+        with EvolutionWorkerClient(
+            args.base_url,
+            headers=(
+                internal_identity.request_headers()
+                if internal_identity is not None
+                else None
+            ),
+        ) as client:
+            if internal_identity is not None:
+                client.register_internal_worker(
+                    worker_id=args.worker_id,
+                    framework_lock_digest=internal_identity.framework_lock_digest,
+                    generation_digest=internal_identity.generation_digest,
+                    registry_digest=internal_identity.registry_digest,
+                )
+            while True:
+                claimed = run_once(
+                    client,
+                    worker_id=args.worker_id,
+                    capabilities=capabilities,
+                    artifact_root=artifact_root,
+                    lease_seconds=args.lease_seconds,
+                    executable_registry=registry,
+                    method_services=method_services,
+                )
+                if args.once:
+                    return 0
+                if not claimed:
+                    time.sleep(args.sleep_seconds)
+    finally:
+        if credential_snapshot is not None:
+            credential_snapshot.close()
+
+
+class _UnavailableCliHarnessService:
+    def infer(self, request):
+        del request
+        raise ValueError("evolution worker harness inference is unavailable")
 
 
 def _parse_capabilities(values: list[str]) -> list[str]:

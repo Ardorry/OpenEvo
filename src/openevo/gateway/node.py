@@ -2660,6 +2660,13 @@ class GatewayNodeManager:
         runtime_spec: RuntimeSpec,
         session_dir: Path | None,
     ) -> None:
+        if (
+            runtime_spec.allow_model_control_plane_network
+            and not _is_subscription_agent(request.agent)
+        ):
+            raise RuntimeError(
+                "model control-plane network requires a managed subscription agent"
+            )
         if not _is_subscription_agent(request.agent):
             return
         GatewayNodeManager._canonicalize_request_capture_mode(request)
@@ -7036,8 +7043,15 @@ class GatewayNodeManager:
         if lock is None:
             lock = asyncio.Lock()
             self._cleanup_reconcile_lock = lock
+        dispatcher = getattr(self, "_dispatcher", None)
         async with lock:
             for session_id, ownership in list(retries.items()):
+                # The normal dispatcher lifecycle is the sole cleanup owner
+                # until it releases the session. Reconciliation is recovery
+                # for abandoned/retry state and must not race post-run journal
+                # revisions produced by a live session.
+                if dispatcher is not None and await dispatcher.owns_session(session_id):
+                    continue
                 try:
                     await self._reconcile_cleanup_ownership(ownership)
                 except Exception as exc:

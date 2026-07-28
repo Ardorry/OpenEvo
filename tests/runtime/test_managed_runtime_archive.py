@@ -14,6 +14,7 @@ from openevo.runtime.managed import (
     MANAGED_RUNTIME_ARCHIVE_RELEASE,
     MANAGED_RUNTIME_RELEASES,
     ManagedRuntimeArchiveVerificationError,
+    managed_runtime_image_inspect_reference,
     verify_managed_runtime_archive,
     verified_managed_runtime_image_reference,
 )
@@ -122,6 +123,29 @@ def test_offline_image_authority_is_distinct_from_registry_authority() -> None:
             repo_digests=[],
             labels=labels,
         )
+
+
+@pytest.mark.parametrize(
+    "requested_image",
+    [
+        MANAGED_RUNTIME_RELEASES["managed_science"].image,
+        MANAGED_RUNTIME_RELEASES["managed_science"].trusted_digest,
+        MANAGED_RUNTIME_RELEASES["managed_science"].immutable_reference,
+        MANAGED_RUNTIME_RELEASES["managed_science"].loaded_image_id,
+    ],
+)
+def test_science_release_resolves_to_pinned_offline_inspect_identity(
+    requested_image: str,
+) -> None:
+    release = MANAGED_RUNTIME_RELEASES["managed_science"]
+
+    assert (
+        managed_runtime_image_inspect_reference(
+            profile="managed_science",
+            image=requested_image,
+        )
+        == release.loaded_image_id
+    )
 
 
 @pytest.mark.parametrize(

@@ -339,6 +339,9 @@ def compile_science_attempt_v2(
             network="host",
             workdir=MANAGED_WORKSPACE,
             allow_internet=config.execution.task_network_allow_internet,
+            allow_model_control_plane_network=(
+                not config.execution.task_network_allow_internet
+            ),
         ),
         agent=AgentSpec(
             harness="codex",

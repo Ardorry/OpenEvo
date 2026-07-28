@@ -1456,6 +1456,11 @@ def test_agent_system_reflector_can_use_codex_cli_subscription_provider(tmp_path
             "reflector_llm": {
                 "provider": "codex_cli",
                 "model": "gpt-5.4",
+                "runtime": {
+                    "mode": "legacy_path",
+                    "path_fallback_allowed": True,
+                },
+                "codex_bin": "/opt/dev-codex/bin/codex",
                 "codex_home": "/tmp/codex-home",
                 "timeout_seconds": 9,
             }
@@ -1469,7 +1474,7 @@ def test_agent_system_reflector_can_use_codex_cli_subscription_provider(tmp_path
         "# Codex CLI Evolved Agent System\n\n"
         "Use transcript evidence before changing the agent system.\n"
     )
-    assert captured["args"][:2] == ["codex", "exec"]
+    assert captured["args"][:2] == ["/opt/dev-codex/bin/codex", "exec"]
     assert "--json" in captured["args"]
     assert "--dangerously-bypass-approvals-and-sandbox" not in captured["args"]
     assert "--ignore-user-config" in captured["args"]
@@ -1506,6 +1511,11 @@ def test_reflector_llm_uses_provider_specific_default_timeout(tmp_path: Path):
             "reflector_llm": {
                 "provider": "codex_cli",
                 "model": "gpt-5.4",
+                "runtime": {
+                    "mode": "legacy_path",
+                    "path_fallback_allowed": True,
+                },
+                "codex_bin": "/opt/dev-codex/bin/codex",
             }
         },
     )

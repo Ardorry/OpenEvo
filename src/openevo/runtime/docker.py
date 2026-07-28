@@ -30,6 +30,7 @@ from openevo.runtime.managed import (
     MANAGED_CODEX_HOME,
     ManagedCredentialMount,
     managed_runtime_image_release,
+    managed_runtime_image_inspect_reference,
     require_immutable_managed_runtime_image,
     verified_managed_runtime_image_reference,
 )
@@ -88,6 +89,10 @@ async def _inspect_managed_runtime_image(
     profile: str | None,
     requested_image: str,
 ) -> str:
+    inspect_image = managed_runtime_image_inspect_reference(
+        profile=profile,
+        image=requested_image,
+    )
     try:
         docker = DockerEngineAuthority.open()
     except DockerHostPathError as exc:
@@ -97,7 +102,7 @@ async def _inspect_managed_runtime_image(
         DOCKER_EXECUTABLE_PATH,
         "image",
         "inspect",
-        requested_image,
+        inspect_image,
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -152,7 +157,7 @@ async def _inspect_managed_runtime_image(
     try:
         return verified_managed_runtime_image_reference(
             profile=profile,
-            image=requested_image,
+            image=inspect_image,
             image_id=record.get("Id"),
             repo_digests=record.get("RepoDigests"),
             labels=labels,
@@ -1024,7 +1029,10 @@ class DockerRuntime(BaseRuntime):
             # to --user. Start at the existing session root so preparation can
             # create the managed workspace with the host user's ownership.
             create_args.extend(["--workdir", self.runtime_session_dir])
-        if not self.spec.allow_internet:
+        if (
+            not self.spec.allow_internet
+            and not self.spec.allow_model_control_plane_network
+        ):
             create_args.extend(["--network", "none"])
         elif self.spec.network:
             create_args.extend(["--network", self.spec.network])
@@ -1168,11 +1176,15 @@ class DockerRuntime(BaseRuntime):
         )
         if release is None:
             return self.spec.image
+        inspect_image = managed_runtime_image_inspect_reference(
+            profile=self.spec.profile,
+            image=self.spec.image,
+        )
         rc, stdout, _ = await self._run_local_command(
             DOCKER_EXECUTABLE_PATH,
             "image",
             "inspect",
-            self.spec.image,
+            inspect_image,
             capture=True,
             timeout=self._START_TIMEOUT,
         )
@@ -1192,7 +1204,7 @@ class DockerRuntime(BaseRuntime):
         try:
             return verified_managed_runtime_image_reference(
                 profile=self.spec.profile,
-                image=self.spec.image,
+                image=inspect_image,
                 image_id=record.get("Id"),
                 repo_digests=record.get("RepoDigests"),
                 labels=labels,

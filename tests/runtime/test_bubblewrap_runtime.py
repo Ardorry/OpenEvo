@@ -298,6 +298,18 @@ async def test_start_requires_core_owned_rootfs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime = _runtime(tmp_path)
+    # Pin an already-validated executable authority before simulating a
+    # different Core UID. The test is specifically about rootfs ownership;
+    # otherwise the deliberately changed UID correctly trips the earlier
+    # executable-ownership gate first.
+    binary_authority = bubblewrap_module._open_executable_authority(
+        runtime._binary_path
+    )
+    monkeypatch.setattr(
+        bubblewrap_module,
+        "_open_executable_authority",
+        lambda _path: binary_authority,
+    )
     actual_uid = os.geteuid()
     monkeypatch.setattr(
         bubblewrap_module.os,

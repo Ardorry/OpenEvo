@@ -5,12 +5,14 @@ import json
 import math
 import os
 import re
+import secrets
 import shlex
 import shutil
 import stat
 import subprocess
 import tempfile
 from collections.abc import Callable
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -22,6 +24,11 @@ from openevo.evolution.agent_system import (
     normalize_agent_system_target_path,
 )
 from openevo.evolution.framework import canonical_digest
+from openevo.evolution.framework.execution import (
+    ManagedReflectorRuntimeConfig,
+    ReflectorInferenceRequest,
+    require_active_reflector_service,
+)
 from openevo.evolution.models import (
     ArtifactRegisterRequest,
     ArtifactType,
@@ -33,8 +40,14 @@ EvolutionMethod = Callable[[WorkerClaimedJob, Path], list[ArtifactRegisterReques
 
 _REFLECTOR_PROVIDER_OPENAI_CHAT = "openai_chat"
 _REFLECTOR_PROVIDER_CODEX_CLI = "codex_cli"
+_REFLECTOR_RUNTIME_MANAGED = "managed"
+_REFLECTOR_RUNTIME_LEGACY_PATH = "legacy_path"
 _DEFAULT_REFLECTOR_TIMEOUT_SECONDS = 30.0
 _DEFAULT_CODEX_CLI_REFLECTOR_TIMEOUT_SECONDS = 300.0
+_LAST_REFLECTOR_RUNTIME_RECEIPT: ContextVar[dict[str, Any] | None] = ContextVar(
+    "openevo_last_reflector_runtime_receipt",
+    default=None,
+)
 _REFLECTOR_PROXY_ENV_VARS = (
     "OPENAI_BASE_URL",
     "OPENAI_API_KEY",
@@ -296,6 +309,7 @@ def text_memory_reflector(
                 "failure_count": failure_count,
                 "reflector_provider": llm_config["provider"],
                 "reflector_model": llm_config["model"],
+                "reflector_runtime_receipt": _reflector_runtime_receipt_manifest(),
                 "reflection_audit": audit_report,
                 "promotion_support": _reflector_promotion_support(
                     job,
@@ -433,6 +447,7 @@ def text_memory_expel_reflector(
                 "required_sections": required_sections,
                 "reflector_provider": llm_config["provider"],
                 "reflector_model": llm_config["model"],
+                "reflector_runtime_receipt": _reflector_runtime_receipt_manifest(),
                 "reflection_audit": audit_report,
                 "promotion_support": _reflector_promotion_support(
                     job,
@@ -573,6 +588,7 @@ def skill_bundle_reflector(
         "failure_count": failure_count,
         "reflector_provider": llm_config["provider"],
         "reflector_model": llm_config["model"],
+        "reflector_runtime_receipt": _reflector_runtime_receipt_manifest(),
         "reflection_audit": audit_report,
         "promotion_support": _reflector_promotion_support(
             job,
@@ -719,6 +735,7 @@ def agent_system_reflector(
                 "method": "agent_system_reflector",
                 "reflector_provider": llm_config["provider"],
                 "reflector_model": llm_config["model"],
+                "reflector_runtime_receipt": _reflector_runtime_receipt_manifest(),
                 "agent_system_audit": audit_report,
                 "promotion_support": _reflector_promotion_support(
                     job,
@@ -856,6 +873,7 @@ def agent_system_history_reflector(
                 "shared_evolution_feedback_count": len(shared_feedback_ids),
                 "reflector_provider": llm_config["provider"],
                 "reflector_model": llm_config["model"],
+                "reflector_runtime_receipt": _reflector_runtime_receipt_manifest(),
                 "agent_system_audit": audit_report,
                 "promotion_support": _reflector_promotion_support(
                     job,
@@ -1063,6 +1081,7 @@ def agent_system_pareto_reflector(
                 "shared_evolution_feedback_count": len(shared_feedback_ids),
                 "reflector_provider": llm_config["provider"],
                 "reflector_model": llm_config["model"],
+                "reflector_runtime_receipt": _reflector_runtime_receipt_manifest(),
                 "promotion_support": _reflector_promotion_support(
                     job,
                     method="agent_system_pareto_reflector",
@@ -1228,6 +1247,7 @@ def agent_system_gepa_reflector(
             "agent_system_audit": audit_report,
             "reflector_provider": llm_config["provider"],
             "reflector_model": llm_config["model"],
+            "reflector_runtime_receipt": _reflector_runtime_receipt_manifest(),
             "promotion_support": _reflector_promotion_support(
                 job,
                 method="agent_system_gepa_reflector",
@@ -4198,6 +4218,24 @@ def _generate_agent_system_reflection_with_codex_cli(
     error_context: str,
     temp_prefix: str,
 ) -> str:
+    runtime_mode = llm_config.get("runtime_mode")
+    if runtime_mode == _REFLECTOR_RUNTIME_MANAGED:
+        runtime = ManagedReflectorRuntimeConfig.model_validate(llm_config.get("runtime"))
+        response = require_active_reflector_service().infer(
+            ReflectorInferenceRequest(
+                request_id=f"reflector-{secrets.token_hex(16)}",
+                prompt=prompt_input,
+                model_name=str(llm_config["model"]),
+                reasoning_effort=str(llm_config.get("reasoning_effort") or "high"),
+                timeout_seconds=float(llm_config["timeout_seconds"]),
+                runtime=runtime,
+            )
+        )
+        _LAST_REFLECTOR_RUNTIME_RECEIPT.set(response.receipt.model_dump(mode="json"))
+        return response.text.strip()
+    if runtime_mode != _REFLECTOR_RUNTIME_LEGACY_PATH:
+        raise ValueError(f"{error_context} has no explicit reflector runtime")
+    _LAST_REFLECTOR_RUNTIME_RECEIPT.set(None)
     with tempfile.TemporaryDirectory(prefix=temp_prefix) as tmp:
         tmpdir = Path(tmp)
         output_path = tmpdir / "last-message.md"
@@ -5374,15 +5412,32 @@ def _reflector_llm_config(job: WorkerClaimedJob) -> dict[str, Any]:
         default_timeout_seconds,
     )
     max_tokens = raw_config.get("max_tokens", job.config.get("reflector_max_tokens"))
+    runtime_value = raw_config.get("runtime")
+    runtime = runtime_value if isinstance(runtime_value, dict) else {}
+    runtime_mode = _config_string(runtime, "mode")
     codex_home = _config_string(raw_config, "codex_home") or _config_string(
-        job.config,
-        "reflector_codex_home",
+        job.config, "reflector_codex_home"
     )
-    codex_bin = (
-        _config_string(raw_config, "codex_bin")
-        or _config_string(job.config, "reflector_codex_bin")
-        or "codex"
+    codex_bin = _config_string(raw_config, "codex_bin") or _config_string(
+        job.config, "reflector_codex_bin"
     )
+    reasoning_effort = _config_string(raw_config, "reasoning_effort") or "high"
+    if provider == _REFLECTOR_PROVIDER_CODEX_CLI:
+        if runtime_mode == _REFLECTOR_RUNTIME_MANAGED:
+            managed_runtime = ManagedReflectorRuntimeConfig.model_validate(runtime)
+            if codex_home or codex_bin:
+                raise ValueError("managed reflector forbids host Codex overrides")
+            codex_bin = managed_runtime.codex_binary
+        elif runtime_mode == _REFLECTOR_RUNTIME_LEGACY_PATH:
+            if runtime.get("path_fallback_allowed") is not True:
+                raise ValueError("legacy reflector PATH mode must be explicitly enabled")
+            if not codex_bin or not Path(codex_bin).is_absolute():
+                raise ValueError("legacy reflector requires an absolute codex_bin")
+            managed_runtime = None
+        else:
+            raise ValueError("codex_cli reflector requires an explicit runtime mode")
+    else:
+        managed_runtime = None
     return {
         "provider": provider,
         "model": model,
@@ -5393,7 +5448,19 @@ def _reflector_llm_config(job: WorkerClaimedJob) -> dict[str, Any]:
         "max_tokens": _optional_int(max_tokens),
         "codex_home": codex_home,
         "codex_bin": codex_bin,
+        "reasoning_effort": reasoning_effort,
+        "runtime_mode": runtime_mode or None,
+        "runtime": (
+            managed_runtime.model_dump(mode="json")
+            if managed_runtime is not None
+            else dict(runtime)
+        ),
     }
+
+
+def _reflector_runtime_receipt_manifest() -> dict[str, Any] | None:
+    receipt = _LAST_REFLECTOR_RUNTIME_RECEIPT.get()
+    return None if receipt is None else dict(receipt)
 
 
 def _record_reward(record: dict[str, Any]) -> float | None:

@@ -658,6 +658,29 @@ def require_immutable_managed_runtime_image(
     return release
 
 
+def managed_runtime_image_inspect_reference(
+    *,
+    profile: str | None,
+    image: str | None,
+) -> str:
+    """Resolve a Core-owned request to the local immutable inspect target.
+
+    The managed Science release is distributed as a verified offline OCI
+    archive.  Loading that archive gives Docker an immutable image ID but no
+    repository tag or RepoDigest.  Callers must therefore inspect and execute
+    the Core-pinned loaded image ID while retaining the requested release
+    authority in their request/receipt.  No caller-supplied tag or PATH-style
+    fallback is introduced by this mapping.
+    """
+
+    release = managed_runtime_image_release(profile=profile, image=image)
+    if release is None:
+        raise ValueError("managed runtime image release is unavailable")
+    if profile == "managed_science":
+        return release.loaded_image_id
+    return image
+
+
 def verified_managed_runtime_image_reference(
     *,
     profile: str | None,
@@ -792,6 +815,7 @@ __all__ = [
     "ManagedCredentialMount",
     "verify_managed_runtime_archive",
     "managed_runtime_image_release",
+    "managed_runtime_image_inspect_reference",
     "require_immutable_managed_runtime_image",
     "verified_managed_runtime_image_reference",
     "reject_managed_subscription_env",

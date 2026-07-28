@@ -497,6 +497,33 @@ def test_gateway_subscription_admission_rejects_token_capture(tmp_path: Path) ->
         )
 
 
+def test_gateway_rejects_control_plane_network_for_non_subscription_agent(
+    tmp_path: Path,
+) -> None:
+    release = MANAGED_RUNTIME_RELEASES["managed_science"]
+    runtime = RuntimeSpec(
+        profile="managed_science",
+        image=release.loaded_image_id,
+        container_user="host",
+        allow_internet=False,
+        allow_model_control_plane_network=True,
+    )
+    request = SessionDispatchRequest(
+        session_id="control-plane-network-proxy",
+        task_id="task_1",
+        instruction="Do work.",
+        remaining_timeout_seconds=60,
+        runtime=runtime,
+        agent=AgentSpec(
+            harness="codex",
+            settings={"auth_mode": "proxy", "capture_mode": "transcript"},
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="managed subscription agent"):
+        GatewayNodeManager._validate_subscription_admission(request, runtime, tmp_path)
+
+
 @pytest.mark.parametrize("auth_mode", ["proxy", "subscription"])
 @pytest.mark.parametrize("capture_mode", ["transcript", "agent_transcript", "pure_text"])
 def test_gateway_boundary_writes_back_canonical_capture_mode(
@@ -1939,6 +1966,24 @@ async def test_cleanup_retry_reconciliation_retries_owned_runtime_and_roots(
 
     assert managed.session_id not in manager._cleanup_retries
     assert calls.count("remove_session_dir") == 1
+
+
+@pytest.mark.asyncio
+async def test_cleanup_retry_reconciliation_skips_live_dispatcher_owner(
+    tmp_path: Path,
+) -> None:
+    manager = _postrun_manager(calls=[])
+    managed = _managed_postrun_session(tmp_path, _session_result())
+    ownership = manager._cleanup_ownership_for(managed)
+    manager._cleanup_retries[managed.session_id] = ownership
+    manager._dispatcher = Mock(owns_session=AsyncMock(return_value=True))
+    manager._reconcile_cleanup_ownership = AsyncMock()
+
+    await manager._reconcile_cleanup_retries()
+
+    manager._dispatcher.owns_session.assert_awaited_once_with(managed.session_id)
+    manager._reconcile_cleanup_ownership.assert_not_awaited()
+    assert manager._cleanup_retries[managed.session_id] is ownership
 
 
 @pytest.mark.asyncio

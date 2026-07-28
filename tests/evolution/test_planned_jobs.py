@@ -74,6 +74,10 @@ def _plan() -> EvolutionPlan:
                     "reflector_llm": {
                         "provider": "codex_cli",
                         "model": "gpt-5.1-codex-mini",
+                        "runtime": {
+                            "mode": "legacy_path",
+                            "path_fallback_allowed": True,
+                        },
                     },
                 },
             ),

@@ -930,6 +930,7 @@ def test_compiler_uses_saved_v2_authority_without_legacy_context_routes(tmp_path
     assert request.runtime is not None
     assert request.runtime.image == binding.runtime_image_immutable_reference
     assert request.runtime.allow_internet is False
+    assert request.runtime.allow_model_control_plane_network is True
     assert request.agent.harness == "codex"
     assert request.agent.model_name == "gpt-5.5"
     assert request.agent.settings["capture_mode"] == "transcript"

@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openevo-researchclawbench"
+version = "0.2.0"
+description = "Isolated Community Dev adapter for ResearchClawBench and OpenEvo."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["PyYAML>=6.0"]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "jsonschema>=4.20"]
+
+[project.scripts]
+openevo-researchclawbench = "openevo_researchclawbench.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["openevo_researchclawbench*"]
+
+[tool.pytest.ini_options]
+addopts = ["--import-mode=importlib"]
+pythonpath = ["src"]
+testpaths = ["tests"]
+cache_dir = "../../../experiments/sequential_task_reflector_evolution_v0/.cache/pytest"

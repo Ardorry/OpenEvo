@@ -81,7 +81,7 @@ def _validate_runtime_capabilities(runtime: BaseRuntime) -> None:
         raise ValueError(f"runtime backend {backend!r} does not support memory limits")
     if spec.storage_mb is not None and not runtime.supports_storage_limits:
         raise ValueError(f"runtime backend {backend!r} does not support storage limits")
-    if not spec.allow_internet:
+    if not spec.allow_internet and not spec.allow_model_control_plane_network:
         if not runtime.can_disable_internet:
             raise ValueError(f"runtime backend {backend!r} cannot disable internet access")
         if spec.network not in (None, "", "host", "none"):

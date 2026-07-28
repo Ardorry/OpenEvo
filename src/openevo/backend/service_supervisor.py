@@ -73,6 +73,7 @@ from openevo.gateway.session_files import (
 from openevo.runtime.managed import (
     MANAGED_CODEX_VERSION,
     require_immutable_managed_runtime_image,
+    managed_runtime_image_inspect_reference,
     verified_managed_runtime_image_reference,
 )
 from openevo.runtime.docker_host import (
@@ -921,9 +922,13 @@ class LocalManagedScienceRuntimeProbe:
                     "The managed Science runtime executable is unavailable.",
                 )
             try:
+                inspect_image = managed_runtime_image_inspect_reference(
+                    profile="managed_science",
+                    image=request.runtime_image,
+                )
                 image_result = self._run_docker(
                     docker_engine,
-                    ("image", "inspect", request.runtime_image),
+                    ("image", "inspect", inspect_image),
                     deadline,
                     cancellation,
                 )
@@ -952,7 +957,7 @@ class LocalManagedScienceRuntimeProbe:
                 labels = config.get("Labels") if isinstance(config, dict) else None
                 immutable_image = verified_managed_runtime_image_reference(
                     profile="managed_science",
-                    image=request.runtime_image,
+                    image=inspect_image,
                     image_id=image_id,
                     repo_digests=repo_digests,
                     labels=labels,
@@ -3025,6 +3030,8 @@ class CoreServiceSupervisor:
                     os.fspath(evolution_root / "evolution.db"),
                     "--artifact-root",
                     os.fspath(evolution_root / "artifacts"),
+                    "--managed-reflector-root",
+                    os.fspath(evolution_root / "managed-reflector"),
                     "--framework-lock",
                     os.fspath(self._framework_lock_path),
                 ),
@@ -3158,7 +3165,9 @@ class CoreServiceSupervisor:
                         listeners[service_id].fileno() if service_id in listeners else None
                     ),
                     codex_credential_authority=(
-                        credential_authority if service_id == "gateway" else None
+                        credential_authority
+                        if service_id in {"gateway", "evolution-worker"}
+                        else None
                     ),
                 )
             )

@@ -101,6 +101,7 @@ class RuntimeSpec(BaseModel):
     storage_mb: int | None = None
     gpus: int = 0
     allow_internet: bool = True
+    allow_model_control_plane_network: bool = False
     import_path: str | None = None
     kwargs: dict[str, Any] = Field(default_factory=dict)
 
@@ -134,4 +135,17 @@ class RuntimeSpec(BaseModel):
             raise ValueError(
                 "Core-managed runtime profiles forbid custom runtime loaders and options"
             )
+        if self.allow_model_control_plane_network:
+            if not managed:
+                raise ValueError(
+                    "model control-plane network is available only to a Core-managed runtime"
+                )
+            if self.allow_internet:
+                raise ValueError(
+                    "model control-plane network must not be combined with task internet"
+                )
+            if self.network not in (None, "", "host"):
+                raise ValueError(
+                    "model control-plane network requires the Core-owned host network"
+                )
         return self

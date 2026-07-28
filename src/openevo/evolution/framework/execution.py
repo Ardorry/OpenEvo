@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -16,6 +17,11 @@ from openevo.evolution.models import (
     ArtifactType,
     WorkerClaimInputArtifact,
     WorkerClaimedJob,
+)
+from openevo.runtime.managed import (
+    MANAGED_CODEX_BINARY,
+    MANAGED_CODEX_VERSION,
+    MANAGED_RUNTIME_RELEASES,
 )
 
 from .contracts import (
@@ -263,6 +269,113 @@ class CoreHarnessService(Protocol):
     def infer(self, request: HarnessInferenceRequest) -> HarnessInferenceResponse: ...
 
 
+class ManagedReflectorRuntimeConfig(_Contract):
+    """Exact managed runtime identity required by a subscription reflector."""
+
+    mode: str
+    profile: str
+    image_digest: str
+    codex_binary: str
+    expected_cli_version: str
+    auth_mode: str
+    capture_mode: str
+    path_fallback_allowed: bool
+
+    @model_validator(mode="after")
+    def _managed_release_only(self) -> "ManagedReflectorRuntimeConfig":
+        release = MANAGED_RUNTIME_RELEASES.get(self.profile)  # type: ignore[arg-type]
+        if (
+            self.mode != "managed"
+            or release is None
+            or self.image_digest != release.trusted_digest
+            or self.codex_binary != MANAGED_CODEX_BINARY
+            or self.expected_cli_version != MANAGED_CODEX_VERSION
+            or self.auth_mode != "subscription"
+            or self.capture_mode != "transcript"
+            or self.path_fallback_allowed is not False
+        ):
+            raise ValueError("managed reflector runtime identity is not the Core release")
+        return self
+
+
+class ReflectorInferenceRequest(_Contract):
+    request_id: str
+    prompt: str = Field(min_length=1, max_length=1_048_576)
+    model_name: str = Field(min_length=1, max_length=4096)
+    reasoning_effort: str = Field(default="high", min_length=1, max_length=64)
+    timeout_seconds: float = Field(default=900.0, gt=0.0, le=86_400.0)
+    runtime: ManagedReflectorRuntimeConfig
+
+    _id = field_validator("request_id")(_stable_id)
+    _text_fields = field_validator("model_name", "reasoning_effort")(_text)
+
+
+class ReflectorRuntimeReceipt(_Contract):
+    request_id: str
+    session_id: str
+    runtime_profile: str
+    runtime_digest: str
+    codex_binary: str
+    actual_cli_version: str
+    model_name: str
+    reasoning_effort: str
+    auth_mode: str
+    capture_mode: str
+    path_fallback_allowed: bool
+    exit_status: int
+    transcript_sha256: str
+
+    _ids = field_validator("request_id", "session_id")(_stable_id)
+    _digests = field_validator("runtime_digest", "transcript_sha256")(_digest)
+
+    @model_validator(mode="after")
+    def _successful_managed_receipt(self) -> "ReflectorRuntimeReceipt":
+        if (
+            self.codex_binary != MANAGED_CODEX_BINARY
+            or self.actual_cli_version != MANAGED_CODEX_VERSION
+            or self.auth_mode != "subscription"
+            or self.capture_mode != "transcript"
+            or self.path_fallback_allowed is not False
+            or self.exit_status != 0
+        ):
+            raise ValueError("reflector runtime receipt is not a successful managed run")
+        return self
+
+
+class ReflectorInferenceResponse(_Contract):
+    request_id: str
+    text: str = Field(min_length=1, max_length=1_048_576)
+    receipt: ReflectorRuntimeReceipt
+
+    _id = field_validator("request_id")(_stable_id)
+
+    @model_validator(mode="after")
+    def _paired_receipt(self) -> "ReflectorInferenceResponse":
+        if self.receipt.request_id != self.request_id:
+            raise ValueError("reflector response receipt belongs to another request")
+        return self
+
+
+@runtime_checkable
+class CoreReflectorService(Protocol):
+    """Core-owned reflector surface. Methods cannot create this authority."""
+
+    def infer(self, request: ReflectorInferenceRequest) -> ReflectorInferenceResponse: ...
+
+
+_ACTIVE_REFLECTOR_SERVICE: ContextVar[CoreReflectorService | None] = ContextVar(
+    "openevo_active_reflector_service",
+    default=None,
+)
+
+
+def require_active_reflector_service() -> CoreReflectorService:
+    service = _ACTIVE_REFLECTOR_SERVICE.get()
+    if service is None:
+        raise ValueError("managed reflector service is unavailable")
+    return service
+
+
 class MethodExecutionEnvelope(_Contract):
     plan_id: str
     plan_digest: str
@@ -361,6 +474,7 @@ class MethodExecutionEnvelope(_Contract):
 @dataclass(frozen=True, slots=True)
 class MethodExecutionServices:
     harness: CoreHarnessService
+    reflector: CoreReflectorService | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -418,7 +532,11 @@ def invoke_legacy_method(
     payload = context.job.model_dump(mode="python")
     payload["config"] = context.envelope.legacy_flat_config()
     projected_job = WorkerClaimedJob.model_validate(payload)
-    return method(projected_job, context.artifact_root)
+    token = _ACTIVE_REFLECTOR_SERVICE.set(context.services.reflector)
+    try:
+        return method(projected_job, context.artifact_root)
+    finally:
+        _ACTIVE_REFLECTOR_SERVICE.reset(token)
 
 
 def build_execution_envelope(
@@ -455,10 +573,12 @@ def build_execution_envelope(
 __all__ = [
     "CORE_CONFIG_RESERVED_KEYS",
     "CoreHarnessService",
+    "CoreReflectorService",
     "EvolutionMethodHandle",
     "EvolutionMethodPlugin",
     "HarnessInferenceRequest",
     "HarnessInferenceResponse",
+    "ManagedReflectorRuntimeConfig",
     "InputBindingSource",
     "LegacyEvolutionMethod",
     "MAX_HARNESS_OUTPUT_TOKENS",
@@ -468,8 +588,12 @@ __all__ = [
     "MethodInputBinding",
     "MethodInputResolution",
     "ResolvedMethodInputBinding",
+    "ReflectorInferenceRequest",
+    "ReflectorInferenceResponse",
+    "ReflectorRuntimeReceipt",
     "build_execution_envelope",
     "invoke_legacy_method",
+    "require_active_reflector_service",
     "resolve_method_inputs",
     "validate_user_config_schema_ownership",
     "worker_input_artifact_digest",

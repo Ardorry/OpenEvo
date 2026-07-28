@@ -2017,6 +2017,10 @@ def test_plan_bound_job_rejects_each_mismatched_existing_plan_identity_field(tmp
                     "reflector_llm": {
                         "provider": "codex_cli",
                         "model": "gpt-5.1-codex-mini",
+                        "runtime": {
+                            "mode": "legacy_path",
+                            "path_fallback_allowed": True,
+                        },
                     }
                 },
             ),
