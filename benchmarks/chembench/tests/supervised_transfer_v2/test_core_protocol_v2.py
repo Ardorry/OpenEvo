@@ -53,6 +53,7 @@ from openevo_chembench.supervised_transfer_v2.executor import (
 )
 from openevo_chembench.supervised_transfer_v2.experiment import (
     FrozenThreeTargetSetV2,
+    SupervisedExperimentV2Error,
     SupervisedTransferExperimentV2,
     load_experiment_inputs_v2,
 )
@@ -582,6 +583,159 @@ class _RetryOnceExecutor(_FakeExecutor):
         return super().execute(request)
 
 
+def test_task_retry_window_fails_closed_before_a_new_attempt_after_stall(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    experiment = object.__new__(SupervisedTransferExperimentV2)
+    experiment.run_id = "stv2-synthetic-stall-0001"
+    experiment._state = {"stage": "CONTROL_TRAIN"}
+    attempts: list[str] = []
+    public_events: list[dict[str, object]] = []
+    clock = SimpleNamespace(value=0.0)
+
+    def fail_without_completion(_self, _executor, **_kwargs):
+        attempts.append("attempted")
+        raise SupervisedTaskExecutionErrorV2(
+            SupervisedTaskExecutionCodeV2.TASK_FAILED,
+            completion_exists=False,
+        )
+
+    def advance_clock(seconds: float) -> None:
+        clock.value += seconds
+
+    monkeypatch.setattr(
+        SupervisedTransferExperimentV2,
+        "_execute_single_session",
+        fail_without_completion,
+    )
+    monkeypatch.setattr(
+        SupervisedTransferExperimentV2,
+        "_append_public",
+        lambda _self, payload: public_events.append(payload),
+    )
+    monkeypatch.setattr(
+        "openevo_chembench.supervised_transfer_v2.experiment._EXECUTOR_STALL_SECONDS",
+        60,
+    )
+    monkeypatch.setattr(
+        "openevo_chembench.supervised_transfer_v2.experiment.time.monotonic",
+        lambda: clock.value,
+    )
+    monkeypatch.setattr(
+        "openevo_chembench.supervised_transfer_v2.experiment.time.sleep",
+        advance_clock,
+    )
+
+    with pytest.raises(SupervisedExperimentV2Error) as captured:
+        experiment._execute_session(
+            object(),  # type: ignore[arg-type]
+            task=SimpleNamespace(uid="synthetic-task"),  # type: ignore[arg-type]
+            context=None,
+            logical_arm="control_train",
+            executor_arm="control",
+            task_ordinal=0,
+            round_index=0,
+            stage="CONTROL_TRAIN",
+        )
+
+    assert captured.value.finding_code == "EXECUTOR_STALLED"
+    assert attempts == ["attempted"]
+    assert len(public_events) == 1
+    assert public_events[0]["completion_exists"] is False
+    assert public_events[0]["stall_budget_seconds"] == 60
+    assert public_events[0]["retry_after_seconds"] == 60.0
+
+
+def test_final_test_retry_window_stalls_before_claiming_a_second_attempt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_path = tmp_path / "state/private"
+    state_path.mkdir(parents=True)
+    experiment = object.__new__(SupervisedTransferExperimentV2)
+    experiment.run_id = "stv2-synthetic-final-stall-0001"
+    experiment._state = {"stage": "FREEZE_THREE_TARGETS"}
+    experiment.inputs = SimpleNamespace(
+        repository_root=tmp_path,
+        source_commit=_sha("source"),
+        test=(SimpleNamespace(uid=_sha("synthetic-test"), category="Name_Conversion"),),
+        config=SimpleNamespace(
+            model="gpt-5.5",
+            reasoning_effort="medium",
+            digest=_sha("config"),
+            payload={"roots": {"state": "state"}},
+        ),
+    )
+    attempts: list[str] = []
+    public_events: list[dict[str, object]] = []
+    clock = SimpleNamespace(value=0.0)
+
+    def fail_without_completion(_self, _executor, **_kwargs):
+        attempts.append("attempted")
+        raise SupervisedTaskExecutionErrorV2(
+            SupervisedTaskExecutionCodeV2.TASK_FAILED,
+            completion_exists=False,
+        )
+
+    monkeypatch.setattr(
+        SupervisedTransferExperimentV2,
+        "_set_stage",
+        lambda self, stage: self._state.update(stage=stage),
+    )
+    monkeypatch.setattr(
+        SupervisedTransferExperimentV2,
+        "_require_source_frozen",
+        lambda _self: None,
+    )
+    monkeypatch.setattr(
+        SupervisedTransferExperimentV2,
+        "_execute_session",
+        fail_without_completion,
+    )
+    monkeypatch.setattr(
+        SupervisedTransferExperimentV2,
+        "_append_public",
+        lambda _self, payload: public_events.append(payload),
+    )
+    monkeypatch.setattr(
+        "openevo_chembench.supervised_transfer_v2.experiment._EXECUTOR_STALL_SECONDS",
+        60,
+    )
+    monkeypatch.setattr(
+        "openevo_chembench.supervised_transfer_v2.experiment.time.monotonic",
+        lambda: clock.value,
+    )
+    monkeypatch.setattr(
+        "openevo_chembench.supervised_transfer_v2.experiment.time.sleep",
+        lambda seconds: setattr(clock, "value", clock.value + seconds),
+    )
+
+    with pytest.raises(SupervisedExperimentV2Error) as captured:
+        experiment._run_final_test(
+            FrozenThreeTargetSetV2(
+                contexts={},
+                artifact_set_digest=_sha("artifacts"),
+                receipt_sha256=_sha("receipt"),
+            ),
+            object(),  # type: ignore[arg-type]
+            object(),  # type: ignore[arg-type]
+        )
+
+    assert captured.value.finding_code == "EXECUTOR_STALLED"
+    assert attempts == ["attempted"]
+    assert len(public_events) == 1
+    assert public_events[0]["completion_exists"] is False
+    assert public_events[0]["stall_budget_seconds"] == 60
+    ledger_rows = [
+        json.loads(line)
+        for line in (state_path / "final_test_consumption_ledger_v2.jsonl")
+        .read_text()
+        .splitlines()
+    ]
+    assert len(ledger_rows) == 1
+    assert ledger_rows[0]["completion_exists"] is False
+
+
 def _resolved_context() -> CoreResolvedSupervisedContextV2:
     memory = "# Category Memory: Name_Conversion\n\n## Output Discipline\n- answer once\n"
     skill = "# Category Skill: Name_Conversion\n\n## Workflow\n- validate naming\n"
@@ -690,6 +844,11 @@ def test_controller_runs_four_sessions_three_cycles_without_model_calls(
         "total_model_calls": 174,
         "maximum_model_calls": 247,
     }
+    assert paid_plan["executor_stall_seconds"] == 1200
+    assert paid_plan["task_infrastructure_retry_limit"] == 60
+    assert paid_plan["task_infrastructure_retry_seconds"] == 60
+    assert paid_plan["final_test_infrastructure_retry_limit"] == 60
+    assert paid_plan["final_test_infrastructure_retry_seconds"] == 60
     experiment._state["stage"] = "ONLINE_TRAIN"
     experiment._write_state()
     task = next(value for value in inputs.train if value.category == "Name_Conversion")

@@ -109,6 +109,7 @@ _TASK_INFRASTRUCTURE_RETRY_LIMIT = 60
 _TASK_INFRASTRUCTURE_RETRY_SECONDS = 60
 _FINAL_TEST_INFRASTRUCTURE_RETRY_LIMIT = 60
 _FINAL_TEST_INFRASTRUCTURE_RETRY_SECONDS = 60
+_EXECUTOR_STALL_SECONDS = 20 * 60
 
 _TRANSITIONS: dict[str, frozenset[str]] = {
     "INITIALIZED": frozenset({"UPDATE_SMOKE", "CONTROL_TRAIN"}),
@@ -133,6 +134,20 @@ class SupervisedExperimentV2Error(RuntimeError):
             raise ValueError("invalid experiment finding code")
         self.finding_code = finding_code
         super().__init__(finding_code)
+
+
+def _require_executor_retry_window(started_at: float) -> None:
+    elapsed = max(0.0, time.monotonic() - started_at)
+    if elapsed >= _EXECUTOR_STALL_SECONDS:
+        raise SupervisedExperimentV2Error("EXECUTOR_STALLED")
+
+
+def _executor_retry_delay_seconds(started_at: float, retry_seconds: int) -> float:
+    elapsed = max(0.0, time.monotonic() - started_at)
+    if elapsed >= _EXECUTOR_STALL_SECONDS:
+        raise SupervisedExperimentV2Error("EXECUTOR_STALLED")
+    remaining = _EXECUTOR_STALL_SECONDS - elapsed
+    return min(float(retry_seconds), remaining)
 
 
 class TaskExecutorV2(Protocol):
@@ -813,7 +828,10 @@ class SupervisedTransferExperimentV2:
         ):
             self._set_stage(stage)
             for ordinal, task in enumerate(self.inputs.test):
+                retry_window_started_at = time.monotonic()
                 for attempt_number in range(1, _FINAL_TEST_INFRASTRUCTURE_RETRY_LIMIT + 1):
+                    if attempt_number > 1:
+                        _require_executor_retry_window(retry_window_started_at)
                     self._require_source_frozen()
                     context = None if arm == "control" else frozen.contexts[task.category]
                     attempt_id = self._session_id(stage, arm, task, 0, attempt_number)
@@ -866,6 +884,10 @@ class SupervisedTransferExperimentV2:
                         )
                         if not retryable:
                             raise
+                        retry_after_seconds = _executor_retry_delay_seconds(
+                            retry_window_started_at,
+                            _FINAL_TEST_INFRASTRUCTURE_RETRY_SECONDS,
+                        )
                         self._append_public(
                             {
                                 "schema_version": "FinalTestInfrastructureRetryPublicV2",
@@ -876,11 +898,12 @@ class SupervisedTransferExperimentV2:
                                 "attempt_number": attempt_number,
                                 "same_source_config_artifact_model": True,
                                 "completion_exists": False,
-                                "retry_after_seconds": (_FINAL_TEST_INFRASTRUCTURE_RETRY_SECONDS),
+                                "retry_after_seconds": retry_after_seconds,
+                                "stall_budget_seconds": _EXECUTOR_STALL_SECONDS,
                                 "recorded_at_utc": utc_now(),
                             }
                         )
-                        time.sleep(_FINAL_TEST_INFRASTRUCTURE_RETRY_SECONDS)
+                        time.sleep(retry_after_seconds)
                 else:
                     raise SupervisedExperimentV2Error("FINAL_TEST_INFRASTRUCTURE_RETRY_EXHAUSTED")
         summary = ledger.summary()
@@ -921,7 +944,10 @@ class SupervisedTransferExperimentV2:
                 session_id=session_id_override,
                 completion_callback=completion_callback,
             )
+        retry_window_started_at = time.monotonic()
         for attempt_number in range(1, _TASK_INFRASTRUCTURE_RETRY_LIMIT + 1):
+            if attempt_number > 1:
+                _require_executor_retry_window(retry_window_started_at)
             session_id = self._session_id(
                 stage,
                 logical_arm,
@@ -950,6 +976,10 @@ class SupervisedTransferExperimentV2:
                 )
                 if not retryable:
                     raise
+                retry_after_seconds = _executor_retry_delay_seconds(
+                    retry_window_started_at,
+                    _TASK_INFRASTRUCTURE_RETRY_SECONDS,
+                )
                 self._append_public(
                     {
                         "schema_version": "TaskInfrastructureRetryPublicV2",
@@ -961,11 +991,12 @@ class SupervisedTransferExperimentV2:
                         "attempt_number": attempt_number,
                         "same_input_and_system_state": True,
                         "completion_exists": False,
-                        "retry_after_seconds": _TASK_INFRASTRUCTURE_RETRY_SECONDS,
+                        "retry_after_seconds": retry_after_seconds,
+                        "stall_budget_seconds": _EXECUTOR_STALL_SECONDS,
                         "recorded_at_utc": utc_now(),
                     }
                 )
-                time.sleep(_TASK_INFRASTRUCTURE_RETRY_SECONDS)
+                time.sleep(retry_after_seconds)
         raise SupervisedExperimentV2Error("TASK_INFRASTRUCTURE_RETRY_EXHAUSTED")
 
     def _execute_single_session(
@@ -1200,6 +1231,15 @@ class SupervisedTransferExperimentV2:
             "reasoning_effort": self.inputs.config.reasoning_effort,
             "task_timeout_seconds": self.inputs.config.task_timeout_seconds,
             "reflector_timeout_seconds": self.inputs.config.reflector_timeout_seconds,
+            "executor_stall_seconds": _EXECUTOR_STALL_SECONDS,
+            "task_infrastructure_retry_limit": _TASK_INFRASTRUCTURE_RETRY_LIMIT,
+            "task_infrastructure_retry_seconds": _TASK_INFRASTRUCTURE_RETRY_SECONDS,
+            "final_test_infrastructure_retry_limit": (
+                _FINAL_TEST_INFRASTRUCTURE_RETRY_LIMIT
+            ),
+            "final_test_infrastructure_retry_seconds": (
+                _FINAL_TEST_INFRASTRUCTURE_RETRY_SECONDS
+            ),
             "task_execution_policy": self.inputs.config.payload["executor"],
             "reflector_execution_policy": self.inputs.config.payload["reflector"],
             "task_max_output_tokens": None,
