@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import stat
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from openevo.runtime.managed import (
@@ -103,6 +105,7 @@ class _CompletedClient:
     def __init__(self, *, tool_event: bool = False) -> None:
         self.payload: dict[str, object] | None = None
         self.tool_event = tool_event
+        self.upload_source: Path | None = None
 
     def submit_task(self, payload: dict[str, object]) -> str:
         self.payload = payload
@@ -113,6 +116,7 @@ class _CompletedClient:
         upload = prepare[0]
         assert isinstance(upload, dict)
         source = Path(str(upload["source"]))
+        self.upload_source = source
         assert (source / "AGENTS.md").is_file()
         assert tuple(source.glob(".openevo-approved-skills/*/SKILL.md"))
         return str(payload["task_id"])
@@ -266,6 +270,39 @@ def test_online_context_is_uploaded_through_managed_runtime() -> None:
     assert "Approved Core-resolved category memory" in client.payload["instruction"]
     receipt = executor.consume_context_receipt("session-v2-00000001")
     assert receipt.passed
+
+
+def test_real_online_context_stages_inside_gateway_visible_private_service_root(
+    tmp_path: Path,
+) -> None:
+    receipt_path = (
+        tmp_path
+        / "state/chembench_supervised_transfer_v2/runtime_services/runs/service-v2"
+        / "runtime_services_receipt_v2.json"
+    )
+    receipt_path.parent.mkdir(mode=0o700, parents=True)
+    client = _CompletedClient()
+    runtime_services = SimpleNamespace(
+        digest="f" * 64,
+        receipt_path=receipt_path,
+        repository_root=tmp_path,
+        require_current=dict,
+    )
+    executor = SupervisedManagedCodexExecutorV2(
+        arm="online",
+        timeout_seconds=1200,
+        rollout_client=client,
+        runtime_services=runtime_services,
+    )
+
+    attempt = executor.execute(_request(arm="online", context=_context()))
+
+    assert attempt.response == "A"
+    assert client.upload_source is not None
+    staging_root = receipt_path.parent / "candidate_workspace_staging"
+    assert client.upload_source.is_relative_to(staging_root)
+    assert stat.S_IMODE(staging_root.stat().st_mode) == 0o700
+    assert not client.upload_source.exists()
 
 
 def test_tool_event_fails_closed_after_official_transcript_capture() -> None:

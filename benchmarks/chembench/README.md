@@ -134,6 +134,11 @@ OpenEvo Rollout JSONL transcript. The supervised packet projection remains a
 private benchmark transformation, but every Core event and artifact lineage
 binds that ordered source-execution provenance digest; transcript content is
 not copied into the lineage.
+Online context upload staging lives in the private `0700` namespace of the
+attested runtime-service run, under the repository path mounted read-only into
+Gateway. It is removed after the immutable task terminates; the candidate
+runtime receives only the uploaded workspace, never the repository or state
+root.
 
 The candidate boundary uses the Core subscription harness capability profile.
 Its zero-tool rule is enforced as a transcript-audit fail-closed condition: any

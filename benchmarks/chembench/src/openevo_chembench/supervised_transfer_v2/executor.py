@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -364,11 +365,36 @@ class SupervisedManagedCodexExecutorV2:
         if context is None:
             yield self.build_task_request(request)
             return
-        with TemporaryDirectory(prefix="openevo-chembench-supervised-v2-") as temporary:
+        staging_root = self._candidate_workspace_staging_root()
+        with TemporaryDirectory(
+            prefix="openevo-chembench-supervised-v2-",
+            dir=staging_root,
+        ) as temporary:
             workspace = Path(temporary) / "workspace"
             workspace.mkdir(mode=0o700)
             _materialize_core_resolved_context(context, workspace)
             yield self.build_task_request(request, workspace_root=workspace)
+
+    def _candidate_workspace_staging_root(self) -> Path | None:
+        """Return a Gateway-visible private root for real online sessions."""
+
+        if self._runtime_services is None:
+            return None
+        root = self._runtime_services.receipt_path.parent / "candidate_workspace_staging"
+        root.mkdir(mode=0o700, exist_ok=True)
+        metadata = root.lstat()
+        resolved = root.resolve(strict=True)
+        repository = self._runtime_services.repository_root.resolve(strict=True)
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) != 0o700
+            or metadata.st_uid != os.geteuid()
+            or not resolved.is_relative_to(repository)
+        ):
+            raise SupervisedTaskExecutionErrorV2(
+                SupervisedTaskExecutionCodeV2.INVALID_REQUEST
+            )
+        return resolved
 
     def _wait_for_terminal(self, task_id: str) -> TaskStatus:
         for attempt_index in range(self._max_poll_attempts):
