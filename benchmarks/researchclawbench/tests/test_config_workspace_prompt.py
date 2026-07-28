@@ -42,7 +42,7 @@ def test_protocol_parser_is_frozen_and_has_closed_budget_configuration() -> None
     assert readiness["reflector_runtime_receipt_valid"] is True
     assert "REFLECTOR_CODEX_RUNTIME_NOT_REPRODUCIBLY_PINNED" not in readiness["blockers"]
     assert "NATIVE_POST_RUN_TRAINING_FEEDBACK_ATTACHMENT_UNAVAILABLE" not in readiness["blockers"]
-    assert "PRODUCTION_TRAINING_FEEDBACK_TRANSPORT_UNAVAILABLE" in readiness["blockers"]
+    assert "PRODUCTION_TRAINING_FEEDBACK_TRANSPORT_UNAVAILABLE" not in readiness["blockers"]
     assert "FORMAL_TRAINING_ORCHESTRATOR_UNAVAILABLE" in readiness["blockers"]
     assert readiness["framework_lock_present"] is True
     assert "JUDGE_CREDENTIALS_MISSING" in readiness["blockers"]

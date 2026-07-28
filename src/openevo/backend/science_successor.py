@@ -100,6 +100,32 @@ class SealedTranscriptDatasetV2(_ScienceSuccessorModel):
     capture_mode: Literal["transcript"]
     token_level_metrics_available: Literal[False]
     sealed: Literal[True]
+    training_feedback: "TrainingFeedbackBindingV2 | None" = None
+
+
+class TrainingFeedbackBindingV2(_ScienceSuccessorModel):
+    """Immutable Core receipt for one resolved evaluator supplement view."""
+
+    training_feedback_binding_contract_version: Literal["2"] = "2"
+    completed_dataset_id: str = Field(pattern=_SCIENCE_ID_PATTERN)
+    completed_dataset_revision: str = Field(pattern=_SCIENCE_ID_PATTERN)
+    attachment_ids: tuple[str, ...] = Field(min_length=1, max_length=32)
+    attachment_sha256: tuple[str, ...] = Field(min_length=1, max_length=32)
+    resolved_dataset_artifact_id: str = Field(pattern=_SCIENCE_ID_PATTERN)
+    resolved_view_sha256: str = Field(pattern=_SCIENCE_SHA256_PATTERN)
+    task_scope_id: str = Field(pattern=_SCIENCE_ID_PATTERN)
+
+    @model_validator(mode="after")
+    def _closed_binding(self) -> "TrainingFeedbackBindingV2":
+        if (
+            len(self.attachment_ids) != len(self.attachment_sha256)
+            or self.attachment_ids != tuple(sorted(self.attachment_ids))
+            or len(self.attachment_ids) != len(set(self.attachment_ids))
+            or any(re.fullmatch(_SCIENCE_ID_PATTERN, value) is None for value in self.attachment_ids)
+            or any(re.fullmatch(_SCIENCE_SHA256_PATTERN, value) is None for value in self.attachment_sha256)
+        ):
+            raise ValueError("training feedback binding inventory is invalid")
+        return self
 
 
 class ScienceMethodOutputV2(_ScienceSuccessorModel):
@@ -444,6 +470,7 @@ __all__ = [
     "ScienceSuccessorTransitionAttemptV2",
     "SealedTranscriptDatasetV2",
     "SuccessorMaterializationV2",
+    "TrainingFeedbackBindingV2",
     "ValidatedScienceOutputsV2",
     "science_successor_plan_sha256",
 ]

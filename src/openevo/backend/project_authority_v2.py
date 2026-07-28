@@ -43,6 +43,7 @@ from openevo.evolution.framework.builtins import (
     require_verified_executable_registry,
 )
 from openevo.evolution.framework.profiles import execution_profile_for_release_mode
+from openevo.evolution.managed_reflector import default_managed_reflector_runtime
 from openevo.evolution.revisions import (
     ExecutionSnapshotV1,
     VerifiedExecutionSnapshot,
@@ -287,6 +288,10 @@ class ProjectAuthorityV2:
                 reflector_llm={
                     "provider": "codex_cli",
                     "model": config.execution.codex_model,
+                    "reasoning_effort": config.execution.reasoning_effort,
+                    "runtime": default_managed_reflector_runtime().model_dump(
+                        mode="json"
+                    ),
                 },
                 registry_snapshot=self._registry.snapshot,
                 execution_profile=execution_profile_for_release_mode(

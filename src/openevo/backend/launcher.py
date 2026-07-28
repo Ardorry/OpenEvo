@@ -17,6 +17,9 @@ from openevo.backend.contracts.v2.provider import CoreControlProviderV2
 from openevo.backend.contracts.v2.store import CoreControlStoreV2
 from openevo.backend.project_authority_v2 import ProjectAuthorityV2
 from openevo.backend.run_admission import install_core_run_admission_endpoint
+from openevo.backend.training_feedback_control import (
+    install_core_training_feedback_endpoint,
+)
 from openevo.backend.runtime_identity import (
     HostServiceRoot,
     canonical_json_bytes,
@@ -191,6 +194,7 @@ def _build_release_daemon_v2_composition(
         )
         app = create_core_control_v2_contract_app(provider)
         install_core_run_admission_endpoint(app, service_supervisor, task_owner)
+        install_core_training_feedback_endpoint(app, service_supervisor)
         composition = _ReleaseDaemonV2Composition(
             app=app,
             provider=provider,

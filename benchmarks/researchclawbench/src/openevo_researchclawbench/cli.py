@@ -14,6 +14,12 @@ from .evolution_loop import FrozenTrainingSchedule
 from .hard_gt_teacher import native_teacher_attachment_capability
 from .reflector_runner import reflector_runtime_audit
 from .run_manifest import atomic_write_json
+from .training_supervisor import supervisor_capability_audit
+from .training_control import (
+    DurableTrainingControl,
+    TrainingOperationsUnavailable,
+    print_closed_json,
+)
 
 
 def _write(path: Path, payload: dict) -> None:
@@ -36,20 +42,15 @@ def command_static_audit(config: ExperimentConfig) -> int:
     schedule = FrozenTrainingSchedule.build()
     candidate = candidate_source_audit(_package_root())
     reflector = reflector_runtime_audit(config.project_root / "OpenEvo")
-    teacher = native_teacher_attachment_capability()
+    teacher = native_teacher_attachment_capability(config.project_root / "OpenEvo")
+    supervisor = supervisor_capability_audit(_package_root())
     receipt = {
         "schema_version": "1.0.0",
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "candidate": candidate,
         "reflector": reflector,
         "teacher": teacher,
-        "formal_training_orchestrator": {
-            "available": False,
-            "reason": (
-                "the adapter has no production community-training command or "
-                "durable 17x3 supervisor"
-            ),
-        },
+        "formal_training_orchestrator": supervisor,
         "protocol_counts": {
             "community_tasks": len(config.require("tasks")),
             "candidate_runs": len(schedule.attempts),
@@ -70,11 +71,17 @@ def command_static_audit(config: ExperimentConfig) -> int:
         and teacher["production_science_successor_hook"]
         and receipt["formal_training_orchestrator"]["available"]
     )
-    receipt["status"] = (
-        "STATIC_AUDIT_PASS_RUNTIME_PROBES_REQUIRED"
-        if receipt["passed"]
-        else "BLOCKED_BY_OPENEVO_NATIVE_CAPABILITY_GAP"
-    )
+    if receipt["passed"]:
+        receipt["status"] = "STATIC_AUDIT_PASS_RUNTIME_PROBES_REQUIRED"
+    elif (
+        teacher["production_evolution_http_transport"]
+        and teacher["production_science_successor_hook"]
+        and supervisor.get("durable_state_machine_ready")
+        and not supervisor.get("production_operations_bound")
+    ):
+        receipt["status"] = "BLOCKED_UNRESOLVED_DURABILITY_GAP"
+    else:
+        receipt["status"] = "BLOCKED_BY_OPENEVO_NATIVE_CAPABILITY_GAP"
     _write(config.experiment_root / "manifests/native_path_static_audit.json", receipt)
     print(json.dumps(receipt, indent=2, sort_keys=True))
     return 0 if receipt["passed"] else 5
@@ -139,6 +146,10 @@ def main(argv: list[str] | None = None) -> int:
     canary.add_argument("--protocol", required=True, type=Path)
     canary.add_argument("--task", required=True)
     canary.add_argument("--attempt", required=True)
+    for name in ("training-init", "status", "verify", "run-next", "resume", "stop-owned"):
+        control = sub.add_parser(name)
+        control.add_argument("--protocol", required=True, type=Path)
+        control.add_argument("--run-id", required=True)
     args = parser.parse_args(argv)
     try:
         config = ExperimentConfig.load(args.protocol)
@@ -148,8 +159,28 @@ def main(argv: list[str] | None = None) -> int:
             return command_static_audit(config)
         if args.command == "contamination-audit":
             return command_contamination_audit(config)
-        return command_native_canary(config, args.task, args.attempt)
-    except (ProtocolError, OSError, ValueError, RuntimeError) as exc:
+        if args.command == "native-canary":
+            return command_native_canary(config, args.task, args.attempt)
+        control = DurableTrainingControl(
+            config=config,
+            run_id=args.run_id,
+            require_existing=args.command != "training-init",
+        )
+        if args.command == "training-init":
+            result = control.initialize()
+        elif args.command == "status":
+            result = control.status()
+        elif args.command == "verify":
+            result = control.verify()
+        elif args.command == "stop-owned":
+            result = control.stop_owned()
+        elif args.command == "run-next":
+            result = control.run_next()
+        else:
+            result = control.resume()
+        print_closed_json(result)
+        return 0
+    except (ProtocolError, OSError, ValueError, RuntimeError, TrainingOperationsUnavailable) as exc:
         print(
             json.dumps(
                 {

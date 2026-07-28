@@ -105,12 +105,13 @@ def test_global_artifact_scanner_accepts_abstract_procedure() -> None:
 
 
 def test_native_teacher_feedback_attachment_uses_core_authority() -> None:
-    receipt = native_teacher_attachment_capability()
+    receipt = native_teacher_attachment_capability(Path(__file__).resolve().parents[3])
     assert receipt["post_run_feedback_attachment_to_native_dataset"] is True
     assert receipt["session_completed_immutable"] is True
-    assert receipt["evaluator_authority"] == "CORE_PROCESS_LOCAL_CAPABILITY"
-    assert receipt["production_evolution_http_transport"] is False
-    assert receipt["production_science_successor_hook"] is False
+    assert receipt["evaluator_authority"] == "CORE_CONTROL_SERVICE_IDENTITY"
+    assert receipt["durable_cross_process_store"] is True
+    assert receipt["production_evolution_http_transport"] is True
+    assert receipt["production_science_successor_hook"] is True
 
 
 @pytest.mark.parametrize("transition", ["evolution", "reflector", "teacher", "feedback", "cross_task_update"])

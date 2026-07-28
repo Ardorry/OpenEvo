@@ -47,6 +47,14 @@ from openevo.evolution.store import (
     DatasetNotFoundError,
     EvolutionStore,
 )
+from openevo.evolution.training_feedback import (
+    EvolutionDatasetViewResolveRequest,
+    ResolvedEvolutionDatasetView,
+    TrainingFeedbackAttachment,
+    TrainingFeedbackAttachmentCreateRequest,
+    TrainingFeedbackAttachmentList,
+    TrainingFeedbackEvolutionService,
+)
 from openevo.evolution.framework.builtins import (
     VerifiedExecutableRegistry,
     require_verified_executable_registry,
@@ -83,6 +91,7 @@ def create_app(
     registry_snapshot: RegistrySnapshot | None = None,
     executable_registry: VerifiedExecutableRegistry | None = None,
     internal_identity: InternalServiceIdentity | None = None,
+    training_feedback_official_mode: bool = False,
 ) -> FastAPI:
     verified_registry = (
         None
@@ -109,6 +118,20 @@ def create_app(
     app.state.evolution_registry = verified_registry
     app.state.internal_identity = internal_identity
     app.state.internal_workers = {}
+    feedback_service = TrainingFeedbackEvolutionService(
+        registry=store,
+        root=root / "core-control" / "training-feedback",
+        official_mode=training_feedback_official_mode,
+    )
+    feedback_authority = (
+        None
+        if training_feedback_official_mode
+        else feedback_service.issue_evaluator_authority(
+            producer="trusted_evaluator"
+        )
+    )
+    app.state.training_feedback_service = feedback_service
+    app.state.training_feedback_official_mode = training_feedback_official_mode
     install_internal_auth(app, lambda: app.state.internal_identity)
 
     @app.get("/v1/health")
@@ -248,6 +271,76 @@ def create_app(
                 status_code=403,
                 detail="Core control caller mismatch",
             )
+
+    @app.post(
+        "/v1/internal/training-feedback/attachments",
+        response_model=TrainingFeedbackAttachment,
+    )
+    def create_training_feedback_attachment(
+        payload: TrainingFeedbackAttachmentCreateRequest,
+        request: Request,
+    ) -> TrainingFeedbackAttachment:
+        require_core_control_caller(request)
+        if feedback_authority is None:
+            raise HTTPException(
+                status_code=409,
+                detail="official frozen mode forbids training feedback",
+            )
+        try:
+            return feedback_service.create_training_feedback_attachment(
+                authority=feedback_authority,
+                request=payload,
+            )
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except ValueError as exc:
+            status = 409 if "conflict" in str(exc) else 422
+            raise HTTPException(status_code=status, detail=str(exc)) from exc
+
+    @app.get(
+        "/v1/internal/training-feedback/attachments/{attachment_id}",
+        response_model=TrainingFeedbackAttachment,
+    )
+    def get_training_feedback_attachment(
+        attachment_id: str,
+        request: Request,
+    ) -> TrainingFeedbackAttachment:
+        require_core_control_caller(request)
+        try:
+            return feedback_service.get_training_feedback_attachment(attachment_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get(
+        "/v1/internal/training-feedback/sessions/{session_id}/attachments",
+        response_model=TrainingFeedbackAttachmentList,
+    )
+    def list_training_feedback_attachments_for_session(
+        session_id: str,
+        request: Request,
+    ) -> TrainingFeedbackAttachmentList:
+        require_core_control_caller(request)
+        try:
+            return feedback_service.list_training_feedback_attachments_for_session(
+                session_id
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post(
+        "/v1/internal/training-feedback/resolve",
+        response_model=ResolvedEvolutionDatasetView,
+    )
+    def resolve_evolution_dataset_view(
+        payload: EvolutionDatasetViewResolveRequest,
+        request: Request,
+    ) -> ResolvedEvolutionDatasetView:
+        require_core_control_caller(request)
+        try:
+            return feedback_service.resolve_evolution_dataset_view(payload)
+        except ValueError as exc:
+            status = 404 if "unknown training feedback" in str(exc) else 422
+            raise HTTPException(status_code=status, detail=str(exc)) from exc
 
     @app.post(
         "/v1/internal/materialized-contexts",

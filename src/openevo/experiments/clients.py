@@ -33,6 +33,22 @@ class EvolutionClientProtocol(Protocol):
 
     def get_artifact(self, artifact_id: str) -> dict[str, Any]: ...
 
+    def create_training_feedback_attachment(
+        self, payload: dict[str, Any]
+    ) -> dict[str, Any]: ...
+
+    def get_training_feedback_attachment(
+        self, attachment_id: str
+    ) -> dict[str, Any]: ...
+
+    def list_training_feedback_attachments_for_session(
+        self, session_id: str
+    ) -> dict[str, Any]: ...
+
+    def resolve_evolution_dataset_view(
+        self, payload: dict[str, Any]
+    ) -> dict[str, Any]: ...
+
     def get_context_runtime_authority(self, context_id: str) -> dict[str, Any]: ...
 
     def create_materialized_context(self, payload: dict[str, Any]) -> dict[str, Any]: ...
@@ -253,6 +269,58 @@ class EvolutionHttpClient:
         result = response.json()
         if not isinstance(result, dict):
             raise ValueError("evolution artifact response was not a JSON object")
+        return result
+
+    def create_training_feedback_attachment(
+        self, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        response = self._client.post(
+            f"{self.base_url}/v1/internal/training-feedback/attachments",
+            json=payload,
+        )
+        self._raise_for_status(response)
+        result = response.json()
+        if not isinstance(result, dict):
+            raise ValueError("training feedback response was not a JSON object")
+        return result
+
+    def get_training_feedback_attachment(
+        self, attachment_id: str
+    ) -> dict[str, Any]:
+        encoded = quote(attachment_id, safe="")
+        response = self._client.get(
+            f"{self.base_url}/v1/internal/training-feedback/attachments/{encoded}"
+        )
+        self._raise_for_status(response)
+        result = response.json()
+        if not isinstance(result, dict):
+            raise ValueError("training feedback response was not a JSON object")
+        return result
+
+    def list_training_feedback_attachments_for_session(
+        self, session_id: str
+    ) -> dict[str, Any]:
+        encoded = quote(session_id, safe="")
+        response = self._client.get(
+            f"{self.base_url}/v1/internal/training-feedback/sessions/{encoded}/attachments"
+        )
+        self._raise_for_status(response)
+        result = response.json()
+        if not isinstance(result, dict):
+            raise ValueError("training feedback list was not a JSON object")
+        return result
+
+    def resolve_evolution_dataset_view(
+        self, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        response = self._client.post(
+            f"{self.base_url}/v1/internal/training-feedback/resolve",
+            json=payload,
+        )
+        self._raise_for_status(response)
+        result = response.json()
+        if not isinstance(result, dict):
+            raise ValueError("resolved evolution dataset view was not a JSON object")
         return result
 
     def get_context_runtime_authority(self, context_id: str) -> dict[str, Any]:

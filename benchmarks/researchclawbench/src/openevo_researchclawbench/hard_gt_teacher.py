@@ -153,15 +153,46 @@ def assert_overlay_transition(overlay: TaskLocalOverlay | None, next_task_id: st
         raise RuntimeError("TASK_LOCAL_OVERLAY_CROSS_TASK_TRANSFER_REJECTED")
 
 
-def native_teacher_attachment_capability() -> dict[str, Any]:
+def native_teacher_attachment_capability(
+    openevo_root: str | Path | None = None,
+) -> dict[str, Any]:
+    transport = False
+    successor = False
+    durable = False
+    if openevo_root is not None:
+        root = Path(openevo_root)
+        feedback = (root / "src/openevo/evolution/training_feedback.py").read_text(
+            encoding="utf-8"
+        )
+        server = (root / "src/openevo/evolution/server.py").read_text(encoding="utf-8")
+        preparer = (
+            root / "src/openevo/backend/science_successor_preparer_v2.py"
+        ).read_text(encoding="utf-8")
+        owner = (root / "src/openevo/backend/science_run_owner.py").read_text(
+            encoding="utf-8"
+        )
+        durable = "training-feedback.sqlite3" in feedback and "BEGIN IMMEDIATE" in feedback
+        transport = (
+            "/v1/internal/training-feedback/attachments" in server
+            and "/v1/internal/training-feedback/resolve" in server
+        )
+        successor = (
+            "resolve_training_feedback" in preparer
+            and "preparer.resolve_training_feedback" in owner
+        )
     return {
         "hard_gt_classification": True,
         "task_local_overlay": True,
         "global_leak_scanner": True,
         "post_run_feedback_attachment_to_native_dataset": True,
         "session_completed_immutable": True,
-        "evaluator_authority": "CORE_PROCESS_LOCAL_CAPABILITY",
-        "production_evolution_http_transport": False,
-        "production_science_successor_hook": False,
-        "status": "PROCESS_LOCAL_ATTACHMENT_AVAILABLE_PRODUCTION_TRANSPORT_GAP",
+        "evaluator_authority": "CORE_CONTROL_SERVICE_IDENTITY",
+        "durable_cross_process_store": durable,
+        "production_evolution_http_transport": transport,
+        "production_science_successor_hook": successor,
+        "status": (
+            "DURABLE_ATTACHMENT_AND_SUCCESSOR_HOOK_READY"
+            if durable and transport and successor
+            else "PRODUCTION_TRANSPORT_GAP"
+        ),
     }

@@ -5925,6 +5925,37 @@ class EvolutionStore:
             raise ValueError(f"unknown artifact: {artifact_id}")
         return _artifact_response_from_row(row)
 
+    def get_dataset_artifact_by_create_identity(
+        self,
+        create_identity: str,
+    ) -> ArtifactResponse | None:
+        """Resolve one durable derived dataset publication by stable identity."""
+
+        if (
+            not isinstance(create_identity, str)
+            or not create_identity
+            or len(create_identity) > 255
+        ):
+            raise ValueError("dataset create identity is invalid")
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM artifacts WHERE type = ? AND state NOT IN (?, ?) "
+                "AND json_valid(manifest_json) = 1 "
+                "AND json_extract(manifest_json, '$.create_identity') = ? "
+                "ORDER BY artifact_id LIMIT 2",
+                (
+                    str(ArtifactType.DATASET),
+                    str(ArtifactState.STAGED),
+                    str(ArtifactState.SEALED),
+                    create_identity,
+                ),
+            ).fetchall()
+        if len(rows) > 1:
+            raise DatasetIntegrityError(
+                "dataset create identity has multiple active artifacts"
+            )
+        return None if not rows else _artifact_response_from_row(rows[0])
+
     def get_internal_successor_artifact(
         self,
         successor_transition_id: str,

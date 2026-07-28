@@ -340,6 +340,15 @@ class _Preparer(ScienceSuccessorPreparerV2):
             ),
         )
 
+    def resolve_training_feedback(
+        self,
+        context: ScienceSuccessorPreparationContextV2,
+        dataset: SealedTranscriptDatasetV2,
+    ) -> SealedTranscriptDatasetV2:
+        self._enter("resolving_training_feedback")
+        assert dataset.task_id == context.task.task_id
+        return dataset
+
     def recover_dataset(
         self,
         context: ScienceSuccessorPreparationContextV2,
@@ -730,6 +739,7 @@ def test_completed_attempt_commits_one_complete_adjacent_successor(
         )
         assert preparer.calls == [
             "sealing_dataset",
+            "resolving_training_feedback",
             "running_methods",
             "validating",
             "materializing",
@@ -855,10 +865,12 @@ def test_failed_materialization_retries_the_same_transition_from_sealed_dataset(
         assert attempts[1].commit_manifest_sha256 == (commit.manifest_sha256)
         assert preparer.calls == [
             "sealing_dataset",
+            "resolving_training_feedback",
             "running_methods",
             "validating",
             "materializing",
             "recovering_dataset",
+            "resolving_training_feedback",
             "running_methods",
             "validating",
             "materializing",
@@ -881,6 +893,52 @@ def test_failed_materialization_retries_the_same_transition_from_sealed_dataset(
             "committing",
             "committed",
         ]
+    finally:
+        owner.close()
+
+
+def test_feedback_hook_waits_after_dataset_seal_and_retries_idempotently(
+    tmp_path: Path,
+) -> None:
+    preparer = _Preparer(fail_phase="resolving_training_feedback")
+    owner = _owner(tmp_path, preparer)
+    predecessor, task = _admit(owner)
+    try:
+        with pytest.raises(CoreTaskControlError):
+            owner.run_successor_transition(
+                task.task_id,
+                accepted_attempt_id=task.attempts[0].attempt_id,
+                plan=_plan(task),
+            )
+        failed = owner.get_successor_transition_for_task(task.task_id)
+        dataset_events = [
+            event
+            for event in owner.list_task_events(task.task_id)
+            if event.event_type == "dataset_sealed"
+        ]
+        assert len(dataset_events) == 1
+        assert failed.error is not None and failed.error.retryable is True
+
+        preparer.fail_phase = None
+        committed = owner.retry_successor_transition(
+            failed.transition.successor_transition_id,
+            expected_project_head_id=(predecessor.active_project_head.project_head_id),
+            retry_request_id="retry-after-feedback-attachment",
+        )
+        assert committed.state == "committed"
+        assert [
+            call
+            for call in preparer.calls
+            if call in {"sealing_dataset", "recovering_dataset"}
+        ] == ["sealing_dataset", "recovering_dataset"]
+        assert len(
+            [
+                event
+                for event in owner.list_task_events(task.task_id)
+                if event.event_type == "dataset_sealed"
+            ]
+        ) == 1
+        transition_id = failed.transition.successor_transition_id
     finally:
         owner.close()
 
@@ -1014,6 +1072,7 @@ def test_failed_dataset_seal_retries_from_pending_without_recovery_evidence(
         assert preparer.calls == [
             "sealing_dataset",
             "sealing_dataset",
+            "resolving_training_feedback",
             "running_methods",
             "validating",
             "materializing",
@@ -1085,6 +1144,7 @@ def test_production_worker_executes_a_durable_retry_asynchronously(
         assert committed is not None
         assert preparer.calls == [
             "recovering_dataset",
+            "resolving_training_feedback",
             "running_methods",
             "validating",
             "materializing",

@@ -339,6 +339,11 @@ def _reflector_schema(
     return _closed_object(
         {
             record_limit_name: _positive_integer(),
+            # Project-scoped gate consumed by the Core successor owner.  It is
+            # deliberately part of the verified method configuration rather
+            # than a daemon-wide switch: unrelated projects in the same Core
+            # service retain their ordinary post-run behavior.
+            "training_feedback_required": {"type": "boolean"},
             "reflector_llm": _reflector_llm_schema(),
             **dict(extra or {}),
         },

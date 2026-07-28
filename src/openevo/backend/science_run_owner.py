@@ -159,6 +159,12 @@ class ScienceSuccessorPreparerV2(Protocol):
         manifest_sha256: str,
     ) -> SealedTranscriptDatasetV2: ...
 
+    def resolve_training_feedback(
+        self,
+        context: ScienceSuccessorPreparationContextV2,
+        dataset: SealedTranscriptDatasetV2,
+    ) -> SealedTranscriptDatasetV2: ...
+
     def run_methods(
         self,
         context: ScienceSuccessorPreparationContextV2,
@@ -723,6 +729,11 @@ class CoreScienceTaskOwnerV2:
                     or dataset.manifest_sha256 != dataset_event.dataset_sha256
                 ):
                     raise ValueError("recovered successor dataset differs from its journal")
+
+            dataset = _validate_sealed_successor_dataset(
+                preparer.resolve_training_feedback(context, dataset),
+                context=context,
+            )
 
             outputs = _validate_successor_method_outputs(
                 preparer.run_methods(context, dataset),
@@ -1457,6 +1468,26 @@ def _build_atomic_successor_manifest(
         dataset_id=dataset.dataset_id,
         dataset_artifact_id=dataset.artifact_id,
         dataset_manifest_sha256=dataset.manifest_sha256,
+        training_feedback_attachment_ids=(
+            ()
+            if dataset.training_feedback is None
+            else dataset.training_feedback.attachment_ids
+        ),
+        training_feedback_attachment_sha256=(
+            ()
+            if dataset.training_feedback is None
+            else dataset.training_feedback.attachment_sha256
+        ),
+        resolved_training_dataset_artifact_id=(
+            None
+            if dataset.training_feedback is None
+            else dataset.training_feedback.resolved_dataset_artifact_id
+        ),
+        resolved_training_view_sha256=(
+            None
+            if dataset.training_feedback is None
+            else dataset.training_feedback.resolved_view_sha256
+        ),
         runtime_context_source=materialized.runtime_context_source,
         materialized_source_successor_transition_id=(
             materialized.materialized_source_successor_transition_id

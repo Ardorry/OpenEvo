@@ -24,7 +24,9 @@ from openevo.backend.science_run_store import ScienceProjectAdmissionAuthorityV2
 from openevo.backend.science_successor_preparer_v2 import (
     ProductionScienceSuccessorPreparerV2,
     ScienceSuccessorPreparationV2Error,
+    _project_requires_training_feedback,
 )
+from openevo.backend.science_successor import SealedTranscriptDatasetV2
 from openevo.backend.workspace_handoff_v2 import WorkspaceHandoffStoreV2
 from openevo.backend.workspace_store_v2 import WorkspaceStoreV2
 from openevo.evolution.context_materialization import MaterializedContext
@@ -33,6 +35,14 @@ from openevo.evolution.framework import canonical_digest
 from openevo.evolution.models import (
     ArtifactResponse,
     DatasetCreateRequest,
+)
+from openevo.evolution.training_feedback import (
+    EvolutionDatasetViewReceipt,
+    FeedbackAuthority,
+    FeedbackClass,
+    ResolvedEvolutionDatasetView,
+    TrainingFeedbackAttachment,
+    TrainingFeedbackAttachmentCreateRequest,
 )
 from openevo.evolution.planned_jobs import PlanBoundJobCreateRequest
 from tests.backend.test_science_execution_v2 import (
@@ -46,6 +56,219 @@ from tests.backend.test_science_execution_v2 import (
     _wait_task_state,
 )
 from tests.framework_testkit import verified_builtin_registry
+
+
+def test_project_scoped_method_config_requires_durable_feedback() -> None:
+    payload = _project_config().model_dump(mode="json")
+    payload["evolution"]["targets"] = {
+        "text_memory": {
+            "enabled": True,
+            "method": "text_memory_expel_reflector",
+            "config": {"training_feedback_required": True},
+        }
+    }
+    config = type(_project_config()).model_validate(payload)
+    project = ProjectRecordV2(
+        project_id="project-feedback-gate",
+        display_name="Feedback gate",
+        config=config,
+        project_config_sha256=project_config_sha256_for(config),
+        created_at="2026-07-28T00:00:00.000000Z",
+        updated_at="2026-07-28T00:00:00.000000Z",
+        resource_version=1,
+    )
+    assert _project_requires_training_feedback(project) is True
+
+    base = _project_config()
+    ungated = ProjectRecordV2(
+        project_id=project.project_id,
+        display_name=project.display_name,
+        config=base,
+        project_config_sha256=project_config_sha256_for(base),
+        created_at=project.created_at,
+        updated_at=project.updated_at,
+        resource_version=project.resource_version,
+    )
+    assert _project_requires_training_feedback(ungated) is False
+
+
+def test_production_preparer_resolves_trusted_feedback_for_successor_jobs(
+    tmp_path,
+) -> None:
+    registry = verified_builtin_registry(tmp_path / "registry")
+    dataset = SealedTranscriptDatasetV2(
+        dataset_id="dataset-1",
+        artifact_id="artifact-dataset-1",
+        manifest_sha256="a" * 64,
+        record_count=1,
+        task_id="task-1",
+        task_admission_id="admission-1",
+        accepted_attempt_id="attempt-1",
+        capture_mode="transcript",
+        token_level_metrics_available=False,
+        sealed=True,
+    )
+    source_artifact = ArtifactResponse(
+        artifact_id=dataset.artifact_id,
+        type="dataset",
+        name="source",
+        version=1,
+        state="active",
+        uri=(tmp_path / "manifest.json").as_uri(),
+        manifest={},
+        promoted=True,
+    )
+
+    class Provider:
+        def create_attachment_request(self, *, context, dataset, completed_dataset_revision):
+            return TrainingFeedbackAttachmentCreateRequest(
+                idempotency_key="successor-feedback-1",
+                session_id="session-1",
+                task_id="rollout-task-1",
+                task_scope_id=context.task.task_id,
+                completed_dataset_id=dataset.dataset_id,
+                completed_dataset_revision=completed_dataset_revision,
+                feedback_class=FeedbackClass.SOFT_JUDGE,
+                global_feedback={"completed": True, "total_score": 0.5},
+                task_local_feedback={},
+            )
+
+    request = Provider().create_attachment_request(
+        context=SimpleNamespace(task=SimpleNamespace(task_id="task-1")),
+        dataset=dataset,
+        completed_dataset_revision="artifact-dataset-1.v1",
+    )
+    body = {
+        "schema_version": "openevo.training_feedback_attachment.v2",
+        "attachment_id": "attachment-1",
+        "revision": 1,
+        "session_id": "session-1",
+        "task_id": "rollout-task-1",
+        "task_scope_id": "task-1",
+        "dataset_id": "dataset-1",
+        "dataset_revision": "artifact-dataset-1.v1",
+        "producer": "trusted_evaluator",
+        "authority_id": "authority-1",
+        "authority": FeedbackAuthority.EVALUATOR_ONLY.value,
+        "feedback_class": FeedbackClass.SOFT_JUDGE.value,
+        "global_feedback": request.global_feedback,
+        "task_local_feedback": {},
+        "created_at": "2026-07-28T00:00:00+00:00",
+        "source_session_result_sha256": "b" * 64,
+        "source_dataset_manifest_sha256": "a" * 64,
+        "status": "sealed",
+    }
+    body["content_sha256"] = canonical_digest(body)
+    attachment = TrainingFeedbackAttachment.model_validate(body)
+    view = EvolutionDatasetViewReceipt(
+        resolution_id="view-1",
+        source_dataset_id="dataset-1",
+        source_dataset_manifest_sha256="a" * 64,
+        source_session_result_sha256="b" * 64,
+        attachment_ids=(attachment.attachment_id,),
+        attachment_sha256=(attachment.content_sha256,),
+        records_sha256="c" * 64,
+        manifest_sha256="d" * 64,
+    )
+    resolved_artifact = ArtifactResponse(
+        artifact_id="artifact-resolved-1",
+        type="dataset",
+        name="resolved",
+        version=1,
+        state="active",
+        uri=(tmp_path / "resolved.json").as_uri(),
+        manifest={},
+        promoted=False,
+    )
+    resolved_body = {
+        "completed_dataset_id": "dataset-1",
+        "completed_dataset_revision": "artifact-dataset-1.v1",
+        "attachment_ids": [attachment.attachment_id],
+        "attachment_sha256": [attachment.content_sha256],
+        "dataset_view": view.model_dump(mode="json"),
+        "dataset_artifact_id": resolved_artifact.artifact_id,
+    }
+    resolved = ResolvedEvolutionDatasetView(
+        completed_dataset_id="dataset-1",
+        completed_dataset_revision="artifact-dataset-1.v1",
+        attachments=(attachment,),
+        dataset_view=view,
+        dataset_artifact=resolved_artifact,
+        resolved_view_sha256=canonical_digest(resolved_body),
+    )
+
+    class Client:
+        def get_artifact(self, artifact_id):
+            assert artifact_id == source_artifact.artifact_id
+            return source_artifact.model_dump(mode="json")
+
+        def create_training_feedback_attachment(self, payload):
+            assert TrainingFeedbackAttachmentCreateRequest.model_validate(payload) == request
+            return attachment.model_dump(mode="json")
+
+        def resolve_evolution_dataset_view(self, payload):
+            assert payload["attachment_ids"] == ["attachment-1"]
+            return resolved.model_dump(mode="json")
+
+        def close(self):
+            return None
+
+    preparer = ProductionScienceSuccessorPreparerV2(
+        catalog=object(),
+        ledger=object(),
+        workspaces=object(),
+        workspace_handoffs=object(),
+        services=object(),
+        executable_registry=registry,
+        training_feedback_provider=Provider(),
+        training_feedback_required=True,
+    )
+    client = Client()
+
+    @contextmanager
+    def evolution(_context, _record, _project):
+        yield object(), client
+
+    preparer._evolution = evolution
+    context = SimpleNamespace(task=SimpleNamespace(task_id="task-1"))
+    record = SimpleNamespace(
+        receipt=SimpleNamespace(
+            session_id="session-1",
+            rollout_task_id="rollout-task-1",
+        )
+    )
+    project = SimpleNamespace(
+        config=SimpleNamespace(
+            evolution=SimpleNamespace(
+                training_feedback=SimpleNamespace(mode="disabled")
+            )
+        )
+    )
+    preparer._authority = lambda _context: (record, object(), project)
+    enriched = preparer.resolve_training_feedback(
+        context,
+        dataset,
+    )
+    assert enriched.training_feedback is not None
+    assert enriched.training_feedback.attachment_ids == ("attachment-1",)
+    assert enriched.training_feedback.resolved_dataset_artifact_id == (
+        "artifact-resolved-1"
+    )
+
+
+def test_official_successor_mode_rejects_feedback_provider(tmp_path) -> None:
+    registry = verified_builtin_registry(tmp_path / "registry")
+    with pytest.raises(ValueError, match="official frozen"):
+        ProductionScienceSuccessorPreparerV2(
+            catalog=object(),
+            ledger=object(),
+            workspaces=object(),
+            workspace_handoffs=object(),
+            services=object(),
+            executable_registry=registry,
+            training_feedback_provider=object(),
+            official_frozen_mode=True,
+        )
 
 
 class _Evolution:

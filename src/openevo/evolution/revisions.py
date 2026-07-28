@@ -577,6 +577,18 @@ class AtomicSuccessorManifestV2(_AtomicSuccessorContract):
     dataset_id: str
     dataset_artifact_id: str
     dataset_manifest_sha256: str
+    training_feedback_attachment_ids: tuple[str, ...] = Field(
+        default=(), max_length=32, exclude_if=lambda value: not value
+    )
+    training_feedback_attachment_sha256: tuple[str, ...] = Field(
+        default=(), max_length=32, exclude_if=lambda value: not value
+    )
+    resolved_training_dataset_artifact_id: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    resolved_training_view_sha256: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     runtime_context_source: Literal[
         "materialized_new",
         "materialized_inherited",
@@ -641,6 +653,26 @@ class AtomicSuccessorManifestV2(_AtomicSuccessorContract):
         mode="before",
     )(_strict_integer)
 
+    @field_validator("training_feedback_attachment_ids")
+    @classmethod
+    def _feedback_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _ordered_stable_ids(value, label="training feedback attachment IDs")
+
+    @field_validator("training_feedback_attachment_sha256")
+    @classmethod
+    def _feedback_hashes(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(_digest(item) for item in value)
+
+    @field_validator("resolved_training_dataset_artifact_id")
+    @classmethod
+    def _optional_training_artifact(cls, value: str | None) -> str | None:
+        return None if value is None else _stable_id(value)
+
+    @field_validator("resolved_training_view_sha256")
+    @classmethod
+    def _optional_training_digest(cls, value: str | None) -> str | None:
+        return None if value is None else _digest(value)
+
     @field_validator("method_artifact_ids")
     @classmethod
     def _ordered_method_artifacts(cls, value: tuple[str, ...]) -> tuple[str, ...]:
@@ -672,6 +704,18 @@ class AtomicSuccessorManifestV2(_AtomicSuccessorContract):
             raise ValueError("atomic successor generation must be adjacent")
         if self.successor_project_head_id == self.predecessor_project_head_id:
             raise ValueError("atomic successor must have a new project-head identity")
+        feedback_fields = (
+            bool(self.training_feedback_attachment_ids),
+            bool(self.training_feedback_attachment_sha256),
+            self.resolved_training_dataset_artifact_id is not None,
+            self.resolved_training_view_sha256 is not None,
+        )
+        if any(feedback_fields) and (
+            not all(feedback_fields)
+            or len(self.training_feedback_attachment_ids)
+            != len(self.training_feedback_attachment_sha256)
+        ):
+            raise ValueError("atomic successor training feedback receipt is incomplete")
         inherited_fields = (
             self.materialized_source_successor_transition_id,
             self.materialized_source_predecessor_project_head_id,

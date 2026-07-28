@@ -31,6 +31,7 @@ from openevo.backend.science_successor import (
     ScienceSuccessorPreparationContextV2,
     SealedTranscriptDatasetV2,
     SuccessorMaterializationV2,
+    TrainingFeedbackBindingV2,
     ValidatedScienceOutputsV2,
 )
 from openevo.backend.service_supervisor import (
@@ -64,6 +65,12 @@ from openevo.evolution.revisions import (
     AtomicSuccessorManifestV2,
     SuccessorArtifactContributionV2,
 )
+from openevo.evolution.training_feedback import (
+    EvolutionDatasetViewResolveRequest,
+    ResolvedEvolutionDatasetView,
+    TrainingFeedbackAttachment,
+    TrainingFeedbackAttachmentCreateRequest,
+)
 from openevo.experiments.clients import (
     EvolutionClientProtocol,
     EvolutionHttpClient,
@@ -94,6 +101,18 @@ class ScienceSuccessorPreparationV2Error(RuntimeError):
     ) -> None:
         super().__init__(message)
         self.retryable = retryable
+
+
+class TrainingFeedbackProviderV2(Protocol):
+    """Benchmark-owned policy that supplies evaluator output to Core transport."""
+
+    def create_attachment_request(
+        self,
+        *,
+        context: ScienceSuccessorPreparationContextV2,
+        dataset: SealedTranscriptDatasetV2,
+        completed_dataset_revision: str,
+    ) -> TrainingFeedbackAttachmentCreateRequest | None: ...
 
 
 def _successor_dataset_idempotency_key(
@@ -211,6 +230,9 @@ class ProductionScienceSuccessorPreparerV2:
         services: _ServiceOwnerV2,
         executable_registry: VerifiedExecutableRegistry,
         evolution_factory: (Callable[[ServiceRunBinding], EvolutionClientProtocol] | None) = None,
+        training_feedback_provider: TrainingFeedbackProviderV2 | None = None,
+        training_feedback_required: bool = False,
+        official_frozen_mode: bool = False,
         clock: Callable[[], datetime] | None = None,
         poll_interval_seconds: float = 1.0,
         max_poll_attempts: int = 7200,
@@ -237,6 +259,13 @@ class ProductionScienceSuccessorPreparerV2:
                 headers=binding.request_headers(),
             )
         )
+        if official_frozen_mode and (
+            training_feedback_provider is not None or training_feedback_required
+        ):
+            raise ValueError("official frozen mode forbids training feedback")
+        self._training_feedback_provider = training_feedback_provider
+        self._training_feedback_required = training_feedback_required
+        self._official_frozen_mode = official_frozen_mode
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._poll_interval = float(poll_interval_seconds)
         self._max_poll_attempts = max_poll_attempts
@@ -447,6 +476,142 @@ class ProductionScienceSuccessorPreparerV2:
             sealed=True,
         )
 
+    def resolve_training_feedback(
+        self,
+        context: ScienceSuccessorPreparationContextV2,
+        dataset: SealedTranscriptDatasetV2,
+    ) -> SealedTranscriptDatasetV2:
+        self._require_running()
+        record, _result, project = self._authority(context)
+        assert record.receipt is not None
+        provider = self._training_feedback_provider
+        required = self._training_feedback_required or _project_requires_training_feedback(
+            project
+        )
+        if provider is None and not required:
+            return dataset
+        if self._official_frozen_mode:
+            if required or provider is not None:
+                raise ScienceSuccessorPreparationV2Error(
+                    "official frozen mode forbids training feedback"
+                )
+            return dataset
+        with self._evolution(context, record, project) as (_binding, client):
+            raw_source = client.get_artifact(dataset.artifact_id)
+        source_artifact = ArtifactResponse.model_validate(raw_source)
+        revision = f"{source_artifact.artifact_id}.v{source_artifact.version}"
+        attachment: TrainingFeedbackAttachment | None = None
+        if provider is not None:
+            request = provider.create_attachment_request(
+                context=context,
+                dataset=dataset,
+                completed_dataset_revision=revision,
+            )
+            if request is not None:
+                request = TrainingFeedbackAttachmentCreateRequest.model_validate(request)
+                if (
+                    request.session_id != record.receipt.session_id
+                    or request.task_id != record.receipt.rollout_task_id
+                    or request.completed_dataset_id != dataset.dataset_id
+                    or request.completed_dataset_revision != revision
+                    or request.task_scope_id != context.task.task_id
+                ):
+                    raise ScienceSuccessorPreparationV2Error(
+                        "training feedback provider returned mismatched authority"
+                    )
+                with self._evolution(context, record, project) as (_binding, client):
+                    attachment = TrainingFeedbackAttachment.model_validate(
+                        client.create_training_feedback_attachment(
+                            request.model_dump(mode="json")
+                        )
+                    )
+                if (
+                    attachment.session_id != request.session_id
+                    or attachment.task_id != request.task_id
+                    or attachment.task_scope_id != request.task_scope_id
+                    or attachment.dataset_id != request.completed_dataset_id
+                    or attachment.dataset_revision
+                    != request.completed_dataset_revision
+                    or attachment.producer != request.producer
+                    or attachment.feedback_class is not request.feedback_class
+                    or attachment.global_feedback != request.global_feedback
+                    or attachment.task_local_feedback != request.task_local_feedback
+                    or attachment.status != "sealed"
+                ):
+                    raise ScienceSuccessorPreparationV2Error(
+                        "training feedback service returned mismatched authority"
+                    )
+        else:
+            with self._evolution(context, record, project) as (_binding, client):
+                listed = client.list_training_feedback_attachments_for_session(
+                    record.receipt.session_id
+                )
+            candidates = [
+                TrainingFeedbackAttachment.model_validate(item)
+                for item in listed.get("attachments", [])
+                if isinstance(item, Mapping)
+            ] if isinstance(listed, Mapping) else []
+            exact = [
+                item
+                for item in candidates
+                if item.session_id == record.receipt.session_id
+                and item.task_id == record.receipt.rollout_task_id
+                and item.task_scope_id == context.task.task_id
+                and item.dataset_id == dataset.dataset_id
+                and item.dataset_revision == revision
+            ]
+            if len(exact) > 1:
+                raise ScienceSuccessorPreparationV2Error(
+                    "multiple trusted feedback attachments match one successor"
+                )
+            attachment = None if not exact else exact[0]
+        if attachment is None:
+            if required:
+                raise ScienceSuccessorPreparationV2Error(
+                    "trusted evaluator feedback is pending",
+                    retryable=True,
+                )
+            return dataset
+        with self._evolution(context, record, project) as (_binding, client):
+            resolve_request = EvolutionDatasetViewResolveRequest(
+                completed_dataset_id=dataset.dataset_id,
+                completed_dataset_revision=revision,
+                task_id=record.receipt.rollout_task_id,
+                task_scope_id=context.task.task_id,
+                attachment_ids=(attachment.attachment_id,),
+            )
+            resolved = ResolvedEvolutionDatasetView.model_validate(
+                client.resolve_evolution_dataset_view(
+                    resolve_request.model_dump(mode="json")
+                )
+            )
+        if (
+            resolved.completed_dataset_id != dataset.dataset_id
+            or resolved.completed_dataset_revision != revision
+            or resolved.attachments != (attachment,)
+            or resolved.dataset_view.attachment_ids != (attachment.attachment_id,)
+            or resolved.dataset_view.attachment_sha256
+            != (attachment.content_sha256,)
+        ):
+            raise ScienceSuccessorPreparationV2Error(
+                "resolved training feedback view differs from its attachment"
+            )
+        return dataset.model_copy(
+            update={
+                "training_feedback": TrainingFeedbackBindingV2(
+                    completed_dataset_id=dataset.dataset_id,
+                    completed_dataset_revision=revision,
+                    attachment_ids=(attachment.attachment_id,),
+                    attachment_sha256=(attachment.content_sha256,),
+                    resolved_dataset_artifact_id=(
+                        resolved.dataset_artifact.artifact_id
+                    ),
+                    resolved_view_sha256=resolved.resolved_view_sha256,
+                    task_scope_id=context.task.task_id,
+                )
+            }
+        )
+
     def run_methods(
         self,
         context: ScienceSuccessorPreparationContextV2,
@@ -474,12 +639,46 @@ class ProductionScienceSuccessorPreparerV2:
                 prior_owner_by_target,
             ) = self._prior_context_artifacts(context, client)
             compiled_task = compiled.tasks[0]
+            evolution_dataset_artifact_id = (
+                dataset.artifact_id
+                if dataset.training_feedback is None
+                else dataset.training_feedback.resolved_dataset_artifact_id
+            )
             legacy_payloads = compiled_task.evolution_job_payloads_for_round(
                 0,
                 methods,
-                dataset_artifact_id=dataset.artifact_id,
+                dataset_artifact_id=evolution_dataset_artifact_id,
                 context_artifact_ids=prior_context,
             )
+            if dataset.training_feedback is not None:
+                feedback_lineage = {
+                    "completed_dataset_id": dataset.dataset_id,
+                    "completed_dataset_artifact_id": dataset.artifact_id,
+                    "training_feedback_attachment_ids": list(
+                        dataset.training_feedback.attachment_ids
+                    ),
+                    "training_feedback_attachment_sha256": list(
+                        dataset.training_feedback.attachment_sha256
+                    ),
+                    "resolved_view_sha256": (
+                        dataset.training_feedback.resolved_view_sha256
+                    ),
+                }
+                for payload in legacy_payloads:
+                    config = payload.get("config")
+                    if not isinstance(config, dict):
+                        raise ScienceSuccessorPreparationV2Error(
+                            "compiled evolution job payload is incomplete"
+                        )
+                    prior_lineage = config.get("lineage", {})
+                    if not isinstance(prior_lineage, dict):
+                        raise ScienceSuccessorPreparationV2Error(
+                            "compiled evolution lineage is invalid"
+                        )
+                    config["lineage"] = {
+                        **prior_lineage,
+                        "training_feedback": feedback_lineage,
+                    }
             outputs = tuple(
                 self._run_one_method(
                     client,
@@ -1478,6 +1677,24 @@ class ProductionScienceSuccessorPreparerV2:
         )
 
 
+def _project_requires_training_feedback(project: ProjectRecordV2) -> bool:
+    """Return the verified, project-scoped post-run feedback gate.
+
+    The flag lives in an enabled reflector method's closed configuration so it
+    is covered by the project config digest and executable-registry schema.  A
+    Daemon-wide environment or launch flag would be invisible to project
+    identity and would incorrectly affect unrelated projects.
+    """
+
+    if type(project) is not ProjectRecordV2:
+        raise TypeError("training feedback gate requires an exact project record")
+    return any(
+        selection.enabled
+        and selection.config.get("training_feedback_required") is True
+        for selection in project.config.evolution.targets.values()
+    )
+
+
 def _plan_bound_request(
     spec: CompiledEvolutionMethodSpec,
     legacy_payload: Mapping[str, Any],
@@ -1513,4 +1730,5 @@ def _plan_bound_request(
 __all__ = [
     "ProductionScienceSuccessorPreparerV2",
     "ScienceSuccessorPreparationV2Error",
+    "TrainingFeedbackProviderV2",
 ]
