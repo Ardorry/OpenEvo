@@ -47,10 +47,16 @@ from openevo_chembench.supervised_transfer_v2.context_binding import (
 )
 from openevo_chembench.supervised_transfer_v2.runtime_services import (
     OpenEvoRuntimeServicesIdentityV2,
+    RuntimeServicesV2Error,
 )
 
 _MODEL = "gpt-5.5"
 _REASONING_EFFORT = "medium"
+_RUNTIME_HEALTH_RETRY_LIMIT = 120
+_RUNTIME_HEALTH_RETRY_SECONDS = 0.5
+_TRANSIENT_RUNTIME_HEALTH_FINDINGS = frozenset(
+    {"RUNTIME_SERVICE_HEALTH_INVALID", "RUNTIME_SERVICE_UNAVAILABLE"}
+)
 _REMOTE_SKILLS_ROOT = f"{MANAGED_WORKSPACE}/.openevo-approved-skills"
 _USAGE_FIELDS = (
     "input_tokens",
@@ -340,8 +346,19 @@ class SupervisedManagedCodexExecutorV2:
             return attempt
 
     def _require_runtime_services(self) -> None:
-        if self._runtime_services is not None:
-            self._runtime_services.require_current()
+        if self._runtime_services is None:
+            return
+        for attempt_index in range(_RUNTIME_HEALTH_RETRY_LIMIT):
+            try:
+                self._runtime_services.require_current()
+                return
+            except RuntimeServicesV2Error as exc:
+                if (
+                    exc.finding_code not in _TRANSIENT_RUNTIME_HEALTH_FINDINGS
+                    or attempt_index == _RUNTIME_HEALTH_RETRY_LIMIT - 1
+                ):
+                    raise
+                time.sleep(_RUNTIME_HEALTH_RETRY_SECONDS)
 
     def consume_context_receipt(
         self,

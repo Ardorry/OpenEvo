@@ -26,6 +26,9 @@ from openevo_chembench.supervised_transfer_v2.executor import (
     SupervisedTaskExecutionCodeV2,
     SupervisedTaskExecutionErrorV2,
 )
+from openevo_chembench.supervised_transfer_v2.runtime_services import (
+    RuntimeServicesV2Error,
+)
 
 
 def _digest(value: str) -> str:
@@ -310,6 +313,72 @@ def test_real_online_context_stages_inside_gateway_visible_private_service_root(
     assert client.upload_source.is_relative_to(staging_root)
     assert stat.S_IMODE(staging_root.stat().st_mode) == 0o700
     assert not client.upload_source.exists()
+
+
+def test_transient_runtime_health_is_rechecked_without_repeating_model_completion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    receipt_path = tmp_path / "state/runtime-services/run/receipt.json"
+    receipt_path.parent.mkdir(mode=0o700, parents=True)
+    calls = 0
+
+    def require_current() -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        if calls <= 2:
+            raise RuntimeServicesV2Error("RUNTIME_SERVICE_HEALTH_INVALID")
+        return {}
+
+    runtime_services = SimpleNamespace(
+        digest="f" * 64,
+        receipt_path=receipt_path,
+        repository_root=tmp_path,
+        require_current=require_current,
+    )
+    client = _CompletedClient()
+    executor = SupervisedManagedCodexExecutorV2(
+        arm="online",
+        timeout_seconds=1200,
+        rollout_client=client,
+        runtime_services=runtime_services,
+    )
+    monkeypatch.setattr(
+        "openevo_chembench.supervised_transfer_v2.executor.time.sleep",
+        lambda _seconds: None,
+    )
+
+    attempt = executor.execute(_request(arm="online", context=_context()))
+
+    assert attempt.response == "A"
+    assert calls == 4
+
+
+def test_runtime_identity_failure_is_not_retried(tmp_path: Path) -> None:
+    calls = 0
+
+    def require_current() -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        raise RuntimeServicesV2Error("RUNTIME_SERVICE_SOURCE_DRIFT")
+
+    runtime_services = SimpleNamespace(
+        digest="f" * 64,
+        receipt_path=tmp_path / "receipt.json",
+        repository_root=tmp_path,
+        require_current=require_current,
+    )
+    executor = SupervisedManagedCodexExecutorV2(
+        arm="online",
+        timeout_seconds=1200,
+        rollout_client=_CompletedClient(),
+        runtime_services=runtime_services,
+    )
+
+    with pytest.raises(RuntimeServicesV2Error, match="RUNTIME_SERVICE_SOURCE_DRIFT"):
+        executor.execute(_request(arm="online", context=_context()))
+
+    assert calls == 1
 
 
 def test_tool_event_fails_closed_after_official_transcript_capture() -> None:
