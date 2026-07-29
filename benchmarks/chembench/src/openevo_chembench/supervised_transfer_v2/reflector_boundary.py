@@ -226,6 +226,9 @@ _SUPERVISED_AGENT_FIELDS = (
     "agent_system_directives",
     "agent_system_output_discipline",
 )
+_CORE_AUXILIARY_CONFIG_MAX_CHARACTERS = 4096
+_SUPERVISED_AUXILIARY_SCALAR_MAX_CHARACTERS = 192
+_SUPERVISED_AUXILIARY_ARRAY_MAX_ITEMS = 4
 
 
 def _supervised_rule_output_schema(*, minimum_evidence: int) -> dict[str, object]:
@@ -279,16 +282,23 @@ _SUPERVISED_OUTPUT_SCHEMA = {
         **{
             field: {
                 "type": "array",
-                "items": {"type": "string", "minLength": 1, "maxLength": 4096},
+                "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": _SUPERVISED_AUXILIARY_SCALAR_MAX_CHARACTERS,
+                },
                 "minItems": 1,
                 "maxItems": maximum,
             }
             for field, maximum in (
-                ("skill_when_to_use", 12),
-                ("skill_workflow", 24),
-                ("skill_validation_checks", 24),
-                ("skill_failure_guards", 16),
-                ("agent_system_output_discipline", 8),
+                ("skill_when_to_use", _SUPERVISED_AUXILIARY_ARRAY_MAX_ITEMS),
+                ("skill_workflow", _SUPERVISED_AUXILIARY_ARRAY_MAX_ITEMS),
+                ("skill_validation_checks", _SUPERVISED_AUXILIARY_ARRAY_MAX_ITEMS),
+                ("skill_failure_guards", _SUPERVISED_AUXILIARY_ARRAY_MAX_ITEMS),
+                (
+                    "agent_system_output_discipline",
+                    _SUPERVISED_AUXILIARY_ARRAY_MAX_ITEMS,
+                ),
             )
         },
         "skill_evidence_digests": {
@@ -304,9 +314,21 @@ _SUPERVISED_OUTPUT_SCHEMA = {
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
-                    "trigger": {"type": "string", "minLength": 1, "maxLength": 4096},
-                    "instruction": {"type": "string", "minLength": 1, "maxLength": 4096},
-                    "validation": {"type": "string", "minLength": 1, "maxLength": 4096},
+                    "trigger": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": _SUPERVISED_AUXILIARY_SCALAR_MAX_CHARACTERS,
+                    },
+                    "instruction": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": _SUPERVISED_AUXILIARY_SCALAR_MAX_CHARACTERS,
+                    },
+                    "validation": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": _SUPERVISED_AUXILIARY_SCALAR_MAX_CHARACTERS,
+                    },
                     "evidence_digests": {
                         "type": "array",
                         "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
@@ -316,7 +338,7 @@ _SUPERVISED_OUTPUT_SCHEMA = {
                 },
                 "required": list(_SUPERVISED_AGENT_DIRECTIVE_FIELDS),
             },
-            "maxItems": 24,
+            "maxItems": _SUPERVISED_AUXILIARY_ARRAY_MAX_ITEMS,
         },
     },
     "required": [
@@ -1895,10 +1917,10 @@ def _render_supervised_structured_auxiliary(
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
 
     skill_limits = {
-        "skill_when_to_use": 12,
-        "skill_workflow": 24,
-        "skill_validation_checks": 24,
-        "skill_failure_guards": 16,
+        "skill_when_to_use": _SUPERVISED_AUXILIARY_ARRAY_MAX_ITEMS,
+        "skill_workflow": _SUPERVISED_AUXILIARY_ARRAY_MAX_ITEMS,
+        "skill_validation_checks": _SUPERVISED_AUXILIARY_ARRAY_MAX_ITEMS,
+        "skill_failure_guards": _SUPERVISED_AUXILIARY_ARRAY_MAX_ITEMS,
     }
     skill_values: dict[str, list[str]] = {}
     for field, maximum in skill_limits.items():
@@ -1906,7 +1928,7 @@ def _render_supervised_structured_auxiliary(
         if type(values) is not list or not values or len(values) > maximum:
             raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
         skill_values[field] = [
-            _normalize_supervised_structured_value(value)
+            _normalize_supervised_auxiliary_value(value)
             for value in values
             if type(value) is str
         ]
@@ -1956,10 +1978,10 @@ def _render_supervised_structured_auxiliary(
     if (
         type(directives) is not list
         or not directives
-        or len(directives) > 24
+        or len(directives) > _SUPERVISED_AUXILIARY_ARRAY_MAX_ITEMS
         or type(discipline) is not list
         or not discipline
-        or len(discipline) > 8
+        or len(discipline) > _SUPERVISED_AUXILIARY_ARRAY_MAX_ITEMS
     ):
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
     rendered_directives: list[str] = []
@@ -1970,9 +1992,9 @@ def _render_supervised_structured_auxiliary(
             _SUPERVISED_AGENT_DIRECTIVE_FIELDS
         ):
             raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
-        trigger = _normalize_supervised_structured_value(directive["trigger"])
-        instruction = _normalize_supervised_structured_value(directive["instruction"])
-        validation = _normalize_supervised_structured_value(directive["validation"])
+        trigger = _normalize_supervised_auxiliary_value(directive["trigger"])
+        instruction = _normalize_supervised_auxiliary_value(directive["instruction"])
+        validation = _normalize_supervised_auxiliary_value(directive["validation"])
         digests = directive["evidence_digests"]
         if type(digests) is not list or not digests or len(digests) > 64:
             raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
@@ -1996,7 +2018,7 @@ def _render_supervised_structured_auxiliary(
             f"When {trigger}, {instruction} Validate by {validation}"
         )
     normalized_discipline = [
-        _normalize_supervised_structured_value(value)
+        _normalize_supervised_auxiliary_value(value)
         for value in discipline
         if type(value) is str
     ]
@@ -2013,7 +2035,9 @@ def _render_supervised_structured_auxiliary(
     ]
     agent_system_markdown = "\n".join(agent_lines).rstrip() + "\n"
     if (
-        len(skill_markdown.encode("utf-8")) > _MAX_LAST_MESSAGE_BYTES
+        len(skill_markdown) > _CORE_AUXILIARY_CONFIG_MAX_CHARACTERS
+        or len(agent_system_markdown) > _CORE_AUXILIARY_CONFIG_MAX_CHARACTERS
+        or len(skill_markdown.encode("utf-8")) > _MAX_LAST_MESSAGE_BYTES
         or len(agent_system_markdown.encode("utf-8")) > _MAX_LAST_MESSAGE_BYTES
     ):
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
@@ -2055,6 +2079,12 @@ def _normalize_supervised_structured_value(value: str) -> str:
     if not normalized or "\n" in normalized or len(normalized.encode("utf-8")) > 4096:
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
     return normalized
+
+
+def _normalize_supervised_auxiliary_value(value: str) -> str:
+    if type(value) is not str or len(value) > _SUPERVISED_AUXILIARY_SCALAR_MAX_CHARACTERS:
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+    return _normalize_supervised_structured_value(value)
 
 
 def _supporting_task_set_hash(evidence_digests: Sequence[str]) -> str:

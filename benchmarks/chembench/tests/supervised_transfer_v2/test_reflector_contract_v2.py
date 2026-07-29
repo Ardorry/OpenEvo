@@ -92,12 +92,14 @@ def test_contract_schema_parser_and_artifact_validator_are_aligned() -> None:
     ):
         assert properties[field]["minItems"] == 1
         assert properties[field]["items"]["minLength"] == 1
-        assert properties[field]["items"]["maxLength"] == 4096
+        assert properties[field]["items"]["maxLength"] == 192
+        assert properties[field]["maxItems"] == 4
         assert "default" not in properties[field]
     assert properties["agent_system_directives"]["minItems"] == 1
+    assert properties["agent_system_directives"]["maxItems"] == 4
     for field in ("trigger", "instruction", "validation"):
         scalar = properties["agent_system_directives"]["items"]["properties"][field]
-        assert scalar == {"type": "string", "minLength": 1, "maxLength": 4096}
+        assert scalar == {"type": "string", "minLength": 1, "maxLength": 192}
 
     payload = _valid_payload()
     response = _response(payload)
@@ -162,6 +164,35 @@ def test_runtime_schema_enumerates_only_core_authorized_evidence_digests() -> No
             [{"packet_sha256": near_copy}],
             frozenset({first, second}),
         )
+
+
+def test_auxiliary_renderer_is_bounded_by_core_method_config_contract() -> None:
+    payload = _valid_payload()
+    maximum = "x" * 192
+    for field in (
+        "skill_when_to_use",
+        "skill_workflow",
+        "skill_validation_checks",
+        "skill_failure_guards",
+        "agent_system_output_discipline",
+    ):
+        payload[field] = [maximum] * 4
+    payload["agent_system_directives"] = [
+        {
+            "trigger": maximum,
+            "instruction": maximum,
+            "validation": maximum,
+            "evidence_digests": payload["skill_evidence_digests"],
+        }
+        for _index in range(4)
+    ]
+    rendered = _render_supervised_structured_auxiliary(_response(payload))
+    assert len(rendered.skill_markdown) <= 4096
+    assert len(rendered.agent_system_markdown) <= 4096
+
+    payload["skill_workflow"] = ["x" * 193]
+    with pytest.raises(ReflectorBoundaryError, match="REFLECTOR_LAST_MESSAGE_INVALID"):
+        _render_supervised_structured_auxiliary(_response(payload))
 
 
 @pytest.mark.parametrize(

@@ -369,7 +369,11 @@ def _contract_matrix_markdown() -> str:
                 "array<string>",
                 str(schema["minItems"]),
                 str(schema["maxItems"]),
-                "digest regex" if field.endswith("digests") else "1..4096 chars; parser caps 4096 UTF-8 bytes",
+                (
+                    "digest regex"
+                    if field.endswith("digests")
+                    else f"1..{schema['items']['maxLength']} chars; rendered SKILL.md <=4096 chars"
+                ),
                 "no",
                 "no",
                 "SKILL.md builder and target validator require nonempty sections",
@@ -385,7 +389,11 @@ def _contract_matrix_markdown() -> str:
                 "array<object>" if field == "agent_system_directives" else "array<string>",
                 str(schema["minItems"]),
                 str(schema["maxItems"]),
-                "directive scalars 1..4096 chars and bytes" if field == "agent_system_directives" else "1..4096 chars; parser caps 4096 UTF-8 bytes",
+                (
+                    "directive scalars 1..192 chars; rendered agent system <=4096 chars"
+                    if field == "agent_system_directives"
+                    else f"1..{schema['items']['maxLength']} chars; rendered agent system <=4096 chars"
+                ),
                 "no",
                 "no",
                 "agent-system builder and validator require nonempty directives/discipline",
