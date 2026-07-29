@@ -30,7 +30,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from openevo.gateway.session_files import (
     HeldCodexCredentialAuthority,
@@ -228,12 +228,12 @@ def _supervised_rule_output_schema(*, minimum_evidence: int) -> dict[str, object
         "type": "object",
         "additionalProperties": False,
         "properties": {
-            "rule_id": {"type": "string"},
+            "rule_id": {"type": "string", "minLength": 1, "maxLength": 4096},
             "target_type": {"type": "string", "enum": ["text_memory"]},
-            "trigger": {"type": "string"},
-            "principle": {"type": "string"},
-            "action": {"type": "string"},
-            "validation": {"type": "string"},
+            "trigger": {"type": "string", "minLength": 1, "maxLength": 4096},
+            "principle": {"type": "string", "minLength": 1, "maxLength": 4096},
+            "action": {"type": "string", "minLength": 1, "maxLength": 4096},
+            "validation": {"type": "string", "minLength": 1, "maxLength": 4096},
             "evidence_count": evidence_schema,
             "evidence_digests": {
                 "type": "array",
@@ -260,7 +260,7 @@ _SUPERVISED_OUTPUT_SCHEMA = {
                 "items": (
                     _supervised_rule_output_schema(minimum_evidence=rule_contract[1])
                     if (rule_contract := _SUPERVISED_RULE_SECTION_FIELDS.get(field))
-                    else {"type": "string"}
+                    else {"type": "string", "minLength": 1, "maxLength": 4096}
                 ),
                 "maxItems": maximum,
             }
@@ -269,7 +269,7 @@ _SUPERVISED_OUTPUT_SCHEMA = {
         **{
             field: {
                 "type": "array",
-                "items": {"type": "string"},
+                "items": {"type": "string", "minLength": 1, "maxLength": 4096},
                 "minItems": 1,
                 "maxItems": maximum,
             }
@@ -294,9 +294,9 @@ _SUPERVISED_OUTPUT_SCHEMA = {
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
-                    "trigger": {"type": "string"},
-                    "instruction": {"type": "string"},
-                    "validation": {"type": "string"},
+                    "trigger": {"type": "string", "minLength": 1, "maxLength": 4096},
+                    "instruction": {"type": "string", "minLength": 1, "maxLength": 4096},
+                    "validation": {"type": "string", "minLength": 1, "maxLength": 4096},
                     "evidence_digests": {
                         "type": "array",
                         "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
@@ -1199,6 +1199,22 @@ def _classify_reflector_event_stream(event_stream: str) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def _parse_reflector_jsonl_transcript_v2(
+    event_stream: str,
+) -> tuple[str, dict[str, int], str]:
+    """Require the shared transcript contract and a terminal turn-completed event."""
+
+    response, usage, digest = _parse_jsonl_transcript(event_stream)
+    lines = [line for line in event_stream.splitlines() if line.strip()]
+    try:
+        terminal = json.loads(lines[-1])
+    except (IndexError, json.JSONDecodeError, RecursionError) as exc:
+        raise ReflectorBoundaryError("REFLECTOR_EVENT_STREAM_INVALID") from exc
+    if type(terminal) is not dict or terminal.get("type") != "turn.completed":
+        raise ReflectorBoundaryError("REFLECTOR_EVENT_STREAM_INVALID")
+    return response, usage, digest
+
+
 def reflector_codex_wrapper_main(argv: Sequence[str] | None = None) -> int:
     """Entry point used only by the single-use PATH launcher."""
 
@@ -1311,7 +1327,9 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
             host_output.unlink(missing_ok=True)
         else:
             try:
-                event_response, _usage, _event_digest = _parse_jsonl_transcript(event_stream)
+                event_response, _usage, _event_digest = (
+                    _parse_reflector_jsonl_transcript_v2(event_stream)
+                )
             except LocalCodexExecutionError as exc:
                 raise ReflectorBoundaryError("REFLECTOR_EVENT_STREAM_INVALID") from exc
             isolated_output = layout["output"] / "last-message.md"
@@ -1614,15 +1632,40 @@ def _normalize_supervised_memory_sections(memory: str) -> tuple[str, bool]:
     return "\n".join(normalized).rstrip() + "\n", True
 
 
-def _render_supervised_structured_memory(response: str) -> str:
-    """Render the schema-constrained model response into canonical Markdown."""
+def _load_supervised_json_object(response: str) -> dict[str, object]:
+    """Parse one closed JSON object and reject duplicate keys at every depth."""
 
     if type(response) is not str:
         raise TypeError("supervised structured response must be text")
+
+    def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        payload: dict[str, object] = {}
+        for key, value in pairs:
+            if key in payload:
+                raise ValueError("duplicate JSON key")
+            payload[key] = value
+        return payload
+
+    def reject_non_finite_number(_value: str) -> NoReturn:
+        raise ValueError("non-finite JSON number")
+
     try:
-        payload = json.loads(response)
-    except (json.JSONDecodeError, RecursionError) as exc:
+        payload = json.loads(
+            response,
+            object_pairs_hook=reject_duplicate_keys,
+            parse_constant=reject_non_finite_number,
+        )
+    except (json.JSONDecodeError, RecursionError, ValueError) as exc:
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID") from exc
+    if type(payload) is not dict:
+        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+    return payload
+
+
+def _render_supervised_structured_memory(response: str) -> str:
+    """Render the schema-constrained model response into canonical Markdown."""
+
+    payload = _load_supervised_json_object(response)
     legacy_keys = {
         "category",
         *(field for _heading, field, _maximum in _SUPERVISED_STRUCTURED_SECTION_FIELDS),
@@ -1632,9 +1675,7 @@ def _render_supervised_structured_memory(response: str) -> str:
         *_SUPERVISED_SKILL_FIELDS,
         *_SUPERVISED_AGENT_FIELDS,
     }
-    if type(payload) is not dict or (
-        set(payload) != legacy_keys and set(payload) != multitarget_keys
-    ):
+    if set(payload) != legacy_keys and set(payload) != multitarget_keys:
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
     category = payload["category"]
     if type(category) is not str or category not in CHEMBENCH4K_CATEGORIES:
@@ -1677,12 +1718,7 @@ def _render_supervised_structured_memory(response: str) -> str:
 def _supervised_structured_normalization_id(response: str) -> str:
     """Select the auditable renderer identity from the exact closed key set."""
 
-    try:
-        payload = json.loads(response)
-    except (json.JSONDecodeError, RecursionError) as exc:
-        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID") from exc
-    if type(payload) is not dict:
-        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+    payload = _load_supervised_json_object(response)
     legacy_keys = {
         "category",
         *(field for _heading, field, _maximum in _SUPERVISED_STRUCTURED_SECTION_FIELDS),
@@ -1694,8 +1730,6 @@ def _supervised_structured_normalization_id(response: str) -> str:
     }
     if set(payload) == multitarget_keys:
         return _SUPERVISED_MULTITARGET_RENDER_ID
-    if set(payload) == legacy_keys:
-        return _SUPERVISED_STRUCTURED_RENDER_ID
     raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
 
 
@@ -1704,19 +1738,14 @@ def _render_supervised_structured_auxiliary(
 ) -> SupervisedStructuredAuxiliaryOutputV2:
     """Render and bind the skill and agent-system parts of one closed response."""
 
-    if type(response) is not str:
-        raise TypeError("supervised structured response must be text")
-    try:
-        payload = json.loads(response)
-    except (json.JSONDecodeError, RecursionError) as exc:
-        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID") from exc
+    payload = _load_supervised_json_object(response)
     expected_keys = {
         "category",
         *(field for _heading, field, _maximum in _SUPERVISED_STRUCTURED_SECTION_FIELDS),
         *_SUPERVISED_SKILL_FIELDS,
         *_SUPERVISED_AGENT_FIELDS,
     }
-    if type(payload) is not dict or set(payload) != expected_keys:
+    if set(payload) != expected_keys:
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
     category = payload["category"]
     if type(category) is not str or category not in CHEMBENCH4K_CATEGORIES:

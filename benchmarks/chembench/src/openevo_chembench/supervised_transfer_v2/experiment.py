@@ -98,6 +98,7 @@ DRY_RUN_SCHEMA = "ChemBenchSupervisedTransferDryRunV2"
 RUN_STATE_SCHEMA = "ChemBenchSupervisedTransferRunStateV2"
 PAID_PLAN_SCHEMA = "PlannedPaidExecutionReceiptV2"
 PREFLIGHT_AUTHORITY_SCHEMA = "SupervisedTransferPreflightAuthorityV2"
+CONTRACT_CANARY_AUTHORITY_SCHEMA = "ReflectorContractCanaryAuthorityV2"
 FROZEN_RECEIPT_SCHEMA = "FrozenThreeTargetTransferReceiptV2"
 _RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,127}\Z", re.ASCII)
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
@@ -105,6 +106,9 @@ _FORMAL_CALLS = 10350
 _FORMAL_MAXIMUM_CALLS = 14850
 _PREFLIGHT_TASK_CALLS = 73
 _PREFLIGHT_REFLECTOR_CALLS = 28
+_CONTRACT_CANARY_TASK_CALLS = 8
+_CONTRACT_CANARY_REFLECTOR_CALLS = 6
+_CONTRACT_CANARY_CATEGORIES = ("Temperature_Prediction", "Name_Conversion")
 _TASK_INFRASTRUCTURE_RETRY_LIMIT = 60
 _TASK_INFRASTRUCTURE_RETRY_SECONDS = 60
 _FINAL_TEST_INFRASTRUCTURE_RETRY_LIMIT = 60
@@ -112,7 +116,10 @@ _FINAL_TEST_INFRASTRUCTURE_RETRY_SECONDS = 60
 _EXECUTOR_STALL_SECONDS = 20 * 60
 
 _TRANSITIONS: dict[str, frozenset[str]] = {
-    "INITIALIZED": frozenset({"UPDATE_SMOKE", "CONTROL_TRAIN"}),
+    "INITIALIZED": frozenset(
+        {"REFLECTOR_CONTRACT_CANARY", "UPDATE_SMOKE", "CONTROL_TRAIN"}
+    ),
+    "REFLECTOR_CONTRACT_CANARY": frozenset({"CONTRACT_CANARY_COMPLETED"}),
     "UPDATE_SMOKE": frozenset({"CONTROL_CANARY"}),
     "CONTROL_CANARY": frozenset({"ONLINE_CANARY"}),
     "ONLINE_CANARY": frozenset({"PREFLIGHT_COMPLETED"}),
@@ -334,8 +341,10 @@ class SupervisedTransferExperimentV2:
         *,
         inputs: ExperimentInputsV2,
         run_id: str,
-        run_mode: Literal["preflight", "formal"],
+        run_mode: Literal["contract_canary", "preflight", "formal"],
         preflight_run_id: str | None = None,
+        contract_canary_run_id: str | None = None,
+        readiness_receipt_sha256: str | None = None,
         executor_factory: Callable[[Literal["control", "online"]], TaskExecutorV2] | None = None,
         bridge_factory: Callable[[Path, str], TaskwiseCoreEvolutionBridgeV1] | None = None,
     ) -> None:
@@ -343,7 +352,7 @@ class SupervisedTransferExperimentV2:
             raise TypeError("inputs must be exact ExperimentInputsV2")
         if type(run_id) is not str or _RUN_ID.fullmatch(run_id) is None:
             raise ValueError("invalid v2 run ID")
-        if run_mode not in {"preflight", "formal"}:
+        if run_mode not in {"contract_canary", "preflight", "formal"}:
             raise ValueError("invalid run mode")
         if run_mode == "formal" and (
             type(preflight_run_id) is not str
@@ -351,8 +360,21 @@ class SupervisedTransferExperimentV2:
             or preflight_run_id == run_id
         ):
             raise ValueError("formal run requires a distinct preflight run")
-        if run_mode == "preflight" and preflight_run_id is not None:
-            raise ValueError("preflight cannot consume a preflight authority")
+        if run_mode == "formal" and contract_canary_run_id is None:
+            raise ValueError("formal run requires a contract canary authority")
+        if run_mode != "formal" and preflight_run_id is not None:
+            raise ValueError("only formal can consume a preflight authority")
+        if run_mode == "contract_canary" and contract_canary_run_id is not None:
+            raise ValueError("contract canary cannot consume its own authority")
+        if contract_canary_run_id is not None and (
+            _RUN_ID.fullmatch(contract_canary_run_id) is None
+            or contract_canary_run_id == run_id
+        ):
+            raise ValueError("invalid contract canary run ID")
+        if readiness_receipt_sha256 is not None and (
+            _SHA256.fullmatch(readiness_receipt_sha256) is None
+        ):
+            raise ValueError("invalid readiness receipt digest")
         if (
             inputs.managed_codex is None
             or inputs.candidate_codex is None
@@ -365,6 +387,8 @@ class SupervisedTransferExperimentV2:
         self.run_id = run_id
         self.run_mode = run_mode
         self.preflight_run_id = preflight_run_id
+        self.contract_canary_run_id = contract_canary_run_id
+        self.readiness_receipt_sha256 = readiness_receipt_sha256
         self.result_root = (
             inputs.repository_root / inputs.config.payload["roots"]["results"] / "runs" / run_id
         )
@@ -388,6 +412,8 @@ class SupervisedTransferExperimentV2:
             "run_id": run_id,
             "run_mode": run_mode,
             "preflight_run_id": preflight_run_id,
+            "contract_canary_run_id": contract_canary_run_id,
+            "readiness_receipt_sha256": readiness_receipt_sha256,
             "status": "INITIALIZED",
             "stage": "INITIALIZED",
             "source_commit": inputs.source_commit,
@@ -405,6 +431,7 @@ class SupervisedTransferExperimentV2:
             "task_sessions": 0,
             "reflector_calls": 0,
             "core_jobs": 0,
+            "context_resolutions": 0,
             "text_memory_artifacts": 0,
             "skill_artifacts": 0,
             "agent_system_artifacts": 0,
@@ -425,10 +452,64 @@ class SupervisedTransferExperimentV2:
         self._bridge_factory = bridge_factory or self._default_bridge
         self._write_paid_plan()
 
+    def run_contract_canary(self) -> dict[str, object]:
+        if self.run_mode != "contract_canary":
+            raise SupervisedExperimentV2Error("RUN_MODE_MISMATCH")
+        try:
+            with ExitStack() as stack:
+                online = _enter_if_context(stack, self._executor_factory("online"))
+                self._set_stage("REFLECTOR_CONTRACT_CANARY")
+                by_category = _by_category(self.inputs.train)
+                for category in _CONTRACT_CANARY_CATEGORIES:
+                    bridge = stack.enter_context(
+                        self._bridge_factory(
+                            self.state_root / "private/core/contract_canary" / category,
+                            category,
+                        )
+                    )
+                    self._run_one_online_task(
+                        online,
+                        task=by_category[category][0],
+                        category_ordinal=0,
+                        bridge=bridge,
+                        stage="REFLECTOR_CONTRACT_CANARY",
+                        persist_head=False,
+                    )
+            if (
+                self._state["task_sessions"] != _CONTRACT_CANARY_TASK_CALLS
+                or self._state["reflector_calls"] != _CONTRACT_CANARY_REFLECTOR_CALLS
+                or self._state["core_jobs"] != _CONTRACT_CANARY_REFLECTOR_CALLS * 3
+                or self._state["context_resolutions"]
+                != _CONTRACT_CANARY_REFLECTOR_CALLS * 3
+                or self._state["text_memory_artifacts"]
+                != _CONTRACT_CANARY_REFLECTOR_CALLS
+                or self._state["skill_artifacts"] != _CONTRACT_CANARY_REFLECTOR_CALLS
+                or self._state["agent_system_artifacts"]
+                != _CONTRACT_CANARY_REFLECTOR_CALLS
+                or self._state["security_findings"] != 0
+                or self._state["context_findings"] != 0
+                or self._state["artifact_findings"] != 0
+            ):
+                raise SupervisedExperimentV2Error("CONTRACT_CANARY_COUNTER_MISMATCH")
+            self._set_stage("CONTRACT_CANARY_COMPLETED")
+            authority = self._contract_canary_authority()
+            path = self.result_root / "public/contract_canary_authority_v2.json"
+            write_public_file(path, canonical_pretty_json_bytes(authority))
+            self._state["contract_canary_authority_sha256"] = sha256_bytes(path.read_bytes())
+            self._state["status"] = "CONTRACT_CANARY_COMPLETED"
+            self._state["completed_at_utc"] = utc_now()
+            self._write_state()
+            return authority
+        except BaseException as exc:
+            self._fail_closed(exc)
+            raise
+
     def run_preflight(self) -> dict[str, object]:
         if self.run_mode != "preflight":
             raise SupervisedExperimentV2Error("RUN_MODE_MISMATCH")
         try:
+            if self.contract_canary_run_id is not None:
+                self._verify_contract_canary_authority()
             with ExitStack() as stack:
                 control = _enter_if_context(stack, self._executor_factory("control"))
                 online = _enter_if_context(stack, self._executor_factory("online"))
@@ -439,6 +520,13 @@ class SupervisedTransferExperimentV2:
                 self._state["task_sessions"] != _PREFLIGHT_TASK_CALLS
                 or self._state["reflector_calls"] != _PREFLIGHT_REFLECTOR_CALLS
                 or self._state["core_jobs"] != _PREFLIGHT_REFLECTOR_CALLS * 3
+                or self._state["context_resolutions"] != _PREFLIGHT_REFLECTOR_CALLS * 3
+                or self._state["text_memory_artifacts"] != _PREFLIGHT_REFLECTOR_CALLS
+                or self._state["skill_artifacts"] != _PREFLIGHT_REFLECTOR_CALLS
+                or self._state["agent_system_artifacts"] != _PREFLIGHT_REFLECTOR_CALLS
+                or self._state["security_findings"] != 0
+                or self._state["context_findings"] != 0
+                or self._state["artifact_findings"] != 0
             ):
                 raise SupervisedExperimentV2Error("PREFLIGHT_COUNTER_MISMATCH")
             self._set_stage("PREFLIGHT_COMPLETED")
@@ -459,6 +547,7 @@ class SupervisedTransferExperimentV2:
         if self.run_mode != "formal" or self.preflight_run_id is None:
             raise SupervisedExperimentV2Error("RUN_MODE_MISMATCH")
         try:
+            self._verify_contract_canary_authority()
             self._verify_preflight_authority()
             with ExitStack() as stack:
                 control = _enter_if_context(stack, self._executor_factory("control"))
@@ -1019,7 +1108,11 @@ class SupervisedTransferExperimentV2:
             raise SupervisedExperimentV2Error("CONTROL_CONTEXT_FORBIDDEN")
         if stage == "FINAL_TEST_EVOLVED" and (executor_arm != "online" or context is None):
             raise SupervisedExperimentV2Error("EVOLVED_TEST_CONTEXT_REQUIRED")
-        if executor_arm == "online" and stage in {"ONLINE_TRAIN", "ONLINE_CANARY"}:
+        if executor_arm == "online" and stage in {
+            "ONLINE_TRAIN",
+            "ONLINE_CANARY",
+            "REFLECTOR_CONTRACT_CANARY",
+        }:
             expected_missing = task_ordinal == 0 and round_index == 0
             if (context is None) != expected_missing:
                 raise SupervisedExperimentV2Error("ONLINE_CONTEXT_SEQUENCE_INVALID")
@@ -1158,6 +1251,9 @@ class SupervisedTransferExperimentV2:
         )
         self._state["reflector_calls"] = int(self._state["reflector_calls"]) + 1
         self._state["core_jobs"] = int(self._state["core_jobs"]) + 3
+        self._state["context_resolutions"] = (
+            int(self._state["context_resolutions"]) + 3
+        )
         for key in (
             "text_memory_artifacts",
             "skill_artifacts",
@@ -1195,8 +1291,28 @@ class SupervisedTransferExperimentV2:
         )
 
     def _write_paid_plan(self) -> None:
-        calls = (
-            {
+        if self.run_mode == "contract_canary":
+            calls = {
+                "candidate_task_calls": _CONTRACT_CANARY_TASK_CALLS,
+                "candidate_subscription_readiness_calls_minimum": (
+                    _CONTRACT_CANARY_TASK_CALLS
+                ),
+                "candidate_subscription_readiness_calls_maximum": (
+                    _CONTRACT_CANARY_TASK_CALLS * 2
+                ),
+                "reflector_calls": _CONTRACT_CANARY_REFLECTOR_CALLS,
+                "answer_and_reflector_model_calls": (
+                    _CONTRACT_CANARY_TASK_CALLS + _CONTRACT_CANARY_REFLECTOR_CALLS
+                ),
+                "total_model_calls": (
+                    _CONTRACT_CANARY_TASK_CALLS * 2 + _CONTRACT_CANARY_REFLECTOR_CALLS
+                ),
+                "maximum_model_calls": (
+                    _CONTRACT_CANARY_TASK_CALLS * 3 + _CONTRACT_CANARY_REFLECTOR_CALLS
+                ),
+            }
+        elif self.run_mode == "preflight":
+            calls = {
                 "candidate_task_calls": _PREFLIGHT_TASK_CALLS,
                 "candidate_subscription_readiness_calls_minimum": (
                     _PREFLIGHT_TASK_CALLS
@@ -1215,14 +1331,15 @@ class SupervisedTransferExperimentV2:
                     _PREFLIGHT_TASK_CALLS * 3 + _PREFLIGHT_REFLECTOR_CALLS
                 ),
             }
-            if self.run_mode == "preflight"
-            else self.inputs.config.call_budget
-        )
+        else:
+            calls = self.inputs.config.call_budget
         payload = {
             "schema_version": PAID_PLAN_SCHEMA,
             "protocol_id": PROTOCOL_ID,
             "run_id": self.run_id,
             "run_mode": self.run_mode,
+            "contract_canary_run_id": self.contract_canary_run_id,
+            "readiness_receipt_sha256": self.readiness_receipt_sha256,
             "source_commit": self.inputs.source_commit,
             "config_sha256": self.inputs.config.digest,
             "split_receipt_sha256": self.inputs.split_receipt_sha256,
@@ -1270,6 +1387,84 @@ class SupervisedTransferExperimentV2:
             canonical_pretty_json_bytes(payload),
         )
 
+    def _contract_canary_authority(self) -> dict[str, object]:
+        return {
+            "schema_version": CONTRACT_CANARY_AUTHORITY_SCHEMA,
+            "protocol_id": PROTOCOL_ID,
+            "status": "PASS",
+            "source_run_id": self.run_id,
+            "source_commit": self.inputs.source_commit,
+            "config_sha256": self.inputs.config.digest,
+            "split_receipt_sha256": self.inputs.split_receipt_sha256,
+            "source_manifest_sha256": self.inputs.source_manifest_sha256,
+            "readiness_receipt_sha256": self.readiness_receipt_sha256,
+            "reflector_codex_identity_sha256": self.inputs.managed_codex.digest,
+            "candidate_codex_identity_sha256": self.inputs.candidate_codex.digest,
+            "runtime_services_identity_sha256": self.inputs.runtime_services.digest,
+            "runtime_services_run_id": self.inputs.runtime_services.service_run_id,
+            "categories": list(_CONTRACT_CANARY_CATEGORIES),
+            "task_sessions": self._state["task_sessions"],
+            "reflector_calls": self._state["reflector_calls"],
+            "core_jobs": self._state["core_jobs"],
+            "context_resolutions": self._state["context_resolutions"],
+            "text_memory_artifacts": self._state["text_memory_artifacts"],
+            "skill_artifacts": self._state["skill_artifacts"],
+            "agent_system_artifacts": self._state["agent_system_artifacts"],
+            "security_findings": self._state["security_findings"],
+            "context_findings": self._state["context_findings"],
+            "artifact_findings": self._state["artifact_findings"],
+            "test_model_calls": 0,
+            "artifacts_reusable": False,
+            "issued_at_utc": utc_now(),
+        }
+
+    def _verify_contract_canary_authority(self) -> None:
+        if self.contract_canary_run_id is None:
+            raise SupervisedExperimentV2Error("CONTRACT_CANARY_AUTHORITY_MISSING")
+        path = (
+            self.inputs.repository_root
+            / self.inputs.config.payload["roots"]["results"]
+            / "runs"
+            / self.contract_canary_run_id
+            / "public/contract_canary_authority_v2.json"
+        )
+        try:
+            payload = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SupervisedExperimentV2Error("CONTRACT_CANARY_AUTHORITY_MISSING") from exc
+        expected = {
+            "schema_version": CONTRACT_CANARY_AUTHORITY_SCHEMA,
+            "protocol_id": PROTOCOL_ID,
+            "status": "PASS",
+            "source_run_id": self.contract_canary_run_id,
+            "source_commit": self.inputs.source_commit,
+            "config_sha256": self.inputs.config.digest,
+            "split_receipt_sha256": self.inputs.split_receipt_sha256,
+            "source_manifest_sha256": self.inputs.source_manifest_sha256,
+            "readiness_receipt_sha256": self.readiness_receipt_sha256,
+            "reflector_codex_identity_sha256": self.inputs.managed_codex.digest,
+            "candidate_codex_identity_sha256": self.inputs.candidate_codex.digest,
+            "runtime_services_identity_sha256": self.inputs.runtime_services.digest,
+            "runtime_services_run_id": self.inputs.runtime_services.service_run_id,
+            "categories": list(_CONTRACT_CANARY_CATEGORIES),
+            "task_sessions": _CONTRACT_CANARY_TASK_CALLS,
+            "reflector_calls": _CONTRACT_CANARY_REFLECTOR_CALLS,
+            "core_jobs": _CONTRACT_CANARY_REFLECTOR_CALLS * 3,
+            "context_resolutions": _CONTRACT_CANARY_REFLECTOR_CALLS * 3,
+            "text_memory_artifacts": _CONTRACT_CANARY_REFLECTOR_CALLS,
+            "skill_artifacts": _CONTRACT_CANARY_REFLECTOR_CALLS,
+            "agent_system_artifacts": _CONTRACT_CANARY_REFLECTOR_CALLS,
+            "security_findings": 0,
+            "context_findings": 0,
+            "artifact_findings": 0,
+            "test_model_calls": 0,
+            "artifacts_reusable": False,
+        }
+        if any(payload.get(key) != value for key, value in expected.items()):
+            raise SupervisedExperimentV2Error("CONTRACT_CANARY_AUTHORITY_INVALID")
+        self._state["contract_canary_authority_sha256"] = sha256_bytes(path.read_bytes())
+        self._write_state()
+
     def _preflight_authority(self) -> dict[str, object]:
         return {
             "schema_version": PREFLIGHT_AUTHORITY_SCHEMA,
@@ -1281,6 +1476,11 @@ class SupervisedTransferExperimentV2:
             "split_receipt_sha256": self.inputs.split_receipt_sha256,
             "split_summary_sha256": self.inputs.split_summary_sha256,
             "source_manifest_sha256": self.inputs.source_manifest_sha256,
+            "contract_canary_run_id": self.contract_canary_run_id,
+            "contract_canary_authority_sha256": self._state.get(
+                "contract_canary_authority_sha256"
+            ),
+            "readiness_receipt_sha256": self.readiness_receipt_sha256,
             "reflector_codex_identity_sha256": self.inputs.managed_codex.digest,
             "candidate_codex_identity_sha256": self.inputs.candidate_codex.digest,
             "runtime_services_identity_sha256": self.inputs.runtime_services.digest,
@@ -1288,6 +1488,7 @@ class SupervisedTransferExperimentV2:
             "task_sessions": self._state["task_sessions"],
             "reflector_calls": self._state["reflector_calls"],
             "core_jobs": self._state["core_jobs"],
+            "context_resolutions": self._state["context_resolutions"],
             "text_memory_artifacts": self._state["text_memory_artifacts"],
             "skill_artifacts": self._state["skill_artifacts"],
             "agent_system_artifacts": self._state["agent_system_artifacts"],
@@ -1321,6 +1522,11 @@ class SupervisedTransferExperimentV2:
             "split_receipt_sha256": self.inputs.split_receipt_sha256,
             "split_summary_sha256": self.inputs.split_summary_sha256,
             "source_manifest_sha256": self.inputs.source_manifest_sha256,
+            "contract_canary_run_id": self.contract_canary_run_id,
+            "contract_canary_authority_sha256": self._state.get(
+                "contract_canary_authority_sha256"
+            ),
+            "readiness_receipt_sha256": self.readiness_receipt_sha256,
             "reflector_codex_identity_sha256": self.inputs.managed_codex.digest,
             "candidate_codex_identity_sha256": self.inputs.candidate_codex.digest,
             "runtime_services_identity_sha256": self.inputs.runtime_services.digest,
@@ -1328,6 +1534,7 @@ class SupervisedTransferExperimentV2:
             "task_sessions": _PREFLIGHT_TASK_CALLS,
             "reflector_calls": _PREFLIGHT_REFLECTOR_CALLS,
             "core_jobs": _PREFLIGHT_REFLECTOR_CALLS * 3,
+            "context_resolutions": _PREFLIGHT_REFLECTOR_CALLS * 3,
             "text_memory_artifacts": _PREFLIGHT_REFLECTOR_CALLS,
             "skill_artifacts": _PREFLIGHT_REFLECTOR_CALLS,
             "agent_system_artifacts": _PREFLIGHT_REFLECTOR_CALLS,

@@ -1,0 +1,88 @@
+{
+  "schema_version": "SupervisedTransferHistoricalFailureFixturesV2",
+  "privacy": "content_free_digest_bound",
+  "real_run_failures": [
+    {
+      "run_id": "stv2-preflight-20260729-015",
+      "stage": "ONLINE_CANARY",
+      "failure_code": "REFLECTOR_LAST_MESSAGE_INVALID",
+      "shape": "required_skill_and_agent_arrays_empty",
+      "expected_replay": "REJECTED_FAIL_CLOSED_WITH_EXPECTED_CODE",
+      "run_state_sha256": "3bdb4aaba0371b44dfb7694aa85122793cd90057c749745afc75b21506f809a1"
+    },
+    {
+      "run_id": "stv2-preflight-20260728-003",
+      "stage": "UPDATE_SMOKE",
+      "failure_code": "SUPERVISED_V2_TASK_SESSION_INVALID",
+      "shape": "task_completion_event_boundary_invalid",
+      "expected_replay": "REJECTED_FAIL_CLOSED_WITH_EXPECTED_CODE",
+      "run_state_sha256": "9189d6001b4f028c8e8fb72a38ffcdcc63661b19505b855ccd74a4cca5cadd7f"
+    },
+    {
+      "run_id": "stv2-preflight-20260728-007",
+      "stage": "ONLINE_CANARY",
+      "failure_code": "TASKWISE_ARTIFACT_VALIDATION_FAILED",
+      "shape": "artifact_validator_rejected_reflector_output",
+      "expected_replay": "REJECTED_FAIL_CLOSED_WITH_EXPECTED_CODE",
+      "run_state_sha256": "83414e4de6a9049ee27f517c7387d21e3392f667a83ae08bfcfbcd64aa8db1d3"
+    },
+    {
+      "run_id": "stv2-preflight-20260728-010",
+      "stage": "ONLINE_CANARY",
+      "failure_code": "TASKWISE_ARTIFACT_VALIDATION_FAILED",
+      "shape": "artifact_validator_rejected_reflector_output",
+      "expected_replay": "REJECTED_FAIL_CLOSED_WITH_EXPECTED_CODE",
+      "run_state_sha256": "28d108dd483ae3c045fad776f4a67f7cdaa76ec540db7923d909ff408c89b3a5"
+    },
+    {
+      "run_id": "stv2-preflight-20260728-011",
+      "stage": "ONLINE_CANARY",
+      "failure_code": "TASKWISE_CONTEXT_RESOLUTION_FAILED",
+      "shape": "context_binding_rejected_auxiliary_provenance",
+      "expected_replay": "REJECTED_FAIL_CLOSED_WITH_EXPECTED_CODE",
+      "run_state_sha256": "c4a24294fe6b4f02c15e0cac04cb44c7d2b74865484937f62c26597f542d262b"
+    },
+    {
+      "run_id": "stv2-formal-20260728-001",
+      "stage": "CONTROL_TRAIN",
+      "failure_code": "KEYBOARDINTERRUPT",
+      "shape": "transport_retries_without_completion_then_operator_interrupt",
+      "expected_replay": "REJECTED_FAIL_CLOSED_WITH_EXPECTED_CODE",
+      "run_state_sha256": "110833ef5f019a0fa3958142903a9f2accc9dff022ebc2486fde17263afea87c"
+    },
+    {
+      "run_id": "stv2-formal-20260728-002",
+      "stage": "ONLINE_TRAIN",
+      "failure_code": "TASKWISE_CONTEXT_RESOLUTION_FAILED",
+      "shape": "auxiliary_evidence_binding_rejected_visible_non_packet_digest",
+      "expected_replay": "REJECTED_FAIL_CLOSED_WITH_EXPECTED_CODE",
+      "run_state_sha256": "46f37a1d8c85a5b7e992ea564a8183d1d32e0fb039f8cef0ead7d0ab3b5c03f8"
+    }
+  ],
+  "synthetic_adjacent_shapes": [
+    "missing_required_field",
+    "null_required_field",
+    "empty_required_array",
+    "empty_required_string",
+    "wrong_field_type",
+    "unknown_field",
+    "duplicate_json_key",
+    "markdown_code_fence",
+    "json_with_prefix_or_suffix",
+    "multiple_json_objects",
+    "truncated_json",
+    "oversized_scalar",
+    "terminal_event_order_invalid",
+    "last_message_file_event_mismatch",
+    "target_type_mismatch",
+    "category_mismatch",
+    "cycle_index_mismatch",
+    "lineage_predecessor_mismatch",
+    "artifact_validation_failure",
+    "artifact_promotion_failure",
+    "context_resolution_failure",
+    "transport_failure_without_completion",
+    "duplicate_completion",
+    "resume_after_fail_closed"
+  ]
+}

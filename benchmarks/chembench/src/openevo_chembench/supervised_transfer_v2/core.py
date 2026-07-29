@@ -170,6 +170,18 @@ _CORE_STAGE_ALLOWED_FINDINGS = {
         }
     ),
 }
+_AUXILIARY_TERMINAL_FINDINGS = frozenset(
+    {
+        "TASKWISE_ARTIFACT_VALIDATION_FAILED",
+        "TASKWISE_ARTIFACT_PROMOTION_FAILED",
+        "TASKWISE_CONTEXT_IDENTITY_DRIFT",
+        "TASKWISE_CORE_JOB_FAILED",
+        "TASKWISE_CORE_LINEAGE_INVALID",
+        "TASKWISE_PREDECESSOR_BINDING_INVALID",
+        "TASKWISE_REGISTERED_METHOD_INVALID",
+        "TASKWISE_TYPED_ARTIFACT_INVALID",
+    }
+)
 _CORE_EXCEPTION_CLASSES = frozenset(
     {
         "TASKWISE_CORE_EVOLUTION_ERROR",
@@ -3149,6 +3161,18 @@ class TaskwiseCoreEvolutionBridgeV1:
                     None if packet is None else REFLECTOR_PROMPT_DIGEST
                 ),
                 supervised_auxiliary_artifacts=auxiliary_artifacts,
+            )
+        except TaskwiseCoreEvolutionError as exc:
+            # Auxiliary target jobs run inside this outer context-resolution phase,
+            # but their own closed failure code must not be mislabeled as a context
+            # failure. No successor head/checkpoint is accepted after re-raising.
+            if exc.finding_code in _AUXILIARY_TERMINAL_FINDINGS:
+                raise
+            self._raise_private_core_failure(
+                stage="CONTEXT_RESOLUTION",
+                default_finding="TASKWISE_CONTEXT_RESOLUTION_FAILED",
+                cause=exc,
+                **failure_metadata,
             )
         except Exception as exc:  # noqa: BLE001 - context trust boundary
             self._raise_private_core_failure(

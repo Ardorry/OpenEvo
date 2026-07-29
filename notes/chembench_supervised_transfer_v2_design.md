@@ -91,6 +91,24 @@ The three approved targets form one category-local context head. The Round-3
 head is the predecessor for the next Train item in the same category. No state
 is shared between categories.
 
+## Paid readiness gate
+
+After any execution-semantic source change, the next full paid preflight is
+blocked until a no-model readiness sweep has replayed the digest-bound
+historical failure shapes, exercised the schema/parser/validator/artifact
+boundaries, and completed an end-to-end synthetic preflight with exactly
+73 candidate completions, 28 reflector completions, 84 Core jobs, 84 typed
+artifacts, and 84 context resolutions. The resulting
+`PrePaidReadinessSweepReceiptV2` is bound to source, config, split, schema,
+source manifest, and live managed-runtime identity.
+
+The paid `REFLECTOR_CONTRACT_CANARY` then runs one Train item from
+`Temperature_Prediction` and one from `Name_Conversion`, each through the exact
+four-session/three-cycle sequence. Its six reflector outputs and 18 artifacts
+are audit-only and can never seed preflight or formal Train. A full preflight
+may start only from a successful canary authority with the same frozen
+identity; formal execution in turn requires that new full preflight authority.
+
 ## Paid-call plan
 
 The selected one-call/three-artifact implementation requires:

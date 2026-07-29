@@ -1,5 +1,5 @@
 {
-  "combined_sha256": "91e9139b72773fac09c15aee7e2bda6a20f8ca9d76f13d8c2f6674b6d0629a59",
+  "combined_sha256": "ba4a9ac8b097fdf72a0b4af89b9511c36f53886eb08ca04bd030c58812695987",
   "private_manifests_excluded": [
     "test_private_manifest.jsonl",
     "train_private_manifest.jsonl"
@@ -7,7 +7,7 @@
   "protocol_id": "chembench_supervised_transfer_v2",
   "schema_version": "ChemBenchSupervisedTransferSourceManifestV2",
   "self_excluded": "benchmarks/chembench/manifests/supervised_transfer_v2/source_manifest_v2.json",
-  "source_file_count": 52,
+  "source_file_count": 55,
   "source_files": [
     {
       "executable": false,
@@ -96,8 +96,8 @@
     {
       "executable": true,
       "path": "benchmarks/chembench/scripts/supervised_transfer_v2/main.py",
-      "sha256": "9fcb4362515125664d24ecaa260697c91a8943a2efdaf13d9949430a80711e8e",
-      "size_bytes": 4281
+      "sha256": "8f4b6e7a7f0366db7d32277b7e55884cf941350cec5f6903885c7cc43a58ee01",
+      "size_bytes": 5462
     },
     {
       "executable": true,
@@ -180,8 +180,8 @@
     {
       "executable": false,
       "path": "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/core.py",
-      "sha256": "0beeaedf40c1dcb5e4125c23a892c0db047b7c158969d70034a2e2284c5ecfa2",
-      "size_bytes": 202261
+      "sha256": "43aa2861d6595d9e4dce9ccfa24529d71c4e139934bf8ec6bad348bf259deedf",
+      "size_bytes": 203291
     },
     {
       "executable": false,
@@ -192,8 +192,8 @@
     {
       "executable": false,
       "path": "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/experiment.py",
-      "sha256": "a72241d0ef89174f8227adf4430796439f722d39e321b76bba08cd9d6d329ef8",
-      "size_bytes": 66279
+      "sha256": "4bf36b4f30c2e46953d994eee4df401439bf3e536980f64b0fb99bb76e0c8a5b",
+      "size_bytes": 77374
     },
     {
       "executable": false,
@@ -221,9 +221,15 @@
     },
     {
       "executable": false,
+      "path": "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/readiness.py",
+      "sha256": "323073455726e5bc4835acf968b172819956459e495aa12eef3881117f1fde78",
+      "size_bytes": 21827
+    },
+    {
+      "executable": false,
       "path": "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/reflector_boundary.py",
-      "sha256": "5c0f6024b4259c6f63c0dce7ac8635c48a96868a70e4dda99ec8483d0d9aa7e6",
-      "size_bytes": 111317
+      "sha256": "298b19d4a840e2a1c6ca703672fea93beab800fed851c0e36c7bbee16a932cdb",
+      "size_bytes": 112699
     },
     {
       "executable": false,
@@ -275,6 +281,12 @@
     },
     {
       "executable": false,
+      "path": "benchmarks/chembench/tests/supervised_transfer_v2/fixtures/historical_failure_shapes_v2.json",
+      "sha256": "9b13096ea4e1f4b4cb40bc5111a07ec3e026038ade6822bbde50543ec800e3ef",
+      "size_bytes": 3527
+    },
+    {
+      "executable": false,
       "path": "benchmarks/chembench/tests/supervised_transfer_v2/test_config_split_v2.py",
       "sha256": "c28bcf4a4e9abf749a08bbae54952992a30a719594e6a5d06cb21f47f6af2a7a",
       "size_bytes": 6317
@@ -282,8 +294,8 @@
     {
       "executable": false,
       "path": "benchmarks/chembench/tests/supervised_transfer_v2/test_core_protocol_v2.py",
-      "sha256": "c4b7af54787d12cac5147aa4855b2b0b65f9505c6b646b96f32ed99a1253efb8",
-      "size_bytes": 37607
+      "sha256": "693467723b528b9db311507a056b0f8d004e5a9e60ea2354d2a3beecabbac62a",
+      "size_bytes": 59172
     },
     {
       "executable": false,
@@ -311,6 +323,12 @@
     },
     {
       "executable": false,
+      "path": "benchmarks/chembench/tests/supervised_transfer_v2/test_reflector_contract_v2.py",
+      "sha256": "089e24de24a21437428b154e08f8a909a023747cc13fb4e328009bda07136ed5",
+      "size_bytes": 12859
+    },
+    {
+      "executable": false,
       "path": "benchmarks/chembench/tests/supervised_transfer_v2/test_runtime_services_v2.py",
       "sha256": "db4ed0bbd52bedab2fea87c55a9775ba34b43d85c1cc37a3f0e386e9507d3d1c",
       "size_bytes": 6322
@@ -318,8 +336,8 @@
     {
       "executable": false,
       "path": "notes/chembench_supervised_transfer_v2_design.md",
-      "sha256": "625fecc6924d906bba076366d2dd62cf74d6e60b5493c371cb86d799073a9728",
-      "size_bytes": 5026
+      "sha256": "9e848842168cc82a1fdf04655799974e0a9dbf91d367200e7937043168eb081e",
+      "size_bytes": 6055
     }
   ],
   "src_openevo_included_by_framework_lock": true

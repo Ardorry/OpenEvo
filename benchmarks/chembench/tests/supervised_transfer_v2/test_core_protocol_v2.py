@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,6 +17,7 @@ from openevo.evolution.framework import builtins as core_builtins
 from openevo.evolution.framework.builtins import load_verified_builtin_registry
 from openevo.evolution.framework.loading import _verify_distribution_install
 
+import openevo_chembench.supervised_transfer_v2.core as supervised_core
 from openevo_chembench.chembench4k_evaluation import ChemBench4KPrivateEvaluator
 from openevo_chembench.chembench4k_models import (
     CHEMBENCH4K_REVISION,
@@ -576,6 +578,53 @@ class _SyntheticBridge:
         return self.bridge.issue_runtime_context(result)
 
 
+class _OwnedSyntheticBridge(_SyntheticBridge):
+    def __init__(
+        self,
+        bridge: TaskwiseCoreEvolutionBridgeV1,
+        active: list[str],
+        active_category: list[str],
+        category: str,
+    ) -> None:
+        super().__init__(bridge, active)
+        self.active_category = active_category
+        self.category = category
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _exc_type, _exc, _traceback) -> None:
+        self.bridge.close()
+
+    def apply_update(self, request):
+        self.active_category.append(self.category)
+        return super().apply_update(request)
+
+
+class _FailingOwnedSyntheticBridge(_OwnedSyntheticBridge):
+    def __init__(
+        self,
+        bridge: TaskwiseCoreEvolutionBridgeV1,
+        active: list[str],
+        active_category: list[str],
+        category: str,
+        online_counter: list[int],
+        fail_at: int,
+        is_online_canary: bool,
+    ) -> None:
+        super().__init__(bridge, active, active_category, category)
+        self.online_counter = online_counter
+        self.fail_at = fail_at
+        self.is_online_canary = is_online_canary
+
+    def apply_update(self, request):
+        if self.is_online_canary:
+            self.online_counter[0] += 1
+            if self.online_counter[0] == self.fail_at:
+                raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+        return super().apply_update(request)
+
+
 class _FakeExecutor:
     def __init__(self) -> None:
         self.requests = []
@@ -917,6 +966,543 @@ def test_controller_runs_four_sessions_three_cycles_without_model_calls(
             assert connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 9
     finally:
         bridge.close()
+
+
+def test_full_preflight_offline_lifecycle_closes_at_73_28_84(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = Path(__file__).resolve().parents[4]
+    config_path = (
+        repository
+        / "benchmarks/chembench/configs/supervised_transfer_v2/chembench_supervised_transfer_v2.yaml"
+    )
+    config = load_config_v2(config_path.resolve())
+    payload = dict(config.payload)
+    payload["roots"] = {
+        "results": str(tmp_path / "results"),
+        "state": str(tmp_path / "state"),
+        "reports": str(tmp_path / "reports"),
+    }
+    loaded = load_experiment_inputs_v2(
+        repository,
+        config,
+        require_reflector_runtime=False,
+    )
+    inputs = replace(
+        loaded,
+        config=SupervisedTransferConfigV2(path=config.path, payload=payload),
+        managed_codex=SimpleNamespace(
+            digest=_sha("managed-codex"),
+            executable_sha256=_sha("managed-binary"),
+            executable=tmp_path / "unused-codex",
+        ),
+        candidate_codex=SimpleNamespace(
+            digest=_sha("candidate-codex"),
+            executable_sha256=_sha("candidate-binary"),
+        ),
+        runtime_services=_synthetic_runtime_services(),
+    )
+    monkeypatch.setattr(
+        "openevo_chembench.supervised_transfer_v2.experiment._benchmark_status",
+        lambda _repository: "",
+    )
+    active_packet = [""]
+    active_category = ["Name_Conversion"]
+    monkeypatch.setattr(
+        core_methods,
+        "_generate_reflector_markdown",
+        lambda *_args, **_kwargs: _memory(active_packet[-1]).replace(
+            "Name_Conversion",
+            active_category[-1],
+        ),
+    )
+    registry = _registry(tmp_path / "full-preflight-registry")
+    database_paths: list[Path] = []
+
+    def bridge_factory(root: Path, category: str) -> _OwnedSyntheticBridge:
+        database = root / "evolution.sqlite3"
+        database_paths.append(database)
+        return _OwnedSyntheticBridge(
+            TaskwiseCoreEvolutionBridgeV1(
+                db_path=database,
+                artifact_root=root / "artifacts",
+                executable_registry=registry,
+                checkpoint_path=root / "private-checkpoints.jsonl",
+                memory_limits=SUPERVISED_MEMORY_LIMITS_V2,
+            ),
+            active_packet,
+            active_category,
+            category,
+        )
+
+    executor = _FakeExecutor()
+    experiment = SupervisedTransferExperimentV2(
+        inputs=inputs,
+        run_id="stv2-offline-full-preflight-0001",
+        run_mode="preflight",
+        executor_factory=lambda _arm: executor,
+        bridge_factory=bridge_factory,
+    )
+
+    result = experiment.run_preflight()
+
+    assert result["status"] == "PASS"
+    assert experiment._state["status"] == "PREFLIGHT_COMPLETED"
+    assert experiment._state["task_sessions"] == 73
+    assert experiment._state["reflector_calls"] == 28
+    assert experiment._state["core_jobs"] == 84
+    assert experiment._state["context_resolutions"] == 84
+    assert experiment._state["text_memory_artifacts"] == 28
+    assert experiment._state["skill_artifacts"] == 28
+    assert experiment._state["agent_system_artifacts"] == 28
+    assert len(executor.requests) == 73
+    assert len(database_paths) == 10
+
+    totals = {"jobs": 0, "contexts": 0}
+    artifact_totals: dict[str, int] = {}
+    artifact_ids: set[str] = set()
+    for database in database_paths:
+        with sqlite3.connect(database) as connection:
+            totals["jobs"] += connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+            totals["contexts"] += connection.execute(
+                "SELECT COUNT(*) FROM contexts"
+            ).fetchone()[0]
+            for artifact_id, artifact_type in connection.execute(
+                "SELECT artifact_id, type FROM artifacts "
+                "WHERE type IN ('text_memory','skill_bundle','agent_system')"
+            ):
+                assert artifact_id not in artifact_ids
+                artifact_ids.add(artifact_id)
+                artifact_totals[artifact_type] = artifact_totals.get(artifact_type, 0) + 1
+    assert totals == {"jobs": 84, "contexts": 84}
+    assert artifact_totals == {
+        "text_memory": 28,
+        "skill_bundle": 28,
+        "agent_system": 28,
+    }
+
+    event_kinds: dict[str, int] = {}
+    for line in experiment.public_events.read_text(encoding="utf-8").splitlines():
+        kind = json.loads(line)["kind"]
+        event_kinds[kind] = event_kinds.get(kind, 0) + 1
+    assert event_kinds == {"TASK_MODEL_EXECUTED": 73, "REFLECTOR_SUPERVISED": 28}
+
+    control = [
+        request for request in executor.requests if "control-canary" in request.session_id
+    ]
+    assert len(control) == 36
+    assert all(request.resolved_context is None for request in control)
+    online = [
+        request for request in executor.requests if "online-canary" in request.session_id
+    ]
+    assert len(online) == 36
+    for task_uid in {request.task_uid for request in online}:
+        rounds = [request for request in online if request.task_uid == task_uid]
+        assert [request.round_index for request in rounds] == [0, 1, 2, 3]
+        assert rounds[0].resolved_context is None
+        assert all(request.resolved_context is not None for request in rounds[1:])
+
+
+def test_second_auxiliary_validator_failure_is_exact_and_never_becomes_a_head(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    active_packet = [""]
+    monkeypatch.setattr(
+        core_methods,
+        "_generate_reflector_markdown",
+        lambda *_args, **_kwargs: _memory(active_packet[-1]),
+    )
+    bridge = TaskwiseCoreEvolutionBridgeV1(
+        db_path=tmp_path / "failure-core/evolution.sqlite3",
+        artifact_root=tmp_path / "failure-core/artifacts",
+        executable_registry=_registry(tmp_path / "failure-registry"),
+        checkpoint_path=tmp_path / "failure-core/checkpoints.jsonl",
+        memory_limits=SUPERVISED_MEMORY_LIMITS_V2,
+    )
+    task = _task(0)
+    trajectory, evaluation = _attempt(task, task_index=0, round_index=0, response="B")
+    packet = SupervisedEvolutionPacketV2.from_evaluations(
+        task=task,
+        training_task_ordinal=1,
+        round_index=0,
+        evaluations=(evaluation,),
+        trajectory_ids=(trajectory.trajectory_id,),
+        predecessor_memory=None,
+        predecessor_artifact_id=None,
+        predecessor_skill=None,
+        predecessor_skill_artifact_id=None,
+        predecessor_agent_system=None,
+        predecessor_agent_system_artifact_id=None,
+    )
+    active_packet.append(packet.digest)
+    request = TaskwiseCoreUpdateRequestV1(
+        task_uid=task.uid,
+        task_index=0,
+        round_index=0,
+        update_index=1,
+        trajectories=(trajectory,),
+        predecessor=None,
+        validator_forbidden_literals=_trajectory_forbidden_literals(trajectory),
+        supervised_packet=packet,
+    )
+    original_inspector = supervised_core.inspect_supervised_auxiliary_artifact_v2
+
+    def reject_agent_system(payload, *, target_id, **kwargs):
+        inspection = original_inspector(payload, target_id=target_id, **kwargs)
+        if target_id == "agent_system":
+            return inspection.model_copy(
+                update={"finding_codes": ("auxiliary_structure_invalid",)}
+            )
+        return inspection
+
+    monkeypatch.setattr(
+        supervised_core,
+        "inspect_supervised_auxiliary_artifact_v2",
+        reject_agent_system,
+    )
+    try:
+        with pytest.raises(
+            TaskwiseCoreEvolutionError,
+            match="TASKWISE_ARTIFACT_VALIDATION_FAILED",
+        ):
+            bridge.apply_update(
+                request,
+                test_only_allow_synthetic_reflector=True,
+            )
+        assert bridge._head is None
+        assert bridge._terminal_finding == "TASKWISE_CORE_UPDATE_FAILED"
+        assert not (tmp_path / "failure-core/checkpoints.jsonl").exists()
+        with bridge._store.connect() as connection:
+            assert connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 3
+            rows = connection.execute(
+                "SELECT type, promoted FROM artifacts "
+                "WHERE type IN ('text_memory','skill_bundle','agent_system') "
+                "ORDER BY type"
+            ).fetchall()
+        assert len(rows) == 3
+        assert {row[0] for row in rows} == {
+            "text_memory",
+            "skill_bundle",
+            "agent_system",
+        }
+        assert any(row[1] == 0 for row in rows)
+        with pytest.raises(TaskwiseCoreEvolutionError, match="TASKWISE_STREAM_TERMINAL"):
+            bridge.apply_update(
+                request,
+                test_only_allow_synthetic_reflector=True,
+            )
+    finally:
+        bridge.close()
+
+
+def test_reflector_contract_canary_prioritizes_two_risky_categories_and_is_not_reusable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = Path(__file__).resolve().parents[4]
+    config = load_config_v2(
+        (
+            repository
+            / "benchmarks/chembench/configs/supervised_transfer_v2/"
+            "chembench_supervised_transfer_v2.yaml"
+        ).resolve()
+    )
+    payload = dict(config.payload)
+    payload["roots"] = {
+        "results": str(tmp_path / "results"),
+        "state": str(tmp_path / "state"),
+        "reports": str(tmp_path / "reports"),
+    }
+    loaded = load_experiment_inputs_v2(repository, config, require_reflector_runtime=False)
+    inputs = replace(
+        loaded,
+        config=SupervisedTransferConfigV2(path=config.path, payload=payload),
+        managed_codex=SimpleNamespace(
+            digest=_sha("managed-codex"),
+            executable_sha256=_sha("managed-binary"),
+            executable=tmp_path / "unused-codex",
+        ),
+        candidate_codex=SimpleNamespace(
+            digest=_sha("candidate-codex"),
+            executable_sha256=_sha("candidate-binary"),
+        ),
+        runtime_services=_synthetic_runtime_services(),
+    )
+    monkeypatch.setattr(
+        "openevo_chembench.supervised_transfer_v2.experiment._benchmark_status",
+        lambda _repository: "",
+    )
+    active_packet = [""]
+    active_category = ["Name_Conversion"]
+    monkeypatch.setattr(
+        core_methods,
+        "_generate_reflector_markdown",
+        lambda *_args, **_kwargs: _memory(active_packet[-1]).replace(
+            "Name_Conversion", active_category[-1]
+        ),
+    )
+    registry = _registry(tmp_path / "contract-canary-registry")
+
+    def bridge_factory(root: Path, category: str) -> _OwnedSyntheticBridge:
+        return _OwnedSyntheticBridge(
+            TaskwiseCoreEvolutionBridgeV1(
+                db_path=root / "evolution.sqlite3",
+                artifact_root=root / "artifacts",
+                executable_registry=registry,
+                checkpoint_path=root / "private-checkpoints.jsonl",
+                memory_limits=SUPERVISED_MEMORY_LIMITS_V2,
+            ),
+            active_packet,
+            active_category,
+            category,
+        )
+
+    executor = _FakeExecutor()
+    experiment = SupervisedTransferExperimentV2(
+        inputs=inputs,
+        run_id="stv2-offline-contract-canary-0001",
+        run_mode="contract_canary",
+        readiness_receipt_sha256=_sha("readiness"),
+        executor_factory=lambda _arm: executor,
+        bridge_factory=bridge_factory,
+    )
+    authority = experiment.run_contract_canary()
+
+    assert authority["status"] == "PASS"
+    assert authority["categories"] == ["Temperature_Prediction", "Name_Conversion"]
+    assert authority["task_sessions"] == 8
+    assert authority["reflector_calls"] == 6
+    assert authority["core_jobs"] == 18
+    assert authority["context_resolutions"] == 18
+    assert authority["text_memory_artifacts"] == 6
+    assert authority["skill_artifacts"] == 6
+    assert authority["agent_system_artifacts"] == 6
+    assert authority["artifacts_reusable"] is False
+    assert [request.round_index for request in executor.requests] == [
+        0,
+        1,
+        2,
+        3,
+        0,
+        1,
+        2,
+        3,
+    ]
+
+    preflight = SupervisedTransferExperimentV2(
+        inputs=inputs,
+        run_id="stv2-offline-preflight-authority-0001",
+        run_mode="preflight",
+        contract_canary_run_id="stv2-offline-contract-canary-0001",
+        readiness_receipt_sha256=_sha("readiness"),
+        executor_factory=lambda _arm: _FakeExecutor(),
+        bridge_factory=bridge_factory,
+    )
+    preflight._verify_contract_canary_authority()
+    assert preflight._state["contract_canary_authority_sha256"] == hashlib.sha256(
+        (
+            experiment.result_root
+            / "public/contract_canary_authority_v2.json"
+        ).read_bytes()
+    ).hexdigest()
+
+
+@pytest.mark.parametrize(
+    ("failure_stage", "expected_code"),
+    (
+        ("core_job", "TASKWISE_CORE_JOB_FAILED"),
+        ("promotion", "TASKWISE_ARTIFACT_PROMOTION_FAILED"),
+        ("context", "TASKWISE_CONTEXT_RESOLUTION_FAILED"),
+    ),
+)
+def test_auxiliary_lifecycle_failures_are_exact_terminal_and_never_carried(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+    expected_code: str,
+) -> None:
+    active_packet = [""]
+    monkeypatch.setattr(
+        core_methods,
+        "_generate_reflector_markdown",
+        lambda *_args, **_kwargs: _memory(active_packet[-1]),
+    )
+    root = tmp_path / failure_stage
+    bridge = TaskwiseCoreEvolutionBridgeV1(
+        db_path=root / "evolution.sqlite3",
+        artifact_root=root / "artifacts",
+        executable_registry=_registry(tmp_path / f"{failure_stage}-registry"),
+        checkpoint_path=root / "checkpoints.jsonl",
+        memory_limits=SUPERVISED_MEMORY_LIMITS_V2,
+    )
+    task = _task(0)
+    trajectory, evaluation = _attempt(task, task_index=0, round_index=0, response="B")
+    packet = SupervisedEvolutionPacketV2.from_evaluations(
+        task=task,
+        training_task_ordinal=1,
+        round_index=0,
+        evaluations=(evaluation,),
+        trajectory_ids=(trajectory.trajectory_id,),
+        predecessor_memory=None,
+        predecessor_artifact_id=None,
+        predecessor_skill=None,
+        predecessor_skill_artifact_id=None,
+        predecessor_agent_system=None,
+        predecessor_agent_system_artifact_id=None,
+    )
+    active_packet.append(packet.digest)
+    request = TaskwiseCoreUpdateRequestV1(
+        task_uid=task.uid,
+        task_index=0,
+        round_index=0,
+        update_index=1,
+        trajectories=(trajectory,),
+        predecessor=None,
+        validator_forbidden_literals=_trajectory_forbidden_literals(trajectory),
+        supervised_packet=packet,
+    )
+    calls = {"value": 0}
+    if failure_stage == "core_job":
+        original_run_once = supervised_core.run_once
+
+        def fail_second_job(*args, **kwargs):
+            calls["value"] += 1
+            if calls["value"] == 2:
+                return False
+            return original_run_once(*args, **kwargs)
+
+        monkeypatch.setattr(supervised_core, "run_once", fail_second_job)
+    elif failure_stage == "promotion":
+        original_promotion = bridge._store.update_artifact_promotion
+
+        def fail_second_promotion(*args, **kwargs):
+            calls["value"] += 1
+            if calls["value"] == 2:
+                return SimpleNamespace(promoted=False)
+            return original_promotion(*args, **kwargs)
+
+        monkeypatch.setattr(bridge._store, "update_artifact_promotion", fail_second_promotion)
+    else:
+        original_resolution = bridge._store.resolve_materialized_context
+
+        def fail_second_resolution(*args, **kwargs):
+            calls["value"] += 1
+            if calls["value"] == 2:
+                raise RuntimeError("synthetic context failure")
+            return original_resolution(*args, **kwargs)
+
+        monkeypatch.setattr(
+            bridge._store,
+            "resolve_materialized_context",
+            fail_second_resolution,
+        )
+    try:
+        with pytest.raises(TaskwiseCoreEvolutionError) as captured:
+            bridge.apply_update(request, test_only_allow_synthetic_reflector=True)
+        assert captured.value.finding_code == expected_code
+        assert bridge._head is None
+        assert bridge._terminal_finding == "TASKWISE_CORE_UPDATE_FAILED"
+        assert not (root / "checkpoints.jsonl").exists()
+        with pytest.raises(TaskwiseCoreEvolutionError, match="TASKWISE_STREAM_TERMINAL"):
+            bridge.apply_update(request, test_only_allow_synthetic_reflector=True)
+    finally:
+        bridge.close()
+
+
+@pytest.mark.parametrize("fail_at", (1, 15, 27))
+def test_preflight_reflector_failure_at_early_middle_or_final_cycle_is_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fail_at: int,
+) -> None:
+    repository = Path(__file__).resolve().parents[4]
+    config = load_config_v2(
+        (
+            repository
+            / "benchmarks/chembench/configs/supervised_transfer_v2/"
+            "chembench_supervised_transfer_v2.yaml"
+        ).resolve()
+    )
+    payload = dict(config.payload)
+    payload["roots"] = {
+        "results": str(tmp_path / "results"),
+        "state": str(tmp_path / "state"),
+        "reports": str(tmp_path / "reports"),
+    }
+    loaded = load_experiment_inputs_v2(repository, config, require_reflector_runtime=False)
+    inputs = replace(
+        loaded,
+        config=SupervisedTransferConfigV2(path=config.path, payload=payload),
+        managed_codex=SimpleNamespace(
+            digest=_sha("managed-codex"),
+            executable_sha256=_sha("managed-binary"),
+            executable=tmp_path / "unused-codex",
+        ),
+        candidate_codex=SimpleNamespace(
+            digest=_sha("candidate-codex"),
+            executable_sha256=_sha("candidate-binary"),
+        ),
+        runtime_services=_synthetic_runtime_services(),
+    )
+    monkeypatch.setattr(
+        "openevo_chembench.supervised_transfer_v2.experiment._benchmark_status",
+        lambda _repository: "",
+    )
+    active_packet = [""]
+    active_category = ["Name_Conversion"]
+    online_counter = [0]
+    monkeypatch.setattr(
+        core_methods,
+        "_generate_reflector_markdown",
+        lambda *_args, **_kwargs: _memory(active_packet[-1]).replace(
+            "Name_Conversion", active_category[-1]
+        ),
+    )
+    registry = _registry(tmp_path / f"failure-position-{fail_at}-registry")
+
+    def bridge_factory(root: Path, category: str) -> _FailingOwnedSyntheticBridge:
+        return _FailingOwnedSyntheticBridge(
+            TaskwiseCoreEvolutionBridgeV1(
+                db_path=root / "evolution.sqlite3",
+                artifact_root=root / "artifacts",
+                executable_registry=registry,
+                checkpoint_path=root / "private-checkpoints.jsonl",
+                memory_limits=SUPERVISED_MEMORY_LIMITS_V2,
+            ),
+            active_packet,
+            active_category,
+            category,
+            online_counter,
+            fail_at,
+            "online_canary" in root.parts,
+        )
+
+    run_id = f"stv2-offline-failure-position-{fail_at:02d}"
+    experiment = SupervisedTransferExperimentV2(
+        inputs=inputs,
+        run_id=run_id,
+        run_mode="preflight",
+        executor_factory=lambda _arm: _FakeExecutor(),
+        bridge_factory=bridge_factory,
+    )
+    with pytest.raises(ReflectorBoundaryError, match="REFLECTOR_LAST_MESSAGE_INVALID"):
+        experiment.run_preflight()
+    assert online_counter == [fail_at]
+    assert experiment._state["status"] == "FAIL_CLOSED"
+    assert experiment._state["failure_code"] == "REFLECTOR_LAST_MESSAGE_INVALID"
+    assert not (
+        experiment.result_root / "public/preflight_authority_v2.json"
+    ).exists()
+    with pytest.raises(SupervisedExperimentV2Error, match="RUN_ID_ALREADY_EXISTS"):
+        SupervisedTransferExperimentV2(
+            inputs=inputs,
+            run_id=run_id,
+            run_mode="preflight",
+            executor_factory=lambda _arm: _FakeExecutor(),
+            bridge_factory=bridge_factory,
+        )
 
 
 def test_final_test_retries_only_no_completion_and_uses_protocol_global_ledger(

@@ -25,6 +25,10 @@ from openevo_chembench.supervised_transfer_v2.prepare import (
     prepare_phase0_v2,
     verify_phase0_v2,
 )
+from openevo_chembench.supervised_transfer_v2.readiness import (
+    run_prepaid_readiness_sweep_v2,
+    verify_prepaid_readiness_sweep_v2,
+)
 from openevo_chembench.supervised_transfer_v2.runtime_services import (
     runtime_services_status_v2,
     start_runtime_services_v2,
@@ -44,6 +48,7 @@ def main() -> int:
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--run-id")
     parser.add_argument("--preflight-run-id")
+    parser.add_argument("--contract-canary-run-id")
     parser.add_argument("--service-run-id")
     parser.add_argument("--allow-paid", action="store_true")
     parser.add_argument(
@@ -56,6 +61,8 @@ def main() -> int:
             "services-start",
             "services-status",
             "services-stop",
+            "readiness-sweep",
+            "contract-canary",
             "preflight",
             "formal",
         ),
@@ -92,12 +99,25 @@ def main() -> int:
         payload = runtime_services_status_v2(repository_root=REPOSITORY_ROOT)
     elif arguments.command == "services-stop":
         payload = stop_runtime_services_v2(repository_root=REPOSITORY_ROOT)
+    elif arguments.command == "readiness-sweep":
+        payload = run_prepaid_readiness_sweep_v2(
+            repository_root=REPOSITORY_ROOT,
+            config=config,
+        )
     else:
         if not arguments.allow_paid:
-            parser.error("preflight/formal requires the explicit --allow-paid gate")
+            parser.error("contract-canary/preflight/formal requires --allow-paid")
         if not arguments.run_id:
-            parser.error("preflight/formal requires --run-id")
+            parser.error("contract-canary/preflight/formal requires --run-id")
+        if arguments.command in {"preflight", "formal"} and not arguments.contract_canary_run_id:
+            parser.error("preflight/formal requires --contract-canary-run-id")
+        if arguments.command == "contract-canary" and arguments.contract_canary_run_id:
+            parser.error("contract-canary cannot consume --contract-canary-run-id")
         require_paid_runtime_python_v2(repository_root=REPOSITORY_ROOT)
+        readiness = verify_prepaid_readiness_sweep_v2(
+            repository_root=REPOSITORY_ROOT,
+            config=config,
+        )
         inputs = load_experiment_inputs_v2(
             REPOSITORY_ROOT,
             config,
@@ -108,12 +128,15 @@ def main() -> int:
             run_id=arguments.run_id,
             run_mode=arguments.command,
             preflight_run_id=arguments.preflight_run_id,
+            contract_canary_run_id=arguments.contract_canary_run_id,
+            readiness_receipt_sha256=str(readiness["receipt_sha256"]),
         )
-        payload = (
-            experiment.run_preflight()
-            if arguments.command == "preflight"
-            else experiment.run_formal()
-        )
+        if arguments.command == "contract-canary":
+            payload = experiment.run_contract_canary()
+        elif arguments.command == "preflight":
+            payload = experiment.run_preflight()
+        else:
+            payload = experiment.run_formal()
     payload["config_sha256"] = config.digest
     print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
     return 0
