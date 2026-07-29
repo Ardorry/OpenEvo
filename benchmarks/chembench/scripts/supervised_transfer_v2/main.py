@@ -17,6 +17,7 @@ from openevo_chembench.supervised_transfer_v2.experiment import (
     SupervisedTransferExperimentV2,
     build_complete_dry_run_v2,
     load_experiment_inputs_v2,
+    paid_cli_run_mode_v2,
 )
 from openevo_chembench.supervised_transfer_v2.managed_codex import (
     require_paid_runtime_python_v2,
@@ -126,7 +127,7 @@ def main() -> int:
         experiment = SupervisedTransferExperimentV2(
             inputs=inputs,
             run_id=arguments.run_id,
-            run_mode=arguments.command,
+            run_mode=paid_cli_run_mode_v2(arguments.command),
             preflight_run_id=arguments.preflight_run_id,
             contract_canary_run_id=arguments.contract_canary_run_id,
             readiness_receipt_sha256=str(readiness["receipt_sha256"]),

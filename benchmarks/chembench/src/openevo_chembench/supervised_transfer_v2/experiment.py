@@ -143,6 +143,22 @@ class SupervisedExperimentV2Error(RuntimeError):
         super().__init__(finding_code)
 
 
+def paid_cli_run_mode_v2(
+    command: str,
+) -> Literal["contract_canary", "preflight", "formal"]:
+    """Map the hyphenated public command to the closed controller run mode."""
+
+    mapping: dict[str, Literal["contract_canary", "preflight", "formal"]] = {
+        "contract-canary": "contract_canary",
+        "preflight": "preflight",
+        "formal": "formal",
+    }
+    try:
+        return mapping[command]
+    except KeyError as exc:
+        raise ValueError("invalid paid CLI command") from exc
+
+
 def _require_executor_retry_window(started_at: float) -> None:
     elapsed = max(0.0, time.monotonic() - started_at)
     if elapsed >= _EXECUTOR_STALL_SECONDS:

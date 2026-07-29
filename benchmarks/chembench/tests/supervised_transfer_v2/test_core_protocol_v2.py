@@ -58,6 +58,7 @@ from openevo_chembench.supervised_transfer_v2.experiment import (
     SupervisedExperimentV2Error,
     SupervisedTransferExperimentV2,
     load_experiment_inputs_v2,
+    paid_cli_run_mode_v2,
 )
 from openevo_chembench.supervised_transfer_v2.memory import (
     SUPERVISED_MEMORY_LIMITS_V2,
@@ -122,6 +123,14 @@ def _registry(root: Path):
 
 def _sha(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
+
+
+def test_paid_cli_command_maps_to_closed_controller_mode() -> None:
+    assert paid_cli_run_mode_v2("contract-canary") == "contract_canary"
+    assert paid_cli_run_mode_v2("preflight") == "preflight"
+    assert paid_cli_run_mode_v2("formal") == "formal"
+    with pytest.raises(ValueError, match="invalid paid CLI command"):
+        paid_cli_run_mode_v2("contract_canary")
 
 
 def test_structured_skill_renderer_produces_validator_clean_artifact() -> None:
