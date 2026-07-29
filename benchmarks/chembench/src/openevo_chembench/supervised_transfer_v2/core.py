@@ -874,6 +874,7 @@ class TaskwiseCoreUpdateResultV1(_FrozenModel):
     task_index: int = Field(ge=0)
     round_index: Literal[0, 1, 2]
     update_index: Literal[1, 2, 3]
+    updates_per_task: Literal[2, 3] = 3
     global_update_ordinal: int = Field(ge=1)
     predecessor: TaskwiseCorePredecessorV1 | None
     trajectory_ids: tuple[str, ...]
@@ -975,12 +976,16 @@ class TaskwiseCoreUpdateResultV1(_FrozenModel):
             self.predecessor.global_update_ordinal + 1 != self.global_update_ordinal
         ):
             raise ValueError("predecessor is not the immediate global update")
-        if self.global_update_ordinal != self.task_index * 3 + self.update_index:
+        if (
+            self.update_index > self.updates_per_task
+            or self.global_update_ordinal
+            != self.task_index * self.updates_per_task + self.update_index
+        ):
             raise ValueError("global update ordinal does not match stream position")
         if self.predecessor is None:
             if self.task_index != 0 or self.round_index != 0 or self.update_index != 1:
                 raise ValueError("the global stream must start at task zero update one")
-        elif self.predecessor.update_index in (1, 2):
+        elif self.predecessor.update_index < self.updates_per_task:
             if (
                 self.task_uid != self.predecessor.task_uid
                 or self.task_index != self.predecessor.task_index
@@ -1445,6 +1450,7 @@ class TaskwiseCoreEvolutionBridgeV1:
             TASKWISE_MEMORY_LIMITS_V1
         ),
         reflector_timeout_seconds: int = DEFAULT_REFLECTOR_TIMEOUT_SECONDS,
+        updates_per_task: Literal[2, 3] = 3,
     ) -> None:
         if type(memory_limits) not in (TaskwiseMemoryLimitsV1, SupervisedMemoryLimitsV2):
             raise TypeError("memory_limits must be an exact supported protocol type")
@@ -1452,6 +1458,9 @@ class TaskwiseCoreEvolutionBridgeV1:
             reflector_timeout_seconds
         )
         self._core_lease_seconds = _core_lease_seconds(self._reflector_timeout_seconds)
+        if updates_per_task not in (2, 3):
+            raise ValueError("updates_per_task must be 2 or 3")
+        self._updates_per_task = updates_per_task
         self._registry = require_verified_executable_registry(executable_registry)
         self._require_method()
         if type(memory_limits) is SupervisedMemoryLimitsV2:
@@ -1569,6 +1578,8 @@ class TaskwiseCoreEvolutionBridgeV1:
             raise ValueError("reflector execution mode is ambiguous")
         if not test_only_allow_synthetic_reflector and selected_factory is None:
             raise TaskwiseCoreEvolutionError("TASKWISE_REFLECTOR_BOUNDARY_REQUIRED")
+        if request.update_index > self._updates_per_task:
+            raise TaskwiseCoreEvolutionError("TASKWISE_LINEAGE_JUMP")
         self._require_next_predecessor(request)
 
         trajectory_digest = ordered_supervised_trajectory_digest_v2(request.trajectories)
@@ -1867,7 +1878,9 @@ class TaskwiseCoreEvolutionBridgeV1:
                 raise TaskwiseCoreEvolutionError("TASKWISE_PRIVATE_CHECKPOINT_INVALID") from exc
             if (
                 result.global_update_ordinal != expected_ordinal
-                or result.global_update_ordinal != result.task_index * 3 + result.update_index
+                or result.updates_per_task != self._updates_per_task
+                or result.global_update_ordinal
+                != result.task_index * self._updates_per_task + result.update_index
                 or (result.predecessor is None) != (expected_ordinal == 1)
                 or (
                     self._head is not None
@@ -1940,6 +1953,8 @@ class TaskwiseCoreEvolutionBridgeV1:
             raise TypeError("result must be exact TaskwiseCoreUpdateResultV1")
         if self._closed:
             raise TaskwiseCoreEvolutionError("TASKWISE_STREAM_CLOSED")
+        if result.updates_per_task != self._updates_per_task:
+            raise TaskwiseCoreEvolutionError("TASKWISE_LINEAGE_PROTOCOL_MISMATCH")
         forbidden = (
             self._validator_inputs.get(result.core_artifact_id)
             if validator_forbidden_literals is None
@@ -2362,7 +2377,7 @@ class TaskwiseCoreEvolutionBridgeV1:
                 or packet.predecessor_agent_system != by_target["agent_system"].resolved_content
             ):
                 raise TaskwiseCoreEvolutionError("TASKWISE_PREDECESSOR_BINDING_INVALID")
-        if head.update_index in (1, 2):
+        if head.update_index < self._updates_per_task:
             expected_position = (
                 head.task_uid,
                 head.task_index,
@@ -3135,6 +3150,7 @@ class TaskwiseCoreEvolutionBridgeV1:
                 task_index=request.task_index,
                 round_index=request.round_index,
                 update_index=request.update_index,
+                updates_per_task=self._updates_per_task,
                 global_update_ordinal=global_update_ordinal,
                 predecessor=request.predecessor,
                 trajectory_ids=tuple(
@@ -3941,6 +3957,7 @@ def build_supervised_core_bridge_at_roots_v2(
     auth_source: Path,
     timeout_seconds: int,
     memory_limits: SupervisedMemoryLimitsV2 = SUPERVISED_MEMORY_LIMITS_V2,
+    updates_per_task: Literal[2, 3] = 3,
 ) -> TaskwiseCoreEvolutionBridgeV1:
     """Build one category-private supervised stream on the verified Core method."""
 
@@ -4027,6 +4044,7 @@ def build_supervised_core_bridge_at_roots_v2(
         checkpoint_path=state_root / "private_lineage_checkpoints_v2.jsonl",
         memory_limits=memory_limits,
         reflector_timeout_seconds=timeout_seconds,
+        updates_per_task=updates_per_task,
     )
 
 

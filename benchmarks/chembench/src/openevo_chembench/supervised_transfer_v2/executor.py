@@ -164,6 +164,7 @@ class SupervisedManagedCodexExecutorV2:
         max_poll_attempts: int = 1800,
         rollout_client: RolloutClientV2 | None = None,
         runtime_services: OpenEvoRuntimeServicesIdentityV2 | None = None,
+        protocol_id: str = "chembench_supervised_transfer_v2",
     ) -> None:
         if arm not in ("control", "online"):
             raise ValueError("executor arm must be control or online")
@@ -187,7 +188,10 @@ class SupervisedManagedCodexExecutorV2:
             ("http://127.0.0.1:", "http://localhost:")
         ):
             raise ValueError("Rollout URL must be an uncredentialed loopback endpoint")
+        if re.fullmatch(r"[a-z][a-z0-9_]{7,95}", protocol_id) is None:
+            raise ValueError("protocol_id is invalid")
         self._arm = arm
+        self._protocol_id = protocol_id
         self._timeout_seconds = timeout_seconds
         self._poll_interval_seconds = float(poll_interval_seconds)
         self._max_poll_attempts = max_poll_attempts
@@ -271,7 +275,7 @@ class SupervisedManagedCodexExecutorV2:
             context=context,
         )
         return TaskRequest(
-            task_id=_runtime_task_id(request),
+            task_id=_runtime_task_id(request, protocol_id=self._protocol_id),
             instruction=_compile_instruction(request),
             num_samples=1,
             timeout_seconds=float(self._timeout_seconds),
@@ -283,7 +287,7 @@ class SupervisedManagedCodexExecutorV2:
             metadata={
                 "openevo_chembench": {
                     "schema_version": "SupervisedTaskRequestV2",
-                    "protocol_id": "chembench_supervised_transfer_v2",
+                    "protocol_id": self._protocol_id,
                     "arm": request.arm,
                     "task_ordinal": request.task_ordinal,
                     "round_index": request.round_index,
@@ -384,7 +388,7 @@ class SupervisedManagedCodexExecutorV2:
             return
         staging_root = self._candidate_workspace_staging_root()
         with TemporaryDirectory(
-            prefix="openevo-chembench-supervised-v2-",
+            prefix=f"openevo-chembench-{self._protocol_id[-24:]}-",
             dir=staging_root,
         ) as temporary:
             workspace = Path(temporary) / "workspace"
@@ -440,8 +444,9 @@ class SupervisedManagedCodexExecutorV2:
             raise SupervisedTaskExecutionErrorV2(SupervisedTaskExecutionCodeV2.INVALID_REQUEST)
 
 
-def _runtime_task_id(request: SupervisedAgentRequestV2) -> str:
-    return f"chembench-supervised-v2-{request.session_id}"
+def _runtime_task_id(request: SupervisedAgentRequestV2, *, protocol_id: str) -> str:
+    protocol_token = protocol_id.replace("_", "-")[-40:]
+    return f"chembench-{protocol_token}-{request.session_id}"
 
 
 def _compile_instruction(request: SupervisedAgentRequestV2) -> str:

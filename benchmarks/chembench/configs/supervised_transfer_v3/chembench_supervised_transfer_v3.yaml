@@ -1,0 +1,85 @@
+schema_version: chembench_supervised_transfer_config_v3
+protocol_id: chembench_supervised_transfer_v3_three_answer_online_only
+classification:
+  - SUPERVISED_THREE_TARGET_EVOLUTION
+  - FROZEN_EVOLVED_ONLY_TRANSFER_TEST
+  - EXPLORATORY_PROTOCOL
+dataset:
+  repository: AI4Chem/ChemBench4K
+  revision: f8ad41a980170f4c5d0cc97e57722d06887c8f53
+  root: data/chembench4k/AI4Chem_ChemBench4K/f8ad41a980170f4c5d0cc97e57722d06887c8f53
+split:
+  source_protocol: chembench_supervised_transfer_v2
+  source_manifest_root: benchmarks/chembench/manifests/supervised_transfer_v2
+  reference_receipt: benchmarks/chembench/manifests/supervised_transfer_v3/split_reference_receipt_v3.json
+  train_per_category: 50
+  test_per_category: 50
+roots:
+  results: results/chembench_supervised_transfer_v3
+  state: state/chembench_supervised_transfer_v3
+  reports: reports/chembench_supervised_transfer_v3
+model:
+  name: gpt-5.5
+  reasoning_effort: medium
+codex_runtime:
+  source: openevo_core_managed_codex_v1
+  shared_verified_runtime_protocol: chembench_supervised_transfer_v2
+  npm_package: "@openai/codex@0.144.1"
+  cli_version: codex-cli 0.144.1
+  executable_sha256: a96f944d1a596dbfb7fdd84f482be5c50e34b04bb371126840d873e4ebf26902
+executor:
+  rollout_url: http://127.0.0.1:8080
+  shared_runtime_services_state_root: state/chembench_supervised_transfer_v2/runtime_services
+  runtime_services_identity_required: true
+  timeout_seconds: 1200
+  runtime_profile: managed_science
+  auth_mode: subscription
+  capture_mode: transcript
+  approval_policy: never
+  sandbox_policy: openevo_codex_subscription_v1
+  tool_policy: zero_tool_transcript_audit
+  network_policy: model_transport_with_zero_tool_fail_closed
+  allow_internet: true
+  mcp_servers: []
+  max_output_tokens: null
+  task_attempts_per_train_item: 3
+  evolution_cycles_per_train_item: 2
+  final_test_attempts_per_item: 1
+  control_train_enabled: false
+  control_test_enabled: false
+  probe_enabled: false
+reflector:
+  method_id: text_memory_expel_reflector
+  framework_lock: state/chembench_supervised_transfer_v2/framework/framework-lock.json
+  timeout_seconds: 1800
+  model: gpt-5.5
+  reasoning_effort: medium
+  auth_mode: subscription
+  approval_policy: never
+  sandbox_policy: bubblewrap_read_only
+  tool_policy: zero_tool_event_gate
+  network_policy: model_transport_only
+  mcp_servers: []
+  max_output_tokens: null
+  max_last_message_bytes: 65536
+  call_strategy: one_structured_call_per_cycle_three_typed_artifacts
+targets:
+  - text_memory
+  - skill_bundle
+  - agent_system
+limits:
+  text_memory:
+    max_utf8_bytes: 24576
+    max_estimated_tokens: 6144
+    max_confirmed_rules: 48
+    max_provisional_rules: 24
+    max_retired_rules: 24
+  skill_bundle:
+    max_utf8_bytes: 24576
+    max_estimated_tokens: 6144
+    max_workflow_steps: 48
+    max_failure_rules: 24
+  agent_system:
+    max_utf8_bytes: 12288
+    max_estimated_tokens: 3072
+    max_instruction_rules: 36

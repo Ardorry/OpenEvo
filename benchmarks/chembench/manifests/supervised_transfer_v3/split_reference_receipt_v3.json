@@ -1,0 +1,72 @@
+{
+  "dataset_revision": "f8ad41a980170f4c5d0cc97e57722d06887c8f53",
+  "per_category_count": {
+    "Caption2mol": {
+      "reserve": 700,
+      "test": 50,
+      "train": 50
+    },
+    "Mol2caption": {
+      "reserve": 199,
+      "test": 50,
+      "train": 50
+    },
+    "Name_Conversion": {
+      "reserve": 699,
+      "test": 50,
+      "train": 50
+    },
+    "Product_Prediction": {
+      "reserve": 200,
+      "test": 50,
+      "train": 50
+    },
+    "Property_Prediction": {
+      "reserve": 609,
+      "test": 50,
+      "train": 50
+    },
+    "Retrosynthesis": {
+      "reserve": 200,
+      "test": 50,
+      "train": 50
+    },
+    "Solvent_Prediction": {
+      "reserve": 200,
+      "test": 50,
+      "train": 50
+    },
+    "Temperature_Prediction": {
+      "reserve": 102,
+      "test": 50,
+      "train": 50
+    },
+    "Yield_Prediction": {
+      "reserve": 200,
+      "test": 50,
+      "train": 50
+    }
+  },
+  "protocol_id": "chembench_supervised_transfer_v3_three_answer_online_only",
+  "reserve_count": 3109,
+  "reserve_uid_sha256": "3ae18d87983d1920dd7a7ec2a9b69b9511e6ced8d893f81f7a8073c7b5522380",
+  "schema_version": "SplitReferenceReceiptV3",
+  "source_files_sha256": {
+    "reserve_public_manifest.jsonl": "10c21546817976fc492e2992888d4c9db585ab7a2d1020500819381fe2d97dcb",
+    "split_isolation_receipt_v2.json": "450251433fd30fe8efda7ae214e7163ec67372ef982a85440ccdb82073dbe275",
+    "split_summary.json": "67d951ae7d62e864277e3bc0f17072d35d30365ddd034e151bb79a5ddd136196",
+    "test_private_manifest.jsonl": "d6a338e7593fb25ea3166e8b7e634f147c10ebe5f931531576f2763924f1ac6b",
+    "test_public_manifest.jsonl": "3b5f34992fadea2e50a2b177f8a611b7475c2019f4bbd6e5bc43326e8d4a3065",
+    "train_private_manifest.jsonl": "c99c01da1546423d6dd5ccbd12e1116190dffed3ace95f04d1e22b826753ef4c",
+    "train_public_manifest.jsonl": "6b63a789d0d24562a74c586d53e68af4edb7935fe5690cdc68cb011080cfb4c3"
+  },
+  "source_split_protocol": "chembench_supervised_transfer_v2",
+  "source_split_receipt": "450251433fd30fe8efda7ae214e7163ec67372ef982a85440ccdb82073dbe275",
+  "source_split_summary": "67d951ae7d62e864277e3bc0f17072d35d30365ddd034e151bb79a5ddd136196",
+  "split_sha256": "4660a007cb6a482aa1a4701c1f95030dc523f35fc6a7996484c1e238be11ad3f",
+  "test_count": 450,
+  "test_historical_exposure": 0,
+  "test_uid_sha256": "a5759aa9d2c69a184bdbca0ac7385f6dc7450c44a3fd82e439337f2cbf5db347",
+  "train_count": 450,
+  "train_uid_sha256": "5f4d74009e455c3f30e821c9cc7691d75e39faf65c36fff76584512f27808e78"
+}

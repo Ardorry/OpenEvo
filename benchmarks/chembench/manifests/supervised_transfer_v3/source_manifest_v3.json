@@ -1,20 +1,15 @@
 {
-  "combined_sha256": "f3af1a1abd738c99a1c50ae98cceda7b18c9672cba7f59033ec7230677d51380",
+  "combined_sha256": "963453544dd081efe1fd5378d9c9779081da86826acdd2bb405ade7b18f495dd",
   "private_manifests_excluded": [
-    "test_private_manifest.jsonl",
-    "train_private_manifest.jsonl"
+    "train_private_manifest.jsonl",
+    "test_private_manifest.jsonl"
   ],
-  "protocol_id": "chembench_supervised_transfer_v2",
-  "schema_version": "ChemBenchSupervisedTransferSourceManifestV2",
-  "self_excluded": "benchmarks/chembench/manifests/supervised_transfer_v2/source_manifest_v2.json",
-  "source_file_count": 55,
+  "protocol_id": "chembench_supervised_transfer_v3_three_answer_online_only",
+  "schema_version": "ChemBenchSupervisedTransferSourceManifestV3",
+  "self_excluded": "benchmarks/chembench/manifests/supervised_transfer_v3/source_manifest_v3.json",
+  "shared_v2_core_abi_included": true,
+  "source_file_count": 43,
   "source_files": [
-    {
-      "executable": false,
-      "path": "benchmarks/chembench/configs/supervised_transfer_v2/chembench_supervised_transfer_v2.yaml",
-      "sha256": "9aa2008b0ab9ee725a90c21210488eacdea6b85081c6b82ceb6a37fd1f8c2a50",
-      "size_bytes": 2821
-    },
     {
       "executable": false,
       "path": "benchmarks/chembench/configs/supervised_transfer_v2/openevo_runtime_services_v2.yaml",
@@ -23,69 +18,21 @@
     },
     {
       "executable": false,
-      "path": "benchmarks/chembench/manifests/supervised_transfer_v2/.gitignore",
-      "sha256": "f3d3135818e7bcb2c808190871e0f559a47370288abfde5da8285ad5c4e28643",
-      "size_bytes": 25
+      "path": "benchmarks/chembench/configs/supervised_transfer_v3/chembench_supervised_transfer_v3.yaml",
+      "sha256": "0f5d2dbccc085786a9cddeab61b384dc4c7c47dcdf97cf6ee60b400b97f31f2f",
+      "size_bytes": 2907
     },
     {
       "executable": false,
-      "path": "benchmarks/chembench/manifests/supervised_transfer_v2/historical_exposure_manifest_v2.json",
-      "sha256": "b69d64e7e8b98d53923c5e90124bd4b83864abefc96db4d2ac8c9bc669503bbe",
-      "size_bytes": 4284432
+      "path": "benchmarks/chembench/manifests/supervised_transfer_v3/.gitignore",
+      "sha256": "039d20a93f19beabb5babce500922479ac490b42f78953ac026186d966300ecb",
+      "size_bytes": 57
     },
     {
       "executable": false,
-      "path": "benchmarks/chembench/manifests/supervised_transfer_v2/historical_exposure_receipt_v2.json",
-      "sha256": "7121f062fb756f9882847c923a2df82b4de9faa996f2999783f3254402dc6747",
-      "size_bytes": 861
-    },
-    {
-      "executable": false,
-      "path": "benchmarks/chembench/manifests/supervised_transfer_v2/historical_exposure_summary_v2.json",
-      "sha256": "073e797db7ac9573ff48f3eada24dcc6eab96e7afe370f4a28d28106acd2296a",
-      "size_bytes": 2147
-    },
-    {
-      "executable": false,
-      "path": "benchmarks/chembench/manifests/supervised_transfer_v2/phase0_audit_receipt_v2.json",
-      "sha256": "74010c797e1b06c2d3b5aaec648998290644600695206a4f7025fb92d4bf21b1",
-      "size_bytes": 1098
-    },
-    {
-      "executable": false,
-      "path": "benchmarks/chembench/manifests/supervised_transfer_v2/reserve_public_manifest.jsonl",
-      "sha256": "10c21546817976fc492e2992888d4c9db585ab7a2d1020500819381fe2d97dcb",
-      "size_bytes": 2918773
-    },
-    {
-      "executable": false,
-      "path": "benchmarks/chembench/manifests/supervised_transfer_v2/split_isolation_receipt_v2.json",
-      "sha256": "450251433fd30fe8efda7ae214e7163ec67372ef982a85440ccdb82073dbe275",
-      "size_bytes": 985
-    },
-    {
-      "executable": false,
-      "path": "benchmarks/chembench/manifests/supervised_transfer_v2/split_summary.json",
-      "sha256": "67d951ae7d62e864277e3bc0f17072d35d30365ddd034e151bb79a5ddd136196",
-      "size_bytes": 2942
-    },
-    {
-      "executable": false,
-      "path": "benchmarks/chembench/manifests/supervised_transfer_v2/test_public_manifest.jsonl",
-      "sha256": "3b5f34992fadea2e50a2b177f8a611b7475c2019f4bbd6e5bc43326e8d4a3065",
-      "size_bytes": 519089
-    },
-    {
-      "executable": false,
-      "path": "benchmarks/chembench/manifests/supervised_transfer_v2/train_public_manifest.jsonl",
-      "sha256": "6b63a789d0d24562a74c586d53e68af4edb7935fe5690cdc68cb011080cfb4c3",
-      "size_bytes": 538591
-    },
-    {
-      "executable": false,
-      "path": "benchmarks/chembench/manifests/supervised_transfer_v2/v1_read_only_snapshot_receipt_v2.json",
-      "sha256": "0f2308dd1139bae1d2da6f950598e17e993bded2a01c7aa236cd6684dab9d02c",
-      "size_bytes": 1001
+      "path": "benchmarks/chembench/manifests/supervised_transfer_v3/split_reference_receipt_v3.json",
+      "sha256": "82eb6582d8af1eaa6a7cb38e3b1cec522ce85d74eb0029bf2598ed315fffd903",
+      "size_bytes": 2501
     },
     {
       "executable": false,
@@ -95,21 +42,15 @@
     },
     {
       "executable": true,
-      "path": "benchmarks/chembench/scripts/supervised_transfer_v2/main.py",
-      "sha256": "54204e590808d3ae690fc27ca9009f27e67233f738479338f1564368c11f6f5f",
-      "size_bytes": 5510
+      "path": "benchmarks/chembench/scripts/supervised_transfer_v3/main.py",
+      "sha256": "894d6994f1fc04f670473da49e86c08228218b268508eb22152732859019e4ec",
+      "size_bytes": 4785
     },
     {
       "executable": true,
-      "path": "benchmarks/chembench/scripts/supervised_transfer_v2/prepare_runtime.sh",
-      "sha256": "b2382aab23b0676c4699d1f8eb2e37e62ba6ef1849b84b60e0bed2700d1ec9e7",
-      "size_bytes": 5515
-    },
-    {
-      "executable": true,
-      "path": "benchmarks/chembench/scripts/supervised_transfer_v2/run.sh",
-      "sha256": "e0f57b665c807563d134dd3e98e2a176fe64500ce7153c078dfddd33063f5e79",
-      "size_bytes": 239
+      "path": "benchmarks/chembench/scripts/supervised_transfer_v3/monitor.py",
+      "sha256": "fd657f39dc034906dec1994413da8e48cc3db2130faf121d8b14496cb932357f",
+      "size_bytes": 2357
     },
     {
       "executable": false,
@@ -269,9 +210,45 @@
     },
     {
       "executable": false,
-      "path": "benchmarks/chembench/src/openevo_chembench/taskwise_config_v1.py",
-      "sha256": "140c14319d063d676170de2043eb9799b1539103a4511174bab48264d30871a0",
-      "size_bytes": 21200
+      "path": "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v3/__init__.py",
+      "sha256": "e24d9830b3ccd81da7d93b178cfd065f72c19d01ada6d7e1bc5cae0ac77df12a",
+      "size_bytes": 173
+    },
+    {
+      "executable": false,
+      "path": "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v3/config.py",
+      "sha256": "4d779bf2642123674b31aed2856641ce4d1323a65c5342fecb35c81c4ad143d5",
+      "size_bytes": 7591
+    },
+    {
+      "executable": false,
+      "path": "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v3/experiment.py",
+      "sha256": "2198b7086172c411e41d6915c5a9155bb8da89c3d1f17596aa998ea42503074c",
+      "size_bytes": 37471
+    },
+    {
+      "executable": false,
+      "path": "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v3/reporting.py",
+      "sha256": "cbf127a8f79085614c3971b87582cb9cba466e8e52a0161148a01805c3d9fcb2",
+      "size_bytes": 14852
+    },
+    {
+      "executable": false,
+      "path": "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v3/source_identity.py",
+      "sha256": "1bfcf6800dd561f636b9a8c9c5b15a05bde5c8e26aaa39085569d992f9517e18",
+      "size_bytes": 5673
+    },
+    {
+      "executable": false,
+      "path": "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v3/split_reference.py",
+      "sha256": "790c98419f9dadf018d2f0ba95b1f1c26fc5f353ab3f7a789993d92fc41591eb",
+      "size_bytes": 5440
+    },
+    {
+      "executable": false,
+      "path": "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v3/test_ledger.py",
+      "sha256": "2ddb72c67590de643bb8ca20e544c26934d23edab258bfe9d43c586eae0b37c9",
+      "size_bytes": 8841
     },
     {
       "executable": false,
@@ -281,63 +258,15 @@
     },
     {
       "executable": false,
-      "path": "benchmarks/chembench/tests/supervised_transfer_v2/fixtures/historical_failure_shapes_v2.json",
-      "sha256": "8c057a93ad153e42dbe199038339b8299cbe56dedff6d83df31a5659bb9e52a2",
-      "size_bytes": 3929
+      "path": "benchmarks/chembench/tests/supervised_transfer_v3/test_protocol_v3.py",
+      "sha256": "c775988a13e8632958051ce2be5c0060fd8db1b6267086b20951b2ca1eb805cf",
+      "size_bytes": 25129
     },
     {
       "executable": false,
-      "path": "benchmarks/chembench/tests/supervised_transfer_v2/test_config_split_v2.py",
-      "sha256": "c28bcf4a4e9abf749a08bbae54952992a30a719594e6a5d06cb21f47f6af2a7a",
-      "size_bytes": 6317
-    },
-    {
-      "executable": false,
-      "path": "benchmarks/chembench/tests/supervised_transfer_v2/test_core_protocol_v2.py",
-      "sha256": "865596edf403a22159835ef981a43163e0d429d53b2ebe0d3adff53566e160bb",
-      "size_bytes": 62777
-    },
-    {
-      "executable": false,
-      "path": "benchmarks/chembench/tests/supervised_transfer_v2/test_executor_v2.py",
-      "sha256": "6d333a1ec70e517561375a5e3152e38731871101f86a3291ffa430964c964563",
-      "size_bytes": 15352
-    },
-    {
-      "executable": false,
-      "path": "benchmarks/chembench/tests/supervised_transfer_v2/test_final_test_safety_v2.py",
-      "sha256": "6236a3458ff3fda8cc6c5e46ab2c97533f7090e193fb92e737ff1616da42ee29",
-      "size_bytes": 7579
-    },
-    {
-      "executable": false,
-      "path": "benchmarks/chembench/tests/supervised_transfer_v2/test_gateway_service_bootstrap_v2.py",
-      "sha256": "1bacc045f8423168c665baf4d2b79f69b5d5e938aa26983c59234092ca0dc842",
-      "size_bytes": 2310
-    },
-    {
-      "executable": false,
-      "path": "benchmarks/chembench/tests/supervised_transfer_v2/test_managed_codex_v2.py",
-      "sha256": "4fc087c5c36f8ec53261210545d9a21667fe4af8bcbda561a7048c15ac9e124d",
-      "size_bytes": 3016
-    },
-    {
-      "executable": false,
-      "path": "benchmarks/chembench/tests/supervised_transfer_v2/test_reflector_contract_v2.py",
-      "sha256": "089e24de24a21437428b154e08f8a909a023747cc13fb4e328009bda07136ed5",
-      "size_bytes": 12859
-    },
-    {
-      "executable": false,
-      "path": "benchmarks/chembench/tests/supervised_transfer_v2/test_runtime_services_v2.py",
-      "sha256": "db4ed0bbd52bedab2fea87c55a9775ba34b43d85c1cc37a3f0e386e9507d3d1c",
-      "size_bytes": 6322
-    },
-    {
-      "executable": false,
-      "path": "notes/chembench_supervised_transfer_v2_design.md",
-      "sha256": "9e848842168cc82a1fdf04655799974e0a9dbf91d367200e7937043168eb081e",
-      "size_bytes": 6055
+      "path": "notes/chembench_supervised_transfer_v3_design.md",
+      "sha256": "5df8a3de1756c23525fba9851c025be175189de1becc6e00cdb2acd6309318b9",
+      "size_bytes": 1746
     }
   ],
   "src_openevo_included_by_framework_lock": true
