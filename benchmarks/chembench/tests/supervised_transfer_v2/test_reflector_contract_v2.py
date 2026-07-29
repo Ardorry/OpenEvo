@@ -121,7 +121,7 @@ def test_contract_schema_parser_and_artifact_validator_are_aligned() -> None:
         assert properties[field]["maxItems"] == maximum
     rule_properties = properties["confirmed_principles"]["items"]["properties"]
     for field in ("rule_id", "trigger", "principle", "action", "validation"):
-        assert rule_properties[field]["maxLength"] == 128
+        assert rule_properties[field]["maxLength"] == 96
     assert rule_properties["evidence_count"]["maximum"] == 4
     assert rule_properties["evidence_digests"]["maxItems"] == 4
 
@@ -152,15 +152,18 @@ def test_contract_schema_parser_and_artifact_validator_are_aligned() -> None:
 
 def test_text_memory_schema_reserves_utf8_capacity_headroom() -> None:
     digests = [_sha(f"capacity-evidence-{index}") for index in range(4)]
+    maximum_scalar = "x" * 64 + "\N{GREEK SMALL LETTER BETA}" * 32
+    assert len(maximum_scalar) == 96
+    assert len(maximum_scalar.encode()) == 128
 
     def rule(evidence_count: int) -> dict[str, object]:
         return {
-            "rule_id": "r" * 128,
+            "rule_id": maximum_scalar,
             "target_type": "text_memory",
-            "trigger": "t" * 128,
-            "principle": "p" * 128,
-            "action": "a" * 128,
-            "validation": "v" * 128,
+            "trigger": maximum_scalar,
+            "principle": maximum_scalar,
+            "action": maximum_scalar,
+            "validation": maximum_scalar,
             "evidence_count": evidence_count,
             "evidence_digests": digests[:evidence_count],
             "first_seen_cycle": 1,
@@ -173,15 +176,15 @@ def test_text_memory_schema_reserves_utf8_capacity_headroom() -> None:
         {
             "confirmed_principles": [rule(4) for _index in range(8)],
             "provisional_principles": [rule(1) for _index in range(3)],
-            "common_failure_modes": ["x" * 128 for _index in range(6)],
-            "option_elimination_checks": ["x" * 128 for _index in range(8)],
+            "common_failure_modes": [maximum_scalar for _index in range(6)],
+            "option_elimination_checks": [maximum_scalar for _index in range(8)],
             "retired_or_contradicted": [rule(4) for _index in range(3)],
-            "output_discipline": ["x" * 128 for _index in range(4)],
-            "do": ["x" * 128 for _index in range(6)],
-            "avoid": ["x" * 128 for _index in range(4)],
-            "validate": ["x" * 128 for _index in range(6)],
-            "when_applicable": ["x" * 128 for _index in range(6)],
-            "retired_or_superseded": ["x" * 128 for _index in range(4)],
+            "output_discipline": [maximum_scalar for _index in range(4)],
+            "do": [maximum_scalar for _index in range(6)],
+            "avoid": [maximum_scalar for _index in range(4)],
+            "validate": [maximum_scalar for _index in range(6)],
+            "when_applicable": [maximum_scalar for _index in range(6)],
+            "retired_or_superseded": [maximum_scalar for _index in range(4)],
         }
     )
     rendered = _render_supervised_structured_memory(_response(payload)).encode()

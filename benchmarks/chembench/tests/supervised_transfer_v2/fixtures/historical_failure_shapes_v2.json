@@ -73,6 +73,14 @@
       "shape": "rendered_text_memory_exceeds_fixed_capacity_by_two_bytes",
       "expected_replay": "REJECTED_FAIL_CLOSED_WITH_EXPECTED_CODE",
       "run_state_sha256": "d6110b610505a8a48c47f61dd407770afa0aac89e1c2cc90c51b294d658bbedb"
+    },
+    {
+      "run_id": "stv3-smoke-20260729T203100Z",
+      "stage": "SMOKE_ONLINE",
+      "failure_code": "TASKWISE_REFLECTOR_BOUNDARY_FAILED",
+      "shape": "schema_character_limit_exceeded_parser_utf8_byte_limit",
+      "expected_replay": "REJECTED_FAIL_CLOSED_WITH_EXPECTED_CODE",
+      "run_state_sha256": "1cf9c61dbc9be2e47f1c52cff73a3855c80b72fbbb1c5db84651b038a6a36138"
     }
   ],
   "synthetic_adjacent_shapes": [

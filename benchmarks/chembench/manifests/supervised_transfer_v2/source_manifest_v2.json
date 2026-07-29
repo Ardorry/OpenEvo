@@ -1,5 +1,5 @@
 {
-  "combined_sha256": "4e0893455065afb5d208b267bd33d75235affafc0e4c77980ab14c381d400903",
+  "combined_sha256": "a2e22ade2a31320214776f02512034f56374bdb4f3d3f9413a52c2debc4628c3",
   "private_manifests_excluded": [
     "test_private_manifest.jsonl",
     "train_private_manifest.jsonl"
@@ -228,8 +228,8 @@
     {
       "executable": false,
       "path": "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/reflector_boundary.py",
-      "sha256": "1a91e052193f10ffcc3896f3da2e0413af7ed46d68cd5a0434603d626c9a8c75",
-      "size_bytes": 125018
+      "sha256": "a082a5e5171e3be000d363462b07cf313aa101b961c834c168630ced6df4c39e",
+      "size_bytes": 125097
     },
     {
       "executable": false,
@@ -282,8 +282,8 @@
     {
       "executable": false,
       "path": "benchmarks/chembench/tests/supervised_transfer_v2/fixtures/historical_failure_shapes_v2.json",
-      "sha256": "7f2403b6358fac3c4a3d20490d3f1985ffedc9e5088077cdc6a60a2ffd37a46d",
-      "size_bytes": 4325
+      "sha256": "13e43872d503dd4fa56ac7a7bb77e38249e19289b9448b2c414f16800517a6f2",
+      "size_bytes": 4710
     },
     {
       "executable": false,
@@ -324,8 +324,8 @@
     {
       "executable": false,
       "path": "benchmarks/chembench/tests/supervised_transfer_v2/test_reflector_contract_v2.py",
-      "sha256": "b9c9cf85aa818084b52cca099a09a3ef900eba2cadcb54c93efbce45a661ddb8",
-      "size_bytes": 21520
+      "sha256": "516d3742a98b2956c272c9c4893edf2171c7db931e82d75ce244c07343e4a874",
+      "size_bytes": 21735
     },
     {
       "executable": false,

@@ -230,6 +230,7 @@ _SUPERVISED_AGENT_FIELDS = (
 _CORE_AUXILIARY_CONFIG_MAX_CHARACTERS = 4096
 _SUPERVISED_AUXILIARY_SCALAR_MAX_CHARACTERS = 192
 _SUPERVISED_AUXILIARY_ARRAY_MAX_ITEMS = 4
+_SUPERVISED_MEMORY_SCALAR_MAX_CHARACTERS = 96
 _SUPERVISED_MEMORY_SCALAR_MAX_UTF8_BYTES = 128
 _SUPERVISED_MEMORY_RULE_EVIDENCE_MAX_ITEMS = 4
 _SUPERVISED_MEMORY_RULE_COUNTER_MAXIMUM = 1000
@@ -252,28 +253,28 @@ def _supervised_rule_output_schema(*, minimum_evidence: int) -> dict[str, object
             "rule_id": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": _SUPERVISED_MEMORY_SCALAR_MAX_UTF8_BYTES,
+                "maxLength": _SUPERVISED_MEMORY_SCALAR_MAX_CHARACTERS,
             },
             "target_type": {"type": "string", "enum": ["text_memory"]},
             "trigger": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": _SUPERVISED_MEMORY_SCALAR_MAX_UTF8_BYTES,
+                "maxLength": _SUPERVISED_MEMORY_SCALAR_MAX_CHARACTERS,
             },
             "principle": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": _SUPERVISED_MEMORY_SCALAR_MAX_UTF8_BYTES,
+                "maxLength": _SUPERVISED_MEMORY_SCALAR_MAX_CHARACTERS,
             },
             "action": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": _SUPERVISED_MEMORY_SCALAR_MAX_UTF8_BYTES,
+                "maxLength": _SUPERVISED_MEMORY_SCALAR_MAX_CHARACTERS,
             },
             "validation": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": _SUPERVISED_MEMORY_SCALAR_MAX_UTF8_BYTES,
+                "maxLength": _SUPERVISED_MEMORY_SCALAR_MAX_CHARACTERS,
             },
             "evidence_count": evidence_schema,
             "evidence_digests": {
@@ -316,7 +317,7 @@ _SUPERVISED_OUTPUT_SCHEMA = {
                     else {
                         "type": "string",
                         "minLength": 1,
-                        "maxLength": _SUPERVISED_MEMORY_SCALAR_MAX_UTF8_BYTES,
+                        "maxLength": _SUPERVISED_MEMORY_SCALAR_MAX_CHARACTERS,
                     }
                 ),
                 "maxItems": maximum,
@@ -466,8 +467,9 @@ _SUPERVISED_PROMPT_CONTRACT = (
     "- The rendered text_memory has a hard 24,576 UTF-8-byte artifact limit. The "
     "closed schema reserves headroom: merge duplicates, keep only the highest-support "
     "transferable rules, and retire or omit lower-value detail. Never preserve every "
-    "predecessor bullet. Each memory scalar must fit within 128 UTF-8 bytes, and each "
-    "rule may retain at most four exact supporting packet digests.\n"
+    "predecessor bullet. Each memory scalar must fit within 96 Unicode characters "
+    "and 128 UTF-8 bytes, and each rule may retain at most four exact supporting "
+    "packet digests.\n"
     "- The CLI enforces one JSON object containing `category`, eleven required section "
     "arrays for memory, five skill fields (four content arrays plus one evidence-"
     "digest array), and two agent-system fields. Populate every field. Memory "
