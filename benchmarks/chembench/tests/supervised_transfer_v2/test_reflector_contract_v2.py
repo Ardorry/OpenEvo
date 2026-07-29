@@ -124,6 +124,11 @@ def test_contract_schema_parser_and_artifact_validator_are_aligned() -> None:
         assert rule_properties[field]["maxLength"] == 96
     assert "evidence_count" not in rule_properties
     assert rule_properties["evidence_digests"]["maxItems"] == 4
+    provisional_evidence = properties["provisional_principles"]["items"][
+        "properties"
+    ]["evidence_digests"]
+    assert provisional_evidence["minItems"] == 1
+    assert provisional_evidence["maxItems"] == 1
 
     payload = _valid_payload()
     response = _response(payload)
@@ -379,6 +384,40 @@ def test_rule_semantics_reject_unsupported_confirmation_and_target_mismatch() ->
     payload["confirmed_principles"] = []
     payload["provisional_principles"] = [rule]
     rule["target_type"] = "skill_bundle"
+    with pytest.raises(ReflectorBoundaryError, match="REFLECTOR_LAST_MESSAGE_INVALID"):
+        _render_supervised_structured_memory(_response(payload))
+
+
+def test_provisional_rule_schema_matches_single_evidence_validator_contract() -> None:
+    payload = _valid_payload(category="Name_Conversion")
+    first = _sha("first-authorized-packet")
+    second = _sha("second-authorized-packet")
+    payload["provisional_principles"] = [
+        {
+            "rule_id": "name-conversion-provisional-v1",
+            "target_type": "text_memory",
+            "trigger": "when converting a molecular representation to a name",
+            "principle": "derive the parent structure before assigning substituents",
+            "action": "identify the parent and then number its substituents",
+            "validation": "reconstruct the structure from the proposed name",
+            "evidence_digests": [first, second],
+            "first_seen_cycle": 1,
+            "last_confirmed_cycle": 2,
+            "contradiction_count": 0,
+        }
+    ]
+    schema = json.loads(
+        _constrained_supervised_output_schema_bytes(frozenset({first, second}))
+    )
+    evidence_schema = schema["properties"]["provisional_principles"]["items"][
+        "properties"
+    ]["evidence_digests"]
+    assert evidence_schema == {
+        "type": "array",
+        "items": {"type": "string", "enum": sorted((first, second))},
+        "minItems": 1,
+        "maxItems": 1,
+    }
     with pytest.raises(ReflectorBoundaryError, match="REFLECTOR_LAST_MESSAGE_INVALID"):
         _render_supervised_structured_memory(_response(payload))
 

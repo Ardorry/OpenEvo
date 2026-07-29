@@ -272,7 +272,11 @@ def _supervised_rule_output_schema(*, minimum_evidence: int) -> dict[str, object
                 "type": "array",
                 "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                 "minItems": minimum_evidence,
-                "maxItems": _SUPERVISED_MEMORY_RULE_EVIDENCE_MAX_ITEMS,
+                "maxItems": (
+                    1
+                    if minimum_evidence == 1
+                    else _SUPERVISED_MEMORY_RULE_EVIDENCE_MAX_ITEMS
+                ),
             },
             "first_seen_cycle": {
                 "type": "integer",
