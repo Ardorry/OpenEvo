@@ -270,6 +270,7 @@ _SUPERVISED_OUTPUT_SCHEMA = {
             field: {
                 "type": "array",
                 "items": {"type": "string"},
+                "minItems": 1,
                 "maxItems": maximum,
             }
             for field, maximum in (
@@ -288,6 +289,7 @@ _SUPERVISED_OUTPUT_SCHEMA = {
         },
         "agent_system_directives": {
             "type": "array",
+            "minItems": 1,
             "items": {
                 "type": "object",
                 "additionalProperties": False,

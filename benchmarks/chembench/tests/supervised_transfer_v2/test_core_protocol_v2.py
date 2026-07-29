@@ -171,6 +171,35 @@ def test_structured_skill_renderer_produces_validator_clean_artifact() -> None:
     assert "chembench" not in auxiliary.skill_markdown.casefold()
 
 
+def test_structured_output_schema_requires_nonempty_auxiliary_targets() -> None:
+    properties = _SUPERVISED_OUTPUT_SCHEMA["properties"]
+
+    for field in (
+        "skill_when_to_use",
+        "skill_workflow",
+        "skill_validation_checks",
+        "skill_failure_guards",
+        "agent_system_output_discipline",
+        "agent_system_directives",
+    ):
+        assert properties[field]["minItems"] == 1
+
+    for field in (
+        "confirmed_principles",
+        "provisional_principles",
+        "common_failure_modes",
+        "option_elimination_checks",
+        "retired_or_contradicted",
+        "output_discipline",
+        "do",
+        "avoid",
+        "validate",
+        "when_applicable",
+        "retired_or_superseded",
+    ):
+        assert "minItems" not in properties[field]
+
+
 def test_structured_memory_renderer_owns_supporting_hash_and_scrubs_answer_map() -> None:
     evidence = "1" * 64
     rule = {
