@@ -79,7 +79,8 @@ _CONFIG_SCHEMA = "chembench4k_reflector_wrapper_config_v2"
 _RECEIPT_SCHEMA_V2 = "chembench4k_reflector_execution_receipt_v2"
 _RECEIPT_SCHEMA_V3 = "chembench4k_reflector_execution_receipt_v3"
 _RECEIPT_SCHEMA_V4 = "chembench4k_reflector_execution_receipt_v4"
-_RECEIPT_SCHEMA = "chembench4k_reflector_execution_receipt_v5"
+_RECEIPT_SCHEMA_V5 = "chembench4k_reflector_execution_receipt_v5"
+_RECEIPT_SCHEMA = "chembench4k_reflector_execution_receipt_v6"
 _ROOT_PREFIX = "openevo-chembench-reflector-v2-"
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _MAX_EVENT_BYTES = 16 * 1024 * 1024
@@ -153,6 +154,14 @@ _SUPERVISED_STRUCTURED_RENDER_ID = "supervised_memory_structured_render_v3"
 _SUPERVISED_MULTITARGET_RENDER_ID = "supervised_multitarget_structured_render_v3"
 _SUPERVISED_OUTPUT_SCHEMA_NAME = "supervised_memory_output_schema.json"
 _NO_OUTPUT_NORMALIZATION_ID = "none"
+_LAST_MESSAGE_OUTPUT_FILE = "output_file"
+_LAST_MESSAGE_TERMINAL_TRANSCRIPT_RECOVERY = "terminal_transcript_recovery"
+_LAST_MESSAGE_TRANSPORTS = frozenset(
+    {
+        _LAST_MESSAGE_OUTPUT_FILE,
+        _LAST_MESSAGE_TERMINAL_TRANSCRIPT_RECOVERY,
+    }
+)
 _SUPERVISED_EXACT_SECTIONS = (
     *SUPERVISED_MEMORY_REQUIRED_SECTIONS,
     *CORE_EXPEL_REQUIRED_SECTIONS,
@@ -456,6 +465,7 @@ class ReflectorExecutionReceiptV2:
     source_last_message_sha256: str | None = None
     output_normalization_id: str = _NO_OUTPUT_NORMALIZATION_ID
     output_normalization_applied: bool = False
+    last_message_transport: str = _LAST_MESSAGE_OUTPUT_FILE
 
     @property
     def digest(self) -> str:
@@ -500,6 +510,7 @@ class ReflectorExecutionReceiptV2:
                     "source_last_message_sha256": source_last_message_sha256,
                     "output_normalization_id": self.output_normalization_id,
                     "output_normalization_applied": self.output_normalization_applied,
+                    "last_message_transport": self.last_message_transport,
                 }
             )
         return payload
@@ -533,16 +544,18 @@ class ReflectorExecutionReceiptV2:
             "stderr_tail_codes",
         }
         v4_expected = v3_expected | {"projected_prompt_sha256"}
-        current_expected = v4_expected | {
+        v5_expected = v4_expected | {
             "source_last_message_sha256",
             "output_normalization_id",
             "output_normalization_applied",
         }
+        current_expected = v5_expected | {"last_message_transport"}
         schema_version = payload.get("schema_version")
         if not (
             (schema_version == _RECEIPT_SCHEMA_V2 and set(payload) == legacy_expected)
             or (schema_version == _RECEIPT_SCHEMA_V3 and set(payload) == v3_expected)
             or (schema_version == _RECEIPT_SCHEMA_V4 and set(payload) == v4_expected)
+            or (schema_version == _RECEIPT_SCHEMA_V5 and set(payload) == v5_expected)
             or (schema_version == _RECEIPT_SCHEMA and set(payload) == current_expected)
         ):
             raise ReflectorBoundaryError("REFLECTOR_RECEIPT_SCHEMA_INVALID")
@@ -577,6 +590,7 @@ class ReflectorExecutionReceiptV2:
         if schema_version in {
             _RECEIPT_SCHEMA_V3,
             _RECEIPT_SCHEMA_V4,
+            _RECEIPT_SCHEMA_V5,
             _RECEIPT_SCHEMA,
         }:
             codex_returncode = payload["codex_returncode"]
@@ -609,7 +623,8 @@ class ReflectorExecutionReceiptV2:
             stderr_tail_codes = []
         projected_prompt_sha256 = (
             payload["projected_prompt_sha256"]
-            if schema_version in {_RECEIPT_SCHEMA_V4, _RECEIPT_SCHEMA}
+            if schema_version
+            in {_RECEIPT_SCHEMA_V4, _RECEIPT_SCHEMA_V5, _RECEIPT_SCHEMA}
             else None
         )
         if projected_prompt_sha256 is not None and (
@@ -617,7 +632,7 @@ class ReflectorExecutionReceiptV2:
             or _SHA256_RE.fullmatch(projected_prompt_sha256) is None
         ):
             raise ReflectorBoundaryError("REFLECTOR_RECEIPT_SCHEMA_INVALID")
-        if schema_version == _RECEIPT_SCHEMA:
+        if schema_version in {_RECEIPT_SCHEMA_V5, _RECEIPT_SCHEMA}:
             source_last_digest = payload["source_last_message_sha256"]
             normalization_id = payload["output_normalization_id"]
             normalization_applied = payload["output_normalization_applied"]
@@ -673,6 +688,25 @@ class ReflectorExecutionReceiptV2:
             source_last_digest = None
             normalization_id = _NO_OUTPUT_NORMALIZATION_ID
             normalization_applied = False
+        last_message_transport = (
+            payload["last_message_transport"]
+            if schema_version == _RECEIPT_SCHEMA
+            else _LAST_MESSAGE_OUTPUT_FILE
+        )
+        if (
+            last_message_transport not in _LAST_MESSAGE_TRANSPORTS
+            or (
+                last_message_transport == _LAST_MESSAGE_TERMINAL_TRANSCRIPT_RECOVERY
+                and (
+                    source_split != SUPERVISED_TRAIN_SOURCE_SPLIT
+                    or payload["status"] != ReflectorBoundaryStatusV2.COMPLETED.value
+                    or source_last_digest is None
+                    or last_digest is None
+                    or not normalization_applied
+                )
+            )
+        ):
+            raise ReflectorBoundaryError("REFLECTOR_RECEIPT_SCHEMA_INVALID")
         counts: list[tuple[str, int]] = []
         for key, value in payload["event_counts"].items():
             if type(key) is not str or type(value) is not int or value <= 0:
@@ -708,6 +742,7 @@ class ReflectorExecutionReceiptV2:
             source_last_message_sha256=source_last_digest,
             output_normalization_id=normalization_id,
             output_normalization_applied=normalization_applied,
+            last_message_transport=last_message_transport,
         )
 
 
@@ -1256,6 +1291,7 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
     projected_prompt_sha256: str | None = None
     output_normalization_id = _NO_OUTPUT_NORMALIZATION_ID
     output_normalization_applied = False
+    last_message_transport = _LAST_MESSAGE_OUTPUT_FILE
     return_code = _WRAPPER_EXIT_INVALID
     try:
         _stage_core_managed_codex_auth(
@@ -1336,9 +1372,13 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
             except LocalCodexExecutionError as exc:
                 raise ReflectorBoundaryError("REFLECTOR_EVENT_STREAM_INVALID") from exc
             isolated_output = layout["output"] / "last-message.md"
-            content = _read_bounded_regular_file(
+            content, last_message_transport = _read_last_message_with_terminal_recovery(
                 isolated_output,
+                terminal_message=event_response,
                 maximum=_MAX_LAST_MESSAGE_BYTES,
+                allow_recovery=(
+                    config["source_split"] == SUPERVISED_TRAIN_SOURCE_SPLIT
+                ),
             )
             if not content.strip():
                 raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_MISSING")
@@ -1412,6 +1452,7 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
             source_last_message_sha256=source_last_message_sha256,
             output_normalization_id=output_normalization_id,
             output_normalization_applied=output_normalization_applied,
+            last_message_transport=last_message_transport,
         )
         _exclusive_write(
             Path(config["receipt_path"]),
@@ -2703,6 +2744,34 @@ def _read_bounded_regular_file(path: Path, *, maximum: int) -> bytes:
         return path.read_bytes()
     except OSError as exc:
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID") from exc
+
+
+def _read_last_message_with_terminal_recovery(
+    path: Path,
+    *,
+    terminal_message: str,
+    maximum: int,
+    allow_recovery: bool,
+) -> tuple[bytes, str]:
+    """Use the same completed transcript only when Codex omitted its redundant file."""
+
+    try:
+        content = _read_bounded_regular_file(path, maximum=maximum)
+    except ReflectorBoundaryError as exc:
+        if (
+            not allow_recovery
+            or exc.finding_code != "REFLECTOR_REQUIRED_FILE_MISSING"
+            or path.exists()
+        ):
+            raise
+        try:
+            content = terminal_message.encode("utf-8")
+        except UnicodeError as encoding_exc:  # pragma: no cover - Python text invariant.
+            raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID") from encoding_exc
+        if not content.strip() or len(content) > maximum:
+            raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
+        return content, _LAST_MESSAGE_TERMINAL_TRANSCRIPT_RECOVERY
+    return content, _LAST_MESSAGE_OUTPUT_FILE
 
 
 def _exclusive_write(path: Path, data: bytes, *, mode: int) -> None:

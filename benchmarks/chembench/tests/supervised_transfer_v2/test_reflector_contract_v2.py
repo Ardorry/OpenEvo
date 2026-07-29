@@ -15,9 +15,15 @@ from openevo_chembench.supervised_transfer_v2.readiness import (
     _failure_audit_markdown,
 )
 from openevo_chembench.supervised_transfer_v2.reflector_boundary import (
+    _LAST_MESSAGE_OUTPUT_FILE,
+    _LAST_MESSAGE_TERMINAL_TRANSCRIPT_RECOVERY,
+    _SUPERVISED_MULTITARGET_RENDER_ID,
     _SUPERVISED_OUTPUT_SCHEMA,
     ReflectorBoundaryError,
+    ReflectorBoundaryStatusV2,
+    ReflectorExecutionReceiptV2,
     _parse_reflector_jsonl_transcript_v2,
+    _read_last_message_with_terminal_recovery,
     _render_supervised_structured_auxiliary,
     _render_supervised_structured_memory,
     _supervised_structured_normalization_id,
@@ -264,6 +270,77 @@ def test_reflector_event_extraction_uses_last_assistant_and_requires_terminal_ev
     assert usage["output_tokens"] == 1
     with pytest.raises(ReflectorBoundaryError, match="REFLECTOR_EVENT_STREAM_INVALID"):
         _parse_reflector_jsonl_transcript_v2(_event_stream("valid", terminal_last=False))
+
+
+def test_missing_redundant_last_message_recovers_only_from_terminal_transcript(
+    tmp_path: Path,
+) -> None:
+    missing = tmp_path / "last-message.md"
+    terminal = _response(_valid_payload())
+    content, transport = _read_last_message_with_terminal_recovery(
+        missing,
+        terminal_message=terminal,
+        maximum=65536,
+        allow_recovery=True,
+    )
+    assert content.decode() == terminal
+    assert transport == _LAST_MESSAGE_TERMINAL_TRANSCRIPT_RECOVERY
+    assert not missing.exists()
+    with pytest.raises(ReflectorBoundaryError, match="REFLECTOR_REQUIRED_FILE_MISSING"):
+        _read_last_message_with_terminal_recovery(
+            missing,
+            terminal_message=terminal,
+            maximum=65536,
+            allow_recovery=False,
+        )
+
+
+def test_existing_last_message_remains_authoritative(tmp_path: Path) -> None:
+    path = tmp_path / "last-message.md"
+    path.write_text("exact", encoding="utf-8")
+    content, transport = _read_last_message_with_terminal_recovery(
+        path,
+        terminal_message="different",
+        maximum=65536,
+        allow_recovery=True,
+    )
+    assert content == b"exact"
+    assert transport == _LAST_MESSAGE_OUTPUT_FILE
+
+
+def test_recovered_transport_is_explicit_in_bound_receipt() -> None:
+    source = (_response(_valid_payload()).strip() + "\n").encode()
+    rendered = _render_supervised_structured_memory(source.decode()).encode()
+    receipt = ReflectorExecutionReceiptV2(
+        invocation_id="a" * 32,
+        status=ReflectorBoundaryStatusV2.COMPLETED,
+        mechanism="bubblewrap",
+        wrapper_invoked=True,
+        real_codex_sha256=_sha("codex"),
+        dev_artifact_sha256=_sha("dataset"),
+        ordered_records_sha256=_sha("records"),
+        record_count=1,
+        event_stream_sha256=_sha("events"),
+        event_counts=(),
+        private_event_reference=f"{'a' * 32}/events.jsonl",
+        last_message_sha256=hashlib.sha256(rendered).hexdigest(),
+        cleanup_complete=True,
+        retry_allowed=False,
+        resume_allowed=False,
+        replacement_completion_allowed=False,
+        codex_returncode=0,
+        protocol_id="chembench_supervised_transfer_v2",
+        source_split="supervised_train",
+        projected_prompt_sha256=_sha("prompt"),
+        source_last_message_sha256=hashlib.sha256(source).hexdigest(),
+        output_normalization_id=_SUPERVISED_MULTITARGET_RENDER_ID,
+        output_normalization_applied=True,
+        last_message_transport=_LAST_MESSAGE_TERMINAL_TRANSCRIPT_RECOVERY,
+    )
+    payload = receipt.to_payload()
+    assert payload["schema_version"] == "chembench4k_reflector_execution_receipt_v6"
+    assert payload["last_message_transport"] == "terminal_transcript_recovery"
+    assert ReflectorExecutionReceiptV2.from_payload(payload) == receipt
 
 
 def test_historical_fixture_is_content_free_and_digest_bound() -> None:
