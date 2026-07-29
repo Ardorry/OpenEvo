@@ -1215,7 +1215,7 @@ class TaskwiseCoreUpdateRequestV1:
 
 
 ReflectorBoundaryFactoryV1 = Callable[
-    [Path, str, int],
+    [Path, str, int, frozenset[str] | None],
     ReflectorExecutionBoundaryV2,
 ]
 
@@ -2880,6 +2880,16 @@ class TaskwiseCoreEvolutionBridgeV1:
                     path,
                     reflector_input_digest,
                     expected_record_count,
+                    (
+                        None
+                        if request.supervised_packet is None
+                        else frozenset(
+                            (
+                                *self._seen_supervised_packet_digests,
+                                request.supervised_packet.digest,
+                            )
+                        )
+                    ),
                 )
                 if type(boundary) is not ReflectorExecutionBoundaryV2:
                     raise TypeError("reflector boundary factory returned an untrusted type")
@@ -3927,7 +3937,10 @@ def build_taskwise_core_port_at_roots_v1(
         artifact_path: Path,
         records_sha256: str,
         record_count: int,
+        allowed_evidence_digests: frozenset[str] | None,
     ) -> ReflectorExecutionBoundaryV2:
+        if allowed_evidence_digests is not None:
+            raise TaskwiseCoreEvolutionError("TASKWISE_REFLECTOR_BOUNDARY_BINDING_INVALID")
         return ReflectorExecutionBoundaryV2(
             dev_artifact_path=artifact_path,
             expected_records_sha256=records_sha256,
@@ -4024,7 +4037,10 @@ def build_supervised_core_bridge_at_roots_v2(
         artifact_path: Path,
         records_sha256: str,
         record_count: int,
+        allowed_evidence_digests: frozenset[str] | None,
     ) -> ReflectorExecutionBoundaryV2:
+        if not allowed_evidence_digests:
+            raise TaskwiseCoreEvolutionError("TASKWISE_REFLECTOR_BOUNDARY_BINDING_INVALID")
         return ReflectorExecutionBoundaryV2(
             dev_artifact_path=artifact_path,
             expected_records_sha256=records_sha256,
@@ -4034,6 +4050,7 @@ def build_supervised_core_bridge_at_roots_v2(
             real_codex_binary=codex_executable,
             auth_source=auth_source,
             timeout_seconds=timeout_seconds,
+            allowed_evidence_digests=allowed_evidence_digests,
         )
 
     return TaskwiseCoreEvolutionBridgeV1(

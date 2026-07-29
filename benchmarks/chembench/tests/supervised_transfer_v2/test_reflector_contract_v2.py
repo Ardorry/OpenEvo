@@ -22,11 +22,13 @@ from openevo_chembench.supervised_transfer_v2.reflector_boundary import (
     ReflectorBoundaryError,
     ReflectorBoundaryStatusV2,
     ReflectorExecutionReceiptV2,
+    _constrained_supervised_output_schema_bytes,
     _parse_reflector_jsonl_transcript_v2,
     _read_last_message_with_terminal_recovery,
     _render_supervised_structured_auxiliary,
     _render_supervised_structured_memory,
     _supervised_structured_normalization_id,
+    _validate_supervised_evidence_allowlist,
 )
 
 
@@ -120,6 +122,46 @@ def test_contract_schema_parser_and_artifact_validator_are_aligned() -> None:
         forbidden_literals=(),
     ).passed
     assert "# Category Memory: Temperature_Prediction" in memory
+
+
+def test_runtime_schema_enumerates_only_core_authorized_evidence_digests() -> None:
+    first = _sha("authorized-packet-1")
+    second = _sha("authorized-packet-2")
+    near_copy = first[:-12] + ("0" * 12)
+    assert near_copy != first
+
+    schema = json.loads(
+        _constrained_supervised_output_schema_bytes(frozenset({first, second}))
+    )
+    properties = schema["properties"]
+    expected = [first, second]
+    for field in (
+        "confirmed_principles",
+        "provisional_principles",
+        "retired_or_contradicted",
+    ):
+        items = properties[field]["items"]["properties"]["evidence_digests"][
+            "items"
+        ]
+        assert items == {"type": "string", "enum": expected}
+        assert near_copy not in items["enum"]
+    assert properties["skill_evidence_digests"]["items"] == {
+        "type": "string",
+        "enum": expected,
+    }
+    assert properties["agent_system_directives"]["items"]["properties"][
+        "evidence_digests"
+    ]["items"] == {"type": "string", "enum": expected}
+    records = [{"packet_sha256": second}]
+    _validate_supervised_evidence_allowlist(records, frozenset({first, second}))
+    with pytest.raises(
+        ReflectorBoundaryError,
+        match="REFLECTOR_OUTPUT_SCHEMA_BINDING_INVALID",
+    ):
+        _validate_supervised_evidence_allowlist(
+            [{"packet_sha256": near_copy}],
+            frozenset({first, second}),
+        )
 
 
 @pytest.mark.parametrize(

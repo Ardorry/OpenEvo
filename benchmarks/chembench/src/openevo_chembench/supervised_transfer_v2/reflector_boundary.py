@@ -75,7 +75,8 @@ CONFIG_ENV = "OPENEVO_CHEMBENCH_REFLECTOR_BOUNDARY_CONFIG_V2"
 WRAPPER_STATUS_ENV = "OPENEVO_CHEMBENCH_REFLECTOR_WRAPPER_V2"
 ISOLATION_FINDING = "REFLECTOR_FILESYSTEM_ISOLATION_MISSING"
 TOOL_VIOLATION_STATUS = "REFLECTOR_SECURITY_TOOL_USE_VIOLATION"
-_CONFIG_SCHEMA = "chembench4k_reflector_wrapper_config_v2"
+_CONFIG_SCHEMA_V2 = "chembench4k_reflector_wrapper_config_v2"
+_CONFIG_SCHEMA = "chembench4k_reflector_wrapper_config_v3"
 _RECEIPT_SCHEMA_V2 = "chembench4k_reflector_execution_receipt_v2"
 _RECEIPT_SCHEMA_V3 = "chembench4k_reflector_execution_receipt_v3"
 _RECEIPT_SCHEMA_V4 = "chembench4k_reflector_execution_receipt_v4"
@@ -338,6 +339,46 @@ _SUPERVISED_OUTPUT_SCHEMA_BYTES = (
 _SUPERVISED_OUTPUT_SCHEMA_SHA256 = hashlib.sha256(
     _SUPERVISED_OUTPUT_SCHEMA_BYTES
 ).hexdigest()
+
+
+def _constrained_supervised_output_schema_bytes(
+    allowed_evidence_digests: frozenset[str],
+) -> bytes:
+    """Bind every model-authored evidence reference to the Core-authorized set."""
+
+    if (
+        type(allowed_evidence_digests) is not frozenset
+        or not allowed_evidence_digests
+        or any(
+            type(value) is not str or _SHA256_RE.fullmatch(value) is None
+            for value in allowed_evidence_digests
+        )
+    ):
+        raise ReflectorBoundaryError("REFLECTOR_OUTPUT_SCHEMA_BINDING_INVALID")
+    schema = json.loads(_SUPERVISED_OUTPUT_SCHEMA_BYTES)
+    digest_items = {
+        "type": "string",
+        "enum": sorted(allowed_evidence_digests),
+    }
+    properties = schema["properties"]
+    for field in _SUPERVISED_RULE_SECTION_FIELDS:
+        properties[field]["items"]["properties"]["evidence_digests"]["items"] = (
+            dict(digest_items)
+        )
+    properties["skill_evidence_digests"]["items"] = dict(digest_items)
+    properties["agent_system_directives"]["items"]["properties"][
+        "evidence_digests"
+    ]["items"] = dict(digest_items)
+    return (
+        json.dumps(
+            schema,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode("utf-8")
 _H2_LINE_RE = re.compile(r"^##\s+(.+?)\s*$", re.ASCII)
 _TASKWISE_PROMPT_CONTRACT = (
     "Taskwise benchmark output requirements:\n"
@@ -944,6 +985,7 @@ class ReflectorExecutionBoundaryV2:
         timeout_seconds: float = 900.0,
         temporary_parent: str | Path | None = None,
         config_probe_runner: ReflectorCodexPolicyProbeRunnerV2 | None = None,
+        allowed_evidence_digests: frozenset[str] | None = None,
     ) -> None:
         self.dev_artifact_path = Path(dev_artifact_path).resolve()
         self.expected_records_sha256 = expected_records_sha256
@@ -977,6 +1019,28 @@ class ReflectorExecutionBoundaryV2:
             )
         if expected_source_split not in _ALLOWED_SOURCE_SPLITS:
             raise ValueError("expected_source_split is outside the closed allowlist")
+        if expected_source_split == SUPERVISED_TRAIN_SOURCE_SPLIT:
+            if allowed_evidence_digests is None:
+                records, _digest = _read_and_validate_records(
+                    self.dev_artifact_path,
+                    expected_record_count=expected_record_count,
+                    expected_source_split=expected_source_split,
+                )
+                allowed_evidence_digests = frozenset(
+                    record.get("packet_sha256") for record in records
+                )
+            if (
+                type(allowed_evidence_digests) is not frozenset
+                or not allowed_evidence_digests
+                or any(
+                    type(value) is not str or _SHA256_RE.fullmatch(value) is None
+                    for value in allowed_evidence_digests
+                )
+            ):
+                raise ValueError("supervised evidence digest allowlist is invalid")
+        elif allowed_evidence_digests is not None:
+            raise ValueError("non-supervised boundary cannot bind evidence digests")
+        self.allowed_evidence_digests = allowed_evidence_digests
         if not 0 < timeout_seconds <= 86_400:
             raise ValueError("timeout_seconds must be positive and bounded")
 
@@ -1046,6 +1110,11 @@ class ReflectorExecutionBoundaryV2:
         )
         if len(records) != self.expected_record_count or digest != self.expected_records_sha256:
             raise ReflectorBoundaryError("REFLECTOR_DEV_ARTIFACT_BINDING_INVALID")
+        if self.expected_source_split == SUPERVISED_TRAIN_SOURCE_SPLIT:
+            _validate_supervised_evidence_allowlist(
+                records,
+                self.allowed_evidence_digests,
+            )
         verify_reflector_codex_policy_v2(
             self.real_codex_binary,
             probe_runner=self.config_probe_runner,
@@ -1098,6 +1167,11 @@ class ReflectorExecutionBoundaryV2:
                 "receipt_path": os.fspath(receipt_path),
                 "timeout_seconds": self.timeout_seconds,
                 "temporary_parent": parent,
+                "allowed_evidence_digests": (
+                    None
+                    if self.allowed_evidence_digests is None
+                    else sorted(self.allowed_evidence_digests)
+                ),
             }
             _exclusive_write(
                 config_path,
@@ -1303,12 +1377,6 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
             layout["inputs"] / "dev_loo_dataset.jsonl",
             mode=0o400,
         )
-        if config["source_split"] == SUPERVISED_TRAIN_SOURCE_SPLIT:
-            _exclusive_write(
-                layout["inputs"] / _SUPERVISED_OUTPUT_SCHEMA_NAME,
-                _SUPERVISED_OUTPUT_SCHEMA_BYTES,
-                mode=0o400,
-            )
         records, records_digest = _read_and_validate_records(
             layout["inputs"] / "dev_loo_dataset.jsonl",
             expected_record_count=int(config["record_count"]),
@@ -1321,6 +1389,17 @@ def _run_wrapper(arguments: list[str], config: dict[str, Any]) -> int:
             != config["dev_artifact_sha256"]
         ):
             raise ReflectorBoundaryError("REFLECTOR_DEV_ARTIFACT_BINDING_INVALID")
+        if config["source_split"] == SUPERVISED_TRAIN_SOURCE_SPLIT:
+            allowed_evidence_digests = frozenset(config["allowed_evidence_digests"])
+            _validate_supervised_evidence_allowlist(
+                records,
+                allowed_evidence_digests,
+            )
+            _exclusive_write(
+                layout["inputs"] / _SUPERVISED_OUTPUT_SCHEMA_NAME,
+                _constrained_supervised_output_schema_bytes(allowed_evidence_digests),
+                mode=0o400,
+            )
         rewritten = _replace_upstream_paths(
             rewritten,
             supervised_structured_output=(
@@ -1478,7 +1557,7 @@ def _load_wrapper_config(path: Path) -> dict[str, Any]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ReflectorBoundaryError("REFLECTOR_WRAPPER_CONFIG_INVALID") from exc
-    expected = {
+    legacy_expected = {
         "schema_version",
         "protocol_id",
         "invocation_id",
@@ -1496,10 +1575,14 @@ def _load_wrapper_config(path: Path) -> dict[str, Any]:
         "timeout_seconds",
         "temporary_parent",
     }
+    expected = legacy_expected | {"allowed_evidence_digests"}
+    schema_version = payload.get("schema_version") if isinstance(payload, dict) else None
     if (
         not isinstance(payload, dict)
-        or set(payload) != expected
-        or payload["schema_version"] != _CONFIG_SCHEMA
+        or not (
+            (schema_version == _CONFIG_SCHEMA_V2 and set(payload) == legacy_expected)
+            or (schema_version == _CONFIG_SCHEMA and set(payload) == expected)
+        )
         or payload["protocol_id"] not in _PROTOCOL_BY_SOURCE_SPLIT.values()
         or isinstance(payload["record_count"], bool)
         or not isinstance(payload["record_count"], int)
@@ -1507,6 +1590,22 @@ def _load_wrapper_config(path: Path) -> dict[str, Any]:
         or payload["source_split"] not in _ALLOWED_SOURCE_SPLITS
         or payload["protocol_id"] != _PROTOCOL_BY_SOURCE_SPLIT[payload["source_split"]]
     ):
+        raise ReflectorBoundaryError("REFLECTOR_WRAPPER_CONFIG_INVALID")
+    if schema_version == _CONFIG_SCHEMA_V2:
+        payload["allowed_evidence_digests"] = None
+    allowed_evidence_digests = payload["allowed_evidence_digests"]
+    if payload["source_split"] == SUPERVISED_TRAIN_SOURCE_SPLIT:
+        if (
+            type(allowed_evidence_digests) is not list
+            or not allowed_evidence_digests
+            or allowed_evidence_digests != sorted(set(allowed_evidence_digests))
+            or any(
+                type(value) is not str or _SHA256_RE.fullmatch(value) is None
+                for value in allowed_evidence_digests
+            )
+        ):
+            raise ReflectorBoundaryError("REFLECTOR_WRAPPER_CONFIG_INVALID")
+    elif allowed_evidence_digests is not None:
         raise ReflectorBoundaryError("REFLECTOR_WRAPPER_CONFIG_INVALID")
     for key in ("real_codex_sha256", "dev_artifact_sha256", "ordered_records_sha256"):
         if type(payload[key]) is not str or _SHA256_RE.fullmatch(payload[key]) is None:
@@ -2678,6 +2777,24 @@ def _read_and_validate_records(
     ):
         raise ReflectorBoundaryError("REFLECTOR_DEV_ARTIFACT_INVALID")
     return records, _canonical_sha256(records)
+
+
+def _validate_supervised_evidence_allowlist(
+    records: Sequence[Mapping[str, Any]],
+    allowed_evidence_digests: frozenset[str] | None,
+) -> None:
+    packet_digests = frozenset(record.get("packet_sha256") for record in records)
+    if (
+        type(allowed_evidence_digests) is not frozenset
+        or not allowed_evidence_digests
+        or len(packet_digests) != 1
+        or any(
+            type(value) is not str or _SHA256_RE.fullmatch(value) is None
+            for value in packet_digests
+        )
+        or not packet_digests.issubset(allowed_evidence_digests)
+    ):
+        raise ReflectorBoundaryError("REFLECTOR_OUTPUT_SCHEMA_BINDING_INVALID")
 
 
 def _copy_private_file(source: Path, destination: Path, *, mode: int) -> None:
