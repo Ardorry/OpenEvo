@@ -1,5 +1,5 @@
 {
-  "combined_sha256": "a2e22ade2a31320214776f02512034f56374bdb4f3d3f9413a52c2debc4628c3",
+  "combined_sha256": "c1ba9bb6e07a12b855392dba3d0836956cb2d87fcc15fcafa9a51dd315cc74a4",
   "private_manifests_excluded": [
     "test_private_manifest.jsonl",
     "train_private_manifest.jsonl"
@@ -210,8 +210,8 @@
     {
       "executable": false,
       "path": "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/packet.py",
-      "sha256": "13d3e83b03758fb160380088f2fc39ea3942682baa7b3825571a497caae1b2fe",
-      "size_bytes": 21685
+      "sha256": "034b674d611d0052d28ea1c05556856699afcc443a5a0fe729139f3de3e79d4e",
+      "size_bytes": 21691
     },
     {
       "executable": false,
@@ -222,14 +222,14 @@
     {
       "executable": false,
       "path": "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/readiness.py",
-      "sha256": "0a5400793dad28ce9245b19973b83ad3edb8f66deac8bb212734704147bfe1ec",
-      "size_bytes": 22454
+      "sha256": "4cabcb6cd5ccaa1e66fd228c891d9444472d658629ca520e454a416afbba7ba8",
+      "size_bytes": 22490
     },
     {
       "executable": false,
       "path": "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/reflector_boundary.py",
-      "sha256": "a082a5e5171e3be000d363462b07cf313aa101b961c834c168630ced6df4c39e",
-      "size_bytes": 125097
+      "sha256": "254e30a8b8f11ff8afb77b27f99887b56206bac24eae8370bd8e43c501c52a0c",
+      "size_bytes": 124414
     },
     {
       "executable": false,
@@ -282,8 +282,8 @@
     {
       "executable": false,
       "path": "benchmarks/chembench/tests/supervised_transfer_v2/fixtures/historical_failure_shapes_v2.json",
-      "sha256": "13e43872d503dd4fa56ac7a7bb77e38249e19289b9448b2c414f16800517a6f2",
-      "size_bytes": 4710
+      "sha256": "24f1a87d1967ac337d96e67aae6f28a88983415e21f3756cd38a25e7f8b2fe1a",
+      "size_bytes": 5113
     },
     {
       "executable": false,
@@ -294,8 +294,8 @@
     {
       "executable": false,
       "path": "benchmarks/chembench/tests/supervised_transfer_v2/test_core_protocol_v2.py",
-      "sha256": "865596edf403a22159835ef981a43163e0d429d53b2ebe0d3adff53566e160bb",
-      "size_bytes": 62777
+      "sha256": "9d74ebe7ef13be609f0b76cb788657b1bb953056f89e93aec11ab83628237438",
+      "size_bytes": 62748
     },
     {
       "executable": false,
@@ -324,8 +324,8 @@
     {
       "executable": false,
       "path": "benchmarks/chembench/tests/supervised_transfer_v2/test_reflector_contract_v2.py",
-      "sha256": "516d3742a98b2956c272c9c4893edf2171c7db931e82d75ce244c07343e4a874",
-      "size_bytes": 21735
+      "sha256": "979c193afc163983e0feb5d95652234bbe7f8d169bedfe2c507b96f1da1e5863",
+      "size_bytes": 21694
     },
     {
       "executable": false,

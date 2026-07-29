@@ -81,6 +81,14 @@
       "shape": "schema_character_limit_exceeded_parser_utf8_byte_limit",
       "expected_replay": "REJECTED_FAIL_CLOSED_WITH_EXPECTED_CODE",
       "run_state_sha256": "1cf9c61dbc9be2e47f1c52cff73a3855c80b72fbbb1c5db84651b038a6a36138"
+    },
+    {
+      "run_id": "stv3-online-formal-20260729T204000Z",
+      "stage": "ONLINE_TRAIN",
+      "failure_code": "TASKWISE_REFLECTOR_BOUNDARY_FAILED",
+      "shape": "model_authored_evidence_count_disagrees_with_unique_digest_count",
+      "expected_replay": "REJECTED_FAIL_CLOSED_WITH_EXPECTED_CODE",
+      "run_state_sha256": "07984a3a11846572b0a6339a7a6918967ac49fae4826dbbe1927cd9bf5c8ed05"
     }
   ],
   "synthetic_adjacent_shapes": [

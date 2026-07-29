@@ -193,7 +193,6 @@ _SUPERVISED_RULE_VALUE_FIELDS = (
     "principle",
     "action",
     "validation",
-    "evidence_count",
     "evidence_digests",
     "first_seen_cycle",
     "last_confirmed_cycle",
@@ -239,13 +238,6 @@ _SUPERVISED_MEMORY_RULE_COUNTER_MAXIMUM = 1000
 def _supervised_rule_output_schema(*, minimum_evidence: int) -> dict[str, object]:
     """Return the closed JSON schema for one model-authored chemistry rule."""
 
-    evidence_schema: dict[str, object] = {
-        "type": "integer",
-        "minimum": minimum_evidence,
-        "maximum": _SUPERVISED_MEMORY_RULE_EVIDENCE_MAX_ITEMS,
-    }
-    if minimum_evidence == 1:
-        evidence_schema["maximum"] = 1
     return {
         "type": "object",
         "additionalProperties": False,
@@ -276,7 +268,6 @@ def _supervised_rule_output_schema(*, minimum_evidence: int) -> dict[str, object
                 "minLength": 1,
                 "maxLength": _SUPERVISED_MEMORY_SCALAR_MAX_CHARACTERS,
             },
-            "evidence_count": evidence_schema,
             "evidence_digests": {
                 "type": "array",
                 "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
@@ -494,16 +485,17 @@ _SUPERVISED_PROMPT_CONTRACT = (
     "category-specific agent-system instructions.\n"
     "- confirmed_principles, provisional_principles, and retired_or_contradicted "
     "contain closed rule objects. Every object has rule_id, target_type=text_memory, "
-    "trigger, principle, action, validation, evidence_count, evidence_digests, "
+    "trigger, principle, action, validation, evidence_digests, "
     "first_seen_cycle, last_confirmed_cycle, and "
     "contradiction_count. The wrapper binds Status from the section and Category "
     "from the top-level category, and derives Supporting Train Ordinals Hash from "
     "the approved evidence-digest set; never author that hash yourself.\n"
     "- A provisional rule has Evidence Count 1. A confirmed rule requires at least "
-    "two independent training-item evidence digests. Copy the exact lowercase "
+    "two independent training-item evidence digests. The trusted wrapper derives "
+    "Evidence Count from the unique digest array; never author a separate count. "
+    "Copy the exact lowercase "
     "`packet_sha256` PACKET_PART value when the current packet supports a rule, and "
-    "preserve prior rule evidence digests verbatim. Evidence Count must equal the "
-    "number of unique evidence_digests. Never invent a digest or copy a question, "
+    "preserve prior rule evidence digests verbatim. Never invent a digest or copy a question, "
     "option, answer mapping, UID, ordinal, or path.\n"
     "- `Supporting Train Ordinals Hash` is a derived set identifier, not packet "
     "evidence. Never copy it into evidence_digests. If no exact packet_sha256 is "
@@ -2161,8 +2153,7 @@ def _supporting_task_set_hash(evidence_digests: Sequence[str]) -> str:
 
     normalized = tuple(sorted(set(evidence_digests)))
     if (
-        not normalized
-        or len(normalized) != len(evidence_digests)
+        len(normalized) != len(evidence_digests)
         or any(_SHA256_RE.fullmatch(value) is None for value in normalized)
     ):
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
@@ -2208,15 +2199,6 @@ def _render_supervised_rule(
         or contradiction_count > _SUPERVISED_MEMORY_RULE_COUNTER_MAXIMUM
     ):
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
-    evidence_count = value["evidence_count"]
-    if (
-        type(evidence_count) is not int
-        or evidence_count < minimum_evidence
-        or evidence_count > _SUPERVISED_MEMORY_RULE_EVIDENCE_MAX_ITEMS
-    ):
-        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
-    if status == "provisional" and evidence_count != 1:
-        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
     evidence_digests = value["evidence_digests"]
     if (
         type(evidence_digests) is not list
@@ -2228,9 +2210,12 @@ def _render_supervised_rule(
         if type(digest) is not str or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
             raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
         normalized_digests.append(digest)
-    if evidence_count > 0 and not normalized_digests:
-        raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
-    if len(set(normalized_digests)) != evidence_count:
+    evidence_count = len(normalized_digests)
+    if (
+        len(set(normalized_digests)) != evidence_count
+        or evidence_count < minimum_evidence
+        or (status == "provisional" and evidence_count != 1)
+    ):
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
     supporting_hash = _supporting_task_set_hash(normalized_digests)
     evidence = ",".join(normalized_digests) if normalized_digests else "none"

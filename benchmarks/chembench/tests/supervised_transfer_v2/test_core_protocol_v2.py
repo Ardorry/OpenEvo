@@ -220,7 +220,6 @@ def test_structured_memory_renderer_owns_supporting_hash_and_scrubs_answer_map()
         "principle": "mass balance bounds the physically possible result",
         "action": "select option C only after checking the limiting amount",
         "validation": "verify the chosen value remains within physical bounds",
-        "evidence_count": 1,
         "evidence_digests": [evidence],
         "first_seen_cycle": 1,
         "last_confirmed_cycle": 1,

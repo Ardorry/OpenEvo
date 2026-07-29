@@ -54,9 +54,9 @@ REFLECTOR_INSTRUCTION = """Supervised three-target category update contract:
 4. Deduplicate before adding; resolve contradictions; Cycle 2 and Cycle 3 must not mechanically repeat earlier content.
 5. A rule supported by only one independent Train task remains provisional; confirmation needs two different Train tasks.
 6. Never copy a question, option, answer mapping, UID, ordinal, source index, dataset path, or repository path.
-7. Each rule must bind category, target type, status, trigger, actionable principle, validation, evidence count,
+7. Each rule must bind category, target type, status, trigger, actionable principle, validation,
    supporting Train evidence digests, first-seen cycle, last-confirmed cycle, and contradiction count. The trusted
-   wrapper derives the opaque supporting-task-set hash; never author or guess that hash.
+   wrapper derives evidence count and the opaque supporting-task-set hash; never author or guess either value.
 8. Keep chemistry knowledge in text_memory, reusable workflow in skill_bundle, and concise behavioral policy in agent_system.
 9. Use only this packet and its approved predecessor context. Test and Reserve data are unavailable and forbidden.
 10. Never write a standalone A/B/C/D answer letter in any model-authored rule, skill, or agent-system field; refer

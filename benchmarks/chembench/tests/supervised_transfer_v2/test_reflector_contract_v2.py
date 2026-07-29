@@ -122,7 +122,7 @@ def test_contract_schema_parser_and_artifact_validator_are_aligned() -> None:
     rule_properties = properties["confirmed_principles"]["items"]["properties"]
     for field in ("rule_id", "trigger", "principle", "action", "validation"):
         assert rule_properties[field]["maxLength"] == 96
-    assert rule_properties["evidence_count"]["maximum"] == 4
+    assert "evidence_count" not in rule_properties
     assert rule_properties["evidence_digests"]["maxItems"] == 4
 
     payload = _valid_payload()
@@ -164,7 +164,6 @@ def test_text_memory_schema_reserves_utf8_capacity_headroom() -> None:
             "principle": maximum_scalar,
             "action": maximum_scalar,
             "validation": maximum_scalar,
-            "evidence_count": evidence_count,
             "evidence_digests": digests[:evidence_count],
             "first_seen_cycle": 1,
             "last_confirmed_cycle": 1000,
@@ -189,6 +188,7 @@ def test_text_memory_schema_reserves_utf8_capacity_headroom() -> None:
     )
     rendered = _render_supervised_structured_memory(_response(payload)).encode()
     assert len(rendered) <= SUPERVISED_MEMORY_MAX_UTF8_BYTES
+    assert b"Evidence Count: 4" in rendered
 
     payload["common_failure_modes"] = ["x" * 129]
     with pytest.raises(ReflectorBoundaryError, match="REFLECTOR_LAST_MESSAGE_INVALID"):
@@ -367,7 +367,6 @@ def test_rule_semantics_reject_unsupported_confirmation_and_target_mismatch() ->
         "principle": "a feasible range must respect physical constraints",
         "action": "eliminate choices outside the feasible range",
         "validation": "check units and limiting assumptions",
-        "evidence_count": 1,
         "evidence_digests": [evidence],
         "first_seen_cycle": 1,
         "last_confirmed_cycle": 1,

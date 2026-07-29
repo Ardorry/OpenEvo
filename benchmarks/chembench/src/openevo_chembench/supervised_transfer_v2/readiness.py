@@ -428,7 +428,7 @@ def _contract_matrix_markdown() -> str:
             "## Object contracts",
             "",
             "- Root and nested directive objects use `additionalProperties: false`.",
-            "- Rule fields are closed and required; provisional evidence is exactly one, confirmed evidence is at least two, and the parser verifies evidence cardinality and cycle ordering.",
+            "- Rule fields are closed and required; provisional evidence is exactly one, confirmed evidence is at least two, and the parser derives evidence count from unique authorized digests while verifying cycle ordering.",
             "- Agent directive fields are exactly: "
             + ", ".join(f"`{field}`" for field in _SUPERVISED_AGENT_DIRECTIVE_FIELDS)
             + ".",
