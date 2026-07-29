@@ -352,7 +352,17 @@ def _contract_matrix_markdown() -> str:
                 "array<object>" if is_rule else "array<string>",
                 str(schema.get("minItems", 0)),
                 str(schema["maxItems"]),
-                "1..4096 chars; parser also caps 4096 UTF-8 bytes" if not is_rule else "rule scalar fields 1..4096 chars and bytes",
+                (
+                    f"1..{item['maxLength']} chars and UTF-8 bytes"
+                    if not is_rule
+                    else (
+                        "rule scalar fields 1.."
+                        f"{item['properties']['trigger']['maxLength']} chars and "
+                        "UTF-8 bytes; at most "
+                        f"{item['properties']['evidence_digests']['maxItems']} "
+                        "evidence digests"
+                    )
+                ),
                 "no",
                 "allowed only for the array",
                 f"renders ## {heading}; validator enforces rule evidence/capacity",
@@ -422,7 +432,7 @@ def _contract_matrix_markdown() -> str:
             "- Agent directive fields are exactly: "
             + ", ".join(f"`{field}`" for field in _SUPERVISED_AGENT_DIRECTIVE_FIELDS)
             + ".",
-            "- JSON Schema limits Unicode code points; the parser adds the stricter 4096 UTF-8-byte scalar limit and artifact validators apply final payload byte/token capacities.",
+            "- JSON Schema limits Unicode code points; the parser independently caps memory scalars at 128 UTF-8 bytes and the complete rendered memory at 24,576 UTF-8 bytes before Core registration.",
             "- A valid reflector completion is one source response, but it creates three independent plan-bound Core jobs, artifact IDs, digests, validators, promotions, and context resolutions.",
             "",
         ]

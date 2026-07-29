@@ -53,6 +53,7 @@ from openevo_chembench.local_codex_executor import (
 )
 from openevo_chembench.supervised_transfer_v2.memory import (
     CORE_EXPEL_REQUIRED_SECTIONS,
+    SUPERVISED_MEMORY_MAX_UTF8_BYTES,
     SUPERVISED_MEMORY_REQUIRED_SECTIONS,
 )
 
@@ -168,17 +169,17 @@ _SUPERVISED_EXACT_SECTIONS = (
     *CORE_EXPEL_REQUIRED_SECTIONS,
 )
 _SUPERVISED_STRUCTURED_SECTION_FIELDS = (
-    ("Confirmed Principles", "confirmed_principles", 40),
-    ("Provisional Principles", "provisional_principles", 20),
-    ("Common Failure Modes", "common_failure_modes", 24),
-    ("Option Elimination Checks", "option_elimination_checks", 40),
-    ("Retired Or Contradicted", "retired_or_contradicted", 24),
-    ("Output Discipline", "output_discipline", 16),
-    ("Do", "do", 40),
-    ("Avoid", "avoid", 24),
-    ("Validate", "validate", 40),
-    ("When Applicable", "when_applicable", 40),
-    ("Retired Or Superseded", "retired_or_superseded", 24),
+    ("Confirmed Principles", "confirmed_principles", 8),
+    ("Provisional Principles", "provisional_principles", 3),
+    ("Common Failure Modes", "common_failure_modes", 6),
+    ("Option Elimination Checks", "option_elimination_checks", 8),
+    ("Retired Or Contradicted", "retired_or_contradicted", 3),
+    ("Output Discipline", "output_discipline", 4),
+    ("Do", "do", 6),
+    ("Avoid", "avoid", 4),
+    ("Validate", "validate", 6),
+    ("When Applicable", "when_applicable", 6),
+    ("Retired Or Superseded", "retired_or_superseded", 4),
 )
 _SUPERVISED_RULE_SECTION_FIELDS = {
     "confirmed_principles": ("confirmed", 2),
@@ -229,34 +230,73 @@ _SUPERVISED_AGENT_FIELDS = (
 _CORE_AUXILIARY_CONFIG_MAX_CHARACTERS = 4096
 _SUPERVISED_AUXILIARY_SCALAR_MAX_CHARACTERS = 192
 _SUPERVISED_AUXILIARY_ARRAY_MAX_ITEMS = 4
+_SUPERVISED_MEMORY_SCALAR_MAX_UTF8_BYTES = 128
+_SUPERVISED_MEMORY_RULE_EVIDENCE_MAX_ITEMS = 4
+_SUPERVISED_MEMORY_RULE_COUNTER_MAXIMUM = 1000
 
 
 def _supervised_rule_output_schema(*, minimum_evidence: int) -> dict[str, object]:
     """Return the closed JSON schema for one model-authored chemistry rule."""
 
-    evidence_schema: dict[str, object] = {"type": "integer", "minimum": minimum_evidence}
+    evidence_schema: dict[str, object] = {
+        "type": "integer",
+        "minimum": minimum_evidence,
+        "maximum": _SUPERVISED_MEMORY_RULE_EVIDENCE_MAX_ITEMS,
+    }
     if minimum_evidence == 1:
         evidence_schema["maximum"] = 1
     return {
         "type": "object",
         "additionalProperties": False,
         "properties": {
-            "rule_id": {"type": "string", "minLength": 1, "maxLength": 4096},
+            "rule_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": _SUPERVISED_MEMORY_SCALAR_MAX_UTF8_BYTES,
+            },
             "target_type": {"type": "string", "enum": ["text_memory"]},
-            "trigger": {"type": "string", "minLength": 1, "maxLength": 4096},
-            "principle": {"type": "string", "minLength": 1, "maxLength": 4096},
-            "action": {"type": "string", "minLength": 1, "maxLength": 4096},
-            "validation": {"type": "string", "minLength": 1, "maxLength": 4096},
+            "trigger": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": _SUPERVISED_MEMORY_SCALAR_MAX_UTF8_BYTES,
+            },
+            "principle": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": _SUPERVISED_MEMORY_SCALAR_MAX_UTF8_BYTES,
+            },
+            "action": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": _SUPERVISED_MEMORY_SCALAR_MAX_UTF8_BYTES,
+            },
+            "validation": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": _SUPERVISED_MEMORY_SCALAR_MAX_UTF8_BYTES,
+            },
             "evidence_count": evidence_schema,
             "evidence_digests": {
                 "type": "array",
                 "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                 "minItems": minimum_evidence,
-                "maxItems": 64,
+                "maxItems": _SUPERVISED_MEMORY_RULE_EVIDENCE_MAX_ITEMS,
             },
-            "first_seen_cycle": {"type": "integer", "minimum": 1},
-            "last_confirmed_cycle": {"type": "integer", "minimum": 1},
-            "contradiction_count": {"type": "integer", "minimum": 0},
+            "first_seen_cycle": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": _SUPERVISED_MEMORY_RULE_COUNTER_MAXIMUM,
+            },
+            "last_confirmed_cycle": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": _SUPERVISED_MEMORY_RULE_COUNTER_MAXIMUM,
+            },
+            "contradiction_count": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": _SUPERVISED_MEMORY_RULE_COUNTER_MAXIMUM,
+            },
         },
         "required": list(_SUPERVISED_RULE_VALUE_FIELDS),
     }
@@ -273,7 +313,11 @@ _SUPERVISED_OUTPUT_SCHEMA = {
                 "items": (
                     _supervised_rule_output_schema(minimum_evidence=rule_contract[1])
                     if (rule_contract := _SUPERVISED_RULE_SECTION_FIELDS.get(field))
-                    else {"type": "string", "minLength": 1, "maxLength": 4096}
+                    else {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": _SUPERVISED_MEMORY_SCALAR_MAX_UTF8_BYTES,
+                    }
                 ),
                 "maxItems": maximum,
             }
@@ -419,6 +463,11 @@ _SUPERVISED_PROMPT_CONTRACT = (
     "- Return one complete replacement memory inside one complete replacement "
     "three-target context, never an append-only patch or a copy followed by revised "
     "sections.\n"
+    "- The rendered text_memory has a hard 24,576 UTF-8-byte artifact limit. The "
+    "closed schema reserves headroom: merge duplicates, keep only the highest-support "
+    "transferable rules, and retire or omit lower-value detail. Never preserve every "
+    "predecessor bullet. Each memory scalar must fit within 128 UTF-8 bytes, and each "
+    "rule may retain at most four exact supporting packet digests.\n"
     "- The CLI enforces one JSON object containing `category`, eleven required section "
     "arrays for memory, five skill fields (four content arrays plus one evidence-"
     "digest array), and two agent-system fields. Populate every field. Memory "
@@ -1866,16 +1915,23 @@ def _render_supervised_structured_memory(response: str) -> str:
                     )
                 )
             else:
-                if type(value) is not str or len(value.encode("utf-8")) > 4096:
+                if (
+                    type(value) is not str
+                    or len(value.encode("utf-8"))
+                    > _SUPERVISED_MEMORY_SCALAR_MAX_UTF8_BYTES
+                ):
                     raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
-                normalized = _normalize_supervised_structured_value(value)
+                normalized = _normalize_supervised_structured_value(
+                    value,
+                    maximum_utf8_bytes=_SUPERVISED_MEMORY_SCALAR_MAX_UTF8_BYTES,
+                )
                 items.append(normalized)
         rendered.append(f"## {heading}")
         rendered.extend(f"- {item}" for item in (items or ["None."]))
         if index != len(_SUPERVISED_STRUCTURED_SECTION_FIELDS) - 1:
             rendered.append("")
     encoded = ("\n".join(rendered).rstrip() + "\n").encode("utf-8")
-    if len(encoded) > _MAX_LAST_MESSAGE_BYTES:
+    if len(encoded) > SUPERVISED_MEMORY_MAX_UTF8_BYTES:
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
     return encoded.decode("utf-8")
 
@@ -2065,7 +2121,11 @@ def _render_supervised_structured_auxiliary(
     )
 
 
-def _normalize_supervised_structured_value(value: str) -> str:
+def _normalize_supervised_structured_value(
+    value: str,
+    *,
+    maximum_utf8_bytes: int = _MAX_LAST_MESSAGE_BYTES,
+) -> str:
     """Normalize one scalar and remove explicit answer-letter mappings."""
 
     normalized = " ".join(value.split()).strip()
@@ -2076,7 +2136,11 @@ def _normalize_supervised_structured_value(value: str) -> str:
         normalized,
     )
     normalized = " ".join(normalized.split()).strip()
-    if not normalized or "\n" in normalized or len(normalized.encode("utf-8")) > 4096:
+    if (
+        not normalized
+        or "\n" in normalized
+        or len(normalized.encode("utf-8")) > maximum_utf8_bytes
+    ):
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
     return normalized
 
@@ -2084,7 +2148,10 @@ def _normalize_supervised_structured_value(value: str) -> str:
 def _normalize_supervised_auxiliary_value(value: str) -> str:
     if type(value) is not str or len(value) > _SUPERVISED_AUXILIARY_SCALAR_MAX_CHARACTERS:
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
-    return _normalize_supervised_structured_value(value)
+    return _normalize_supervised_structured_value(
+        value,
+        maximum_utf8_bytes=_SUPERVISED_AUXILIARY_SCALAR_MAX_CHARACTERS,
+    )
 
 
 def _supporting_task_set_hash(evidence_digests: Sequence[str]) -> str:
@@ -2115,7 +2182,10 @@ def _render_supervised_rule(
     if type(value) is not dict or set(value) != set(_SUPERVISED_RULE_VALUE_FIELDS):
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
     text_fields = {
-        field: _normalize_supervised_structured_value(value[field])
+        field: _normalize_supervised_structured_value(
+            value[field],
+            maximum_utf8_bytes=_SUPERVISED_MEMORY_SCALAR_MAX_UTF8_BYTES,
+        )
         for field in ("rule_id", "trigger", "principle", "action", "validation")
         if type(value[field]) is str
     }
@@ -2127,19 +2197,29 @@ def _render_supervised_rule(
         or value["target_type"] != "text_memory"
         or type(first_seen_cycle) is not int
         or first_seen_cycle < 1
+        or first_seen_cycle > _SUPERVISED_MEMORY_RULE_COUNTER_MAXIMUM
         or type(last_confirmed_cycle) is not int
         or last_confirmed_cycle < first_seen_cycle
+        or last_confirmed_cycle > _SUPERVISED_MEMORY_RULE_COUNTER_MAXIMUM
         or type(contradiction_count) is not int
         or contradiction_count < 0
+        or contradiction_count > _SUPERVISED_MEMORY_RULE_COUNTER_MAXIMUM
     ):
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
     evidence_count = value["evidence_count"]
-    if type(evidence_count) is not int or evidence_count < minimum_evidence:
+    if (
+        type(evidence_count) is not int
+        or evidence_count < minimum_evidence
+        or evidence_count > _SUPERVISED_MEMORY_RULE_EVIDENCE_MAX_ITEMS
+    ):
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
     if status == "provisional" and evidence_count != 1:
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
     evidence_digests = value["evidence_digests"]
-    if type(evidence_digests) is not list or len(evidence_digests) > 64:
+    if (
+        type(evidence_digests) is not list
+        or len(evidence_digests) > _SUPERVISED_MEMORY_RULE_EVIDENCE_MAX_ITEMS
+    ):
         raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
     normalized_digests: list[str] = []
     for digest in evidence_digests:

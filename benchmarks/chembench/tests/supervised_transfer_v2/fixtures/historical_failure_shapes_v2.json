@@ -65,6 +65,14 @@
       "shape": "auxiliary_evidence_binding_rejected_visible_non_packet_digest",
       "expected_replay": "REJECTED_FAIL_CLOSED_WITH_EXPECTED_CODE",
       "run_state_sha256": "46f37a1d8c85a5b7e992ea564a8183d1d32e0fb039f8cef0ead7d0ab3b5c03f8"
+    },
+    {
+      "run_id": "stv3-online-formal-20260729T190642Z",
+      "stage": "ONLINE_TRAIN",
+      "failure_code": "TASKWISE_ARTIFACT_VALIDATION_FAILED",
+      "shape": "rendered_text_memory_exceeds_fixed_capacity_by_two_bytes",
+      "expected_replay": "REJECTED_FAIL_CLOSED_WITH_EXPECTED_CODE",
+      "run_state_sha256": "d6110b610505a8a48c47f61dd407770afa0aac89e1c2cc90c51b294d658bbedb"
     }
   ],
   "synthetic_adjacent_shapes": [

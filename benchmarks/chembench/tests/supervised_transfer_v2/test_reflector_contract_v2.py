@@ -10,6 +10,9 @@ import pytest
 from openevo_chembench.supervised_transfer_v2.artifacts import (
     inspect_supervised_auxiliary_artifact_v2,
 )
+from openevo_chembench.supervised_transfer_v2.memory import (
+    SUPERVISED_MEMORY_MAX_UTF8_BYTES,
+)
 from openevo_chembench.supervised_transfer_v2.readiness import (
     _contract_matrix_markdown,
     _failure_audit_markdown,
@@ -101,6 +104,27 @@ def test_contract_schema_parser_and_artifact_validator_are_aligned() -> None:
         scalar = properties["agent_system_directives"]["items"]["properties"][field]
         assert scalar == {"type": "string", "minLength": 1, "maxLength": 192}
 
+    memory_max_items = {
+        "confirmed_principles": 8,
+        "provisional_principles": 3,
+        "common_failure_modes": 6,
+        "option_elimination_checks": 8,
+        "retired_or_contradicted": 3,
+        "output_discipline": 4,
+        "do": 6,
+        "avoid": 4,
+        "validate": 6,
+        "when_applicable": 6,
+        "retired_or_superseded": 4,
+    }
+    for field, maximum in memory_max_items.items():
+        assert properties[field]["maxItems"] == maximum
+    rule_properties = properties["confirmed_principles"]["items"]["properties"]
+    for field in ("rule_id", "trigger", "principle", "action", "validation"):
+        assert rule_properties[field]["maxLength"] == 128
+    assert rule_properties["evidence_count"]["maximum"] == 4
+    assert rule_properties["evidence_digests"]["maxItems"] == 4
+
     payload = _valid_payload()
     response = _response(payload)
     assert _supervised_structured_normalization_id(response).endswith("render_v3")
@@ -124,6 +148,51 @@ def test_contract_schema_parser_and_artifact_validator_are_aligned() -> None:
         forbidden_literals=(),
     ).passed
     assert "# Category Memory: Temperature_Prediction" in memory
+
+
+def test_text_memory_schema_reserves_utf8_capacity_headroom() -> None:
+    digests = [_sha(f"capacity-evidence-{index}") for index in range(4)]
+
+    def rule(evidence_count: int) -> dict[str, object]:
+        return {
+            "rule_id": "r" * 128,
+            "target_type": "text_memory",
+            "trigger": "t" * 128,
+            "principle": "p" * 128,
+            "action": "a" * 128,
+            "validation": "v" * 128,
+            "evidence_count": evidence_count,
+            "evidence_digests": digests[:evidence_count],
+            "first_seen_cycle": 1,
+            "last_confirmed_cycle": 1000,
+            "contradiction_count": 1000,
+        }
+
+    payload = _valid_payload()
+    payload.update(
+        {
+            "confirmed_principles": [rule(4) for _index in range(8)],
+            "provisional_principles": [rule(1) for _index in range(3)],
+            "common_failure_modes": ["x" * 128 for _index in range(6)],
+            "option_elimination_checks": ["x" * 128 for _index in range(8)],
+            "retired_or_contradicted": [rule(4) for _index in range(3)],
+            "output_discipline": ["x" * 128 for _index in range(4)],
+            "do": ["x" * 128 for _index in range(6)],
+            "avoid": ["x" * 128 for _index in range(4)],
+            "validate": ["x" * 128 for _index in range(6)],
+            "when_applicable": ["x" * 128 for _index in range(6)],
+            "retired_or_superseded": ["x" * 128 for _index in range(4)],
+        }
+    )
+    rendered = _render_supervised_structured_memory(_response(payload)).encode()
+    assert len(rendered) <= SUPERVISED_MEMORY_MAX_UTF8_BYTES
+
+    payload["common_failure_modes"] = ["x" * 129]
+    with pytest.raises(ReflectorBoundaryError, match="REFLECTOR_LAST_MESSAGE_INVALID"):
+        _render_supervised_structured_memory(_response(payload))
+    payload["common_failure_modes"] = ["\U0001f9ea" * 33]
+    with pytest.raises(ReflectorBoundaryError, match="REFLECTOR_LAST_MESSAGE_INVALID"):
+        _render_supervised_structured_memory(_response(payload))
 
 
 def test_runtime_schema_enumerates_only_core_authorized_evidence_digests() -> None:
