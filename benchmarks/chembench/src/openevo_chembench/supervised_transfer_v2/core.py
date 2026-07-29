@@ -4086,7 +4086,13 @@ def _bind_auxiliary_source_evidence(
         or len(set(reported_evidence_digests)) != len(reported_evidence_digests)
         or type(allowed_evidence_digests) is not frozenset
         or current_packet_digest not in allowed_evidence_digests
-        or not set(reported_evidence_digests).issubset(allowed_evidence_digests)
+        # The reflector can echo an opaque supporting-task-set hash that is
+        # visible in the approved predecessor memory alongside a real Train
+        # packet digest.  Those model-authored values never become artifact
+        # provenance: Core binds the auxiliary artifact solely to the current
+        # packet below.  Require at least one real, already-authorized packet
+        # digest so an entirely invented evidence set still fails closed.
+        or set(reported_evidence_digests).isdisjoint(allowed_evidence_digests)
     ):
         raise TaskwiseCoreEvolutionError("TASKWISE_ARTIFACT_VALIDATION_FAILED")
     return (current_packet_digest,)

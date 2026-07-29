@@ -220,10 +220,16 @@ def test_structured_memory_renderer_owns_supporting_hash_and_scrubs_answer_map()
 def test_core_owns_current_auxiliary_packet_provenance() -> None:
     previous = _sha("previous-packet")
     current = _sha("current-packet")
+    visible_supporting_set_hash = _sha("visible-supporting-task-set")
     allowed = frozenset({previous, current})
 
     assert _bind_auxiliary_source_evidence(
         reported_evidence_digests=(previous,),
+        allowed_evidence_digests=allowed,
+        current_packet_digest=current,
+    ) == (current,)
+    assert _bind_auxiliary_source_evidence(
+        reported_evidence_digests=(current, visible_supporting_set_hash),
         allowed_evidence_digests=allowed,
         current_packet_digest=current,
     ) == (current,)
