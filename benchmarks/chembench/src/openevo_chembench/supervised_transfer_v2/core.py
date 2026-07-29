@@ -1229,6 +1229,7 @@ class TaskwiseTextMemoryValidatorV1:
     """Validate one Core candidate against cumulative taskwise leakage inputs."""
 
     __slots__ = (
+        "_allowed_evidence_digests",
         "_expected_lineage",
         "_expected_record_count",
         "_finding_evidence",
@@ -1245,15 +1246,26 @@ class TaskwiseTextMemoryValidatorV1:
         forbidden_literals: tuple[str, ...],
         memory_limits: TaskwiseMemoryLimitsV1 | SupervisedMemoryLimitsV2,
         supervised_category: str | None = None,
+        allowed_evidence_digests: frozenset[str] | None = None,
     ) -> None:
         if type(memory_limits) not in (TaskwiseMemoryLimitsV1, SupervisedMemoryLimitsV2):
             raise TypeError("memory_limits type is unsupported")
         if (type(memory_limits) is SupervisedMemoryLimitsV2) != (supervised_category is not None):
             raise TypeError("supervised category and limits must be selected together")
+        if supervised_category is None:
+            if allowed_evidence_digests is not None:
+                raise TypeError("taskwise validation cannot bind supervised evidence")
+        elif (
+            type(allowed_evidence_digests) is not frozenset
+            or not allowed_evidence_digests
+            or any(_SHA256_RE.fullmatch(value) is None for value in allowed_evidence_digests)
+        ):
+            raise TypeError("supervised validation requires allowed packet evidence")
         self._expected_lineage = json.loads(_canonical_json(expected_lineage))
         self._expected_record_count = expected_record_count
         self._forbidden_literals = forbidden_literals
         self._finding_evidence: tuple[TaskwiseValidatorFindingEvidenceV1, ...] = ()
+        self._allowed_evidence_digests = allowed_evidence_digests
         self._memory_limits = memory_limits
         self._supervised_category = supervised_category
 
@@ -1302,6 +1314,7 @@ class TaskwiseTextMemoryValidatorV1:
                 payload,
                 category=self._supervised_category,
                 limits=self._memory_limits,
+                allowed_evidence_digests=self._allowed_evidence_digests,
             )
             required_core_sections = list(self._memory_limits.core_compatibility_sections)
             validator_id = "chembench_supervised_category_memory_validator_v1"
@@ -2011,12 +2024,23 @@ class TaskwiseCoreEvolutionBridgeV1:
             != result.core_artifact_manifest_sha256
         ):
             raise TaskwiseCoreEvolutionError("TASKWISE_HEAD_IDENTITY_DRIFT")
+        allowed_evidence = (
+            None
+            if result.supervised_category is None
+            else frozenset(
+                (
+                    *self._seen_supervised_packet_digests,
+                    result.supervised_packet_sha256,
+                )
+            )
+        )
         validator = TaskwiseTextMemoryValidatorV1(
             expected_lineage=self._expected_lineage_from_result(result),
             expected_record_count=result.records_visible_to_reflector,
             forbidden_literals=forbidden,
             memory_limits=self._memory_limits,
             supervised_category=result.supervised_category,
+            allowed_evidence_digests=allowed_evidence,
         )
         recomputed = validator.validate(
             artifact=artifact.model_copy(update={"promoted": False}),
@@ -2039,12 +2063,7 @@ class TaskwiseCoreEvolutionBridgeV1:
                 payload,
                 category=result.supervised_category,
                 limits=self._memory_limits,
-                allowed_evidence_digests=frozenset(
-                    (
-                        *self._seen_supervised_packet_digests,
-                        result.supervised_packet_sha256,
-                    )
-                ),
+                allowed_evidence_digests=allowed_evidence,
             )
         if inspection != result.memory_inspection:
             raise TaskwiseCoreEvolutionError("TASKWISE_MEMORY_INSPECTION_DRIFT")
@@ -3012,13 +3031,14 @@ class TaskwiseCoreEvolutionBridgeV1:
             else:
                 if type(self._memory_limits) is not SupervisedMemoryLimitsV2:
                     raise TypeError("supervised stream uses incompatible memory limits")
+                allowed_evidence = frozenset(
+                    (*self._seen_supervised_packet_digests, packet.digest)
+                )
                 inspection = inspect_supervised_category_memory_v2(
                     payload,
                     category=packet.category,
                     limits=self._memory_limits,
-                    allowed_evidence_digests=frozenset(
-                        (*self._seen_supervised_packet_digests, packet.digest)
-                    ),
+                    allowed_evidence_digests=allowed_evidence,
                 )
             failure_metadata["artifact_payload_sha256"] = payload_sha256
             failure_metadata["memory_inspection_sha256"] = inspection.digest
@@ -3028,6 +3048,9 @@ class TaskwiseCoreEvolutionBridgeV1:
                 forbidden_literals=forbidden_literals,
                 memory_limits=self._memory_limits,
                 supervised_category=None if packet is None else packet.category,
+                allowed_evidence_digests=(
+                    None if packet is None else allowed_evidence
+                ),
             )
             receipt = validator.validate(
                 artifact=artifact,
@@ -3037,7 +3060,7 @@ class TaskwiseCoreEvolutionBridgeV1:
             )
             failure_metadata["validation_receipt_sha256"] = receipt.digest
             failure_metadata["validator_finding_evidence"] = validator.finding_evidence
-            if not receipt.passed or receipt.finding_codes:
+            if not inspection.passed or not receipt.passed or receipt.finding_codes:
                 raise TaskwiseCoreEvolutionError("TASKWISE_ARTIFACT_VALIDATION_FAILED")
         except Exception as exc:  # noqa: BLE001 - validator trust boundary
             self._raise_private_core_failure(

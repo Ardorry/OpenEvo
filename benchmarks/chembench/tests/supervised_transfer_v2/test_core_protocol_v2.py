@@ -412,6 +412,87 @@ def _memory(evidence_digest: str) -> str:
 """
 
 
+def test_primary_memory_outside_train_evidence_fails_before_promotion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        core_methods,
+        "_generate_reflector_markdown",
+        lambda *_args, **_kwargs: _memory(_sha("invented-packet-evidence")),
+    )
+    root = tmp_path / "primary-evidence-failure"
+    bridge = TaskwiseCoreEvolutionBridgeV1(
+        db_path=root / "evolution.sqlite3",
+        artifact_root=root / "artifacts",
+        executable_registry=_registry(tmp_path / "primary-evidence-registry"),
+        checkpoint_path=root / "checkpoints.jsonl",
+        memory_limits=SUPERVISED_MEMORY_LIMITS_V2,
+    )
+    try:
+        task = _task(0)
+        trajectory, evaluation = _attempt(
+            task,
+            task_index=0,
+            round_index=0,
+            response="A",
+        )
+        packet = SupervisedEvolutionPacketV2.from_evaluations(
+            task=task,
+            training_task_ordinal=1,
+            round_index=0,
+            evaluations=(evaluation,),
+            trajectory_ids=(trajectory.trajectory_id,),
+            predecessor_memory=None,
+            predecessor_artifact_id=None,
+            predecessor_skill=None,
+            predecessor_skill_artifact_id=None,
+            predecessor_agent_system=None,
+            predecessor_agent_system_artifact_id=None,
+        )
+        request = TaskwiseCoreUpdateRequestV1(
+            task_uid=task.uid,
+            task_index=0,
+            round_index=0,
+            update_index=1,
+            trajectories=(trajectory,),
+            predecessor=None,
+            validator_forbidden_literals=_trajectory_forbidden_literals(trajectory),
+            supervised_packet=packet,
+        )
+        with pytest.raises(
+            TaskwiseCoreEvolutionError,
+            match="TASKWISE_ARTIFACT_VALIDATION_FAILED",
+        ):
+            bridge.apply_update(
+                request,
+                test_only_allow_synthetic_reflector=True,
+            )
+        with bridge._store.connect() as connection:
+            assert connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 1
+            assert connection.execute("SELECT COUNT(*) FROM contexts").fetchone()[0] == 0
+            text_rows = connection.execute(
+                "SELECT promoted FROM artifacts WHERE type='text_memory'"
+            ).fetchall()
+        assert [row["promoted"] for row in text_rows] == [0]
+        assert not (root / "checkpoints.jsonl").exists()
+        diagnostics = list((root / "private_core_failure_diagnostics").glob("*.json"))
+        assert len(diagnostics) == 1
+        failure = json.loads(diagnostics[0].read_text(encoding="utf-8"))
+        assert failure["stage"] == "ARTIFACT_VALIDATION"
+        assert failure["finding_code"] == "TASKWISE_ARTIFACT_VALIDATION_FAILED"
+        assert {
+            value["finding_code"] for value in failure["validator_finding_evidence"]
+        } == {"memory_evidence_outside_train_chain"}
+        with pytest.raises(TaskwiseCoreEvolutionError):
+            bridge.apply_update(
+                request,
+                test_only_allow_synthetic_reflector=True,
+            )
+    finally:
+        bridge.close()
+
+
 def test_three_cycles_create_nine_jobs_and_carry_all_targets(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

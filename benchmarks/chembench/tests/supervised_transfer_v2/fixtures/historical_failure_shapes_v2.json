@@ -11,6 +11,14 @@
       "run_state_sha256": "3bdb4aaba0371b44dfb7694aa85122793cd90057c749745afc75b21506f809a1"
     },
     {
+      "run_id": "stv2-preflight-20260729-017",
+      "stage": "ONLINE_CANARY",
+      "failure_code": "TASKWISE_CONTEXT_RESOLUTION_FAILED",
+      "shape": "primary_memory_outside_train_evidence_promoted_before_result_rejection",
+      "expected_replay": "REJECTED_FAIL_CLOSED_WITH_EXPECTED_CODE",
+      "run_state_sha256": "99bbc2371f36ced2eaa9bbdef9cb383a74a6264019db7a3fa24c269735e3607e"
+    },
+    {
       "run_id": "stv2-preflight-20260728-003",
       "stage": "UPDATE_SMOKE",
       "failure_code": "SUPERVISED_V2_TASK_SESSION_INVALID",
