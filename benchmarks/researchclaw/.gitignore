@@ -1,0 +1,95 @@
+
+# Local benchmark datasets
+data/
+datasets/
+downloads/
+
+# Generated runtime and experiment artifacts
+runtime/
+results/
+state/
+logs/
+artifacts/
+outputs/
+cache/
+
+# Nested experiment artifacts
+experiments/**/data/
+experiments/**/datasets/
+experiments/**/downloads/
+experiments/**/runtime/
+experiments/**/results/
+experiments/**/state/
+experiments/**/logs/
+experiments/**/artifacts/
+experiments/**/outputs/
+
+# Dependencies and caches
+node_modules/
+.venv/
+.venv-*/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+
+# Databases, logs and archives
+*.log
+*.db
+*.sqlite
+*.sqlite3
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.whl
+
+# Large dataset and model formats
+*.parquet
+*.arrow
+*.safetensors
+*.pt
+*.pth
+
+# Credentials
+.env
+.env.*
+auth.json
+credentials.json
+
+# Benchmark data and download staging
+/.cache/
+/hf_tasks_staging/
+/ResearchClawBench/tasks/
+
+# Generated experiment artifacts
+/experiments/**/.cache/
+/experiments/**/runs/
+/experiments/**/runtime/
+/experiments/**/outputs/
+/experiments/**/results/
+/experiments/**/state/
+/experiments/**/logs/
+/experiments/**/artifacts/
+
+# Local environments and dependencies
+.venv/
+.venv-*/
+node_modules/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+
+# Runtime files
+*.log
+*.db
+*.sqlite
+*.sqlite3
+*.tar
+*.tar.gz
+*.tgz
+
+# Credentials
+.env
+.env.*
+auth.json
+credentials.json

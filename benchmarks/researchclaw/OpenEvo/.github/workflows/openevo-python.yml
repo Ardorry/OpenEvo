@@ -1,0 +1,175 @@
+name: OpenEvo Core Backend checks
+
+on:
+  workflow_dispatch:
+    inputs:
+      require_real_docker:
+        description: Run required managed-runtime Docker ownership probes
+        required: true
+        default: true
+        type: boolean
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+    paths:
+      - ".github/workflows/openevo-python.yml"
+      - ".github/workflows/openevo-desktop.yml"
+      - ".github/workflows/openevo-desktop-candidate.yml"
+      - ".github/workflows/openevo-release-smoke.yml"
+      - ".github/workflows/openevo-release-artifact.yml"
+      - ".github/workflows/openevo-publish-pypi.yml"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "src/openevo/**"
+      - "src/slime_bridge/**"
+      - "scripts/**"
+      - "tests/**"
+      - "benchmarks/terminal_bench/**"
+      - "tests/ci/test_openevo_python_workflow.py"
+
+jobs:
+  python-tests:
+    name: ruff and core backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest pytest-asyncio ruff build twine wheel
+
+      - name: Lint OpenEvo package
+        run: |
+          ruff check src tests scripts
+
+      - name: Run OpenEvo regression tests
+        run: |
+          umask 077
+          python -m pytest \
+            tests/ci \
+            tests/config \
+            tests/platform \
+            tests/test_evolution_agent_harnesses.py \
+            tests/backend \
+            tests/evolution \
+            tests/gateway \
+            tests/runtime \
+            tests/trajectory \
+            tests/rollout \
+            tests/openevo/remote \
+            tests/openevo/science \
+            tests/openevo/sidecar \
+            tests/openevo/desktop \
+            tests/openevo/test_experiment_compiler.py \
+            tests/openevo/test_experiment_models.py \
+            tests/openevo/test_experiment_runner.py \
+            tests/openevo/test_core_capabilities.py \
+            tests/openevo/test_core_host_service.py \
+            -q
+
+  real-docker-runtime-probes:
+    name: required candidate managed-runtime Docker probes
+    if: github.event_name == 'workflow_dispatch' && inputs.require_real_docker
+    runs-on: ubuntu-latest
+    env:
+      OPENEVO_REQUIRE_REAL_DOCKER: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install runtime probe dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest pytest-asyncio
+
+      - name: Require Docker daemon and probe image
+        run: |
+          docker info
+          docker pull python:3.12-slim-bookworm
+
+      - name: Run real Docker ownership probes
+        run: |
+          python -m pytest -q \
+            tests/runtime/test_docker_runtime.py::test_real_docker_name_collision_preserves_running_external_container \
+            tests/runtime/test_docker_runtime.py::test_real_docker_credential_auth_inode_remains_pinned_after_host_replacement \
+            tests/runtime/test_docker_runtime.py::test_real_docker_cancel_after_cidfile_is_recoverably_owned
+
+  macos-ssh-transport:
+    name: macOS fixed executable and anonymous Core SSH transport
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install focused test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest
+
+      - name: Test anonymous AF_UNIX Core transport
+        run: |
+          unset SSH_AUTH_SOCK
+          umask 077
+          python -m pytest -q \
+            tests/openevo/remote/test_ssh_transport.py::test_core_tunnel_uses_parent_owned_socketpair_and_per_connection_ssh_child \
+            tests/openevo/remote/test_ssh_transport.py::test_core_tunnel_connection_start_cancellation_closes_parent_stream_and_propagates \
+            tests/openevo/remote/test_ssh_transport.py::test_core_tunnel_never_fchmods_anonymous_socketpair_on_darwin \
+            tests/openevo/remote/test_ssh_transport.py::test_core_tunnel_rejects_non_stream_socketpair \
+            tests/openevo/remote/test_ssh_transport.py::test_core_tunnel_rejects_socketpair_not_owned_by_effective_uid \
+            tests/openevo/remote/test_ssh_transport.py::test_core_tunnel_rejects_peer_fd_replacement_after_child_spawn \
+            tests/openevo/remote/test_ssh_transport.py::test_core_tunnel_rejects_child_that_exits_during_connection_start \
+            tests/openevo/remote/test_ssh_transport.py::test_core_connection_authority_passes_birth_and_peer_fds_to_exact_ssh_child \
+            tests/openevo/remote/test_ssh_transport.py::test_core_connection_subprocess_bridges_a_real_parent_owned_af_unix_stream \
+            tests/openevo/remote/test_ssh_transport.py::test_source_birth_launcher_uses_platform_bound_execution_target \
+            tests/openevo/remote/test_ssh_transport.py::test_rsync_nested_ssh_uses_verified_platform_target_and_inherits_fd \
+            tests/openevo/remote/test_ssh_transport.py::test_darwin_rsync_nested_ssh_uses_revalidated_fixed_path \
+            tests/openevo/remote/test_ssh_transport.py::test_group_signal_skips_kill_when_only_zombie_members_remain \
+            tests/openevo/remote/test_ssh_transport.py::test_group_signal_permission_error_requires_state_recheck \
+            tests/openevo/remote/test_system_executables.py::test_darwin_system_executable_uses_revalidated_root_owned_path \
+            tests/openevo/remote/test_system_executables.py::test_owned_subprocess_birth_uses_platform_execution_authority \
+            tests/openevo/remote/test_system_executables.py::test_malicious_path_ssh_is_never_executed \
+            tests/openevo/remote/test_system_executables.py::test_keyscan_executes_only_the_held_fixed_binary
+
+  terminal-bench-tests:
+    name: standalone Terminal Bench package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install standalone benchmark dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install -e benchmarks/terminal_bench
+          python -m pip install pytest ruff build
+
+      - name: Lint standalone Terminal Bench automation
+        run: ruff check benchmarks/terminal_bench
+
+      - name: Run standalone Terminal Bench automation tests
+        run: python -m pytest benchmarks/terminal_bench/tests -q
+
+      - name: Smoke clean Terminal Bench package install
+        run: |
+          python -m build --wheel --outdir .ci-dist/core .
+          python -m build --wheel --outdir .ci-dist/terminal-bench benchmarks/terminal_bench
+          python scripts/ci/smoke_terminal_bench_package.py \
+            --core-wheel .ci-dist/core/*.whl \
+            --benchmark-wheel .ci-dist/terminal-bench/*.whl
