@@ -97,6 +97,14 @@
       "shape": "provisional_schema_allowed_multiple_evidence_digests_but_renderer_requires_one",
       "expected_replay": "REJECTED_FAIL_CLOSED_WITH_EXPECTED_CODE",
       "run_state_sha256": "f6a3e70cb20115c56aef1a52afb516cd7b0572fc3d0fe3fe43d132d1e7f1cfa9"
+    },
+    {
+      "run_id": "stv3-online-formal-20260729T214200Z",
+      "stage": "ONLINE_TRAIN",
+      "failure_code": "REFLECTOR_LAST_MESSAGE_INVALID",
+      "shape": "schema_allowed_duplicate_skill_evidence_before_auxiliary_renderer_rejection",
+      "expected_replay": "REJECTED_FAIL_CLOSED_WITH_EXPECTED_CODE",
+      "run_state_sha256": "5549278627ccb5cd0951f692b52eeeecf949d91d27459cca51bda982424b8a06"
     }
   ],
   "synthetic_adjacent_shapes": [

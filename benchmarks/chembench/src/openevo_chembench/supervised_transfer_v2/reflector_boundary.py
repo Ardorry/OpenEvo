@@ -270,6 +270,7 @@ def _supervised_rule_output_schema(*, minimum_evidence: int) -> dict[str, object
             },
             "evidence_digests": {
                 "type": "array",
+                "description": "Distinct supporting packet digests; never repeat a digest.",
                 "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                 "minItems": minimum_evidence,
                 "maxItems": (
@@ -343,6 +344,7 @@ _SUPERVISED_OUTPUT_SCHEMA = {
         },
         "skill_evidence_digests": {
             "type": "array",
+            "description": "Distinct supporting packet digests; never repeat a digest.",
             "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
             "minItems": 1,
             "maxItems": 64,
@@ -371,6 +373,9 @@ _SUPERVISED_OUTPUT_SCHEMA = {
                     },
                     "evidence_digests": {
                         "type": "array",
+                        "description": (
+                            "Distinct supporting packet digests; never repeat a digest."
+                        ),
                         "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                         "minItems": 1,
                         "maxItems": 64,
@@ -1935,7 +1940,12 @@ def _render_supervised_structured_memory(response: str) -> str:
 
 
 def _supervised_structured_normalization_id(response: str) -> str:
-    """Select the auditable renderer identity from the exact closed key set."""
+    """Select the renderer only after every target projection is renderable.
+
+    The wrapper calls this before the Core worker can consume its output.  Keep
+    the all-target validation here so an invalid auxiliary projection cannot
+    leave a primary text-memory job or artifact behind.
+    """
 
     payload = _load_supervised_json_object(response)
     legacy_keys = {
@@ -1948,6 +1958,8 @@ def _supervised_structured_normalization_id(response: str) -> str:
         *_SUPERVISED_AGENT_FIELDS,
     }
     if set(payload) == multitarget_keys:
+        _render_supervised_structured_memory(response)
+        _render_supervised_structured_auxiliary(response)
         return _SUPERVISED_MULTITARGET_RENDER_ID
     raise ReflectorBoundaryError("REFLECTOR_LAST_MESSAGE_INVALID")
 

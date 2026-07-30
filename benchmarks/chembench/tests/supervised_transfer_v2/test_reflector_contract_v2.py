@@ -124,11 +124,16 @@ def test_contract_schema_parser_and_artifact_validator_are_aligned() -> None:
         assert rule_properties[field]["maxLength"] == 96
     assert "evidence_count" not in rule_properties
     assert rule_properties["evidence_digests"]["maxItems"] == 4
+    assert "never repeat" in rule_properties["evidence_digests"]["description"]
     provisional_evidence = properties["provisional_principles"]["items"][
         "properties"
     ]["evidence_digests"]
     assert provisional_evidence["minItems"] == 1
     assert provisional_evidence["maxItems"] == 1
+    assert "never repeat" in properties["skill_evidence_digests"]["description"]
+    assert "never repeat" in properties["agent_system_directives"]["items"][
+        "properties"
+    ]["evidence_digests"]["description"]
 
     payload = _valid_payload()
     response = _response(payload)
@@ -302,12 +307,7 @@ def test_historical_empty_and_adjacent_required_field_shapes_fail_closed(
     else:
         payload[field] = {"unexpected": True}
     response = _response(payload)
-    if mutation == "missing":
-        _assert_rejected(response)
-    else:
-        _supervised_structured_normalization_id(response)
-        with pytest.raises(ReflectorBoundaryError, match="REFLECTOR_LAST_MESSAGE_INVALID"):
-            _render_supervised_structured_auxiliary(response)
+    _assert_rejected(response)
 
 
 @pytest.mark.parametrize(
@@ -414,6 +414,7 @@ def test_provisional_rule_schema_matches_single_evidence_validator_contract() ->
     ]["evidence_digests"]
     assert evidence_schema == {
         "type": "array",
+        "description": "Distinct supporting packet digests; never repeat a digest.",
         "items": {"type": "string", "enum": sorted((first, second))},
         "minItems": 1,
         "maxItems": 1,
@@ -558,6 +559,23 @@ def test_all_six_nonempty_auxiliary_fields_replay_the_015_failure_shape() -> Non
         payload[field] = []
         with pytest.raises(ReflectorBoundaryError, match="REFLECTOR_LAST_MESSAGE_INVALID"):
             _render_supervised_structured_auxiliary(_response(payload))
+
+
+def test_duplicate_evidence_is_rejected_before_any_target_projection_is_accepted() -> None:
+    payload = _valid_payload(category="Property_Prediction")
+    evidence = tuple(payload["skill_evidence_digests"])
+    payload["skill_evidence_digests"] = [*evidence, *evidence]
+    with pytest.raises(ReflectorBoundaryError, match="REFLECTOR_LAST_MESSAGE_INVALID"):
+        _supervised_structured_normalization_id(_response(payload))
+
+    payload = _valid_payload(category="Property_Prediction")
+    directive = payload["agent_system_directives"][0]
+    directive["evidence_digests"] = [
+        *directive["evidence_digests"],
+        *directive["evidence_digests"],
+    ]
+    with pytest.raises(ReflectorBoundaryError, match="REFLECTOR_LAST_MESSAGE_INVALID"):
+        _supervised_structured_normalization_id(_response(payload))
 
 
 def test_machine_readable_contract_and_failure_audit_cover_the_paid_boundaries() -> None:
