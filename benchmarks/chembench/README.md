@@ -339,6 +339,16 @@ compare_full_frozen_v2.sh
 Full-run launch is blocked unless the unchanged paired pilot report satisfies
 the preregistered GO gate.
 
+## Supervised transfer v3 category-shard recovery
+
+The explicit `category-recovery-verify`, `category-recovery-dry-run`, and
+`category-recover-online` v3 commands recover only at whole-category
+boundaries. They accept a separately audited closed parent shard, discard the
+entire partial category, and start a new namespace at the next category's task
+0 with generation-zero targets. They never copy or attach a parent database
+and never import parent artifacts. See
+[`configs/supervised_transfer_v3/category_shard_recovery.md`](configs/supervised_transfer_v3/category_shard_recovery.md).
+
 ## Legacy protocol
 
 The older `jablonkagroup/ChemBench` adapter, configurations, and partial
