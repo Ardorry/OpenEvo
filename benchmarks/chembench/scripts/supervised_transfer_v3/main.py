@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ChemBench three-answer evolved-only supervised transfer v3 entry point."""
+"""ChemBench config-bound evolved-only supervised transfer v3 entry point."""
 
 from __future__ import annotations
 

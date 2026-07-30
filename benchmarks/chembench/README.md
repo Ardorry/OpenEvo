@@ -349,6 +349,19 @@ entire partial category, and start a new namespace at the next category's task
 and never import parent artifacts. See
 [`configs/supervised_transfer_v3/category_shard_recovery.md`](configs/supervised_transfer_v3/category_shard_recovery.md).
 
+## Supervised transfer v3 two-round amendment
+
+The optional
+`chembench_supervised_transfer_v3_two_round_one_evolution.yaml` profile runs
+each Train task as `Round 0 -> Cycle 1 -> Round 1 Final`: two independent
+candidate sessions with one supervised evolution update producing all three
+typed targets. It uses a distinct protocol ID and a fresh run namespace. It
+cannot import or compose any category shard produced by the legacy
+three-answer/two-cycle profile. The candidate harness, reflector worker,
+artifact lifecycle, model, evaluator, parser, frozen split, and final-Test
+semantics are unchanged. See
+[`configs/supervised_transfer_v3/two_round_one_evolution.md`](configs/supervised_transfer_v3/two_round_one_evolution.md).
+
 ## Legacy protocol
 
 The older `jablonkagroup/ChemBench` adapter, configurations, and partial

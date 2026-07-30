@@ -1,4 +1,4 @@
-"""Three-answer, two-cycle, evolved-only supervised transfer v3 controller."""
+"""Config-bound evolved-only supervised transfer v3 controller."""
 
 from __future__ import annotations
 
@@ -47,12 +47,10 @@ from openevo_chembench.supervised_transfer_v2.prepare import verify_phase0_v2
 from openevo_chembench.supervised_transfer_v2.runtime_services import load_runtime_services_v2
 from openevo_chembench.supervised_transfer_v2.split import load_private_partition_v2
 from openevo_chembench.supervised_transfer_v3.config import (
-    EVOLUTION_CYCLES,
-    PROTOCOL_ID,
     TARGETS,
     TEST_COUNT,
     TRAIN_COUNT,
-    TRAIN_ROUNDS,
+    TRAIN_PER_CATEGORY,
     V2_MANIFEST_ROOT,
     SupervisedTransferConfigV3,
 )
@@ -167,9 +165,9 @@ def build_complete_dry_run_v3(inputs: ExperimentInputsV2) -> dict[str, object]:
         {
             "category": category,
             "task_count": len(v2._by_category(inputs.train)[category]),
-            "sessions_per_task": TRAIN_ROUNDS,
-            "cycles_per_task": EVOLUTION_CYCLES,
-            "sequence": ["ROUND_0", "CYCLE_1", "ROUND_1", "CYCLE_2", "ROUND_2_FINAL"],
+            "sessions_per_task": inputs.config.train_rounds,
+            "cycles_per_task": inputs.config.evolution_cycles,
+            "sequence": list(inputs.config.train_sequence),
             "targets_per_cycle": list(TARGETS),
         }
         for category in CHEMBENCH4K_CATEGORIES
@@ -178,7 +176,7 @@ def build_complete_dry_run_v3(inputs: ExperimentInputsV2) -> dict[str, object]:
         raise SupervisedExperimentV3Error("DRY_RUN_TRAIN_SCHEDULE_INVALID")
     return {
         "schema_version": "ChemBenchSupervisedTransferDryRunV3",
-        "protocol_id": PROTOCOL_ID,
+        "protocol_id": inputs.config.protocol_id,
         "status": "PASS",
         "model_calls": 0,
         "stage_order": ["ONLINE_TRAIN", "FREEZE_THREE_TARGETS", "EVOLVED_TEST", "REPORTING"],
@@ -236,14 +234,14 @@ class SupervisedTransferExperimentV3(v2.SupervisedTransferExperimentV2):
         self._state.update(
             {
                 "schema_version": RUN_STATE_SCHEMA,
-                "protocol_id": PROTOCOL_ID,
+                "protocol_id": self.inputs.config.protocol_id,
                 "run_mode": run_mode,
                 "smoke_run_id": smoke_run_id,
                 "control_train_enabled": False,
                 "control_test_enabled": False,
                 "probe_enabled": False,
-                "attempts_per_train_task": TRAIN_ROUNDS,
-                "evolution_cycles_per_train_task": EVOLUTION_CYCLES,
+                "attempts_per_train_task": self.inputs.config.train_rounds,
+                "evolution_cycles_per_train_task": self.inputs.config.evolution_cycles,
             }
         )
         self._write_state()
@@ -270,7 +268,12 @@ class SupervisedTransferExperimentV3(v2.SupervisedTransferExperimentV2):
                     stage="SMOKE_ONLINE",
                     persist_head=False,
                 )
-            self._require_counts(task_sessions=3, reflector_calls=2, core_jobs=6)
+            cycles = self.inputs.config.evolution_cycles
+            self._require_counts(
+                task_sessions=self.inputs.config.train_rounds,
+                reflector_calls=cycles,
+                core_jobs=cycles * len(TARGETS),
+            )
             self._set_stage("SMOKE_COMPLETED")
             authority = self._smoke_authority()
             path = self.result_root / "public/smoke_authority_v3.json"
@@ -293,10 +296,17 @@ class SupervisedTransferExperimentV3(v2.SupervisedTransferExperimentV2):
                 executor = v2._enter_if_context(stack, self._executor_factory("online"))
                 self._open_formal_bridges(stack)
                 self._run_online_train_v3(executor)
-                self._require_counts(task_sessions=1350, reflector_calls=900, core_jobs=2700)
+                cycles = self.inputs.config.evolution_cycles
+                self._require_counts(
+                    task_sessions=TRAIN_COUNT * self.inputs.config.train_rounds,
+                    reflector_calls=TRAIN_COUNT * cycles,
+                    core_jobs=TRAIN_COUNT * cycles * len(TARGETS),
+                )
                 frozen = self._freeze_three_targets_v3()
                 self._run_evolved_test_v3(frozen, executor)
-            if int(self._state["task_sessions"]) != 1800:
+            if int(self._state["task_sessions"]) != (
+                TRAIN_COUNT * self.inputs.config.train_rounds + TEST_COUNT
+            ):
                 raise SupervisedExperimentV3Error("FINAL_TASK_COUNTER_MISMATCH")
         except BaseException as exc:
             self._fail_closed(exc)
@@ -374,7 +384,7 @@ class SupervisedTransferExperimentV3(v2.SupervisedTransferExperimentV2):
         trajectories = []
         evaluations = []
         context = None if head is None else bridge.issue_runtime_context(head)
-        for round_index in range(TRAIN_ROUNDS):
+        for round_index in range(self.inputs.config.train_rounds):
             outcome = self._execute_session(
                 executor,
                 task=task,
@@ -386,7 +396,7 @@ class SupervisedTransferExperimentV3(v2.SupervisedTransferExperimentV2):
                 stage=stage,
             )
             evaluations.append(outcome.evaluation)
-            if round_index == TRAIN_ROUNDS - 1:
+            if round_index == self.inputs.config.train_rounds - 1:
                 break
             trajectory = self._trajectory(task, category_ordinal, round_index, outcome)
             trajectories.append(trajectory)
@@ -403,7 +413,7 @@ class SupervisedTransferExperimentV3(v2.SupervisedTransferExperimentV2):
             )
             context = bridge.issue_runtime_context(head)
             self._record_core_result(stage, task.category, head)
-        if head is None or head.update_index != EVOLUTION_CYCLES:
+        if head is None or head.update_index != self.inputs.config.evolution_cycles:
             raise SupervisedExperimentV3Error("ONLINE_TASK_FINAL_HEAD_MISSING")
         if persist_head:
             self._heads[task.category] = head
@@ -415,7 +425,12 @@ class SupervisedTransferExperimentV3(v2.SupervisedTransferExperimentV2):
         categories: dict[str, dict[str, object]] = {}
         for category in CHEMBENCH4K_CATEGORIES:
             head = self._heads[category]
-            if head is None or head.global_update_ordinal != 100 or head.update_index != 2:
+            final_update_ordinal = TRAIN_PER_CATEGORY * self.inputs.config.evolution_cycles
+            if (
+                head is None
+                or head.global_update_ordinal != final_update_ordinal
+                or head.update_index != self.inputs.config.evolution_cycles
+            ):
                 raise SupervisedExperimentV3Error("FINAL_CATEGORY_HEAD_INCOMPLETE")
             bridge = self._bridges[category]
             bridge.verify_update_result(head)
@@ -424,7 +439,7 @@ class SupervisedTransferExperimentV3(v2.SupervisedTransferExperimentV2):
             categories[category] = {
                 "global_update_ordinal": head.global_update_ordinal,
                 "final_task_ordinal": 50,
-                "final_cycle": 2,
+                "final_cycle": self.inputs.config.evolution_cycles,
                 "text_memory": v2._target_receipt(context.memory),
                 "skill_bundle": v2._target_receipt(context.skill),
                 "agent_system": v2._target_receipt(context.agent_system),
@@ -435,7 +450,7 @@ class SupervisedTransferExperimentV3(v2.SupervisedTransferExperimentV2):
         artifact_set_digest = sha256_bytes(canonical_json_bytes(categories))
         receipt = {
             "schema_version": FROZEN_RECEIPT_SCHEMA,
-            "protocol_id": PROTOCOL_ID,
+            "protocol_id": self.inputs.config.protocol_id,
             "source_commit": self.inputs.source_commit,
             "config_sha256": self.inputs.config.digest,
             "split_reference_sha256": self.inputs.split_receipt_sha256,
@@ -449,7 +464,9 @@ class SupervisedTransferExperimentV3(v2.SupervisedTransferExperimentV2):
             "target_count": len(categories) * len(TARGETS),
             "artifact_set_sha256": artifact_set_digest,
             "categories": categories,
-            "checkpoint_selection": "FINAL_TASK_50_CYCLE_2_ONLY",
+            "checkpoint_selection": (
+                f"FINAL_TASK_50_CYCLE_{self.inputs.config.evolution_cycles}_ONLY"
+            ),
             "test_evolution_allowed": False,
             "frozen_at_utc": v2.utc_now(),
         }
@@ -586,7 +603,7 @@ class SupervisedTransferExperimentV3(v2.SupervisedTransferExperimentV2):
         }:
             raise SupervisedExperimentV3Error("V3_EXECUTION_ARM_INVALID")
         if stage in {"SMOKE_ONLINE", "ONLINE_TRAIN"}:
-            if round_index not in {0, 1, 2}:
+            if round_index not in set(range(self.inputs.config.train_rounds)):
                 raise SupervisedExperimentV3Error("V3_TRAIN_ROUND_INVALID")
             expected_missing = task_ordinal == 0 and round_index == 0
             if (context is None) != expected_missing:
@@ -617,7 +634,7 @@ class SupervisedTransferExperimentV3(v2.SupervisedTransferExperimentV2):
             timeout_seconds=self.inputs.config.task_timeout_seconds,
             rollout_url=self.inputs.config.rollout_url,
             runtime_services=self.inputs.runtime_services,
-            protocol_id=PROTOCOL_ID,
+            protocol_id=self.inputs.config.protocol_id,
         )
 
     def _default_bridge(self, state_root: Path, _category: str) -> TaskwiseCoreEvolutionBridgeV1:
@@ -629,29 +646,32 @@ class SupervisedTransferExperimentV3(v2.SupervisedTransferExperimentV2):
             codex_executable=self.inputs.managed_codex.executable,
             auth_source=codex_subscription_auth_source_v2(),
             timeout_seconds=self.inputs.config.reflector_timeout_seconds,
-            updates_per_task=EVOLUTION_CYCLES,
+            updates_per_task=self.inputs.config.evolution_cycles,
         )
 
     def _write_paid_plan(self) -> None:
         mode = self.v3_run_mode
         if mode == "smoke":
+            rounds = self.inputs.config.train_rounds
+            cycles = self.inputs.config.evolution_cycles
+            core_jobs = cycles * len(TARGETS)
             calls = {
-                "candidate_task_calls": 3,
-                "reflector_calls": 2,
-                "core_jobs": 6,
-                "typed_artifacts": 6,
-                "context_resolutions": 6,
-                "candidate_subscription_readiness_calls_minimum": 3,
-                "candidate_subscription_readiness_calls_maximum": 6,
-                "answer_and_reflector_model_calls": 5,
-                "total_model_calls": 8,
-                "maximum_model_calls": 11,
+                "candidate_task_calls": rounds,
+                "reflector_calls": cycles,
+                "core_jobs": core_jobs,
+                "typed_artifacts": core_jobs,
+                "context_resolutions": core_jobs,
+                "candidate_subscription_readiness_calls_minimum": rounds,
+                "candidate_subscription_readiness_calls_maximum": rounds * 2,
+                "answer_and_reflector_model_calls": rounds + cycles,
+                "total_model_calls": rounds * 2 + cycles,
+                "maximum_model_calls": rounds * 3 + cycles,
             }
         else:
             calls = self.inputs.config.call_budget
         payload = {
             "schema_version": PAID_PLAN_SCHEMA,
-            "protocol_id": PROTOCOL_ID,
+            "protocol_id": self.inputs.config.protocol_id,
             "run_id": self.run_id,
             "run_mode": mode,
             "smoke_run_id": self.smoke_run_id,
@@ -666,8 +686,8 @@ class SupervisedTransferExperimentV3(v2.SupervisedTransferExperimentV2):
             "task_infrastructure_retry_limit": v2._TASK_INFRASTRUCTURE_RETRY_LIMIT,
             "final_test_infrastructure_retry_limit": v2._FINAL_TEST_INFRASTRUCTURE_RETRY_LIMIT,
             "stall_limit_seconds": v2._EXECUTOR_STALL_SECONDS,
-            "attempts_per_train_task": TRAIN_ROUNDS,
-            "evolution_cycles_per_train_task": EVOLUTION_CYCLES,
+            "attempts_per_train_task": self.inputs.config.train_rounds,
+            "evolution_cycles_per_train_task": self.inputs.config.evolution_cycles,
             "targets_per_cycle": list(TARGETS),
             "control_train_enabled": False,
             "control_test_enabled": False,
@@ -688,9 +708,12 @@ class SupervisedTransferExperimentV3(v2.SupervisedTransferExperimentV2):
         )
 
     def _smoke_authority(self) -> dict[str, object]:
+        rounds = self.inputs.config.train_rounds
+        cycles = self.inputs.config.evolution_cycles
+        core_jobs = cycles * len(TARGETS)
         return {
             "schema_version": SMOKE_AUTHORITY_SCHEMA,
-            "protocol_id": PROTOCOL_ID,
+            "protocol_id": self.inputs.config.protocol_id,
             "status": "PASS",
             "source_run_id": self.run_id,
             "source_commit": self.inputs.source_commit,
@@ -701,13 +724,13 @@ class SupervisedTransferExperimentV3(v2.SupervisedTransferExperimentV2):
             "reflector_codex_identity_sha256": self.inputs.managed_codex.digest,
             "runtime_services_identity_sha256": self.inputs.runtime_services.digest,
             "category": "Temperature_Prediction",
-            "task_sessions": 3,
-            "reflector_calls": 2,
-            "core_jobs": 6,
-            "context_resolutions": 6,
-            "text_memory_artifacts": 2,
-            "skill_artifacts": 2,
-            "agent_system_artifacts": 2,
+            "task_sessions": rounds,
+            "reflector_calls": cycles,
+            "core_jobs": core_jobs,
+            "context_resolutions": core_jobs,
+            "text_memory_artifacts": cycles,
+            "skill_artifacts": cycles,
+            "agent_system_artifacts": cycles,
             "security_findings": 0,
             "context_findings": 0,
             "artifact_findings": 0,
@@ -728,9 +751,12 @@ class SupervisedTransferExperimentV3(v2.SupervisedTransferExperimentV2):
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise SupervisedExperimentV3Error("SMOKE_AUTHORITY_MISSING") from exc
+        rounds = self.inputs.config.train_rounds
+        cycles = self.inputs.config.evolution_cycles
+        core_jobs = cycles * len(TARGETS)
         expected = {
             "schema_version": SMOKE_AUTHORITY_SCHEMA,
-            "protocol_id": PROTOCOL_ID,
+            "protocol_id": self.inputs.config.protocol_id,
             "status": "PASS",
             "source_run_id": self.smoke_run_id,
             "source_commit": self.inputs.source_commit,
@@ -741,13 +767,13 @@ class SupervisedTransferExperimentV3(v2.SupervisedTransferExperimentV2):
             "reflector_codex_identity_sha256": self.inputs.managed_codex.digest,
             "runtime_services_identity_sha256": self.inputs.runtime_services.digest,
             "category": "Temperature_Prediction",
-            "task_sessions": 3,
-            "reflector_calls": 2,
-            "core_jobs": 6,
-            "context_resolutions": 6,
-            "text_memory_artifacts": 2,
-            "skill_artifacts": 2,
-            "agent_system_artifacts": 2,
+            "task_sessions": rounds,
+            "reflector_calls": cycles,
+            "core_jobs": core_jobs,
+            "context_resolutions": core_jobs,
+            "text_memory_artifacts": cycles,
+            "skill_artifacts": cycles,
+            "agent_system_artifacts": cycles,
             "security_findings": 0,
             "context_findings": 0,
             "artifact_findings": 0,

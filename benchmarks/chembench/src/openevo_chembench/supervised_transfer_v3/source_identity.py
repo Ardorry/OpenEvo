@@ -13,7 +13,7 @@ from openevo_chembench.supervised_transfer_v1.common import (
     write_public_file,
 )
 from openevo_chembench.supervised_transfer_v3.config import (
-    PROTOCOL_ID,
+    SOURCE_FAMILY_ID,
     SOURCE_MANIFEST_RELATIVE,
 )
 
@@ -70,7 +70,7 @@ def build_source_manifest_v3(repository_root: Path) -> dict[str, object]:
     )
     return {
         "schema_version": "ChemBenchSupervisedTransferSourceManifestV3",
-        "protocol_id": PROTOCOL_ID,
+        "protocol_id": SOURCE_FAMILY_ID,
         "source_file_count": len(entries),
         "source_files": entries,
         "combined_sha256": combined,

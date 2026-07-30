@@ -874,7 +874,7 @@ class TaskwiseCoreUpdateResultV1(_FrozenModel):
     task_index: int = Field(ge=0)
     round_index: Literal[0, 1, 2]
     update_index: Literal[1, 2, 3]
-    updates_per_task: Literal[2, 3] = 3
+    updates_per_task: Literal[1, 2, 3] = 3
     global_update_ordinal: int = Field(ge=1)
     predecessor: TaskwiseCorePredecessorV1 | None
     trajectory_ids: tuple[str, ...]
@@ -1450,7 +1450,7 @@ class TaskwiseCoreEvolutionBridgeV1:
             TASKWISE_MEMORY_LIMITS_V1
         ),
         reflector_timeout_seconds: int = DEFAULT_REFLECTOR_TIMEOUT_SECONDS,
-        updates_per_task: Literal[2, 3] = 3,
+        updates_per_task: Literal[1, 2, 3] = 3,
     ) -> None:
         if type(memory_limits) not in (TaskwiseMemoryLimitsV1, SupervisedMemoryLimitsV2):
             raise TypeError("memory_limits must be an exact supported protocol type")
@@ -1458,8 +1458,8 @@ class TaskwiseCoreEvolutionBridgeV1:
             reflector_timeout_seconds
         )
         self._core_lease_seconds = _core_lease_seconds(self._reflector_timeout_seconds)
-        if updates_per_task not in (2, 3):
-            raise ValueError("updates_per_task must be 2 or 3")
+        if updates_per_task not in (1, 2, 3):
+            raise ValueError("updates_per_task must be 1, 2, or 3")
         self._updates_per_task = updates_per_task
         self._registry = require_verified_executable_registry(executable_registry)
         self._require_method()
@@ -3970,7 +3970,7 @@ def build_supervised_core_bridge_at_roots_v2(
     auth_source: Path,
     timeout_seconds: int,
     memory_limits: SupervisedMemoryLimitsV2 = SUPERVISED_MEMORY_LIMITS_V2,
-    updates_per_task: Literal[2, 3] = 3,
+    updates_per_task: Literal[1, 2, 3] = 3,
 ) -> TaskwiseCoreEvolutionBridgeV1:
     """Build one category-private supervised stream on the verified Core method."""
 

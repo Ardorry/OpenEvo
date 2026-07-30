@@ -30,6 +30,12 @@ These results must not be reported as standard ChemBench4K or leaderboard
 scores.  The control and online configs are paired against one shared public
 manifest and one evaluator-only private manifest for each scope.
 
+The supervised-transfer v3 package also contains an explicit
+`chembench_supervised_transfer_v3_two_round_one_evolution.yaml` amendment. It
+uses two Train candidate sessions and one intervening evolution cycle. The
+legacy v3 config remains three sessions/two cycles; the two profiles use
+distinct protocol IDs and their category shards are not composable.
+
 The old `{control,online}_pilot500_taskwise_online_v1.yaml` pair binds only
 the byte-preserved `legacy_single_stream` manifest.  Public pilot entrypoints
 do not use it; its provenance is marked `LEGACY_SINGLE_STREAM_PILOT_MANIFEST`

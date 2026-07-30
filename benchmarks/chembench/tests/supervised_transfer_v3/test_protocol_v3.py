@@ -39,7 +39,9 @@ from openevo_chembench.supervised_transfer_v3 import reporting as reporting_v3
 from openevo_chembench.supervised_transfer_v3.config import (
     EVOLUTION_CYCLES,
     PROTOCOL_ID,
+    SOURCE_FAMILY_ID,
     TRAIN_ROUNDS,
+    TWO_ROUND_ONE_EVOLUTION_PROTOCOL_ID,
     SupervisedTransferConfigV3,
     load_config_v3,
 )
@@ -63,6 +65,10 @@ from openevo_chembench.supervised_transfer_v3.test_ledger import (
 
 REPOSITORY = Path(__file__).resolve().parents[4]
 CONFIG = REPOSITORY / "benchmarks/chembench/configs/supervised_transfer_v3/chembench_supervised_transfer_v3.yaml"
+TWO_ROUND_CONFIG = (
+    REPOSITORY
+    / "benchmarks/chembench/configs/supervised_transfer_v3/chembench_supervised_transfer_v3_two_round_one_evolution.yaml"
+)
 
 
 class _SourceDistribution:
@@ -204,8 +210,13 @@ class _SyntheticBridge:
         return self.bridge.verify_update_result(result)
 
 
-def _test_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    config = load_config_v3(CONFIG.resolve())
+def _test_inputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    config_path: Path = CONFIG,
+):
+    config = load_config_v3(config_path.resolve())
     loaded = load_experiment_inputs_v3(REPOSITORY, config, require_runtime=False)
     payload = dict(config.payload)
     payload["roots"] = {
@@ -255,6 +266,32 @@ def test_v3_config_is_three_answer_two_cycle_evolved_only() -> None:
     assert config.call_budget["answer_and_reflector_model_calls"] == 2700
 
 
+def test_v3_two_round_one_evolution_profile_has_exact_budget() -> None:
+    config = load_config_v3(TWO_ROUND_CONFIG.resolve())
+    assert config.protocol_id == TWO_ROUND_ONE_EVOLUTION_PROTOCOL_ID
+    assert config.train_rounds == 2
+    assert config.evolution_cycles == 1
+    assert config.call_budget["online_candidate_task_calls"] == 900
+    assert config.call_budget["reflector_calls"] == 450
+    assert config.call_budget["evolved_test_candidate_calls"] == 450
+    assert config.call_budget["core_jobs"] == 1350
+    assert config.call_budget["answer_and_reflector_model_calls"] == 1800
+    assert config.call_budget["total_model_calls"] == 3150
+
+
+def test_v3_two_round_one_evolution_dry_run_has_one_update() -> None:
+    config = load_config_v3(TWO_ROUND_CONFIG.resolve())
+    inputs = load_experiment_inputs_v3(REPOSITORY, config, require_runtime=False)
+    result = build_complete_dry_run_v3(inputs)
+    assert result["protocol_id"] == TWO_ROUND_ONE_EVOLUTION_PROTOCOL_ID
+    assert all(item["sessions_per_task"] == 2 for item in result["train_schedule"])
+    assert all(item["cycles_per_task"] == 1 for item in result["train_schedule"])
+    assert all(
+        item["sequence"] == ["ROUND_0", "CYCLE_1", "ROUND_1_FINAL"]
+        for item in result["train_schedule"]
+    )
+
+
 def test_v3_split_is_exact_read_only_v2_reference() -> None:
     receipt = verify_split_reference_receipt_v3(REPOSITORY)
     assert receipt == {
@@ -273,6 +310,7 @@ def test_v3_source_manifest_closes_shared_core_abi() -> None:
     receipt = verify_source_manifest_v3(REPOSITORY)
     assert receipt["status"] == "PASS"
     payload = json.loads((REPOSITORY / "benchmarks/chembench/manifests/supervised_transfer_v3/source_manifest_v3.json").read_text())
+    assert payload["protocol_id"] == SOURCE_FAMILY_ID
     paths = {row["path"] for row in payload["source_files"]}
     assert "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/core.py" in paths
     assert "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v3/experiment.py" in paths
@@ -362,6 +400,56 @@ def test_v3_offline_smoke_closes_three_two_six(
     assert experiment._state["text_memory_artifacts"] == 2
     assert experiment._state["skill_artifacts"] == 2
     assert experiment._state["agent_system_artifacts"] == 2
+
+
+def test_v3_two_round_one_evolution_smoke_closes_two_one_three(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    inputs = _test_inputs(tmp_path, monkeypatch, config_path=TWO_ROUND_CONFIG)
+    active_packet = [""]
+    active_category = ["Temperature_Prediction"]
+    monkeypatch.setattr(
+        core_methods,
+        "_generate_reflector_markdown",
+        lambda *_args, **_kwargs: _memory(active_packet[-1], active_category[-1]),
+    )
+    registry = _registry(tmp_path / "registry-one-update")
+
+    def bridge_factory(root: Path, category: str) -> _SyntheticBridge:
+        return _SyntheticBridge(
+            TaskwiseCoreEvolutionBridgeV1(
+                db_path=root / "evolution.sqlite3",
+                artifact_root=root / "artifacts",
+                executable_registry=registry,
+                checkpoint_path=root / "checkpoints.jsonl",
+                memory_limits=SUPERVISED_MEMORY_LIMITS_V2,
+                updates_per_task=1,
+            ),
+            active_packet,
+            active_category,
+            category,
+        )
+
+    executor = _FakeExecutor()
+    experiment = SupervisedTransferExperimentV3(
+        inputs=inputs,
+        run_id="stv3-one-update-smoke-0001",
+        run_mode="smoke",
+        executor_factory=lambda _arm: executor,
+        bridge_factory=bridge_factory,
+    )
+    result = experiment.run_smoke()
+    assert result["status"] == "PASS"
+    assert [request.round_index for request in executor.requests] == [0, 1]
+    assert executor.requests[0].resolved_context is None
+    assert executor.requests[1].resolved_context is not None
+    assert experiment._state["task_sessions"] == 2
+    assert experiment._state["reflector_calls"] == 1
+    assert experiment._state["core_jobs"] == 3
+    assert experiment._state["context_resolutions"] == 3
+    assert experiment._state["text_memory_artifacts"] == 1
+    assert experiment._state["skill_artifacts"] == 1
+    assert experiment._state["agent_system_artifacts"] == 1
 
 
 def test_v3_evolved_test_requires_frozen_context_before_executor(
@@ -529,7 +617,7 @@ def test_v3_reporting_emits_evolved_only_deliverables(
     )
     for category in categories:
         for task_ordinal in range(50):
-            for cycle in (1, 2):
+            for cycle in (1,):
                 public.append(
                     {
                         "kind": "REFLECTOR_SUPERVISED",
@@ -545,7 +633,7 @@ def test_v3_reporting_emits_evolved_only_deliverables(
                         "retired_rules": 0,
                     }
                 )
-            for round_index in range(3):
+            for round_index in range(2):
                 private.append(
                     {
                         "kind": "PRIVATE_EVALUATED",
@@ -583,14 +671,17 @@ def test_v3_reporting_emits_evolved_only_deliverables(
     (state_root / "run_state.json").write_text(
         json.dumps(
             {
+                "protocol_id": TWO_ROUND_ONE_EVOLUTION_PROTOCOL_ID,
                 "source_commit": "1" * 40,
                 "config_sha256": "2" * 64,
                 "split_receipt_sha256": "3" * 64,
                 "source_manifest_sha256": "4" * 64,
+                "attempts_per_train_task": 2,
+                "evolution_cycles_per_train_task": 1,
                 "security_findings": 0,
                 "context_findings": 0,
                 "artifact_findings": 0,
-                "core_jobs": 2700,
+                "core_jobs": 1350,
                 "infrastructure_failures": 0,
             }
         ),

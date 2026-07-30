@@ -298,6 +298,16 @@ def remaining_categories_v3(start_category_index: int = START_CATEGORY_INDEX) ->
     return CHEMBENCH4K_CATEGORIES[start_category_index:]
 
 
+def _require_legacy_category_recovery_profile(inputs: v2.ExperimentInputsV2) -> None:
+    config = inputs.config
+    if (
+        getattr(config, "protocol_id", None) != PROTOCOL_ID
+        or getattr(config, "train_rounds", None) != 3
+        or getattr(config, "evolution_cycles", None) != EVOLUTION_CYCLES
+    ):
+        raise SupervisedExperimentV3Error("CATEGORY_SHARD_RECOVERY_PROFILE_INCOMPATIBLE")
+
+
 def build_category_shard_recovery_dry_run_v3(
     *,
     inputs: v2.ExperimentInputsV2,
@@ -308,6 +318,7 @@ def build_category_shard_recovery_dry_run_v3(
 
     if type(inputs) is not v2.ExperimentInputsV2:
         raise TypeError("inputs must be exact ExperimentInputsV2")
+    _require_legacy_category_recovery_profile(inputs)
     if type(audit) is not AuditedParentShardsV3:
         raise TypeError("audit must be exact AuditedParentShardsV3")
     if _RUN_ID.fullmatch(recovery_run_id) is None:
@@ -758,6 +769,7 @@ class SupervisedTransferCategoryShardRecoveryV3(SupervisedTransferExperimentV3):
         executor_factory: Any | None = None,
         bridge_factory: Any | None = None,
     ) -> None:
+        _require_legacy_category_recovery_profile(inputs)
         if type(parent_audit) is not AuditedParentShardsV3:
             raise TypeError("parent_audit must be exact AuditedParentShardsV3")
         if parent_audit.repository_root != inputs.repository_root:
@@ -1324,9 +1336,12 @@ def _active_processes(run_id: str) -> tuple[int, ...]:
         if not entry.name.isdigit() or int(entry.name) in own:
             continue
         try:
-            command = (entry / "cmdline").read_bytes().replace(b"\0", b" ")
+            arguments = (entry / "cmdline").read_bytes().split(b"\0")
         except OSError:
             continue
+        if not arguments or Path(arguments[0].decode(errors="ignore")).name == "tmux":
+            continue
+        command = b" ".join(arguments)
         if run_id.encode() in command:
             found.append(int(entry.name))
     return tuple(sorted(found))

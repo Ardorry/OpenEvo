@@ -13,7 +13,11 @@ from openevo_chembench.chembench4k_models import CHEMBENCH4K_REVISION
 from openevo_chembench.supervised_transfer_v1.common import canonical_json_bytes, sha256_bytes
 
 PROTOCOL_ID = "chembench_supervised_transfer_v3_three_answer_online_only"
+TWO_ROUND_ONE_EVOLUTION_PROTOCOL_ID = (
+    "chembench_supervised_transfer_v3_two_round_one_evolution_online_only"
+)
 CONFIG_SCHEMA = "chembench_supervised_transfer_config_v3"
+SOURCE_FAMILY_ID = "chembench_supervised_transfer_v3_source_family"
 SOURCE_SPLIT_PROTOCOL = "chembench_supervised_transfer_v2"
 TRAIN_COUNT = 450
 TEST_COUNT = 450
@@ -22,6 +26,10 @@ TRAIN_PER_CATEGORY = 50
 TEST_PER_CATEGORY = 50
 TRAIN_ROUNDS = 3
 EVOLUTION_CYCLES = 2
+_TRAIN_SCHEDULES = {
+    PROTOCOL_ID: (TRAIN_ROUNDS, EVOLUTION_CYCLES),
+    TWO_ROUND_ONE_EVOLUTION_PROTOCOL_ID: (2, 1),
+}
 TARGETS = ("text_memory", "skill_bundle", "agent_system")
 RESULT_ROOT = "results/chembench_supervised_transfer_v3"
 STATE_ROOT = "state/chembench_supervised_transfer_v3"
@@ -41,6 +49,28 @@ class SupervisedTransferConfigV3:
     path: Path
     payload: dict[str, Any]
     digest: str
+
+    @property
+    def protocol_id(self) -> str:
+        return str(self.payload["protocol_id"])
+
+    @property
+    def train_rounds(self) -> int:
+        return int(self.payload["executor"]["task_attempts_per_train_item"])
+
+    @property
+    def evolution_cycles(self) -> int:
+        return int(self.payload["executor"]["evolution_cycles_per_train_item"])
+
+    @property
+    def train_sequence(self) -> tuple[str, ...]:
+        sequence: list[str] = []
+        for round_index in range(self.train_rounds):
+            suffix = "_FINAL" if round_index == self.train_rounds - 1 else ""
+            sequence.append(f"ROUND_{round_index}{suffix}")
+            if round_index < self.evolution_cycles:
+                sequence.append(f"CYCLE_{round_index + 1}")
+        return tuple(sequence)
 
     @property
     def model(self) -> str:
@@ -68,8 +98,8 @@ class SupervisedTransferConfigV3:
 
     @property
     def call_budget(self) -> dict[str, int]:
-        online_candidate = TRAIN_COUNT * TRAIN_ROUNDS
-        reflector = TRAIN_COUNT * EVOLUTION_CYCLES
+        online_candidate = TRAIN_COUNT * self.train_rounds
+        reflector = TRAIN_COUNT * self.evolution_cycles
         test_candidate = TEST_COUNT
         candidate = online_candidate + test_candidate
         answer_and_reflector = candidate + reflector
@@ -122,7 +152,7 @@ def _validate_config(payload: dict[str, Any]) -> None:
     }
     if set(payload) != required:
         raise SupervisedTransferV3ConfigError("V3_CONFIG_SCHEMA_INVALID")
-    if payload["schema_version"] != CONFIG_SCHEMA or payload["protocol_id"] != PROTOCOL_ID:
+    if payload["schema_version"] != CONFIG_SCHEMA or payload["protocol_id"] not in _TRAIN_SCHEDULES:
         raise SupervisedTransferV3ConfigError("V3_CONFIG_IDENTITY_INVALID")
     if payload["dataset"] != {
         "repository": "AI4Chem/ChemBench4K",
@@ -150,10 +180,12 @@ def _validate_config(payload: dict[str, Any]) -> None:
     if payload["model"] != {"name": "gpt-5.5", "reasoning_effort": "medium"}:
         raise SupervisedTransferV3ConfigError("V3_MODEL_INVALID")
     executor = payload["executor"]
+    train_rounds, evolution_cycles = _TRAIN_SCHEDULES[str(payload["protocol_id"])]
     if (
         type(executor) is not dict
-        or executor.get("task_attempts_per_train_item") != TRAIN_ROUNDS
-        or executor.get("evolution_cycles_per_train_item") != EVOLUTION_CYCLES
+        or executor.get("task_attempts_per_train_item") != train_rounds
+        or executor.get("evolution_cycles_per_train_item") != evolution_cycles
+        or train_rounds != evolution_cycles + 1
         or executor.get("final_test_attempts_per_item") != 1
         or executor.get("control_train_enabled") is not False
         or executor.get("control_test_enabled") is not False
@@ -189,6 +221,7 @@ __all__ = [
     "REPORT_ROOT",
     "RESERVE_COUNT",
     "RESULT_ROOT",
+    "SOURCE_FAMILY_ID",
     "SOURCE_MANIFEST_RELATIVE",
     "SOURCE_SPLIT_PROTOCOL",
     "SPLIT_REFERENCE_RELATIVE",
@@ -199,6 +232,7 @@ __all__ = [
     "TRAIN_COUNT",
     "TRAIN_PER_CATEGORY",
     "TRAIN_ROUNDS",
+    "TWO_ROUND_ONE_EVOLUTION_PROTOCOL_ID",
     "V2_MANIFEST_ROOT",
     "SupervisedTransferConfigV3",
     "SupervisedTransferV3ConfigError",
