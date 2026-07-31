@@ -5,16 +5,17 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath
 import re
 import secrets
 import socket
 import stat
 from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from openevo.internal_auth import INTERNAL_OWNERSHIP_ENV
 
 DOCKER_SELF_INSPECT_FORMAT: Final[str] = (
     '{"id":{{json .Id}},"hostname":{{json .Config.Hostname}},'
@@ -45,7 +46,7 @@ class DockerHostPathError(RuntimeError):
 class DockerExecutableAuthority:
     """Pinned identity for the release Docker executable pathname."""
 
-    identity: tuple[int, int, int, int, int, int, int, int, int]
+    identity: tuple[int, ...]
     identity_digest: str
 
     @classmethod
@@ -156,13 +157,27 @@ class DockerEngineAuthority:
 def docker_cli_environment() -> dict[str, str]:
     """Return the complete, non-inheriting environment for release Docker CLI calls."""
 
-    return {
+    environment = {
         "DOCKER_CONFIG": _DOCKER_CONFIG_PATH,
         "DOCKER_HOST": DOCKER_HOST_ENDPOINT,
         "HOME": "/proc/self",
         "LC_ALL": "C",
         "PATH": "/usr/bin:/bin",
     }
+    # A Core-supervised worker and every host child in its process group must
+    # carry the same non-secret ownership digest.  DockerRuntime intentionally
+    # uses this closed environment, so preserve only that validated marker;
+    # user Docker configuration and all credentials remain excluded.  The
+    # marker is consumed by the host process-group verifier and is not passed
+    # into the launched container.
+    ownership_digest = os.environ.get(INTERNAL_OWNERSHIP_ENV)
+    if ownership_digest is not None:
+        if _DIGEST_RE.fullmatch(ownership_digest) is None:
+            raise DockerHostPathError(
+                "managed Docker child process ownership identity is invalid"
+            )
+        environment[INTERNAL_OWNERSHIP_ENV] = ownership_digest
+    return environment
 
 
 class DockerHostPathSpec(BaseModel):
@@ -749,8 +764,56 @@ def _identity_digest(payload: dict[str, object]) -> str:
 
 def _docker_executable_identity(
     metadata: os.stat_result,
-) -> tuple[int, int, int, int, int, int, int, int, int]:
+) -> tuple[int, ...]:
     mode = stat.S_IMODE(metadata.st_mode)
+    if stat.S_ISLNK(metadata.st_mode):
+        # Docker Desktop for WSL publishes /usr/bin/docker as a root-owned
+        # symlink into its read-only ISO.  Accept that release surface only
+        # when both link and final executable identities are immutable to the
+        # unprivileged Core process; writable ordinary symlinks remain closed.
+        try:
+            raw_target = os.readlink(DOCKER_EXECUTABLE_PATH)
+            target = Path(DOCKER_EXECUTABLE_PATH).resolve(strict=True)
+            target_metadata = os.stat(target, follow_symlinks=False)
+            target_mode = stat.S_IMODE(target_metadata.st_mode)
+            read_only_filesystem = bool(os.statvfs(target).f_flag & os.ST_RDONLY)
+        except OSError as exc:
+            raise DockerHostPathError(
+                "the release Docker executable symlink authority is unavailable"
+            ) from exc
+        if (
+            metadata.st_uid != 0
+            or metadata.st_nlink != 1
+            or not raw_target.startswith("/")
+            or os.path.normpath(raw_target) != raw_target
+            or not stat.S_ISREG(target_metadata.st_mode)
+            or target_metadata.st_uid != 0
+            or target_metadata.st_nlink < 1
+            or not read_only_filesystem
+            or not target_mode & 0o111
+            or target_metadata.st_size <= 0
+        ):
+            raise DockerHostPathError("the release Docker executable identity is invalid")
+        return (
+            1,
+            metadata.st_dev,
+            metadata.st_ino,
+            metadata.st_mode,
+            metadata.st_uid,
+            metadata.st_gid,
+            metadata.st_nlink,
+            metadata.st_mtime_ns,
+            metadata.st_ctime_ns,
+            target_metadata.st_dev,
+            target_metadata.st_ino,
+            target_metadata.st_mode,
+            target_metadata.st_uid,
+            target_metadata.st_gid,
+            target_metadata.st_nlink,
+            target_metadata.st_size,
+            target_metadata.st_mtime_ns,
+            target_metadata.st_ctime_ns,
+        )
     if (
         not stat.S_ISREG(metadata.st_mode)
         or metadata.st_uid != 0
@@ -761,6 +824,7 @@ def _docker_executable_identity(
     ):
         raise DockerHostPathError("the release Docker executable identity is invalid")
     return (
+        0,
         metadata.st_dev,
         metadata.st_ino,
         metadata.st_mode,

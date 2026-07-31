@@ -7,8 +7,6 @@ from typing import Any, Protocol
 
 import httpx
 
-from openevo.evolution.methods import UnknownEvolutionMethodError, run_method
-from openevo.evolution.models import ArtifactRegisterRequest, WorkerClaimedJob
 from openevo.evolution.framework.builtins import VerifiedExecutableRegistry
 from openevo.evolution.framework.contracts import (
     DescriptorKind,
@@ -16,16 +14,20 @@ from openevo.evolution.framework.contracts import (
     canonical_digest,
 )
 from openevo.evolution.framework.execution import (
+    CoreReflectorService,
     HarnessInferenceRequest,
     HarnessInferenceResponse,
     MethodExecutionContext,
     MethodExecutionEnvelope,
     MethodExecutionServices,
+    ReflectorInferenceRequest,
+    ReflectorInferenceResponse,
     invoke_legacy_method,
 )
 from openevo.evolution.framework.plan import EvolutionPlan
+from openevo.evolution.methods import UnknownEvolutionMethodError, run_method
+from openevo.evolution.models import ArtifactRegisterRequest, WorkerClaimedJob
 from openevo.evolution.planned_jobs import validate_plan_against_snapshot
-
 
 _DEFAULT_LEASE_SECONDS = 600
 
@@ -66,6 +68,21 @@ class WorkerClient(Protocol):
         error: str,
         *,
         retryable: bool = True,
+    ) -> dict[str, Any]: ...
+
+    def reserve_reflector_inference(
+        self,
+        job_id: str,
+        lease_id: str,
+        request_id: str,
+    ) -> dict[str, Any]: ...
+
+    def complete_reflector_inference(
+        self,
+        job_id: str,
+        lease_id: str,
+        request_id: str,
+        runtime_receipt_sha256: str,
     ) -> dict[str, Any]: ...
 
 
@@ -177,11 +194,16 @@ def _run_method_with_heartbeats(
     method_error: Exception | None = None
     artifacts: list[ArtifactRegisterRequest] = []
     try:
+        effective_services = _durable_reflector_services(
+            client,
+            job,
+            method_services,
+        )
         artifacts = _run_claimed_method(
             job,
             artifact_root=artifact_root,
             executable_registry=executable_registry,
-            method_services=method_services,
+            method_services=effective_services,
         )
     except Exception as exc:
         method_error = exc
@@ -194,6 +216,69 @@ def _run_method_with_heartbeats(
     if method_error is not None:
         raise method_error
     return artifacts
+
+
+class _DurableJobReflectorService(CoreReflectorService):
+    """Reserve one job-owned inference before delegating to the managed runtime."""
+
+    def __init__(
+        self,
+        *,
+        client: WorkerClient,
+        job: WorkerClaimedJob,
+        delegate: CoreReflectorService,
+    ) -> None:
+        self._client = client
+        self._job = job
+        self._delegate = delegate
+
+    def infer(self, request: ReflectorInferenceRequest) -> ReflectorInferenceResponse:
+        reservation = self._client.reserve_reflector_inference(
+            self._job.job_id,
+            self._job.lease_id,
+            request.request_id,
+        )
+        if reservation.get("execute_allowed") is not True:
+            raise RuntimeError(
+                "reflector inference authority was already consumed or has unknown outcome"
+            )
+        response = self._delegate.infer(request)
+        receipt_sha256 = canonical_digest(response.receipt)
+        completed = self._client.complete_reflector_inference(
+            self._job.job_id,
+            self._job.lease_id,
+            request.request_id,
+            receipt_sha256,
+        )
+        if (
+            completed.get("state") != "completed"
+            or completed.get("request_id") != request.request_id
+            or completed.get("runtime_receipt_sha256") != receipt_sha256
+        ):
+            raise RuntimeError("reflector inference completion receipt is invalid")
+        return response
+
+
+def _durable_reflector_services(
+    client: WorkerClient,
+    job: WorkerClaimedJob,
+    services: MethodExecutionServices | None,
+) -> MethodExecutionServices | None:
+    raw_budget = job.config.get("max_reflector_model_calls")
+    if raw_budget is None:
+        return services
+    if raw_budget != 1:
+        raise ValueError("durable reflector jobs require an exact one-call budget")
+    if services is None or services.reflector is None:
+        raise ValueError("durable reflector job has no managed reflector service")
+    return MethodExecutionServices(
+        harness=services.harness,
+        reflector=_DurableJobReflectorService(
+            client=client,
+            job=job,
+            delegate=services.reflector,
+        ),
+    )
 
 
 class _UnavailableHarnessService:
@@ -368,24 +453,26 @@ class EvolutionWorkerClient:
         framework_lock_digest: str,
         generation_digest: str,
         registry_digest: str,
-    ) -> dict[str, str]:
+        managed_reflector_credential_mount: dict[str, Any] | None = None,
+        managed_reflector_runtime_readiness: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        request_payload = {
+            "framework_lock_digest": framework_lock_digest,
+            "generation_digest": generation_digest,
+            "managed_reflector_credential_mount": managed_reflector_credential_mount,
+            "managed_reflector_runtime_readiness": (
+                managed_reflector_runtime_readiness
+            ),
+            "registry_digest": registry_digest,
+            "worker_id": worker_id,
+        }
         response = self._client.post(
             f"{self.base_url}/v1/internal/workers/register",
-            json={
-                "framework_lock_digest": framework_lock_digest,
-                "generation_digest": generation_digest,
-                "registry_digest": registry_digest,
-                "worker_id": worker_id,
-            },
+            json=request_payload,
         )
         response.raise_for_status()
         payload = response.json()
-        if payload != {
-            "framework_lock_digest": framework_lock_digest,
-            "generation_digest": generation_digest,
-            "registry_digest": registry_digest,
-            "worker_id": worker_id,
-        }:
+        if payload != request_payload:
             raise RuntimeError("evolution backend returned a mismatched worker registration")
         return payload
 
@@ -444,6 +531,47 @@ class EvolutionWorkerClient:
         )
         response.raise_for_status()
         return response.json()
+
+    def reserve_reflector_inference(
+        self,
+        job_id: str,
+        lease_id: str,
+        request_id: str,
+    ) -> dict[str, Any]:
+        response = self._client.post(
+            f"{self.base_url}/v1/internal/jobs/{job_id}/reflector-inference/reserve",
+            json={
+                "lease_id": lease_id,
+                "request_id": request_id,
+                "max_model_calls": 1,
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise RuntimeError("reflector inference reservation was not an object")
+        return payload
+
+    def complete_reflector_inference(
+        self,
+        job_id: str,
+        lease_id: str,
+        request_id: str,
+        runtime_receipt_sha256: str,
+    ) -> dict[str, Any]:
+        response = self._client.post(
+            f"{self.base_url}/v1/internal/jobs/{job_id}/reflector-inference/complete",
+            json={
+                "lease_id": lease_id,
+                "request_id": request_id,
+                "runtime_receipt_sha256": runtime_receipt_sha256,
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise RuntimeError("reflector inference completion was not an object")
+        return payload
 
     def close(self) -> None:
         self._client.close()

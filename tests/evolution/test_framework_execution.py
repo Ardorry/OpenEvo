@@ -15,6 +15,7 @@ from openevo.evolution.framework import (
     ResolvedMethodInputBinding,
     build_execution_envelope,
     invoke_legacy_method,
+    require_active_reflector_service,
     resolve_method_inputs,
     worker_input_artifact_digest,
 )
@@ -32,6 +33,15 @@ class _Harness:
             text="response",
             capture_mode="transcript",
         )
+
+
+class _Reflector:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def infer(self, request):
+        self.calls += 1
+        return request
 
 
 def _artifact(artifact_id: str, artifact_type: str) -> WorkerClaimInputArtifact:
@@ -200,6 +210,76 @@ def test_execution_envelope_separates_config_and_legacy_adapter_is_exact(
         invoke_legacy_method(legacy_method, context)
 
 
+def test_legacy_method_reflector_budget_is_enforced_and_receipted(
+    tmp_path: Path,
+) -> None:
+    envelope = build_execution_envelope(
+        plan_id="plan-budget",
+        plan_digest="a" * 64,
+        registry_snapshot_digest="b" * 64,
+        target_id="agent_system",
+        method_id="agent_system_gepa_reflector",
+        method_identity_digest="c" * 64,
+        user_config={},
+        core_config={"max_reflector_model_calls": 1},
+        input_bindings=(),
+        output_artifact_types=("agent_system",),
+    )
+    reflector = _Reflector()
+    context = MethodExecutionContext(
+        job=WorkerClaimedJob(
+            job_id="job-budget",
+            lease_id="lease-budget",
+            job_type="agent_system_gepa_reflector",
+            method="agent_system_gepa_reflector",
+        ),
+        artifact_root=tmp_path,
+        envelope=envelope,
+        services=MethodExecutionServices(
+            harness=_Harness(),
+            reflector=reflector,
+        ),
+    )
+
+    def one_call(job: WorkerClaimedJob, artifact_root: Path):
+        del job
+        require_active_reflector_service().infer(object())
+        return [
+            ArtifactRegisterRequest(
+                type="agent_system",
+                name="budgeted",
+                uri=(artifact_root / "AGENTS.md").resolve().as_uri(),
+            )
+        ]
+
+    artifacts = invoke_legacy_method(one_call, context)
+    receipt = artifacts[0].manifest["openevo_reflector_inference_budget"]
+    assert reflector.calls == 1
+    assert receipt["max_reflector_model_calls"] == 1
+    assert receipt["actual_reflector_model_calls"] == 1
+
+    def two_calls(job: WorkerClaimedJob, artifact_root: Path):
+        del job, artifact_root
+        service = require_active_reflector_service()
+        service.infer(object())
+        service.infer(object())
+        return []
+
+    second_reflector = _Reflector()
+    second = MethodExecutionContext(
+        job=context.job,
+        artifact_root=tmp_path,
+        envelope=envelope,
+        services=MethodExecutionServices(
+            harness=_Harness(),
+            reflector=second_reflector,
+        ),
+    )
+    with pytest.raises(RuntimeError, match="call budget exhausted"):
+        invoke_legacy_method(two_calls, second)
+    assert second_reflector.calls == 1
+
+
 def test_execution_envelope_rejects_core_user_shadowing() -> None:
     with pytest.raises(ValueError, match="shadow Core-owned"):
         build_execution_envelope(
@@ -248,6 +328,7 @@ def test_evaluator_and_audit_controls_are_core_owned(tmp_path: Path) -> None:
     controls = {
         "agent_system_audit": {"enabled": True},
         "candidate_evaluations": {"candidate-1": {"f1": 0.5}},
+        "content_admission_basis_sha256": "a" * 64,
         "forbidden_literals": {"source_files": ["heldout.txt"]},
         "promotion_support": {"validation_checks": ["run heldout evaluation"]},
     }

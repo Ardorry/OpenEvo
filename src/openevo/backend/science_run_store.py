@@ -39,10 +39,25 @@ from openevo.backend.science_successor import (
     ScienceSuccessorTransitionAttemptV2,
     science_successor_plan_sha256,
 )
+from openevo.backend.science_successor_recovery_v1 import (
+    ScienceSuccessorRecoveryProjectSeedAuthorityV1,
+    ScienceSuccessorRecoveryProjectSeedRequestV1,
+)
+from openevo.backend.project_freeze_control import (
+    FrozenProjectForkAuthorityV1,
+    FrozenProjectForkRequestV1,
+    FrozenProjectArtifactV1,
+    ProjectFreezeAuthorityV1,
+    ProjectFreezeRequestV1,
+)
+from openevo.backend.project_head_transfer import build_cross_project_restored_head
 from openevo.evolution.revisions import (
     AtomicEvolutionAbandonManifestV2,
+    AtomicFrozenProjectForkManifestV1,
+    AtomicHistoricalRestoreManifestV2,
     AtomicSuccessorCommitV2,
     AtomicSuccessorManifestV2,
+    AtomicSuccessorRecoverySeedManifestV1,
     SuccessorArtifactContributionV2,
     atomic_successor_manifest_sha256,
 )
@@ -170,6 +185,43 @@ CREATE TABLE IF NOT EXISTS project_heads (
     head_json BLOB NOT NULL,
     UNIQUE(project_id, generation),
     FOREIGN KEY(predecessor_project_head_id)
+        REFERENCES project_heads(project_head_id) ON DELETE RESTRICT
+) STRICT;
+CREATE TABLE IF NOT EXISTS project_freezes (
+    project_id TEXT PRIMARY KEY,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    request_sha256 TEXT NOT NULL CHECK (length(request_sha256) = 64),
+    authority_sha256 TEXT NOT NULL UNIQUE CHECK (length(authority_sha256) = 64),
+    project_head_id TEXT NOT NULL UNIQUE,
+    authority_json BLOB NOT NULL,
+    FOREIGN KEY(project_head_id)
+        REFERENCES project_heads(project_head_id) ON DELETE RESTRICT
+) STRICT;
+CREATE TABLE IF NOT EXISTS frozen_project_forks (
+    fork_request_id TEXT PRIMARY KEY,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    request_sha256 TEXT NOT NULL CHECK (length(request_sha256) = 64),
+    request_json BLOB NOT NULL,
+    authority_sha256 TEXT NOT NULL UNIQUE CHECK (length(authority_sha256) = 64),
+    source_project_id TEXT NOT NULL,
+    source_freeze_receipt_id TEXT NOT NULL,
+    source_freeze_authority_sha256 TEXT NOT NULL
+        CHECK (length(source_freeze_authority_sha256) = 64),
+    source_project_head_id TEXT NOT NULL,
+    destination_project_id TEXT NOT NULL UNIQUE,
+    predecessor_destination_project_head_id TEXT NOT NULL,
+    successor_destination_project_head_id TEXT NOT NULL UNIQUE,
+    manifest_sha256 TEXT NOT NULL UNIQUE CHECK (length(manifest_sha256) = 64),
+    authority_json BLOB NOT NULL,
+    commit_json BLOB NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(source_project_id)
+        REFERENCES project_freezes(project_id) ON DELETE RESTRICT,
+    FOREIGN KEY(source_project_head_id)
+        REFERENCES project_heads(project_head_id) ON DELETE RESTRICT,
+    FOREIGN KEY(predecessor_destination_project_head_id)
+        REFERENCES project_heads(project_head_id) ON DELETE RESTRICT,
+    FOREIGN KEY(successor_destination_project_head_id)
         REFERENCES project_heads(project_head_id) ON DELETE RESTRICT
 ) STRICT;
 CREATE TABLE IF NOT EXISTS tasks (
@@ -302,6 +354,42 @@ CREATE TABLE IF NOT EXISTS successor_commits (
     commit_json BLOB NOT NULL,
     FOREIGN KEY(successor_transition_id)
         REFERENCES successor_transitions(successor_transition_id) ON DELETE RESTRICT
+) STRICT;
+CREATE TABLE IF NOT EXISTS historical_restore_commits (
+    restore_request_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    request_sha256 TEXT NOT NULL CHECK (length(request_sha256) = 64),
+    predecessor_project_head_id TEXT NOT NULL,
+    source_project_head_id TEXT NOT NULL,
+    successor_project_head_id TEXT NOT NULL UNIQUE,
+    manifest_sha256 TEXT NOT NULL UNIQUE CHECK (length(manifest_sha256) = 64),
+    commit_json BLOB NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(project_id, idempotency_key),
+    FOREIGN KEY(predecessor_project_head_id)
+        REFERENCES project_heads(project_head_id) ON DELETE RESTRICT,
+    FOREIGN KEY(source_project_head_id)
+        REFERENCES project_heads(project_head_id) ON DELETE RESTRICT,
+    FOREIGN KEY(successor_project_head_id)
+        REFERENCES project_heads(project_head_id) ON DELETE RESTRICT
+) STRICT;
+CREATE TABLE IF NOT EXISTS successor_recovery_project_seeds (
+    seed_request_id TEXT PRIMARY KEY,
+    recovery_id TEXT NOT NULL UNIQUE,
+    destination_project_id TEXT NOT NULL UNIQUE,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    request_sha256 TEXT NOT NULL CHECK (length(request_sha256) = 64),
+    predecessor_project_head_id TEXT NOT NULL,
+    successor_project_head_id TEXT NOT NULL UNIQUE,
+    manifest_sha256 TEXT NOT NULL UNIQUE CHECK (length(manifest_sha256) = 64),
+    authority_sha256 TEXT NOT NULL UNIQUE CHECK (length(authority_sha256) = 64),
+    authority_json BLOB NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(predecessor_project_head_id)
+        REFERENCES project_heads(project_head_id) ON DELETE RESTRICT,
+    FOREIGN KEY(successor_project_head_id)
+        REFERENCES project_heads(project_head_id) ON DELETE RESTRICT
 ) STRICT;
 CREATE TABLE IF NOT EXISTS successor_cleanup_receipts (
     successor_transition_id TEXT PRIMARY KEY,
@@ -448,6 +536,10 @@ class ScienceTaskETagChangedV2(ScienceTaskPreconditionFailedV2):
 
 class ScienceTaskTerminalV2(ScienceTaskConflictV2):
     pass
+
+
+class ScienceProjectFrozenV2(ScienceTaskTerminalV2):
+    """A durable project freeze rejected a new mutating operation."""
 
 
 class ScienceEventCursorExpiredV2(ScienceTaskStoreV2Error):
@@ -1597,6 +1689,7 @@ class ScienceTaskStoreV2:
             blockers=(ScienceProjectReadinessBlockerV2.PROJECT_CONFIG_REBIND,),
         )
         with self._lock, self._transaction() as connection:
+            _require_v2_project_not_frozen(connection, expected.project_id)
             current = _load_v2_project_authority(connection, expected.project_id)
             if current == blocked:
                 return current
@@ -1910,6 +2003,771 @@ class ScienceTaskStoreV2:
                 )
             return head
 
+    def freeze_project(
+        self,
+        request: ProjectFreezeRequestV1,
+        *,
+        verified_artifacts: tuple[FrozenProjectArtifactV1, ...],
+        now: datetime,
+    ) -> ProjectFreezeAuthorityV1:
+        """Seal one active project head after all mutating work is terminal."""
+
+        request = _validate_v2_model(ProjectFreezeRequestV1, request)
+        verified_artifacts = tuple(
+            _validate_v2_model(FrozenProjectArtifactV1, item)
+            for item in verified_artifacts
+        )
+        request_json = _v2_model_bytes(request)
+        request_sha256 = hashlib.sha256(request_json).hexdigest()
+        with self._lock, self._transaction() as connection:
+            existing = connection.execute(
+                "SELECT request_sha256, authority_sha256, authority_json "
+                "FROM project_freezes WHERE project_id = ? OR idempotency_key = ?",
+                (request.project_id, request.idempotency_key),
+            ).fetchall()
+            if existing:
+                if len(existing) != 1 or str(existing[0]["request_sha256"]) != request_sha256:
+                    raise ScienceTaskPreconditionFailedV2(
+                        "project freeze identity was reused with different input"
+                    )
+                authority = _v2_model_from_bytes(
+                    ProjectFreezeAuthorityV1,
+                    bytes(existing[0]["authority_json"]),
+                )
+                if authority.authority_sha256 != str(existing[0]["authority_sha256"]):
+                    raise ScienceTaskStoreV2Error("project freeze authority hash changed")
+                return authority
+
+            authority = _load_v2_project_authority(connection, request.project_id)
+            head = authority.active_project_head
+            if (
+                authority.blockers
+                or head.project_head_id != request.expected_project_head_id
+                or head.manifest_sha256
+                != request.expected_project_head_manifest_sha256
+            ):
+                raise ScienceTaskPreconditionFailedV2(
+                    "project freeze does not bind the active ready project head"
+                )
+            if connection.execute(
+                "SELECT 1 FROM tasks WHERE project_id = ? AND closed = 0 LIMIT 1",
+                (request.project_id,),
+            ).fetchone() is not None:
+                raise ScienceTaskProjectInFlightV2(
+                    "project freeze requires every immutable Task to be closed"
+                )
+            rows = connection.execute(
+                "SELECT transition_json FROM successor_transitions "
+                "WHERE project_id = ? ORDER BY successor_transition_id",
+                (request.project_id,),
+            ).fetchall()
+            for row in rows:
+                transition = _v2_model_from_bytes(
+                    m2.SuccessorTransitionV2,
+                    bytes(row["transition_json"]),
+                )
+                if transition.state not in {"committed", "failed", "cancelled", "superseded"}:
+                    raise ScienceTaskProjectInFlightV2(
+                        "project freeze found a nonterminal successor transition"
+                    )
+
+            commit = _load_v2_successor_commit_for_project_head(
+                connection,
+                head.project_head_id,
+            )
+            if commit is None or type(commit.manifest) not in {
+                AtomicSuccessorManifestV2,
+                AtomicHistoricalRestoreManifestV2,
+            }:
+                raise ScienceTaskPreconditionFailedV2(
+                    "project freeze requires successor or historical restore "
+                    "artifact authority"
+                )
+            manifest_artifacts = {
+                (item.artifact_type, item.artifact_id)
+                for item in commit.manifest.artifacts
+            }
+            verified_pairs = {
+                (item.artifact_type, item.registry_id) for item in verified_artifacts
+            }
+            requested = tuple(sorted(request.artifacts, key=lambda item: item.artifact_type))
+            verified = tuple(sorted(verified_artifacts, key=lambda item: item.artifact_type))
+            if (
+                manifest_artifacts != verified_pairs
+                or requested != verified
+                or head.evolution_revision.artifact_count != 3
+            ):
+                raise ScienceTaskPreconditionFailedV2(
+                    "project freeze artifact authority differs from the active head"
+                )
+
+            created_at = _v2_timestamp(now)
+            freeze_receipt_id = "project-freeze-" + hashlib.sha256(
+                _v2_json_bytes(
+                    {
+                        "idempotency_key": request.idempotency_key,
+                        "project_id": request.project_id,
+                    }
+                )
+            ).hexdigest()[:32]
+            authority_seed = {
+                "schema_version": "openevo.project_freeze_authority.v1",
+                "freeze_receipt_id": freeze_receipt_id,
+                "request_sha256": request_sha256,
+                "project_id": request.project_id,
+                "project_head_id": head.project_head_id,
+                "project_head_manifest_sha256": head.manifest_sha256,
+                "composite_id": request.composite_id,
+                "composite_sha256": request.composite_sha256,
+                "artifacts": [item.model_dump(mode="json") for item in verified],
+                "protocol_sha256": request.protocol_sha256,
+                "core_identity_sha256": request.core_identity_sha256,
+                "adapter_identity_sha256": request.adapter_identity_sha256,
+                "runtime_digest": request.runtime_digest,
+                "codex_cli_version": request.codex_cli_version,
+                "model": request.model,
+                "reasoning_effort": request.reasoning_effort,
+                "training_manifest_sha256": request.training_manifest_sha256,
+                "budget_policy_sha256": request.budget_policy_sha256,
+                "tool_policy_sha256": request.tool_policy_sha256,
+                "created_at": created_at,
+                "core_authoritative": True,
+                "frozen": True,
+                "evolution_enabled": False,
+            }
+            authority_sha256 = hashlib.sha256(
+                _v2_json_bytes(authority_seed)
+            ).hexdigest()
+            frozen = ProjectFreezeAuthorityV1.model_validate(
+                {**authority_seed, "authority_sha256": authority_sha256}
+            )
+            frozen_json = _v2_model_bytes(frozen)
+            connection.execute(
+                "INSERT INTO project_freezes(project_id, idempotency_key, "
+                "request_sha256, authority_sha256, project_head_id, authority_json) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    request.project_id,
+                    request.idempotency_key,
+                    request_sha256,
+                    authority_sha256,
+                    head.project_head_id,
+                    frozen_json,
+                ),
+            )
+            stored = _load_v2_project_freeze(connection, request.project_id)
+            if stored != frozen:
+                raise ScienceTaskStoreV2Error("project freeze changed during commit")
+            return stored
+
+    def project_freeze(self, project_id: str) -> ProjectFreezeAuthorityV1:
+        project_id = _v2_resource_id(project_id, label="project")
+        with self._lock, self._reader() as connection:
+            return _load_v2_project_freeze(connection, project_id)
+
+    def fork_frozen_project(
+        self,
+        request: FrozenProjectForkRequestV1,
+        *,
+        successor: m2.ProjectHeadRefV2,
+        commit: AtomicSuccessorCommitV2,
+        now: datetime,
+    ) -> FrozenProjectForkAuthorityV1:
+        """Atomically seed one independent ready project from a frozen head."""
+
+        request = _validate_v2_model(FrozenProjectForkRequestV1, request)
+        successor = _validate_v2_model(m2.ProjectHeadRefV2, successor)
+        commit = _validate_v2_model(AtomicSuccessorCommitV2, commit)
+        if type(commit.manifest) is not AtomicFrozenProjectForkManifestV1:
+            raise TypeError("frozen project fork requires its closed commit type")
+        fork_manifest = commit.manifest
+        request_json = _v2_model_bytes(request)
+        request_sha256 = hashlib.sha256(request_json).hexdigest()
+        with self._lock, self._transaction() as connection:
+            rows = connection.execute(
+                "SELECT fork_request_id, request_sha256 FROM frozen_project_forks "
+                "WHERE fork_request_id = ? OR idempotency_key = ? "
+                "OR destination_project_id = ?",
+                (
+                    fork_manifest.fork_request_id,
+                    request.idempotency_key,
+                    request.destination_project_id,
+                ),
+            ).fetchall()
+            if rows:
+                if (
+                    len(rows) != 1
+                    or str(rows[0]["request_sha256"]) != request_sha256
+                ):
+                    raise ScienceTaskPreconditionFailedV2(
+                        "frozen project fork identity was reused with different input"
+                    )
+                return _load_v2_frozen_project_fork(
+                    connection,
+                    str(rows[0]["fork_request_id"]),
+                )
+
+            source_freeze = _load_v2_project_freeze(
+                connection,
+                request.source_project_id,
+            )
+            source_authority = _load_v2_project_authority(
+                connection,
+                request.source_project_id,
+            )
+            destination_authority = _load_v2_project_authority(
+                connection,
+                request.destination_project_id,
+            )
+            predecessor = destination_authority.active_project_head
+            if (
+                source_freeze.freeze_receipt_id
+                != request.source_freeze_receipt_id
+                or source_freeze.authority_sha256
+                != request.source_freeze_authority_sha256
+                or source_freeze.project_head_id
+                != request.expected_source_project_head_id
+                or source_freeze.project_head_manifest_sha256
+                != request.expected_source_project_head_manifest_sha256
+                or source_authority.blockers
+                or source_authority.active_project_head.project_head_id
+                != source_freeze.project_head_id
+            ):
+                raise ScienceTaskPreconditionFailedV2(
+                    "frozen project fork source authority changed"
+                )
+            if (
+                destination_authority.blockers
+                or destination_authority.project_config_sha256
+                != request.expected_destination_project_config_sha256
+                or predecessor.project_head_id
+                != request.expected_destination_project_head_id
+                or predecessor.manifest_sha256
+                != request.expected_destination_project_head_manifest_sha256
+                or predecessor.generation != 0
+                or predecessor.evolution_revision.artifact_count != 0
+            ):
+                raise ScienceTaskPreconditionFailedV2(
+                    "frozen project fork destination is not an empty ready genesis"
+                )
+            _require_v2_project_not_frozen(
+                connection,
+                request.destination_project_id,
+            )
+            if connection.execute(
+                "SELECT 1 FROM tasks WHERE project_id = ? LIMIT 1",
+                (request.destination_project_id,),
+            ).fetchone() is not None or connection.execute(
+                "SELECT 1 FROM successor_transitions WHERE project_id = ? LIMIT 1",
+                (request.destination_project_id,),
+            ).fetchone() is not None:
+                raise ScienceTaskProjectInFlightV2(
+                    "frozen project fork requires an unused destination"
+                )
+            source_commit = _load_v2_successor_commit_for_project_head(
+                connection,
+                source_authority.active_project_head.project_head_id,
+            )
+            if source_commit is None:
+                raise ScienceTaskPreconditionFailedV2(
+                    "frozen project fork source lacks a native successor receipt"
+                )
+            _validate_v2_frozen_project_fork_closure(
+                source_freeze=source_freeze,
+                source_head=source_authority.active_project_head,
+                source_commit=source_commit,
+                predecessor=predecessor,
+                successor=successor,
+                commit=commit,
+                request=request,
+            )
+            _store_v2_project_head(connection, successor)
+            created_at = _v2_timestamp(now)
+            authority_seed = {
+                "schema_version": "openevo.frozen_project_fork_authority.v1",
+                "fork_receipt_id": fork_manifest.fork_request_id,
+                "request_sha256": request_sha256,
+                "source_project_id": source_freeze.project_id,
+                "source_freeze_receipt_id": source_freeze.freeze_receipt_id,
+                "source_freeze_authority_sha256": (
+                    source_freeze.authority_sha256
+                ),
+                "source_project_head_id": source_freeze.project_head_id,
+                "source_project_head_manifest_sha256": (
+                    source_freeze.project_head_manifest_sha256
+                ),
+                "destination_project_id": request.destination_project_id,
+                "destination_project_config_sha256": (
+                    request.expected_destination_project_config_sha256
+                ),
+                "predecessor_destination_project_head_id": (
+                    predecessor.project_head_id
+                ),
+                "predecessor_destination_project_head_manifest_sha256": (
+                    predecessor.manifest_sha256
+                ),
+                "seeded_destination_project_head": successor.model_dump(
+                    mode="json"
+                ),
+                "artifacts": [
+                    item.model_dump(mode="json")
+                    for item in source_freeze.artifacts
+                ],
+                "commit": commit.model_dump(mode="json"),
+                "created_at": created_at,
+                "core_authoritative": True,
+                "append_only": True,
+                "source_frozen": True,
+                "source_mutated": False,
+                "destination_seeded": True,
+                "evolution_enabled": False,
+            }
+            authority_sha256 = hashlib.sha256(
+                _v2_json_bytes(authority_seed)
+            ).hexdigest()
+            forked = FrozenProjectForkAuthorityV1.model_validate_json(
+                _v2_json_bytes(
+                    {**authority_seed, "authority_sha256": authority_sha256}
+                )
+            )
+            connection.execute(
+                "INSERT INTO frozen_project_forks("
+                "fork_request_id, idempotency_key, request_sha256, "
+                "request_json, authority_sha256, source_project_id, "
+                "source_freeze_receipt_id, source_freeze_authority_sha256, "
+                "source_project_head_id, destination_project_id, "
+                "predecessor_destination_project_head_id, "
+                "successor_destination_project_head_id, manifest_sha256, "
+                "authority_json, commit_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    forked.fork_receipt_id,
+                    request.idempotency_key,
+                    request_sha256,
+                    request_json,
+                    authority_sha256,
+                    forked.source_project_id,
+                    forked.source_freeze_receipt_id,
+                    forked.source_freeze_authority_sha256,
+                    forked.source_project_head_id,
+                    forked.destination_project_id,
+                    predecessor.project_head_id,
+                    successor.project_head_id,
+                    commit.manifest_sha256,
+                    _v2_model_bytes(forked),
+                    _v2_model_bytes(commit),
+                    created_at,
+                ),
+            )
+            seeded_authority = ScienceProjectAdmissionAuthorityV2(
+                project_id=destination_authority.project_id,
+                active_project_head=successor,
+                project_config_sha256=(
+                    destination_authority.project_config_sha256
+                ),
+                workspace_snapshot=successor.workspace_snapshot,
+                normalized_evolution_intent_sha256=(
+                    destination_authority.normalized_evolution_intent_sha256
+                ),
+                blockers=(),
+            )
+            updated = connection.execute(
+                "UPDATE project_admission_authorities SET authority_json = ?, "
+                "resource_version = resource_version + 1 WHERE project_id = ?",
+                (
+                    _v2_authority_bytes(seeded_authority),
+                    destination_authority.project_id,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise ScienceTaskStoreV2Error(
+                    "frozen project fork lost destination authority"
+                )
+            stored = _load_v2_frozen_project_fork(
+                connection,
+                forked.fork_receipt_id,
+            )
+            if (
+                stored != forked
+                or _load_v2_project_authority(
+                    connection,
+                    destination_authority.project_id,
+                )
+                != seeded_authority
+            ):
+                raise ScienceTaskStoreV2Error(
+                    "frozen project fork changed during commit"
+                )
+            return stored
+
+    def frozen_project_fork(
+        self,
+        fork_request_id: str,
+    ) -> FrozenProjectForkAuthorityV1:
+        fork_request_id = _v2_resource_id(
+            fork_request_id,
+            label="frozen project fork",
+        )
+        with self._lock, self._reader() as connection:
+            return _load_v2_frozen_project_fork(connection, fork_request_id)
+
+    def restore_historical_project_head(
+        self,
+        *,
+        project_id: str,
+        expected_project_head_id: str,
+        source_project_head_id: str,
+        idempotency_key: str,
+        successor: m2.ProjectHeadRefV2,
+        commit: AtomicSuccessorCommitV2,
+        now: datetime,
+        cross_project: bool = False,
+    ) -> tuple[m2.ProjectHeadRefV2, AtomicSuccessorCommitV2]:
+        """Atomically publish a linear head using verified source authority."""
+
+        project_id = _v2_resource_id(project_id, label="project")
+        expected_project_head_id = _v2_resource_id(
+            expected_project_head_id, label="expected project head"
+        )
+        source_project_head_id = _v2_resource_id(
+            source_project_head_id, label="source project head"
+        )
+        idempotency_key = _v2_resource_id(
+            idempotency_key, label="historical restore idempotency key"
+        )
+        successor = _validate_v2_model(m2.ProjectHeadRefV2, successor)
+        commit = _validate_v2_model(AtomicSuccessorCommitV2, commit)
+        request = {
+            "expected_project_head_id": expected_project_head_id,
+            "project_id": project_id,
+            "source_project_head_id": source_project_head_id,
+        }
+        if cross_project:
+            request["cross_project"] = True
+        request_sha256 = hashlib.sha256(_v2_json_bytes(request)).hexdigest()
+        with self._lock, self._transaction() as connection:
+            existing = connection.execute(
+                "SELECT restore_request_id, request_sha256, successor_project_head_id "
+                "FROM historical_restore_commits "
+                "WHERE project_id = ? AND idempotency_key = ?",
+                (project_id, idempotency_key),
+            ).fetchone()
+            if existing is not None:
+                if str(existing["request_sha256"]) != request_sha256:
+                    raise ScienceTaskPreconditionFailedV2(
+                        "historical restore idempotency key was reused"
+                    )
+                restored = _load_v2_project_head(
+                    connection, str(existing["successor_project_head_id"])
+                )
+                stored_commit = _load_v2_historical_restore_commit(
+                    connection, str(existing["restore_request_id"])
+                )
+                _validate_v2_historical_restore_closure(
+                    connection=connection,
+                    predecessor=_load_v2_project_head(
+                        connection, expected_project_head_id
+                    ),
+                    source=_load_v2_project_head(
+                        connection, source_project_head_id
+                    ),
+                    successor=restored,
+                    commit=stored_commit,
+                    restore_request_id=idempotency_key,
+                )
+                replay_source = _load_v2_project_head(
+                    connection, source_project_head_id
+                )
+                if (replay_source.project_id != project_id) != cross_project:
+                    raise ScienceTaskPreconditionFailedV2(
+                        "historical restore mode changed during replay"
+                    )
+                return restored, stored_commit
+            _require_v2_project_not_frozen(connection, project_id)
+            authority = _load_v2_project_authority(connection, project_id)
+            if authority.blockers:
+                raise ScienceTaskNotReadyV2(authority.blockers)
+            if authority.active_project_head.project_head_id != expected_project_head_id:
+                raise ScienceTaskPreconditionFailedV2(
+                    "historical restore active project head changed"
+                )
+            open_task = connection.execute(
+                "SELECT 1 FROM tasks WHERE project_id = ? AND closed = 0 LIMIT 1",
+                (project_id,),
+            ).fetchone()
+            if open_task is not None:
+                raise ScienceTaskProjectInFlightV2(
+                    "historical restore requires every project Task to be closed"
+                )
+            predecessor = _load_v2_project_head(connection, expected_project_head_id)
+            source = _load_v2_project_head(connection, source_project_head_id)
+            observed_cross_project = source.project_id != predecessor.project_id
+            if observed_cross_project != cross_project:
+                raise ScienceTaskPreconditionFailedV2(
+                    "historical restore source project differs from its mode"
+                )
+            if cross_project:
+                if (
+                    predecessor.generation != 0
+                    or predecessor.predecessor_project_head_id is not None
+                    or predecessor.evolution_revision.artifact_count != 0
+                    or predecessor.registry_sha256 != source.registry_sha256
+                ):
+                    raise ScienceTaskPreconditionFailedV2(
+                        "cross-project restore destination is not an empty compatible genesis"
+                    )
+                source_authority = _load_v2_project_authority(
+                    connection, source.project_id
+                )
+                if (
+                    source_authority.blockers
+                    or source_authority.active_project_head != source
+                ):
+                    raise ScienceTaskPreconditionFailedV2(
+                        "cross-project restore source is not the active ready authority"
+                    )
+                _require_v2_project_not_frozen(connection, source.project_id)
+                source_open_task = connection.execute(
+                    "SELECT 1 FROM tasks WHERE project_id = ? AND closed = 0 LIMIT 1",
+                    (source.project_id,),
+                ).fetchone()
+                destination_used = (
+                    connection.execute(
+                        "SELECT 1 FROM tasks WHERE project_id = ? LIMIT 1",
+                        (project_id,),
+                    ).fetchone()
+                    is not None
+                    or connection.execute(
+                        "SELECT 1 FROM successor_transitions WHERE project_id = ? LIMIT 1",
+                        (project_id,),
+                    ).fetchone()
+                    is not None
+                    or connection.execute(
+                        "SELECT 1 FROM project_heads WHERE project_id = ? "
+                        "AND project_head_id != ? LIMIT 1",
+                        (project_id, predecessor.project_head_id),
+                    ).fetchone()
+                    is not None
+                )
+                if source_open_task is not None or destination_used:
+                    raise ScienceTaskProjectInFlightV2(
+                        "cross-project restore requires a closed source and unused destination"
+                    )
+            _validate_v2_historical_restore_closure(
+                connection=connection,
+                predecessor=predecessor,
+                source=source,
+                successor=successor,
+                commit=commit,
+                restore_request_id=idempotency_key,
+            )
+            _store_v2_project_head(connection, successor)
+            manifest = commit.manifest
+            assert type(manifest) is AtomicHistoricalRestoreManifestV2
+            connection.execute(
+                "INSERT INTO historical_restore_commits("
+                "restore_request_id, project_id, idempotency_key, request_sha256, "
+                "predecessor_project_head_id, source_project_head_id, "
+                "successor_project_head_id, manifest_sha256, commit_json, created_at"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    manifest.successor_transition_id,
+                    project_id,
+                    idempotency_key,
+                    request_sha256,
+                    expected_project_head_id,
+                    source_project_head_id,
+                    successor.project_head_id,
+                    commit.manifest_sha256,
+                    _v2_model_bytes(commit),
+                    _v2_timestamp(now),
+                ),
+            )
+            next_authority = replace(
+                authority,
+                active_project_head=successor,
+                workspace_snapshot=successor.workspace_snapshot,
+            )
+            updated = connection.execute(
+                "UPDATE project_admission_authorities SET authority_json = ?, "
+                "resource_version = resource_version + 1 WHERE project_id = ?",
+                (_v2_authority_bytes(next_authority), project_id),
+            )
+            if updated.rowcount != 1:
+                raise ScienceTaskStoreV2Error(
+                    "historical restore lost project admission authority"
+                )
+            return successor, commit
+
+    def historical_restore_commit(
+        self, restore_request_id: str
+    ) -> AtomicSuccessorCommitV2:
+        restore_request_id = _v2_resource_id(
+            restore_request_id, label="historical restore"
+        )
+        with self._lock, self._reader() as connection:
+            return _load_v2_historical_restore_commit(
+                connection, restore_request_id
+            )
+
+    def seed_project_from_successor_recovery(
+        self,
+        request: ScienceSuccessorRecoveryProjectSeedRequestV1,
+        authority: ScienceSuccessorRecoveryProjectSeedAuthorityV1,
+    ) -> ScienceSuccessorRecoveryProjectSeedAuthorityV1:
+        """Atomically publish a fresh project's recovery-derived first head."""
+
+        request = _validate_v2_model(
+            ScienceSuccessorRecoveryProjectSeedRequestV1,
+            request,
+        )
+        authority = _validate_v2_model(
+            ScienceSuccessorRecoveryProjectSeedAuthorityV1,
+            authority,
+        )
+        request_json = _v2_model_bytes(request)
+        request_sha256 = hashlib.sha256(request_json).hexdigest()
+        manifest = authority.commit.manifest
+        if (
+            type(manifest) is not AtomicSuccessorRecoverySeedManifestV1
+            or authority.request_sha256 != request_sha256
+            or authority.recovery_id != request.recovery_id
+            or authority.recovery_record_sha256 != request.recovery_record_sha256
+            or authority.destination_project_id != request.destination_project_id
+            or authority.predecessor_destination_project_head_id
+            != request.expected_destination_project_head_id
+            or manifest.predecessor_manifest_sha256
+            != request.expected_destination_project_head_sha256
+        ):
+            raise ScienceTaskPreconditionFailedV2(
+                "successor recovery project seed authority differs from its request"
+            )
+        with self._lock, self._transaction() as connection:
+            existing = connection.execute(
+                "SELECT seed_request_id, request_sha256 FROM "
+                "successor_recovery_project_seeds WHERE recovery_id = ? "
+                "OR destination_project_id = ? OR idempotency_key = ?",
+                (
+                    request.recovery_id,
+                    request.destination_project_id,
+                    request.idempotency_key,
+                ),
+            ).fetchall()
+            if existing:
+                if (
+                    len(existing) != 1
+                    or str(existing[0]["seed_request_id"])
+                    != authority.seed_request_id
+                    or str(existing[0]["request_sha256"]) != request_sha256
+                ):
+                    raise ScienceTaskPreconditionFailedV2(
+                        "successor recovery project seed identity was reused"
+                    )
+                return _load_v2_successor_recovery_project_seed(
+                    connection,
+                    authority.seed_request_id,
+                )
+            _require_v2_project_not_frozen(connection, request.destination_project_id)
+            destination_authority = _load_v2_project_authority(
+                connection,
+                request.destination_project_id,
+            )
+            predecessor = destination_authority.active_project_head
+            if (
+                destination_authority.blockers
+                or predecessor.project_head_id
+                != request.expected_destination_project_head_id
+                or predecessor.manifest_sha256
+                != request.expected_destination_project_head_sha256
+                or predecessor.generation != 0
+                or authority.successor_destination_project_head.generation != 1
+            ):
+                raise ScienceTaskPreconditionFailedV2(
+                    "successor recovery destination is not an unused genesis project"
+                )
+            open_task = connection.execute(
+                "SELECT 1 FROM tasks WHERE project_id = ? LIMIT 1",
+                (request.destination_project_id,),
+            ).fetchone()
+            if open_task is not None:
+                raise ScienceTaskProjectInFlightV2(
+                    "successor recovery destination already owns a Task"
+                )
+            successor = authority.successor_destination_project_head
+            if (
+                successor.project_id != request.destination_project_id
+                or successor.predecessor_project_head_id != predecessor.project_head_id
+                or successor.workspace_snapshot != predecessor.workspace_snapshot
+                or successor.effective_execution_snapshot
+                != predecessor.effective_execution_snapshot
+                or successor.manifest_sha256 != manifest.successor_manifest_sha256
+            ):
+                raise ScienceTaskPreconditionFailedV2(
+                    "successor recovery seed head is not adjacent to destination genesis"
+                )
+            _store_v2_project_head(connection, successor)
+            authority_json = _v2_model_bytes(authority)
+            connection.execute(
+                "INSERT INTO successor_recovery_project_seeds("
+                "seed_request_id, recovery_id, destination_project_id, "
+                "idempotency_key, request_sha256, predecessor_project_head_id, "
+                "successor_project_head_id, manifest_sha256, authority_sha256, "
+                "authority_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    authority.seed_request_id,
+                    authority.recovery_id,
+                    authority.destination_project_id,
+                    request.idempotency_key,
+                    request_sha256,
+                    predecessor.project_head_id,
+                    successor.project_head_id,
+                    authority.commit.manifest_sha256,
+                    authority.content_sha256,
+                    authority_json,
+                    authority.created_at,
+                ),
+            )
+            next_authority = replace(
+                destination_authority,
+                active_project_head=successor,
+                workspace_snapshot=successor.workspace_snapshot,
+            )
+            updated = connection.execute(
+                "UPDATE project_admission_authorities SET authority_json = ?, "
+                "resource_version = resource_version + 1 WHERE project_id = ?",
+                (
+                    _v2_authority_bytes(next_authority),
+                    request.destination_project_id,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise ScienceTaskStoreV2Error(
+                    "successor recovery seed lost destination admission authority"
+                )
+            stored = _load_v2_successor_recovery_project_seed(
+                connection,
+                authority.seed_request_id,
+            )
+            if stored != authority:
+                raise ScienceTaskStoreV2Error(
+                    "successor recovery seed changed during atomic commit"
+                )
+            return stored
+
+    def successor_recovery_project_seed(
+        self,
+        seed_request_id: str,
+    ) -> ScienceSuccessorRecoveryProjectSeedAuthorityV1:
+        seed_request_id = _v2_resource_id(
+            seed_request_id,
+            label="successor recovery project seed",
+        )
+        with self._lock, self._reader() as connection:
+            return _load_v2_successor_recovery_project_seed(
+                connection,
+                seed_request_id,
+            )
+
     def _project_heads_in_connection(
         self,
         connection: sqlite3.Connection,
@@ -1944,6 +2802,7 @@ class ScienceTaskStoreV2:
         timestamp = _v2_timestamp(now)
         with self._lock, self._transaction() as connection:
             task = _load_v2_task_closure(connection, task_id)
+            _require_v2_project_not_frozen(connection, task.project_id)
             direct_transition = (
                 task.state == "admitted"
                 and task.authoritative_attempt_id is None
@@ -3466,8 +4325,9 @@ class ScienceTaskStoreV2:
         project_head_id = _v2_resource_id(project_head_id, label="project head")
         dataset_ids: list[str] = []
         seen_heads: set[str] = set()
-        current_id: str | None = project_head_id
-        while current_id is not None:
+        pending_ids: list[str] = [project_head_id]
+        while pending_ids:
+            current_id = pending_ids.pop()
             if current_id in seen_heads or len(seen_heads) > _MAX_V2_TASKS:
                 raise ScienceTaskStoreV2Error("v2 project-head chain is cyclic")
             seen_heads.add(current_id)
@@ -3475,7 +4335,16 @@ class ScienceTaskStoreV2:
             commit = self.successor_commit_for_project_head(current_id)
             if commit is not None and type(commit.manifest) is AtomicSuccessorManifestV2:
                 dataset_ids.append(commit.manifest.dataset_artifact_id)
-            current_id = head.predecessor_project_head_id
+            if (
+                commit is not None
+                and type(commit.manifest) is AtomicHistoricalRestoreManifestV2
+            ):
+                source_id = commit.manifest.source_project_head_id
+                source = self.get_project_head(source_id)
+                if source.project_id != head.project_id:
+                    pending_ids.append(source_id)
+            if head.predecessor_project_head_id is not None:
+                pending_ids.append(head.predecessor_project_head_id)
         values = tuple(sorted(dataset_ids))
         if len(values) != len(set(values)):
             raise ScienceTaskStoreV2Error("v2 project-head chain reuses a dataset artifact")
@@ -3538,6 +4407,8 @@ class ScienceTaskStoreV2:
                 ):
                     raise ScienceTaskIdempotencyConflictV2("v2 Task idempotency key was reused")
                 return _load_v2_task_closure(connection, str(existing["task_id"])), True
+
+            _require_v2_project_not_frozen(connection, request.project_id)
 
             authority_row = connection.execute(
                 "SELECT authority_json FROM project_admission_authorities WHERE project_id = ?",
@@ -4020,6 +4891,7 @@ class ScienceTaskStoreV2:
         task_id: str,
         attempt_id: str,
         error_code: str,
+        failure_authority=None,
         now: datetime,
     ) -> ScienceAttemptExecutionRecordV2:
         task_id = _v2_resource_id(task_id, label="task")
@@ -4030,11 +4902,28 @@ class ScienceTaskStoreV2:
         ):
             raise ValueError("v2 Attempt execution error code is invalid")
         with self._lock, self._transaction() as connection:
+            if failure_authority is not None:
+                from openevo.backend.science_execution_v2 import (
+                    ScienceAttemptFailureAuthorityV1,
+                )
+
+                failure_authority = ScienceAttemptFailureAuthorityV1.model_validate(
+                    failure_authority
+                )
+                if (
+                    failure_authority.task_id != task_id
+                    or failure_authority.attempt_id != attempt_id
+                    or failure_authority.failure_code != error_code
+                ):
+                    raise ValueError("v2 Attempt failure authority ownership changed")
             task = _load_v2_task_closure(connection, task_id)
             record = _load_v2_attempt_execution(connection, attempt_id)
             _validate_v2_execution_ownership(task, record)
             if record.state == "failed":
-                if record.error_code != error_code:
+                if (
+                    record.error_code != error_code
+                    or record.failure_authority != failure_authority
+                ):
                     raise ScienceTaskConflictV2(
                         "v2 Attempt execution failure changed after persistence"
                     )
@@ -4050,6 +4939,7 @@ class ScienceTaskStoreV2:
                 record,
                 state="failed",
                 error_code=error_code,
+                failure_authority=failure_authority,
                 updated_at=timestamp,
             )
             failed_task = _replace_v2_task(
@@ -4605,9 +5495,124 @@ class ScienceTaskStoreV2:
                             "v2 project head lacks exact "
                             "successor receipt authority"
                         )
+                    if (
+                        commit is not None
+                        and type(commit.manifest)
+                        is AtomicHistoricalRestoreManifestV2
+                    ):
+                        manifest = commit.manifest
+                        _validate_v2_historical_restore_closure(
+                            connection=connection,
+                            predecessor=_load_v2_project_head(
+                                connection,
+                                manifest.predecessor_project_head_id,
+                            ),
+                            source=_load_v2_project_head(
+                                connection,
+                                manifest.source_project_head_id,
+                            ),
+                            successor=head,
+                            commit=commit,
+                            restore_request_id=manifest.restore_request_id,
+                        )
+                    if (
+                        commit is not None
+                        and type(commit.manifest)
+                        is AtomicFrozenProjectForkManifestV1
+                    ):
+                        manifest = commit.manifest
+                        forked = _load_v2_frozen_project_fork(
+                            connection,
+                            manifest.fork_request_id,
+                        )
+                        if forked.commit != commit:
+                            raise ScienceTaskStoreV2Error(
+                                "frozen project fork is not the unique head receipt"
+                            )
+                    if (
+                        commit is not None
+                        and type(commit.manifest)
+                        is AtomicSuccessorRecoverySeedManifestV1
+                    ):
+                        manifest = commit.manifest
+                        seeded = _load_v2_successor_recovery_project_seed(
+                            connection,
+                            manifest.seed_request_id,
+                        )
+                        if seeded.commit != commit:
+                            raise ScienceTaskStoreV2Error(
+                                "successor recovery seed is not the unique head receipt"
+                            )
                 if not heads or heads[-1] != authority.active_project_head:
                     raise ScienceTaskStoreV2Error(
                         "v2 project authority is not the project-head tip"
+                    )
+            restore_rows = connection.execute(
+                "SELECT restore_request_id FROM historical_restore_commits "
+                "ORDER BY restore_request_id LIMIT ?",
+                (_MAX_V2_PROJECT_HEADS + 1,),
+            ).fetchall()
+            if len(restore_rows) > _MAX_V2_PROJECT_HEADS:
+                raise ScienceTaskStoreV2Error(
+                    "historical restore inventory exceeds its bound"
+                )
+            for restore_row in restore_rows:
+                restore = _load_v2_historical_restore_commit(
+                    connection, str(restore_row["restore_request_id"])
+                )
+                indexed = _load_v2_successor_commit_for_project_head(
+                    connection, restore.manifest.successor_project_head_id
+                )
+                if indexed != restore:
+                    raise ScienceTaskStoreV2Error(
+                        "historical restore is not the unique project-head receipt"
+                    )
+            freeze_rows = connection.execute(
+                "SELECT project_id FROM project_freezes ORDER BY project_id LIMIT ?",
+                (_MAX_V2_PROJECTS + 1,),
+            ).fetchall()
+            if len(freeze_rows) > _MAX_V2_PROJECTS:
+                raise ScienceTaskStoreV2Error(
+                    "project freeze authority inventory exceeds its bound"
+                )
+            for freeze_row in freeze_rows:
+                frozen = _load_v2_project_freeze(
+                    connection,
+                    str(freeze_row["project_id"]),
+                )
+                project_authority = _load_v2_project_authority(
+                    connection,
+                    frozen.project_id,
+                )
+                if (
+                    project_authority.blockers
+                    or project_authority.active_project_head.project_head_id
+                    != frozen.project_head_id
+                ):
+                    raise ScienceTaskStoreV2Error(
+                        "frozen project no longer exposes its frozen active head"
+                    )
+            fork_rows = connection.execute(
+                "SELECT fork_request_id FROM frozen_project_forks "
+                "ORDER BY fork_request_id LIMIT ?",
+                (_MAX_V2_PROJECTS + 1,),
+            ).fetchall()
+            if len(fork_rows) > _MAX_V2_PROJECTS:
+                raise ScienceTaskStoreV2Error(
+                    "frozen project fork inventory exceeds its bound"
+                )
+            for fork_row in fork_rows:
+                forked = _load_v2_frozen_project_fork(
+                    connection,
+                    str(fork_row["fork_request_id"]),
+                )
+                indexed = _load_v2_successor_commit_for_project_head(
+                    connection,
+                    forked.seeded_destination_project_head.project_head_id,
+                )
+                if indexed != forked.commit:
+                    raise ScienceTaskStoreV2Error(
+                        "frozen project fork is not the unique project-head receipt"
                     )
             tasks = connection.execute(
                 "SELECT task_id FROM tasks ORDER BY task_id LIMIT ?",
@@ -5538,14 +6543,36 @@ def _migrate_v2_successor_commit_authority(
             raise ScienceTaskStoreV2Error("v2 successor commit project-head index is inconsistent")
         predecessor_artifacts = composition_by_head.get(manifest.predecessor_project_head_id)
         if predecessor_artifacts is None:
+            predecessor_commit = _load_v2_successor_commit_for_project_head(
+                connection,
+                manifest.predecessor_project_head_id,
+            )
             if (
-                predecessor_head.generation != 0
-                or predecessor_head.evolution_revision.artifact_count != 0
+                predecessor_commit is not None
+                and type(predecessor_commit.manifest)
+                in {
+                    AtomicFrozenProjectForkManifestV1,
+                    AtomicHistoricalRestoreManifestV2,
+                    AtomicSuccessorRecoverySeedManifestV1,
+                }
             ):
+                predecessor_artifacts = predecessor_commit.manifest.artifacts
+                if (
+                    tuple(item.artifact_id for item in predecessor_artifacts)
+                    != predecessor_commit.manifest.method_artifact_ids
+                ):
+                    raise ScienceTaskStoreV2Error(
+                        "v2 seeded predecessor artifact composition is incomplete"
+                    )
+            elif (
+                predecessor_head.generation == 0
+                and predecessor_head.evolution_revision.artifact_count == 0
+            ):
+                predecessor_artifacts = ()
+            else:
                 raise ScienceTaskStoreV2Error(
                     "v2 successor migration lacks predecessor composition"
                 )
-            predecessor_artifacts = ()
         if len(predecessor_artifacts) != predecessor_head.evolution_revision.artifact_count:
             raise ScienceTaskStoreV2Error("v2 predecessor artifact composition is incomplete")
         artifacts = manifest.artifacts
@@ -5791,6 +6818,282 @@ def _load_v2_project_head(
     ):
         raise ScienceTaskStoreV2Error("persisted v2 project-head row is inconsistent")
     return head
+
+
+def _load_v2_project_freeze(
+    connection: sqlite3.Connection,
+    project_id: str,
+) -> ProjectFreezeAuthorityV1:
+    row = connection.execute(
+        "SELECT idempotency_key, request_sha256, authority_sha256, "
+        "project_head_id, authority_json FROM project_freezes WHERE project_id = ?",
+        (project_id,),
+    ).fetchone()
+    if row is None:
+        raise ScienceTaskNotFoundV2("project freeze authority was not found")
+    authority = _v2_model_from_bytes(
+        ProjectFreezeAuthorityV1,
+        bytes(row["authority_json"]),
+    )
+    seed = authority.model_dump(mode="json", exclude={"authority_sha256"})
+    observed_sha256 = hashlib.sha256(_v2_json_bytes(seed)).hexdigest()
+    if (
+        authority.project_id != project_id
+        or authority.project_head_id != str(row["project_head_id"])
+        or authority.request_sha256 != str(row["request_sha256"])
+        or authority.authority_sha256 != str(row["authority_sha256"])
+        or authority.authority_sha256 != observed_sha256
+    ):
+        raise ScienceTaskStoreV2Error("project freeze authority row is inconsistent")
+    head = _load_v2_project_head(connection, authority.project_head_id)
+    if (
+        head.project_id != project_id
+        or head.manifest_sha256 != authority.project_head_manifest_sha256
+    ):
+        raise ScienceTaskStoreV2Error("project freeze no longer binds its project head")
+    return authority
+
+
+def _validate_v2_frozen_project_fork_closure(
+    *,
+    source_freeze: ProjectFreezeAuthorityV1,
+    source_head: m2.ProjectHeadRefV2,
+    source_commit: AtomicSuccessorCommitV2,
+    predecessor: m2.ProjectHeadRefV2,
+    successor: m2.ProjectHeadRefV2,
+    commit: AtomicSuccessorCommitV2,
+    request: FrozenProjectForkRequestV1,
+) -> None:
+    manifest = commit.manifest
+    if type(manifest) is not AtomicFrozenProjectForkManifestV1:
+        raise ScienceTaskPreconditionFailedV2(
+            "frozen project fork has the wrong commit type"
+        )
+    source_manifest = source_commit.manifest
+    if type(source_manifest) is not AtomicSuccessorManifestV2:
+        raise ScienceTaskPreconditionFailedV2(
+            "frozen project fork source lacks a native successor receipt"
+        )
+    if source_manifest.runtime_context_source == "materialized_new":
+        source_transition_id = source_manifest.successor_transition_id
+        source_predecessor_id = source_manifest.predecessor_project_head_id
+    elif source_manifest.runtime_context_source == "materialized_inherited":
+        source_transition_id = (
+            source_manifest.materialized_source_successor_transition_id
+        )
+        source_predecessor_id = (
+            source_manifest.materialized_source_predecessor_project_head_id
+        )
+    else:
+        raise ScienceTaskPreconditionFailedV2(
+            "frozen triple-artifact source has no materialized context"
+        )
+    source_artifacts = tuple(
+        sorted(source_manifest.artifacts, key=lambda item: item.target_id)
+    )
+    frozen = tuple(sorted(source_freeze.artifacts, key=lambda item: item.artifact_type))
+    inherited = tuple(
+        item.model_copy(update={"origin": "inherited"}) for item in source_artifacts
+    )
+    if (
+        source_head.project_id != source_freeze.project_id
+        or source_head.project_head_id != source_freeze.project_head_id
+        or source_head.manifest_sha256
+        != source_freeze.project_head_manifest_sha256
+        or request.source_project_id != source_freeze.project_id
+        or request.source_freeze_receipt_id != source_freeze.freeze_receipt_id
+        or request.source_freeze_authority_sha256
+        != source_freeze.authority_sha256
+        or request.destination_project_id != predecessor.project_id
+        or request.expected_destination_project_head_id
+        != predecessor.project_head_id
+        or request.expected_destination_project_head_manifest_sha256
+        != predecessor.manifest_sha256
+        or successor.project_id != predecessor.project_id
+        or successor.generation != predecessor.generation + 1
+        or successor.predecessor_project_head_id != predecessor.project_head_id
+        or successor.workspace_snapshot != predecessor.workspace_snapshot
+        or successor.effective_execution_snapshot
+        != predecessor.effective_execution_snapshot
+        or successor.registry_sha256 != source_head.registry_sha256
+        or successor.registry_sha256 != predecessor.registry_sha256
+        or successor.evolution_revision.artifact_count != 3
+        or manifest.project_id != successor.project_id
+        or manifest.source_project_id != source_head.project_id
+        or manifest.source_freeze_receipt_id != source_freeze.freeze_receipt_id
+        or manifest.source_freeze_authority_sha256
+        != source_freeze.authority_sha256
+        or manifest.source_project_head_id != source_head.project_head_id
+        or manifest.source_manifest_sha256 != source_head.manifest_sha256
+        or manifest.source_evolution_revision_id
+        != source_head.evolution_revision.evolution_revision_id
+        or manifest.source_evolution_revision_manifest_sha256
+        != source_head.evolution_revision.manifest_sha256
+        or manifest.source_runtime_context_snapshot_id
+        != source_head.runtime_context_snapshot.runtime_context_snapshot_id
+        or manifest.source_runtime_context_manifest_sha256
+        != source_head.runtime_context_snapshot.manifest_sha256
+        or manifest.predecessor_project_head_id != predecessor.project_head_id
+        or manifest.predecessor_generation != predecessor.generation
+        or manifest.predecessor_manifest_sha256 != predecessor.manifest_sha256
+        or manifest.successor_project_head_id != successor.project_head_id
+        or manifest.successor_generation != successor.generation
+        or manifest.successor_manifest_sha256 != successor.manifest_sha256
+        or manifest.workspace_snapshot_id
+        != successor.workspace_snapshot.workspace_snapshot_id
+        or manifest.workspace_manifest_sha256
+        != successor.workspace_snapshot.manifest_sha256
+        or manifest.evolution_revision_id
+        != successor.evolution_revision.evolution_revision_id
+        or manifest.evolution_revision_manifest_sha256
+        != successor.evolution_revision.manifest_sha256
+        or manifest.runtime_context_snapshot_id
+        != successor.runtime_context_snapshot.runtime_context_snapshot_id
+        or manifest.runtime_context_manifest_sha256
+        != successor.runtime_context_snapshot.manifest_sha256
+        or manifest.effective_execution_snapshot_id
+        != successor.effective_execution_snapshot.effective_execution_snapshot_id
+        or manifest.effective_execution_snapshot_sha256
+        != successor.effective_execution_snapshot.snapshot_sha256
+        or manifest.registry_sha256 != successor.registry_sha256
+        or manifest.materialized_source_successor_transition_id
+        != source_transition_id
+        or manifest.materialized_source_predecessor_project_head_id
+        != source_predecessor_id
+        or manifest.materialized_context_id
+        != source_manifest.materialized_context_id
+        or manifest.materialized_context_manifest_sha256
+        != source_manifest.materialized_context_manifest_sha256
+        or manifest.method_artifact_ids
+        != tuple(item.registry_id for item in frozen)
+        or manifest.frozen_artifact_sha256
+        != tuple(item.sha256 for item in frozen)
+        or manifest.artifacts != inherited
+        or tuple(
+            (item.artifact_type, item.registry_id) for item in frozen
+        )
+        != tuple((item.artifact_type, item.artifact_id) for item in source_artifacts)
+    ):
+        raise ScienceTaskPreconditionFailedV2(
+            "frozen project fork differs from its source or destination authority"
+        )
+def _load_v2_frozen_project_fork(
+    connection: sqlite3.Connection,
+    fork_request_id: str,
+) -> FrozenProjectForkAuthorityV1:
+    row = connection.execute(
+        "SELECT fork_request_id, idempotency_key, request_sha256, request_json, "
+        "authority_sha256, source_project_id, source_freeze_receipt_id, "
+        "source_freeze_authority_sha256, source_project_head_id, "
+        "destination_project_id, predecessor_destination_project_head_id, "
+        "successor_destination_project_head_id, manifest_sha256, authority_json, "
+        "commit_json, created_at FROM frozen_project_forks "
+        "WHERE fork_request_id = ?",
+        (fork_request_id,),
+    ).fetchone()
+    if row is None:
+        raise ScienceTaskNotFoundV2("frozen project fork was not found")
+    request = _v2_model_from_bytes(
+        FrozenProjectForkRequestV1,
+        bytes(row["request_json"]),
+    )
+    authority = _v2_model_from_bytes(
+        FrozenProjectForkAuthorityV1,
+        bytes(row["authority_json"]),
+    )
+    commit = _v2_model_from_bytes(
+        AtomicSuccessorCommitV2,
+        bytes(row["commit_json"]),
+    )
+    seed = authority.model_dump(mode="json", exclude={"authority_sha256"})
+    observed_authority_sha256 = hashlib.sha256(_v2_json_bytes(seed)).hexdigest()
+    source_freeze = _load_v2_project_freeze(
+        connection,
+        str(row["source_project_id"]),
+    )
+    source_head = _load_v2_project_head(
+        connection,
+        str(row["source_project_head_id"]),
+    )
+    predecessor = _load_v2_project_head(
+        connection,
+        str(row["predecessor_destination_project_head_id"]),
+    )
+    successor = _load_v2_project_head(
+        connection,
+        str(row["successor_destination_project_head_id"]),
+    )
+    request_sha256 = hashlib.sha256(_v2_model_bytes(request)).hexdigest()
+    if (
+        authority.fork_receipt_id != fork_request_id
+        or request.idempotency_key != row["idempotency_key"]
+        or request_sha256 != row["request_sha256"]
+        or authority.request_sha256 != request_sha256
+        or authority.authority_sha256 != row["authority_sha256"]
+        or authority.authority_sha256 != observed_authority_sha256
+        or authority.source_project_id != row["source_project_id"]
+        or authority.source_freeze_receipt_id
+        != row["source_freeze_receipt_id"]
+        or authority.source_freeze_authority_sha256
+        != row["source_freeze_authority_sha256"]
+        or authority.source_project_head_id != row["source_project_head_id"]
+        or authority.destination_project_id != row["destination_project_id"]
+        or authority.predecessor_destination_project_head_id
+        != row["predecessor_destination_project_head_id"]
+        or authority.seeded_destination_project_head != successor
+        or authority.commit != commit
+        or commit.manifest_sha256 != row["manifest_sha256"]
+        or authority.created_at != row["created_at"]
+        or source_freeze.authority_sha256
+        != authority.source_freeze_authority_sha256
+    ):
+        raise ScienceTaskStoreV2Error(
+            "frozen project fork authority row is inconsistent"
+        )
+    source_commit = _load_v2_successor_commit_for_project_head(
+        connection,
+        source_head.project_head_id,
+    )
+    if source_commit is None:
+        raise ScienceTaskStoreV2Error(
+            "frozen project fork source commit is missing"
+        )
+    _validate_v2_frozen_project_fork_closure(
+        source_freeze=source_freeze,
+        source_head=source_head,
+        source_commit=source_commit,
+        predecessor=predecessor,
+        successor=successor,
+        commit=commit,
+        request=request,
+    )
+    destination_authority = _load_v2_project_authority(
+        connection,
+        authority.destination_project_id,
+    )
+    if (
+        destination_authority.active_project_head != successor
+        or destination_authority.project_config_sha256
+        != authority.destination_project_config_sha256
+    ):
+        raise ScienceTaskStoreV2Error(
+            "frozen project fork no longer owns the destination head"
+        )
+    return authority
+
+
+def _require_v2_project_not_frozen(
+    connection: sqlite3.Connection,
+    project_id: str,
+) -> None:
+    if connection.execute(
+        "SELECT 1 FROM project_freezes WHERE project_id = ?",
+        (project_id,),
+    ).fetchone() is not None:
+        # Verify the immutable closure before rejecting a mutation.  A corrupt
+        # freeze row must never be treated as an absent gate.
+        _load_v2_project_freeze(connection, project_id)
+        raise ScienceProjectFrozenV2("frozen project rejects further mutations")
 
 
 def _validate_v2_project_head_chain(heads: Sequence[m2.ProjectHeadRefV2]) -> None:
@@ -6281,6 +7584,74 @@ def _load_v2_legacy_successor_abandon_exemption(
     return exemption
 
 
+def _load_v2_historical_restore_commit(
+    connection: sqlite3.Connection,
+    restore_request_id: str,
+) -> AtomicSuccessorCommitV2:
+    row = connection.execute(
+        "SELECT restore_request_id, project_id, predecessor_project_head_id, "
+        "source_project_head_id, successor_project_head_id, manifest_sha256, created_at, "
+        "commit_json FROM historical_restore_commits "
+        "WHERE restore_request_id = ?",
+        (restore_request_id,),
+    ).fetchone()
+    if row is None:
+        raise ScienceTaskNotFoundV2("historical restore was not found")
+    commit = _v2_model_from_bytes(
+        AtomicSuccessorCommitV2, bytes(row["commit_json"])
+    )
+    manifest = commit.manifest
+    if (
+        type(manifest) is not AtomicHistoricalRestoreManifestV2
+        or manifest.successor_transition_id != row["restore_request_id"]
+        or manifest.project_id != row["project_id"]
+        or manifest.predecessor_project_head_id
+        != row["predecessor_project_head_id"]
+        or manifest.source_project_head_id != row["source_project_head_id"]
+        or manifest.successor_project_head_id
+        != row["successor_project_head_id"]
+        or commit.manifest_sha256 != row["manifest_sha256"]
+        or _v2_timestamp(manifest.created_at) != row["created_at"]
+    ):
+        raise ScienceTaskStoreV2Error(
+            "historical restore receipt row is inconsistent"
+        )
+    return commit
+
+
+def _load_v2_successor_recovery_project_seed(
+    connection: sqlite3.Connection,
+    seed_request_id: str,
+) -> ScienceSuccessorRecoveryProjectSeedAuthorityV1:
+    row = connection.execute(
+        "SELECT recovery_id, destination_project_id, request_sha256, "
+        "successor_project_head_id, manifest_sha256, authority_sha256, "
+        "authority_json FROM successor_recovery_project_seeds "
+        "WHERE seed_request_id = ?",
+        (seed_request_id,),
+    ).fetchone()
+    if row is None:
+        raise ScienceTaskNotFoundV2("successor recovery project seed was not found")
+    authority = _v2_model_from_bytes(
+        ScienceSuccessorRecoveryProjectSeedAuthorityV1,
+        bytes(row["authority_json"]),
+    )
+    if (
+        authority.seed_request_id != seed_request_id
+        or authority.recovery_id != row["recovery_id"]
+        or authority.destination_project_id != row["destination_project_id"]
+        or authority.request_sha256 != row["request_sha256"]
+        or authority.successor_destination_project_head.project_head_id
+        != row["successor_project_head_id"]
+        or authority.commit.manifest_sha256 != row["manifest_sha256"]
+        or authority.content_sha256 != row["authority_sha256"]
+    ):
+        raise ScienceTaskStoreV2Error(
+            "persisted successor recovery project seed is inconsistent"
+        )
+    return authority
+
+
 def _load_v2_successor_commit_for_project_head(
     connection: sqlite3.Connection,
     project_head_id: str,
@@ -6292,6 +7663,73 @@ def _load_v2_successor_commit_for_project_head(
         (project_head_id,),
     ).fetchone()
     if row is None:
+        recovered = connection.execute(
+            "SELECT seed_request_id FROM successor_recovery_project_seeds "
+            "WHERE successor_project_head_id = ?",
+            (project_head_id,),
+        ).fetchone()
+        if recovered is not None:
+            authority = _load_v2_successor_recovery_project_seed(
+                connection,
+                str(recovered["seed_request_id"]),
+            )
+            commit = authority.commit
+            manifest = commit.manifest
+            if (
+                type(manifest) is not AtomicSuccessorRecoverySeedManifestV1
+                or manifest.project_id != head.project_id
+                or manifest.successor_project_head_id != project_head_id
+                or manifest.successor_generation != head.generation
+                or manifest.successor_manifest_sha256 != head.manifest_sha256
+            ):
+                raise ScienceTaskStoreV2Error(
+                    "successor recovery seed head and atomic receipt differ"
+                )
+            return commit
+        forked = connection.execute(
+            "SELECT fork_request_id FROM frozen_project_forks "
+            "WHERE successor_destination_project_head_id = ?",
+            (project_head_id,),
+        ).fetchone()
+        if forked is not None:
+            authority = _load_v2_frozen_project_fork(
+                connection,
+                str(forked["fork_request_id"]),
+            )
+            commit = authority.commit
+            manifest = commit.manifest
+            if (
+                type(manifest) is not AtomicFrozenProjectForkManifestV1
+                or manifest.project_id != head.project_id
+                or manifest.successor_project_head_id != project_head_id
+                or manifest.successor_generation != head.generation
+                or manifest.successor_manifest_sha256 != head.manifest_sha256
+            ):
+                raise ScienceTaskStoreV2Error(
+                    "frozen project fork head and atomic receipt differ"
+                )
+            return commit
+        restored = connection.execute(
+            "SELECT restore_request_id FROM historical_restore_commits "
+            "WHERE successor_project_head_id = ?",
+            (project_head_id,),
+        ).fetchone()
+        if restored is not None:
+            commit = _load_v2_historical_restore_commit(
+                connection, str(restored["restore_request_id"])
+            )
+            manifest = commit.manifest
+            if (
+                type(manifest) is not AtomicHistoricalRestoreManifestV2
+                or manifest.project_id != head.project_id
+                or manifest.successor_project_head_id != project_head_id
+                or manifest.successor_generation != head.generation
+                or manifest.successor_manifest_sha256 != head.manifest_sha256
+            ):
+                raise ScienceTaskStoreV2Error(
+                    "historical restore head and atomic receipt differ"
+                )
+            return commit
         if head.generation != 0:
             raise ScienceTaskStoreV2Error(
                 "non-genesis v2 project head has no atomic successor receipt"
@@ -6313,8 +7751,18 @@ def _load_v2_successor_commit_for_project_head(
 
 def _v2_successor_commit_semantics(
     connection: sqlite3.Connection,
-    manifest: AtomicSuccessorManifestV2 | AtomicEvolutionAbandonManifestV2,
+    manifest: AtomicSuccessorManifestV2
+    | AtomicEvolutionAbandonManifestV2
+    | AtomicFrozenProjectForkManifestV1
+    | AtomicHistoricalRestoreManifestV2
+    | AtomicSuccessorRecoverySeedManifestV1,
 ) -> int:
+    if type(manifest) in {
+        AtomicFrozenProjectForkManifestV1,
+        AtomicHistoricalRestoreManifestV2,
+        AtomicSuccessorRecoverySeedManifestV1,
+    }:
+        return 2
     row = connection.execute(
         "SELECT composition_semantics_version, "
         "legacy_manifest_sha256 FROM successor_commits "
@@ -6344,7 +7792,11 @@ def _v2_successor_commit_semantics(
 
 
 def _v2_typed_artifact_authority(
-    manifest: AtomicSuccessorManifestV2 | AtomicEvolutionAbandonManifestV2,
+    manifest: AtomicSuccessorManifestV2
+    | AtomicEvolutionAbandonManifestV2
+    | AtomicFrozenProjectForkManifestV1
+    | AtomicHistoricalRestoreManifestV2
+    | AtomicSuccessorRecoverySeedManifestV1,
     *,
     expected_count: int,
     label: str,
@@ -6415,6 +7867,24 @@ def _v2_expected_inherited_runtime(
             predecessor_manifest.predecessor_project_head_id,
             predecessor_manifest.materialized_context_id,
             predecessor_manifest.materialized_context_manifest_sha256,
+        )
+    if type(predecessor_manifest) is AtomicSuccessorRecoverySeedManifestV1:
+        return (
+            "materialized_inherited",
+            predecessor_manifest.recovery_id,
+            predecessor_manifest.predecessor_project_head_id,
+            predecessor_manifest.materialized_context_id,
+            predecessor_manifest.materialized_context_manifest_sha256,
+        )
+    if type(predecessor_manifest) not in {
+        AtomicEvolutionAbandonManifestV2,
+        AtomicFrozenProjectForkManifestV1,
+        AtomicHistoricalRestoreManifestV2,
+        AtomicSuccessorManifestV2,
+        AtomicSuccessorRecoverySeedManifestV1,
+    }:
+        raise ScienceTaskPreconditionFailedV2(
+            "inherited runtime receipt type is unsupported"
         )
     return (
         predecessor_manifest.runtime_context_source,
@@ -6756,6 +8226,127 @@ def _validate_v2_successor_commit_closure(
         predecessor=predecessor,
         expected_runtime=expected_runtime,
         expected_artifacts=predecessor_artifacts,
+    )
+
+
+def _validate_v2_historical_restore_closure(
+    *,
+    connection: sqlite3.Connection,
+    predecessor: m2.ProjectHeadRefV2,
+    source: m2.ProjectHeadRefV2,
+    successor: m2.ProjectHeadRefV2,
+    commit: AtomicSuccessorCommitV2,
+    restore_request_id: str,
+) -> None:
+    manifest = commit.manifest
+    if type(manifest) is not AtomicHistoricalRestoreManifestV2:
+        raise ScienceTaskPreconditionFailedV2(
+            "historical restore has the wrong atomic receipt"
+        )
+    cross_project = source.project_id != predecessor.project_id
+    expected_successor = (
+        build_cross_project_restored_head(
+            predecessor=predecessor,
+            source=source,
+            restore_transition_id=manifest.successor_transition_id,
+        )
+        if cross_project
+        else None
+    )
+    if (
+        successor.project_id != predecessor.project_id
+        or (not cross_project and source.generation > predecessor.generation)
+        or (cross_project and successor != expected_successor)
+        or successor.predecessor_project_head_id != predecessor.project_head_id
+        or successor.generation != predecessor.generation + 1
+        or successor.workspace_snapshot != predecessor.workspace_snapshot
+        or (
+            not cross_project
+            and successor.evolution_revision != source.evolution_revision
+        )
+        or (
+            not cross_project
+            and successor.runtime_context_snapshot
+            != source.runtime_context_snapshot
+        )
+        or (
+            not cross_project
+            and successor.effective_execution_snapshot
+            != source.effective_execution_snapshot
+        )
+        or successor.registry_sha256 != source.registry_sha256
+        or manifest.project_id != predecessor.project_id
+        or manifest.restore_request_id != restore_request_id
+        or manifest.source_project_head_id != source.project_head_id
+        or manifest.source_manifest_sha256 != source.manifest_sha256
+        or manifest.predecessor_project_head_id != predecessor.project_head_id
+        or manifest.predecessor_generation != predecessor.generation
+        or manifest.predecessor_manifest_sha256 != predecessor.manifest_sha256
+        or manifest.successor_project_head_id != successor.project_head_id
+        or manifest.successor_generation != successor.generation
+        or manifest.successor_manifest_sha256 != successor.manifest_sha256
+        or manifest.workspace_snapshot_id
+        != successor.workspace_snapshot.workspace_snapshot_id
+        or manifest.workspace_manifest_sha256
+        != successor.workspace_snapshot.manifest_sha256
+        or manifest.evolution_revision_id
+        != successor.evolution_revision.evolution_revision_id
+        or manifest.evolution_revision_manifest_sha256
+        != successor.evolution_revision.manifest_sha256
+        or manifest.runtime_context_snapshot_id
+        != successor.runtime_context_snapshot.runtime_context_snapshot_id
+        or manifest.runtime_context_manifest_sha256
+        != successor.runtime_context_snapshot.manifest_sha256
+        or manifest.effective_execution_snapshot_id
+        != successor.effective_execution_snapshot.effective_execution_snapshot_id
+        or manifest.effective_execution_snapshot_sha256
+        != successor.effective_execution_snapshot.snapshot_sha256
+        or manifest.registry_sha256 != successor.registry_sha256
+    ):
+        raise ScienceTaskPreconditionFailedV2(
+            "historical restore differs from its project-head authority"
+        )
+    source_commit = _load_v2_successor_commit_for_project_head(
+        connection, source.project_head_id
+    )
+    if source_commit is None:
+        if source.generation != 0 or source.evolution_revision.artifact_count != 0:
+            raise ScienceTaskPreconditionFailedV2(
+                "historical restore source lacks genesis authority"
+            )
+        source_artifacts: tuple[tuple[str, str, str, str], ...] = ()
+    else:
+        source_artifacts = _v2_typed_artifact_authority(
+            source_commit.manifest,
+            expected_count=source.evolution_revision.artifact_count,
+            label="historical restore source",
+        )
+    observed_artifacts = _v2_typed_artifact_authority(
+        manifest,
+        expected_count=source.evolution_revision.artifact_count,
+        label="historical restore",
+    )
+    expected_runtime = _v2_expected_inherited_runtime(source_commit)
+    observed_runtime = (
+        manifest.runtime_context_source,
+        manifest.materialized_source_successor_transition_id,
+        manifest.materialized_source_predecessor_project_head_id,
+        manifest.materialized_context_id,
+        manifest.materialized_context_manifest_sha256,
+    )
+    if (
+        observed_artifacts != source_artifacts
+        or observed_runtime != expected_runtime
+        or any(item.origin != "inherited" for item in manifest.artifacts)
+    ):
+        raise ScienceTaskPreconditionFailedV2(
+            "historical restore changed exact source artifact authority"
+        )
+    _validate_v2_inherited_runtime_authority(
+        connection,
+        predecessor=source,
+        expected_runtime=expected_runtime,
+        expected_artifacts=source_artifacts,
     )
 
 
@@ -7632,7 +9223,10 @@ def _load_v2_attempt_execution_optional(
         if (
             record.receipt is None
             or record.evidence is None
-            or science_session_result_sha256(captured_result)
+            or science_session_result_sha256(
+                captured_result,
+                allow_historical_isolation_authority=True,
+            )
             != record.receipt.session_result_sha256
             or record.evidence.session_result_sha256 != record.receipt.session_result_sha256
         ):
@@ -7677,10 +9271,16 @@ def _load_v2_captured_session_result(
         raise ScienceTaskStoreV2Error("captured v2 Attempt result digest is inconsistent")
     try:
         result = SessionResult.model_validate_json(payload)
-        result = canonical_subscription_session_result(result)
+        result = canonical_subscription_session_result(
+            result,
+            allow_historical_isolation_authority=True,
+        )
     except (TypeError, ValueError) as exc:
         raise ScienceTaskStoreV2Error("captured v2 Attempt result is invalid") from exc
-    if science_session_result_bytes(result) != payload:
+    if science_session_result_bytes(
+        result,
+        allow_historical_isolation_authority=True,
+    ) != payload:
         raise ScienceTaskStoreV2Error("captured v2 Attempt result is not canonical")
     return result
 
@@ -7814,7 +9414,11 @@ def _validate_v2_terminal_execution_closure(
         or evidence.session_status != receipt.terminal_status
         or terminal_result.task_id != receipt.rollout_task_id
         or terminal_result.session_id != receipt.session_id
-        or science_session_result_sha256(terminal_result) != receipt.session_result_sha256
+        or science_session_result_sha256(
+            terminal_result,
+            allow_historical_isolation_authority=True,
+        )
+        != receipt.session_result_sha256
         or workspace_result is None
         or workspace_result.handoff_id != receipt.workspace_handoff_id
         or workspace_result.result_manifest_sha256 != receipt.workspace_result_manifest_sha256
@@ -8248,6 +9852,7 @@ __all__ = [
     "ProjectInFlightOwner",
     "ScienceProjectInFlight",
     "ScienceProjectAdmissionAuthorityV2",
+    "ScienceProjectFrozenV2",
     "ScienceProjectReadinessBlockerV2",
     "ScienceAttemptNotFoundV2",
     "ScienceRunConflict",

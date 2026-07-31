@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import re
 import shlex
 import subprocess
 import tomllib
+from pathlib import Path
 
 import pytest
 
@@ -15,11 +15,18 @@ from openevo.runtime.codex_isolation import (
     CODEX_SUBSCRIPTION_PERMISSION_PROFILE,
     CODEX_SUBSCRIPTION_POLICY_SHA256,
     CODEX_SUBSCRIPTION_REFRESH_PERSISTENCE,
+    CodexSubscriptionIsolationError,
     _canary_event_validator_command,
     codex_subscription_cli_flags,
     codex_subscription_cli_overrides,
     codex_subscription_contract,
     codex_subscription_exec_canary_command,
+    codex_subscription_isolation_probe_command,
+    codex_subscription_sandbox_smoke_command,
+    is_historical_codex_subscription_authority,
+    parse_codex_sandbox_helper_diagnostic,
+    validate_codex_subscription_isolation_result,
+    validate_codex_subscription_sandbox_smoke_result,
     validate_codex_subscription_surface,
     validate_codex_subscription_version,
 )
@@ -30,18 +37,45 @@ from openevo.runtime.managed import (
     MANAGED_CODEX_VERSION,
 )
 
-
 _NONCE = "0123456789abcdef0123456789abcdef"
 _SCRIPT_PATH = "/openevo/session/workspace/.openevo-test-canary-probe.sh"
 
 
+def test_only_exact_v1_authority_is_accepted_for_historical_readback() -> None:
+    contract = {
+        "schema_version": 1,
+        "policy_id": "openevo.codex-subscription-credential-isolation.v1",
+        "policy_sha256": "59ea503b553aa414ddcc35ede66210ee901621eebcbd1cfbeb06023410e35d38",
+        "permission_profile": "openevo_codex_subscription_v1",
+        "codex_version": "0.144.1",
+        "default_model": "gpt-5.5",
+        "sandbox_backend": "linux-bubblewrap",
+        "refresh_persistence": "unsupported_read_only_auth_overlay",
+    }
+    receipt = {
+        **contract,
+        "status": "passed",
+        "canary": "openevo-codex-subscription-real-exec-ready-v1",
+        "evidence": "completed_command_execution_event",
+    }
+
+    assert is_historical_codex_subscription_authority(contract, receipt) is True
+    assert (
+        is_historical_codex_subscription_authority(
+            contract,
+            {**receipt, "status": "failed"},
+        )
+        is False
+    )
+
+
 def test_codex_subscription_policy_identity_is_stable() -> None:
     assert CODEX_SUBSCRIPTION_POLICY_SHA256 == (
-        "59ea503b553aa414ddcc35ede66210ee901621eebcbd1cfbeb06023410e35d38"
+        "2411fb769d72ae75eafdd7e2f4c7a9083418c2a3972c9026868e7c6df8e68ea8"
     )
     assert codex_subscription_contract() == {
         "schema_version": 1,
-        "policy_id": "openevo.codex-subscription-credential-isolation.v1",
+        "policy_id": "openevo.codex-subscription-credential-isolation.v2",
         "policy_sha256": CODEX_SUBSCRIPTION_POLICY_SHA256,
         "permission_profile": CODEX_SUBSCRIPTION_PERMISSION_PROFILE,
         "codex_version": "0.144.1",
@@ -63,7 +97,8 @@ def test_codex_subscription_overrides_are_valid_toml_and_closed() -> None:
     flags = " ".join(codex_subscription_cli_flags(allow_internet=True))
 
     assert f'"{MANAGED_CODEX_PACKAGE_ROOT}"="read"' in rendered
-    assert '"/openevo/credentials/codex"="deny"' in rendered
+    assert '"/openevo/credentials/codex"="read"' in rendered
+    assert '"/openevo/credentials/codex/auth.json"="deny"' in rendered
     assert '"/openevo/session/workspace"="write"' in rendered
     assert '"/openevo/session/home"="read"' in rendered
     assert '"/openevo/session/evolution"="read"' in rendered
@@ -104,8 +139,10 @@ def test_codex_subscription_network_policy_is_core_owned() -> None:
     assert "network.enabled=false" in disabled
     assert 'web_search="live"' in enabled
     assert 'web_search="disabled"' in disabled
-    assert '"/openevo/credentials/codex"="deny"' in enabled
-    assert '"/openevo/credentials/codex"="deny"' in disabled
+    assert '"/openevo/credentials/codex"="read"' in enabled
+    assert '"/openevo/credentials/codex/auth.json"="deny"' in enabled
+    assert '"/openevo/credentials/codex"="read"' in disabled
+    assert '"/openevo/credentials/codex/auth.json"="deny"' in disabled
     with pytest.raises(ValueError, match="Core-owned"):
         codex_subscription_cli_overrides(allow_internet=1)  # type: ignore[arg-type]
 
@@ -166,6 +203,213 @@ def test_codex_subscription_canary_uses_real_exec_and_validates_boundaries() -> 
         assert "/openevo/credentials" not in prompt
         assert "/proc/" not in prompt
         assert "sudo" not in prompt
+
+
+def test_codex_subscription_deterministic_probe_uses_no_model() -> None:
+    command = codex_subscription_isolation_probe_command(
+        allow_internet=False,
+        nonce=_NONCE,
+    )
+
+    subprocess.run(
+        ["/bin/sh", "-n"],
+        input=command,
+        text=True,
+        check=True,
+        capture_output=True,
+    )
+    assert ";;&" not in command
+    assert "/opt/codex/bin/codex login status" in command
+    assert "/opt/codex/bin/codex exec" not in command
+    assert " sandbox " in command
+    assert "--permission-profile openevo_codex_subscription_v1" in command
+    assert "/proc/self/root /proc/[0-9]*/root" in command
+    assert "/var/run/docker.sock" in command
+    assert "OPENEVO_CORE_CONTROL_BEARER" in command
+    assert "JUDGE_API_KEY" in command
+    assert "sandbox_proc_credential_visible" in command
+    assert "sandbox_namespace_unavailable" in command
+    assert "sandbox_executable_unavailable" in command
+    assert "sandbox_cli_contract_invalid" in command
+    assert "sandbox_config_permission_denied" in command
+    assert "nested_return_code=%s|progress=%s|stderr_class=%s" in command
+    assert "sandbox_child_not_started" in command
+    assert "sandbox_outer_command_failed" in command
+    assert "outer_progress=sandbox_launched" in command
+    assert "outer_command_missing" in command
+    assert "cleanup() { /bin/rm -f --" in command
+    assert "sandbox_security_policy_denied" in command
+    assert ".openevo-isolation-progress-" in command
+    assert "printf completed" in command
+    assert "No permissions to create a new namespace" in command
+    assert "required arguments were not provided|Usage: codex sandbox" in command
+    assert re.search(r"/tmp/\.openevo-isolation-[0-9a-f]{32}\.stderr", command)
+    assert "sandbox_output=$(" in command
+    assert "2>/dev/null)" not in command
+
+
+def test_codex_subscription_sandbox_smoke_uses_the_production_profile() -> None:
+    command = codex_subscription_sandbox_smoke_command(allow_internet=False)
+
+    assert "/opt/codex/bin/codex" in command
+    assert "--strict-config" not in command
+    assert "--ignore-user-config" not in command
+    assert "--ignore-rules" not in command
+    assert "-c " in command
+    assert " sandbox " in command
+    assert "--permission-profile openevo_codex_subscription_v1" in command
+    assert command.endswith("-- /bin/true")
+    assert "codex exec" not in command
+
+
+def test_codex_subscription_sandbox_smoke_failure_is_closed() -> None:
+    with pytest.raises(
+        CodexSubscriptionIsolationError,
+        match="sandbox_executable_unavailable",
+    ) as failure:
+        validate_codex_subscription_sandbox_smoke_result(
+            return_code=127,
+            stderr="",
+            probe_progress="uncredentialed_smoke",
+        )
+
+    assert failure.value.nested_return_code == 127
+    assert failure.value.probe_progress == "uncredentialed_smoke"
+    assert failure.value.stderr_class == "empty"
+
+    with pytest.raises(
+        CodexSubscriptionIsolationError,
+        match="sandbox_bwrap_unavailable",
+    ) as missing_bwrap:
+        validate_codex_subscription_sandbox_smoke_result(
+            return_code=127,
+            stderr="",
+            probe_progress="credential_smoke",
+            helper_started=True,
+            helper_return_code=127,
+            missing_executable_basename="bwrap",
+        )
+    assert missing_bwrap.value.helper_started is True
+    assert missing_bwrap.value.helper_return_code == 127
+    assert missing_bwrap.value.missing_executable_basename == "bwrap"
+
+
+def test_codex_sandbox_helper_diagnostic_is_closed() -> None:
+    assert parse_codex_sandbox_helper_diagnostic(
+        "started=1\nreturn_code=127\nmissing_executable=bwrap\n"
+    ) == (True, 127, "bwrap")
+    assert parse_codex_sandbox_helper_diagnostic(
+        "started=1\nreturn_code=999\nmissing_executable=bwrap\n"
+    ) == (None, None, None)
+    assert parse_codex_sandbox_helper_diagnostic(
+        "started=1\nreturn_code=127\nmissing_executable=/private/path\n"
+    ) == (None, None, None)
+
+
+def test_codex_subscription_deterministic_probe_has_closed_failure_codes() -> None:
+    with pytest.raises(
+        CodexSubscriptionIsolationError,
+        match="sandbox_proc_credential_visible",
+    ):
+        validate_codex_subscription_isolation_result(
+            return_code=70,
+            stdout="",
+            stderr="OPENEVO_CODEX_ISOLATION_FAILURE:sandbox_proc_credential_visible\n",
+        )
+    with pytest.raises(
+        CodexSubscriptionIsolationError,
+        match="sandbox_invocation_failed",
+    ):
+        validate_codex_subscription_isolation_result(
+            return_code=1,
+            stdout="untrusted output",
+            stderr="secret-looking-untrusted-output",
+        )
+    with pytest.raises(
+        CodexSubscriptionIsolationError,
+        match="sandbox_namespace_unavailable",
+    ):
+        validate_codex_subscription_isolation_result(
+            return_code=70,
+            stdout="",
+            stderr="OPENEVO_CODEX_ISOLATION_FAILURE:sandbox_namespace_unavailable\n",
+        )
+    with pytest.raises(
+        CodexSubscriptionIsolationError,
+        match="sandbox_config_permission_denied",
+    ):
+        validate_codex_subscription_isolation_result(
+            return_code=70,
+            stdout="",
+            stderr=(
+                "OPENEVO_CODEX_ISOLATION_FAILURE:"
+                "sandbox_config_permission_denied\n"
+            ),
+        )
+
+    with pytest.raises(
+        CodexSubscriptionIsolationError,
+        match="sandbox_child_not_started",
+    ) as diagnostic:
+        validate_codex_subscription_isolation_result(
+            return_code=70,
+            stdout="",
+            stderr=(
+                "OPENEVO_CODEX_ISOLATION_FAILURE:sandbox_child_not_started"
+                "|nested_return_code=1|progress=not_started"
+                "|stderr_class=policy_rejected\n"
+            ),
+        )
+    assert diagnostic.value.nested_return_code == 1
+    assert diagnostic.value.probe_progress == "not_started"
+    assert diagnostic.value.stderr_class == "policy_rejected"
+
+    with pytest.raises(
+        CodexSubscriptionIsolationError,
+        match="sandbox_child_not_started",
+    ) as diagnostic_with_transport_notice:
+        validate_codex_subscription_isolation_result(
+            return_code=70,
+            stdout="",
+            stderr=(
+                "closed transport notice\n"
+                "OPENEVO_CODEX_ISOLATION_FAILURE:sandbox_child_not_started"
+                "|nested_return_code=1|progress=not_started"
+                "|stderr_class=policy_rejected\n"
+            ),
+        )
+    assert diagnostic_with_transport_notice.value.nested_return_code == 1
+    assert diagnostic_with_transport_notice.value.probe_progress == "not_started"
+    assert diagnostic_with_transport_notice.value.stderr_class == "policy_rejected"
+
+    with pytest.raises(
+        CodexSubscriptionIsolationError,
+        match="sandbox_invocation_failed",
+    ) as malformed:
+        validate_codex_subscription_isolation_result(
+            return_code=70,
+            stdout="",
+            stderr=(
+                "OPENEVO_CODEX_ISOLATION_FAILURE:sandbox_child_not_started"
+                "|nested_return_code=999|progress=not_started"
+                "|stderr_class=policy_rejected\n"
+            ),
+        )
+    assert malformed.value.nested_return_code == 70
+    assert malformed.value.stderr_class == "unclassified"
+
+    with pytest.raises(
+        CodexSubscriptionIsolationError,
+        match="sandbox_outer_command_failed",
+    ) as missing_stat:
+        validate_codex_subscription_isolation_result(
+            return_code=127,
+            stdout="",
+            stderr="/bin/bash: line 9: stat: command not found\n",
+        )
+    assert missing_stat.value.nested_return_code == 127
+    assert missing_stat.value.probe_progress is None
+    assert missing_stat.value.stderr_class == "outer_missing_stat"
 
 
 def test_canary_event_validator_accepts_exact_completed_command(

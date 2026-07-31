@@ -315,6 +315,17 @@ class SessionDispatcher:
     async def active_count(self) -> int:
         return (await self.snapshot()).active_count
 
+    async def owns_session(self, session_id: str) -> bool:
+        """Return whether the live dispatcher still owns ``session_id``.
+
+        Cleanup recovery must not race the normal lifecycle for a session that
+        remains in the dispatcher. This closed query exposes only ownership,
+        not the mutable ``ManagedSession`` object.
+        """
+
+        async with self._lock:
+            return session_id in self._sessions
+
     async def wait_terminated(self, session_id: str) -> None:
         async with self._condition:
             while session_id in self._sessions:

@@ -153,6 +153,7 @@ def test_release_composition_mounts_only_production_v2_authority(
         source_commit=_SOURCE_COMMIT,
         executable_registry=registry,
         service_supervisor=services,
+        daemon_release_identity="d" * 64,
         runtime_contract_sha256=release_runtime_contract_sha256(),
     )
 
@@ -256,6 +257,7 @@ def test_release_composition_executes_two_sessions_recovers_events_and_reconnect
         source_commit=_SOURCE_COMMIT,
         executable_registry=registry,
         service_supervisor=services,
+        daemon_release_identity="d" * 64,
         runtime_contract_sha256=release_runtime_contract_sha256(),
     )
     gateway_sessions = tmp_path / "gateway-sessions"
@@ -350,6 +352,7 @@ def test_release_composition_executes_two_sessions_recovers_events_and_reconnect
         source_commit=_SOURCE_COMMIT,
         executable_registry=registry,
         service_supervisor=restarted_services,
+        daemon_release_identity="d" * 64,
         runtime_contract_sha256=release_runtime_contract_sha256(),
     )
     with TestClient(restarted.app) as client:
@@ -386,6 +389,7 @@ def test_release_ready_payload_binds_the_exact_v2_build(tmp_path: Path) -> None:
         source_commit=_SOURCE_COMMIT,
         executable_registry=registry,
         service_supervisor=services,
+        daemon_release_identity="d" * 64,
         runtime_contract_sha256=release_runtime_contract_sha256(),
     )
     try:

@@ -337,7 +337,7 @@ class CompiledExperiment:
     rollout_url: str
     evolution_backend_url: str
     tasks: list[CompiledTask]
-    reflector_llm: dict[str, str]
+    reflector_llm: dict[str, Any]
     promotion_gate: dict[str, Any]
     _target_selections_json: tuple[tuple[str, str], ...]
     _registry_snapshot: RegistrySnapshot
@@ -570,7 +570,7 @@ def validate_project_evolution_selections(
     targets: ProjectEvolutionTargetMap,
     *,
     agent_model: str,
-    reflector_llm: Mapping[str, str],
+    reflector_llm: Mapping[str, Any],
     registry_snapshot: RegistrySnapshot,
     execution_profile: EvolutionExecutionProfile,
 ) -> None:
@@ -776,7 +776,7 @@ def _plan_selections(
     *,
     prior_dataset_artifact_ids: tuple[str, ...],
     agent_model: str,
-    reflector_llm: Mapping[str, str],
+    reflector_llm: Mapping[str, Any],
     registry_snapshot: RegistrySnapshot,
 ) -> tuple[EvolutionTargetSelection, ...]:
     selections: list[EvolutionTargetSelection] = []
@@ -876,7 +876,7 @@ def _project_method_config(
     *,
     method_descriptor: EvolutionMethodDescriptor,
     agent_model: str,
-    reflector_llm: Mapping[str, str],
+    reflector_llm: Mapping[str, Any],
 ) -> dict[str, Any]:
     config = dict(requested_config)
     config.pop("compatibility", None)
@@ -1042,15 +1042,26 @@ def _workspace_source(task: TaskConfig, config_path: Path | None) -> str | None:
     return str((config_path.resolve().parent / workspace).resolve())
 
 
-def _reflector_llm(config: ExperimentConfig) -> dict[str, str]:
-    if config.agent.provider:
-        return {"provider": config.agent.provider, "model": config.agent.model}
-    provider = (
+def _reflector_llm(config: ExperimentConfig) -> dict[str, Any]:
+    provider = config.agent.provider or (
         "codex_cli"
         if (config.agent.auth in _SUBSCRIPTION_AUTH_MODES or config.agent.preset == "codex")
         else "openai_chat"
     )
-    return {"provider": provider, "model": config.agent.model}
+    result: dict[str, Any] = {"provider": provider, "model": config.agent.model}
+    if provider == "codex_cli":
+        if config.agent.auth not in _SUBSCRIPTION_AUTH_MODES:
+            raise ValueError(
+                "codex_cli reflector requires managed subscription auth; "
+                "legacy PATH execution must be configured explicitly in a development job"
+            )
+        from openevo.evolution.managed_reflector import default_managed_reflector_runtime
+
+        result["reasoning_effort"] = str(
+            config.agent.settings.get("reasoning_effort") or "high"
+        )
+        result["runtime"] = default_managed_reflector_runtime().model_dump(mode="json")
+    return result
 
 
 def _promotion_gate(config: ExperimentConfig) -> dict[str, Any]:

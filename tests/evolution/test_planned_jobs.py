@@ -1,16 +1,23 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import json
 import os
-from pathlib import Path
 import sqlite3
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 import openevo.evolution.store as store_module
+from openevo.evolution.admission import (
+    ArtifactAdmissionEvidence,
+    ArtifactContentAdmissionBasis,
+    ArtifactProposalDecisionRequest,
+    NativeArtifactAdmissionService,
+    ProposalAction,
+)
 from openevo.evolution.framework import (
     EvolutionExecutionProfile,
     EvolutionPlan,
@@ -21,25 +28,35 @@ from openevo.evolution.framework.builtins import (
     ImplementationDistributionIdentity,
     build_builtin_registry,
 )
+from openevo.evolution.framework.execution import (
+    ReflectorInferenceRequest,
+    ReflectorInferenceResponse,
+    ReflectorRuntimeReceipt,
+)
+from openevo.evolution.managed_reflector import default_managed_reflector_runtime
+from openevo.evolution.methods import _read_dataset_artifact, run_method
 from openevo.evolution.models import (
     ArtifactRegisterRequest,
     ArtifactType,
     DatasetCreateRequest,
     EventIngestRequest,
     JobCreateRequest,
+    WorkerClaimedJob,
     WorkerClaimRequest,
     WorkerCompleteRequest,
     WorkerFailRequest,
     WorkerHeartbeatRequest,
+    WorkerReflectorInferenceCompleteRequest,
+    WorkerReflectorInferenceReserveRequest,
 )
-from openevo.evolution.methods import _read_dataset_artifact, run_method
 from openevo.evolution.planned_jobs import (
     PlanBoundJobCreateRequest,
     PlanBoundJobRetryRequest,
     PlannedInputBinding,
 )
-from openevo.evolution.store import DatasetIntegrityError, EvolutionStore
 from openevo.evolution.server import create_app
+from openevo.evolution.store import DatasetIntegrityError, EvolutionStore
+from openevo.evolution.worker import _DurableJobReflectorService
 from tests.framework_testkit import verified_builtin_registry
 
 
@@ -74,6 +91,10 @@ def _plan() -> EvolutionPlan:
                     "reflector_llm": {
                         "provider": "codex_cli",
                         "model": "gpt-5.1-codex-mini",
+                        "runtime": {
+                            "mode": "legacy_path",
+                            "path_fallback_allowed": True,
+                        },
                     },
                 },
             ),
@@ -206,6 +227,7 @@ def _complete_transition_bound_skill_job(
     request: PlanBoundJobCreateRequest,
     *,
     payload_name: str,
+    promoted: bool = True,
 ) -> tuple[str, str]:
     created = store.create_plan_bound_job(
         request,
@@ -243,12 +265,38 @@ def _complete_transition_bound_skill_job(
                     name=payload_name,
                     uri=payload.as_uri(),
                     manifest={"content_path": "SKILL.md"},
-                    promoted=True,
+                    promoted=promoted,
                 )
             ],
         ),
     )
     return created.job_id, completed["artifact_ids"][0]
+
+
+def _admission_request(
+    *,
+    job_id: str,
+    selected_artifact_id: str,
+    parent_artifact_id: str | None,
+    genesis: bool = False,
+) -> ArtifactProposalDecisionRequest:
+    return ArtifactProposalDecisionRequest(
+        decision_id=f"decision-{job_id}",
+        job_id=job_id,
+        artifact_type=ArtifactType.SKILL_BUNDLE,
+        action=ProposalAction.UPDATE,
+        parent_artifact_id=parent_artifact_id,
+        genesis=genesis,
+        selected_artifact_id=selected_artifact_id,
+        reason="closed structural admission",
+        admission=ArtifactAdmissionEvidence(
+            validator_id="test-native-admission-v1",
+            schema_version="1",
+            passed=True,
+            report_sha256="f" * 64,
+        ),
+        content_admission_basis=ArtifactContentAdmissionBasis(),
+    )
 
 
 def _request_using_sealed_artifact(
@@ -293,6 +341,386 @@ def _request_using_sealed_artifact(
             ),
         }
     )
+
+
+def test_sealed_successor_admission_is_atomic_and_replayable_after_response_loss(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    transition_id = "successor-transition-admission-atomic"
+    sealed_request, _dataset_id = _request_with_sealed_dataset(store)
+    request = sealed_request.model_copy(
+        update={"successor_transition_id": transition_id}
+    )
+    parent_artifact_id = request.input_bindings[1].artifact_ids[0]
+    job_id, proposal_id = _complete_transition_bound_skill_job(
+        store,
+        request,
+        payload_name="admission-atomic",
+        promoted=False,
+    )
+    decision = _admission_request(
+        job_id=job_id,
+        selected_artifact_id=proposal_id,
+        parent_artifact_id=parent_artifact_id,
+    )
+
+    # The first Core transaction committed, but its caller lost the response.
+    committed = store.apply_internal_artifact_admission(decision)
+    service = NativeArtifactAdmissionService(
+        registry=store,
+        root=tmp_path / "admission-mirror",
+    )
+    authority = service.issue_admission_authority(producer="test-core")
+    recovered = service.decide(authority=authority, request=decision)
+
+    assert recovered == committed
+    assert store.get_internal_successor_artifact(
+        transition_id,
+        proposal_id,
+    ).promoted is True
+    with store.connect() as connection:
+        row = connection.execute(
+            "SELECT receipt_sha256 FROM artifact_admission_decisions "
+            "WHERE decision_id = ?",
+            (decision.decision_id,),
+        ).fetchone()
+        parent = connection.execute(
+            "SELECT promoted FROM artifacts WHERE artifact_id = ?",
+            (parent_artifact_id,),
+        ).fetchone()
+    assert row["receipt_sha256"] == committed.content_sha256
+    # Admission cannot invalidate the still-active predecessor project head.
+    assert parent["promoted"] == 1
+
+
+def test_parentless_genesis_admission_requires_no_plan_bound_parent(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    base, _dataset_id = _request_with_sealed_dataset(store)
+    request = base.model_copy(
+        update={
+            "successor_transition_id": "successor-transition-admission-genesis",
+            "input_bindings": (
+                base.input_bindings[0],
+                PlannedInputBinding(
+                    binding_id="prior_target_artifacts",
+                    artifact_ids=(),
+                ),
+            ),
+        }
+    )
+    job_id, proposal_id = _complete_transition_bound_skill_job(
+        store,
+        request,
+        payload_name="admission-genesis",
+        promoted=False,
+    )
+
+    receipt = store.apply_internal_artifact_admission(
+        _admission_request(
+            job_id=job_id,
+            selected_artifact_id=proposal_id,
+            parent_artifact_id=None,
+            genesis=True,
+        )
+    )
+
+    assert receipt.genesis is True
+    assert receipt.active_artifact_id == proposal_id
+
+
+def test_genesis_admission_rejects_an_existing_plan_bound_parent(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    base, _dataset_id = _request_with_sealed_dataset(store)
+    request = base.model_copy(
+        update={"successor_transition_id": "successor-transition-not-genesis"}
+    )
+    job_id, proposal_id = _complete_transition_bound_skill_job(
+        store,
+        request,
+        payload_name="admission-not-genesis",
+        promoted=False,
+    )
+
+    with pytest.raises(ValueError, match="existing parent"):
+        store.apply_internal_artifact_admission(
+            _admission_request(
+                job_id=job_id,
+                selected_artifact_id=proposal_id,
+                parent_artifact_id=None,
+                genesis=True,
+            )
+        )
+
+
+def _one_call_reflector_request(store: EvolutionStore) -> PlanBoundJobCreateRequest:
+    base = _request(store)
+    return base.model_copy(
+        update={
+            "core_config": {
+                **base.core_config,
+                "max_reflector_model_calls": 1,
+            }
+        }
+    )
+
+
+def test_reflector_reservation_survives_crash_and_forbids_paid_replay(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    request = _one_call_reflector_request(store)
+    created = store.create_plan_bound_job(request, snapshot=_snapshot())
+    claim = store.claim_job(
+        WorkerClaimRequest(
+            worker_id="durable-reservation-worker",
+            capabilities=[request.job_type],
+            method_capabilities=["skill_bundle_reflector"],
+            method_identity_capabilities=_method_identities(request),
+        )
+    )
+    assert claim.job is not None
+    reserve = WorkerReflectorInferenceReserveRequest(
+        lease_id=claim.job.lease_id,
+        request_id="reflect-once",
+        max_model_calls=1,
+    )
+
+    first = store.reserve_reflector_inference(created.job_id, reserve)
+    replay = store.reserve_reflector_inference(created.job_id, reserve)
+    failed = store.fail_job(
+        created.job_id,
+        WorkerFailRequest(
+            lease_id=claim.job.lease_id,
+            error="worker crashed after paid-call reservation",
+            retryable=True,
+        ),
+    )
+
+    assert first.execute_allowed is True
+    assert replay.execute_allowed is False
+    assert replay.receipt == first.receipt
+    assert failed["state"] == "failed"
+    with pytest.raises(ValueError, match="consumed its reflector inference"):
+        store.retry_plan_bound_job(
+            created.job_id,
+            PlanBoundJobRetryRequest(
+                retry_request_id="must-not-retry-paid-call",
+                plan_id=request.plan.plan_id,
+                target_id=request.target_id,
+            ),
+            snapshot=_snapshot(),
+        )
+
+
+def test_completed_reflector_reservation_is_idempotent_and_hash_bound(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    request = _one_call_reflector_request(store)
+    created = store.create_plan_bound_job(request, snapshot=_snapshot())
+    claim = store.claim_job(
+        WorkerClaimRequest(
+            worker_id="durable-completion-worker",
+            capabilities=[request.job_type],
+            method_capabilities=["skill_bundle_reflector"],
+            method_identity_capabilities=_method_identities(request),
+        )
+    )
+    assert claim.job is not None
+    store.reserve_reflector_inference(
+        created.job_id,
+        WorkerReflectorInferenceReserveRequest(
+            lease_id=claim.job.lease_id,
+            request_id="reflect-complete-once",
+            max_model_calls=1,
+        ),
+    )
+    completion = WorkerReflectorInferenceCompleteRequest(
+        lease_id=claim.job.lease_id,
+        request_id="reflect-complete-once",
+        runtime_receipt_sha256="e" * 64,
+    )
+
+    first = store.complete_reflector_inference(created.job_id, completion)
+    replay = store.complete_reflector_inference(created.job_id, completion)
+
+    assert replay == first
+    with pytest.raises(ValueError, match="completion hash changed"):
+        store.complete_reflector_inference(
+            created.job_id,
+            completion.model_copy(
+                update={"runtime_receipt_sha256": "d" * 64}
+            ),
+        )
+
+
+def test_expired_lease_after_reservation_fails_closed_across_restart(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    request = _one_call_reflector_request(store)
+    created = store.create_plan_bound_job(request, snapshot=_snapshot())
+    claim = store.claim_job(
+        WorkerClaimRequest(
+            worker_id="durable-expiry-worker",
+            capabilities=[request.job_type],
+            method_capabilities=["skill_bundle_reflector"],
+            method_identity_capabilities=_method_identities(request),
+        )
+    )
+    assert claim.job is not None
+    store.reserve_reflector_inference(
+        created.job_id,
+        WorkerReflectorInferenceReserveRequest(
+            lease_id=claim.job.lease_id,
+            request_id="reflect-expired-once",
+            max_model_calls=1,
+        ),
+    )
+    with store.connect() as connection:
+        connection.execute(
+            "UPDATE jobs SET lease_expires_at = ? WHERE job_id = ?",
+            ("2000-01-01T00:00:00Z", created.job_id),
+        )
+        connection.commit()
+
+    restarted = EvolutionStore(
+        db_path=tmp_path / "evolution.db",
+        artifact_root=tmp_path / "artifacts",
+    )
+    restarted.initialize()
+
+    terminal = restarted.get_internal_job_result(created.job_id)
+    reservation = restarted.get_reflector_inference_reservation(created.job_id)
+    assert terminal["state"] == "failed"
+    assert terminal["retryable"] is False
+    assert reservation.state == "started"
+    with pytest.raises(ValueError, match="consumed its reflector inference"):
+        restarted.retry_plan_bound_job(
+            created.job_id,
+            PlanBoundJobRetryRequest(
+                retry_request_id="must-not-retry-expired-call",
+                plan_id=request.plan.plan_id,
+                target_id=request.target_id,
+            ),
+            snapshot=_snapshot(),
+        )
+
+
+class _OneCallReservationClient:
+    def __init__(self, *, fail_completion: bool = False) -> None:
+        self.reserved = False
+        self.completed = False
+        self.fail_completion = fail_completion
+
+    def reserve_reflector_inference(
+        self,
+        job_id: str,
+        lease_id: str,
+        request_id: str,
+    ) -> dict[str, object]:
+        del job_id, lease_id, request_id
+        if self.reserved:
+            return {"execute_allowed": False}
+        self.reserved = True
+        return {"execute_allowed": True}
+
+    def complete_reflector_inference(
+        self,
+        job_id: str,
+        lease_id: str,
+        request_id: str,
+        runtime_receipt_sha256: str,
+    ) -> dict[str, object]:
+        del job_id, lease_id
+        if self.fail_completion:
+            raise RuntimeError("completion response lost")
+        self.completed = True
+        return {
+            "state": "completed",
+            "request_id": request_id,
+            "runtime_receipt_sha256": runtime_receipt_sha256,
+        }
+
+
+class _CountingReflector:
+    def __init__(self, *, fail_before_response: bool = False) -> None:
+        self.calls = 0
+        self.fail_before_response = fail_before_response
+
+    def infer(
+        self,
+        request: ReflectorInferenceRequest,
+    ) -> ReflectorInferenceResponse:
+        self.calls += 1
+        if self.fail_before_response:
+            raise RuntimeError("reflector outcome unknown")
+        return ReflectorInferenceResponse(
+            request_id=request.request_id,
+            text="durable result",
+            receipt=ReflectorRuntimeReceipt(
+                request_id=request.request_id,
+                session_id="durable-reflector-session",
+                runtime_profile="managed_science",
+                runtime_digest=request.runtime.image_digest.removeprefix("sha256:"),
+                codex_binary="/opt/codex/bin/codex",
+                actual_cli_version="0.144.1",
+                model_name=request.model_name,
+                reasoning_effort=request.reasoning_effort,
+                auth_mode="subscription",
+                capture_mode="transcript",
+                path_fallback_allowed=False,
+                exit_status=0,
+                transcript_sha256="f" * 64,
+            ),
+        )
+
+
+def _durable_reflector_request() -> ReflectorInferenceRequest:
+    return ReflectorInferenceRequest(
+        request_id="durable-reflector-once",
+        prompt="synthetic no-network reflection",
+        model_name="gpt-5.5",
+        reasoning_effort="high",
+        timeout_seconds=30,
+        runtime=default_managed_reflector_runtime(),
+    )
+
+
+@pytest.mark.parametrize(
+    ("fail_before_response", "fail_completion"),
+    ((True, False), (False, True)),
+)
+def test_durable_worker_never_replays_after_unknown_paid_inference_outcome(
+    fail_before_response: bool,
+    fail_completion: bool,
+) -> None:
+    client = _OneCallReservationClient(fail_completion=fail_completion)
+    delegate = _CountingReflector(fail_before_response=fail_before_response)
+    job = WorkerClaimedJob(
+        job_id="job-durable-reflector",
+        lease_id="lease-durable-reflector",
+        job_type="agent_system_reflector",
+        method="agent_system_gepa_reflector",
+    )
+    service = _DurableJobReflectorService(
+        client=client,
+        job=job,
+        delegate=delegate,
+    )
+
+    with pytest.raises(RuntimeError):
+        service.infer(_durable_reflector_request())
+    assert delegate.calls == 1
+
+    with pytest.raises(RuntimeError, match="already consumed or has unknown outcome"):
+        service.infer(_durable_reflector_request())
+    assert delegate.calls == 1
 
 
 def test_plan_bound_job_persists_plan_envelope_and_exact_worker_projection(tmp_path) -> None:
@@ -421,6 +849,138 @@ def test_transition_bound_job_outputs_remain_sealed_until_head_authority(
         ).fetchone()
     assert recovered["state"] == "sealed"
     assert recovered["staging_job_id"] == created.job_id
+
+
+def test_sealed_terminal_job_readback_survives_registry_generation_drift(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    transition_id = "successor-transition-historical-registry-readback"
+    request = _request(store).model_copy(
+        update={"successor_transition_id": transition_id}
+    )
+    job_id, artifact_id = _complete_transition_bound_skill_job(
+        store,
+        request,
+        payload_name="historical-registry-readback",
+        promoted=False,
+    )
+    original = store.get_internal_job_result(job_id)
+
+    drifted_snapshot = build_builtin_registry(
+        ImplementationDistributionIdentity(
+            distribution="openevo-test",
+            distribution_version="2.0.0",
+            distribution_digest="b" * 64,
+        )
+    )
+    restarted = EvolutionStore(
+        db_path=tmp_path / "evolution.db",
+        artifact_root=tmp_path / "artifacts",
+        registry_snapshot=drifted_snapshot,
+    )
+    restarted.initialize()
+
+    observed = restarted.get_internal_job_result(job_id)
+    assert observed == original
+    assert observed["successor_transition_id"] == transition_id
+    assert observed["artifact_ids"] == [artifact_id]
+    assert observed["outputs"][0]["promoted"] is False
+    artifact = restarted.get_internal_successor_artifact(
+        transition_id,
+        artifact_id,
+    )
+    assert artifact.artifact_id == artifact_id
+    assert artifact.state.value == "sealed"
+    assert artifact.promoted is False
+
+
+def test_sealed_terminal_job_admission_survives_registry_generation_drift(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    transition_id = "successor-transition-historical-registry-admission"
+    sealed_request, _dataset_id = _request_with_sealed_dataset(store)
+    request = sealed_request.model_copy(
+        update={"successor_transition_id": transition_id}
+    )
+    parent_artifact_id = request.input_bindings[1].artifact_ids[0]
+    job_id, proposal_id = _complete_transition_bound_skill_job(
+        store,
+        request,
+        payload_name="historical-registry-admission",
+        promoted=False,
+    )
+    drifted_snapshot = build_builtin_registry(
+        ImplementationDistributionIdentity(
+            distribution="openevo-test",
+            distribution_version="2.0.0",
+            distribution_digest="d" * 64,
+        )
+    )
+    restarted = EvolutionStore(
+        db_path=tmp_path / "evolution.db",
+        artifact_root=tmp_path / "artifacts",
+        registry_snapshot=drifted_snapshot,
+    )
+    restarted.initialize()
+
+    receipt = restarted.apply_internal_artifact_admission(
+        _admission_request(
+            job_id=job_id,
+            selected_artifact_id=proposal_id,
+            parent_artifact_id=parent_artifact_id,
+        )
+    )
+
+    assert receipt.job_id == job_id
+    assert receipt.active_artifact_id == proposal_id
+    assert restarted.get_internal_successor_artifact(
+        transition_id,
+        proposal_id,
+    ).promoted is True
+
+
+def test_registry_drift_does_not_authorize_nonterminal_job_readback(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    request = _request(store).model_copy(
+        update={
+            "successor_transition_id": (
+                "successor-transition-nonterminal-registry-drift"
+            )
+        }
+    )
+    created = store.create_plan_bound_job(request, snapshot=_snapshot())
+    drifted_snapshot = build_builtin_registry(
+        ImplementationDistributionIdentity(
+            distribution="openevo-test",
+            distribution_version="2.0.0",
+            distribution_digest="c" * 64,
+        )
+    )
+    restarted = EvolutionStore(
+        db_path=tmp_path / "evolution.db",
+        artifact_root=tmp_path / "artifacts",
+        registry_snapshot=drifted_snapshot,
+    )
+    restarted.initialize()
+
+    with pytest.raises(
+        ValueError,
+        match="historical registry readback requires a sealed terminal successor job",
+    ):
+        with restarted.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM jobs WHERE job_id = ?",
+                (created.job_id,),
+            ).fetchone()
+            restarted._validate_plan_bound_job_identity(
+                connection,
+                row,
+                allow_historical_terminal_registry=True,
+            )
 
 
 @pytest.mark.parametrize(
@@ -1046,6 +1606,8 @@ def test_restart_adds_discard_authority_to_prior_current_schema(
 ) -> None:
     store = _store(tmp_path)
     with store.connect() as connection:
+        connection.execute("DROP TABLE artifact_admission_decisions")
+        connection.execute("DROP TABLE reflector_inference_reservations")
         connection.execute(
             "DROP TABLE successor_transition_discards"
         )

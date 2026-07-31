@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,16 @@ from openevo.backend.contracts.v2.provider import CoreControlProviderV2
 from openevo.backend.contracts.v2.store import CoreControlStoreV2
 from openevo.backend.project_authority_v2 import ProjectAuthorityV2
 from openevo.backend.run_admission import install_core_run_admission_endpoint
+from openevo.backend.training_feedback_control import (
+    install_core_training_feedback_endpoint,
+)
+from openevo.backend.training_attempt_control import (
+    ProductionProjectFreezeArtifactReader,
+    install_core_training_attempt_endpoint,
+)
+from openevo.backend.project_freeze_control import (
+    install_core_project_freeze_endpoint,
+)
 from openevo.backend.runtime_identity import (
     HostServiceRoot,
     canonical_json_bytes,
@@ -26,12 +37,35 @@ from openevo.backend.runtime_identity import (
     require_host_global_service_root,
 )
 from openevo.backend.science_execution_v2 import ScienceAttemptExecutorV2
+from openevo.backend.science_candidate_readiness_control_v1 import (
+    ProductionManagedCandidateReadinessProviderV1,
+    install_core_managed_candidate_readiness_endpoint,
+)
 from openevo.backend.science_run_owner import CoreScienceTaskOwnerV2
 from openevo.backend.science_successor_preparer_v2 import (
     ProductionScienceSuccessorPreparerV2,
 )
+from openevo.backend.science_successor_recovery_control_v1 import (
+    install_core_managed_reflector_readiness_endpoint,
+    install_core_science_successor_recovery_endpoint,
+)
+from openevo.backend.science_successor_recovery_executor_v1 import (
+    ProductionManagedReflectorReadinessProviderV1,
+    ProductionScienceSuccessorRecoveryAuthorityReaderV1,
+    ProductionScienceSuccessorRecoveryExecutorV1,
+    ProductionScienceSuccessorRecoveryNativeRunnerV1,
+    ProductionScienceSuccessorRecoveryProjectSeederV1,
+)
+from openevo.backend.science_successor_recovery_v1 import (
+    ScienceSuccessorRecoveryCoordinatorV1,
+    ScienceSuccessorRecoveryStoreV1,
+)
 from openevo.backend.service import claim_core_service_spawn
-from openevo.backend.service_supervisor import CoreServiceSupervisor, ServiceLaunchMode
+from openevo.backend.service_supervisor import (
+    CoreServiceSupervisor,
+    ServiceLaunchMode,
+    release_identity_from_verified_registry,
+)
 from openevo.backend.workspace_handoff_v2 import WorkspaceHandoffStoreV2
 from openevo.backend.workspace_store_v2 import WorkspaceStoreV2
 from openevo.evolution.framework import (
@@ -88,6 +122,11 @@ class _ReleaseDaemonV2Composition:
     project_authority: ProjectAuthorityV2
     attempt_executor: ScienceAttemptExecutorV2
     successor_preparer: ProductionScienceSuccessorPreparerV2
+    successor_recovery_store: ScienceSuccessorRecoveryStoreV1
+    successor_recovery_coordinator: ScienceSuccessorRecoveryCoordinatorV1
+    successor_recovery_project_seeder: ProductionScienceSuccessorRecoveryProjectSeederV1
+    managed_reflector_readiness_provider: ProductionManagedReflectorReadinessProviderV1
+    managed_candidate_readiness_provider: ProductionManagedCandidateReadinessProviderV1
     service_supervisor: object
     _lock: threading.RLock = field(default_factory=threading.RLock)
     _provider_closed: bool = False
@@ -117,6 +156,7 @@ def _build_release_daemon_v2_composition(
     source_commit: str,
     executable_registry: VerifiedExecutableRegistry,
     service_supervisor: object,
+    daemon_release_identity: str,
     runtime_contract_sha256: str,
 ) -> _ReleaseDaemonV2Composition:
     """Build the only mutation authority shipped by the release Daemon."""
@@ -130,6 +170,7 @@ def _build_release_daemon_v2_composition(
     provider: CoreControlProviderV2 | None = None
     executor_holder: dict[str, ScienceAttemptExecutorV2] = {}
     preparer_holder: dict[str, ProductionScienceSuccessorPreparerV2] = {}
+    recovery_store: ScienceSuccessorRecoveryStoreV1 | None = None
     try:
         catalog = CoreControlStoreV2(root / "core-control-v2")
         workspaces = WorkspaceStoreV2(root / "workspaces-v2")
@@ -159,6 +200,9 @@ def _build_release_daemon_v2_composition(
                 workspace_handoffs=handoffs,
                 services=service_supervisor,
                 executable_registry=executable_registry,
+                artifact_admission_root=(
+                    root / "core-control" / "artifact-admission-v1"
+                ),
             )
             preparer_holder["value"] = preparer
             return preparer
@@ -189,8 +233,90 @@ def _build_release_daemon_v2_composition(
             build_channel="release",
             runtime_contract_sha256=runtime_contract_sha256,
         )
+        service_release_identity = release_identity_from_verified_registry(
+            executable_registry
+        )
+        recovery_store = ScienceSuccessorRecoveryStoreV1(
+            root / "science-successor-recovery-v1"
+        )
+        recovery_authority_reader = (
+            ProductionScienceSuccessorRecoveryAuthorityReaderV1(
+                context_provider=task_owner,
+                preparer=preparer_holder["value"],
+                services=service_supervisor,
+                attestation_store=recovery_store,
+                daemon_release_identity=daemon_release_identity,
+                release_install_digest=service_release_identity.install_digest,
+            )
+        )
+        recovery_native_runner = ProductionScienceSuccessorRecoveryNativeRunnerV1(
+            context_provider=task_owner,
+            preparer=preparer_holder["value"],
+        )
+        recovery_executor = ProductionScienceSuccessorRecoveryExecutorV1(
+            services=service_supervisor,
+            native_runner=recovery_native_runner,
+            daemon_release_identity=daemon_release_identity,
+            release_install_digest=service_release_identity.install_digest,
+        )
+        recovery_coordinator = ScienceSuccessorRecoveryCoordinatorV1(
+            store=recovery_store,
+            authority_reader=recovery_authority_reader,
+            executor=recovery_executor,
+            clock=lambda: datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        )
+        recovery_project_seeder = ProductionScienceSuccessorRecoveryProjectSeederV1(
+            store=recovery_store,
+            authority_reader=recovery_authority_reader,
+            owner=task_owner,
+            services=service_supervisor,
+            native_runner=recovery_native_runner,
+        )
+        managed_reflector_readiness_provider = (
+            ProductionManagedReflectorReadinessProviderV1(
+                services=service_supervisor,
+                daemon_release_identity=daemon_release_identity,
+                release_install_digest=service_release_identity.install_digest,
+            )
+        )
+        managed_candidate_readiness_provider = (
+            ProductionManagedCandidateReadinessProviderV1(
+                services=service_supervisor,
+                daemon_release_identity=daemon_release_identity,
+                release_install_digest=service_release_identity.install_digest,
+            )
+        )
         app = create_core_control_v2_contract_app(provider)
         install_core_run_admission_endpoint(app, service_supervisor, task_owner)
+        install_core_training_feedback_endpoint(app, service_supervisor)
+        install_core_training_attempt_endpoint(
+            app,
+            task_owner,
+            handoffs,
+            service_supervisor,
+        )
+        install_core_project_freeze_endpoint(
+            app,
+            task_owner,
+            ProductionProjectFreezeArtifactReader(
+                owner=task_owner,
+                service_control=service_supervisor,
+            ),
+        )
+        install_core_science_successor_recovery_endpoint(
+            app,
+            recovery_coordinator,
+            source_resolver=recovery_authority_reader,
+            project_seeder=recovery_project_seeder,
+        )
+        install_core_managed_reflector_readiness_endpoint(
+            app,
+            managed_reflector_readiness_provider,
+        )
+        install_core_managed_candidate_readiness_endpoint(
+            app,
+            managed_candidate_readiness_provider,
+        )
         composition = _ReleaseDaemonV2Composition(
             app=app,
             provider=provider,
@@ -201,6 +327,15 @@ def _build_release_daemon_v2_composition(
             project_authority=project_authority,
             attempt_executor=executor_holder["value"],
             successor_preparer=preparer_holder["value"],
+            successor_recovery_store=recovery_store,
+            successor_recovery_coordinator=recovery_coordinator,
+            successor_recovery_project_seeder=recovery_project_seeder,
+            managed_reflector_readiness_provider=(
+                managed_reflector_readiness_provider
+            ),
+            managed_candidate_readiness_provider=(
+                managed_candidate_readiness_provider
+            ),
             service_supervisor=service_supervisor,
         )
         app.state.core_control_provider = provider
@@ -305,6 +440,7 @@ def _serve_core_control(args: argparse.Namespace) -> int:
         launch_mode=ServiceLaunchMode.RELEASE,
         service_root=args.service_root / "managed-services",
         framework_lock=args.framework_lock,
+        daemon_release_identity=release.digest,
         verified_registry=registry,
         run_admission_url=(
             f"http://127.0.0.1:{port}/internal/v1/run-admissions/verify"
@@ -316,6 +452,7 @@ def _serve_core_control(args: argparse.Namespace) -> int:
         source_commit=args.source_commit,
         executable_registry=registry,
         service_supervisor=service_supervisor,
+        daemon_release_identity=release.digest,
         runtime_contract_sha256=release_runtime_contract_sha256(),
     )
     app = composition.app

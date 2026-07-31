@@ -995,7 +995,7 @@ async def test_private_credential_root_is_mounted_outside_the_session_tree(
     async def run_command_impl(*args, **kwargs):
         del kwargs
         if args[1:3] == ("image", "inspect"):
-            digest = MANAGED_RUNTIME_RELEASES["managed_science"].trusted_digest
+            digest = MANAGED_RUNTIME_RELEASES["managed_science"].loaded_image_id
             return 0, json.dumps([_managed_image_record(digest)]), None
         if args[1] == "create":
             _write_mock_cidfile(args, container_id)
@@ -1077,7 +1077,7 @@ async def test_host_credential_sandbox_uses_uid_scoped_capabilities(
     async def run_command_impl(*args, **kwargs):
         del kwargs
         if args[1:3] == ("image", "inspect"):
-            digest = MANAGED_RUNTIME_RELEASES["managed_science"].trusted_digest
+            digest = MANAGED_RUNTIME_RELEASES["managed_science"].loaded_image_id
             return 0, json.dumps([_managed_image_record(digest)]), None
         if args[1] == "create":
             _write_mock_cidfile(args, container_id)
@@ -1250,7 +1250,7 @@ async def test_credential_mount_rejects_path_replacement_adopted_by_docker(
         nonlocal container_present, replacement
         del kwargs
         if args[1:3] == ("image", "inspect"):
-            digest = MANAGED_RUNTIME_RELEASES["managed_science"].trusted_digest
+            digest = MANAGED_RUNTIME_RELEASES["managed_science"].loaded_image_id
             return 0, json.dumps([_managed_image_record(digest)]), None
         if args[1] == "create":
             credential_dir.rename(displaced)
@@ -1330,7 +1330,7 @@ async def test_credential_mount_rejects_replacement_after_final_process_identity
         nonlocal container_present, process_inspects
         del kwargs
         if args[1:3] == ("image", "inspect"):
-            digest = MANAGED_RUNTIME_RELEASES["managed_science"].trusted_digest
+            digest = MANAGED_RUNTIME_RELEASES["managed_science"].loaded_image_id
             return 0, json.dumps([_managed_image_record(digest)]), None
         if args[1] == "create":
             _write_mock_cidfile(args, container_id)
@@ -1414,7 +1414,7 @@ async def test_managed_image_admission_checks_only_exact_immutable_reference(
         environments.append(kwargs["env"])
         return _InspectProcess(
             returncode=0,
-            stdout=json.dumps([_managed_image_record(release.trusted_digest)]).encode("utf-8"),
+            stdout=json.dumps([_managed_image_record(release.loaded_image_id)]).encode("utf-8"),
         )
 
     monkeypatch.setattr(docker_module.asyncio, "create_subprocess_exec", create_process)
@@ -1426,13 +1426,13 @@ async def test_managed_image_admission_checks_only_exact_immutable_reference(
 
     await verify_managed_runtime_image_admission(spec)
 
-    assert inspected == [release.trusted_digest]
+    assert inspected == [release.loaded_image_id]
     assert environments == [docker_cli_environment()]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure", ["replaced", "deleted"])
-async def test_managed_image_tag_mutation_does_not_affect_synchronous_admission(
+async def test_managed_image_alias_mutation_does_not_affect_synchronous_admission(
     monkeypatch: pytest.MonkeyPatch,
     failure: str,
 ) -> None:
@@ -1441,10 +1441,10 @@ async def test_managed_image_tag_mutation_does_not_affect_synchronous_admission(
 
     async def create_process(*args, **_kwargs):
         inspected.append(args[-1])
-        if args[-1] == release.trusted_digest:
+        if args[-1] == release.loaded_image_id:
             return _InspectProcess(
                 returncode=0,
-                stdout=json.dumps([_managed_image_record(release.trusted_digest)]).encode("utf-8"),
+                stdout=json.dumps([_managed_image_record(release.loaded_image_id)]).encode("utf-8"),
             )
         if failure == "deleted":
             return _InspectProcess(returncode=1, stdout=b"", stderr=b"missing")
@@ -1462,7 +1462,7 @@ async def test_managed_image_tag_mutation_does_not_affect_synchronous_admission(
 
     await verify_managed_runtime_image_admission(spec)
 
-    assert inspected == [release.trusted_digest]
+    assert inspected == [release.loaded_image_id]
 
 
 @pytest.mark.asyncio
@@ -1494,7 +1494,10 @@ async def test_managed_image_drift_fails_before_credential_mount_or_create(
     run_command = AsyncMock(return_value=(0, json.dumps([inspected]), None))
     monkeypatch.setattr(runtime, "_run_local_command", run_command)
 
-    with pytest.raises(RuntimeError, match="image digest mismatch"):
+    with pytest.raises(
+        RuntimeError,
+        match="image digest mismatch|offline image has registry authority",
+    ):
         await runtime.start()
 
     assert [call.args[1:3] for call in run_command.await_args_list] == [("image", "inspect")]
@@ -1502,7 +1505,7 @@ async def test_managed_image_drift_fails_before_credential_mount_or_create(
 
 
 @pytest.mark.asyncio
-async def test_managed_repo_digest_is_the_immutable_docker_create_target(
+async def test_managed_offline_image_id_is_the_immutable_docker_create_target(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1513,6 +1516,9 @@ async def test_managed_repo_digest_is_the_immutable_docker_create_target(
             profile="managed_science",
             image=release.image,
             container_user="host",
+            network="host",
+            allow_internet=False,
+            allow_model_control_plane_network=True,
         ),
         "repo-digest-session",
         tmp_path,
@@ -1526,8 +1532,8 @@ async def test_managed_repo_digest_is_the_immutable_docker_create_target(
                 json.dumps(
                     [
                         {
-                            "Id": "sha256:" + "d" * 64,
-                            "RepoDigests": [release.immutable_reference],
+                            "Id": release.loaded_image_id,
+                            "RepoDigests": [],
                             "Config": {"Labels": {"io.openevo.managed-runtime": "true"}},
                         }
                     ]
@@ -1547,8 +1553,38 @@ async def test_managed_repo_digest_is_the_immutable_docker_create_target(
     await runtime.start()
 
     create = next(call.args for call in run_command.await_args_list if call.args[1] == "create")
-    assert release.immutable_reference in create
+    assert release.loaded_image_id in create
     assert release.image not in create
+    assert create[create.index("--network") + 1] == "host"
+    assert "none" not in create
+
+
+def test_model_control_plane_network_is_closed_to_managed_offline_task_policy() -> None:
+    release = MANAGED_RUNTIME_RELEASES["managed_science"]
+
+    with pytest.raises(ValueError, match="Core-managed runtime"):
+        RuntimeSpec(
+            image="python:3.12",
+            allow_internet=False,
+            allow_model_control_plane_network=True,
+        )
+    with pytest.raises(ValueError, match="must not be combined"):
+        RuntimeSpec(
+            profile="managed_science",
+            image=release.loaded_image_id,
+            container_user="host",
+            allow_internet=True,
+            allow_model_control_plane_network=True,
+        )
+    with pytest.raises(ValueError, match="Core-owned host network"):
+        RuntimeSpec(
+            profile="managed_science",
+            image=release.loaded_image_id,
+            container_user="host",
+            network="none",
+            allow_internet=False,
+            allow_model_control_plane_network=True,
+        )
 
 
 @pytest.mark.asyncio

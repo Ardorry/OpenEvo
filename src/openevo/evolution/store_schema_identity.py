@@ -909,6 +909,34 @@ CREATE TABLE successor_transition_discards (
 ) STRICT;
 """
 
+_REFLECTOR_INFERENCE_RESERVATIONS_DDL = """
+CREATE TABLE reflector_inference_reservations (
+    job_id TEXT PRIMARY KEY,
+    reservation_id TEXT NOT NULL UNIQUE,
+    request_id TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('started', 'completed')),
+    max_model_calls INTEGER NOT NULL CHECK (max_model_calls = 1),
+    model_calls_started INTEGER NOT NULL CHECK (model_calls_started = 1),
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    runtime_receipt_sha256 TEXT,
+    content_sha256 TEXT NOT NULL,
+    FOREIGN KEY(job_id) REFERENCES jobs(job_id) ON DELETE RESTRICT
+);
+"""
+
+_ARTIFACT_ADMISSION_DECISIONS_DDL = """
+CREATE TABLE artifact_admission_decisions (
+    decision_id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL UNIQUE,
+    request_sha256 TEXT NOT NULL CHECK(length(request_sha256) = 64),
+    receipt_sha256 TEXT NOT NULL CHECK(length(receipt_sha256) = 64),
+    receipt_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(job_id) REFERENCES jobs(job_id) ON DELETE RESTRICT
+) STRICT;
+"""
+
 _DATASET_CREATE_REQUESTS_V1_DDL = """
 CREATE TABLE dataset_create_requests (
     idempotency_key TEXT PRIMARY KEY,
@@ -1184,6 +1212,28 @@ _SUCCESSOR_TRANSITION_DISCARD_CURRENT_SCHEMAS = tuple(
     for known in _PLAN_BOUND_TRANSITION_CURRENT_SCHEMAS
 )
 
+_REFLECTOR_RESERVATION_CURRENT_SCHEMAS = tuple(
+    _KnownSchema(
+        match=LegacySchemaMatch(
+            kind="complete",
+            version=f"{known.match.version}-reflector-inference-reservations",
+        ),
+        ddl=known.ddl + _REFLECTOR_INFERENCE_RESERVATIONS_DDL,
+    )
+    for known in _SUCCESSOR_TRANSITION_DISCARD_CURRENT_SCHEMAS
+)
+
+_ARTIFACT_ADMISSION_CURRENT_SCHEMAS = tuple(
+    _KnownSchema(
+        match=LegacySchemaMatch(
+            kind="complete",
+            version=f"{known.match.version}-artifact-admission-decisions",
+        ),
+        ddl=known.ddl + _ARTIFACT_ADMISSION_DECISIONS_DDL,
+    )
+    for known in _REFLECTOR_RESERVATION_CURRENT_SCHEMAS
+)
+
 _CURRENT_SCHEMAS = (
     _REVISION_CURRENT_SCHEMAS
     + _PLAN_BOUND_RETRY_CURRENT_SCHEMAS
@@ -1191,6 +1241,8 @@ _CURRENT_SCHEMAS = (
     + _DATASET_CREATE_CURRENT_SCHEMAS
     + _PLAN_BOUND_TRANSITION_CURRENT_SCHEMAS
     + _SUCCESSOR_TRANSITION_DISCARD_CURRENT_SCHEMAS
+    + _REFLECTOR_RESERVATION_CURRENT_SCHEMAS
+    + _ARTIFACT_ADMISSION_CURRENT_SCHEMAS
 )
 
 

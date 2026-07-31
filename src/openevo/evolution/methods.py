@@ -5,12 +5,14 @@ import json
 import math
 import os
 import re
+import secrets
 import shlex
 import shutil
 import stat
 import subprocess
 import tempfile
 from collections.abc import Callable
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -22,19 +24,30 @@ from openevo.evolution.agent_system import (
     normalize_agent_system_target_path,
 )
 from openevo.evolution.framework import canonical_digest
+from openevo.evolution.framework.execution import (
+    ManagedReflectorRuntimeConfig,
+    ReflectorInferenceRequest,
+    require_active_reflector_service,
+)
 from openevo.evolution.models import (
     ArtifactRegisterRequest,
     ArtifactType,
-    WorkerClaimInputArtifact,
     WorkerClaimedJob,
+    WorkerClaimInputArtifact,
 )
 
 EvolutionMethod = Callable[[WorkerClaimedJob, Path], list[ArtifactRegisterRequest]]
 
 _REFLECTOR_PROVIDER_OPENAI_CHAT = "openai_chat"
 _REFLECTOR_PROVIDER_CODEX_CLI = "codex_cli"
+_REFLECTOR_RUNTIME_MANAGED = "managed"
+_REFLECTOR_RUNTIME_LEGACY_PATH = "legacy_path"
 _DEFAULT_REFLECTOR_TIMEOUT_SECONDS = 30.0
 _DEFAULT_CODEX_CLI_REFLECTOR_TIMEOUT_SECONDS = 300.0
+_LAST_REFLECTOR_RUNTIME_RECEIPT: ContextVar[dict[str, Any] | None] = ContextVar(
+    "openevo_last_reflector_runtime_receipt",
+    default=None,
+)
 _REFLECTOR_PROXY_ENV_VARS = (
     "OPENAI_BASE_URL",
     "OPENAI_API_KEY",
@@ -172,6 +185,118 @@ _EVOLUTION_FEEDBACK_LIKE_KEYS = {
 }
 _MAX_DATASET_MANIFEST_BYTES = 4 * 1024 * 1024
 _MAX_DATASET_RECORDS_BYTES = 128 * 1024 * 1024
+_MAX_LEAKAGE_SCAN_RECORDS = 64
+_MAX_LEAKAGE_SCAN_CHARS = 2 * 1024 * 1024
+_MAX_TRACE_LITERAL_COUNT = 512
+
+# Closed keys whose values carry task-local answer/source authority.  Generic
+# workflow feedback such as ``required_sections_missing`` is intentionally not
+# included: section names like Methods, Results, and Discussion are reusable
+# methodology, not protected task answers.
+TASK_SPECIFIC_LITERAL_KEYS = frozenset(
+    {
+        "answer",
+        "answers",
+        "article_id",
+        "article_ids",
+        "article_title",
+        "article_titles",
+        "benchmark_task_scope_id",
+        "benchmark_task_scope_ids",
+        "correct_answer",
+        "correct_answers",
+        "correct_value",
+        "correct_values",
+        "data_file",
+        "data_files",
+        "doi",
+        "dois",
+        "entity",
+        "entities",
+        "expected_answer",
+        "expected_answers",
+        "expected_value",
+        "expected_values",
+        "file_name",
+        "file_names",
+        "output_value",
+        "output_values",
+        "result_value",
+        "result_values",
+        "sequence",
+        "sequences",
+        "source_file",
+        "source_files",
+        "source_row",
+        "source_rows",
+        "source_sheet",
+        "source_sheets",
+        "target_answer",
+        "target_answers",
+        "target_entity",
+        "target_entities",
+        "target_paper_title",
+        "target_value",
+        "target_values",
+    }
+)
+_GENERIC_REPORT_HEADINGS = frozenset(
+    {
+        "abstract",
+        "acknowledgments",
+        "analysis",
+        "background",
+        "conclusion",
+        "conclusions",
+        "data",
+        "data and pipeline",
+        "discussion",
+        "executive summary",
+        "experiments",
+        "findings",
+        "introduction",
+        "limitations",
+        "limitations and reproducibility",
+        "materials and methods",
+        "methodology",
+        "methods",
+        "references",
+        "related work",
+        "related work and motivation",
+        "results",
+        "summary",
+    }
+)
+
+
+def task_specific_report_titles(
+    value: object,
+    *,
+    explicit_title: bool = False,
+) -> list[str]:
+    """Select typed document titles without treating arbitrary headings as private."""
+
+    values: list[str] = []
+
+    def walk(item: object) -> None:
+        if isinstance(item, str):
+            text = re.sub(r"^\s*(?:#{1,6}|\d+[.)])\s*", "", item).strip()
+            normalized = " ".join(text.rstrip(":").casefold().split())
+            if len(text) >= 6 and (
+                explicit_title or normalized not in _GENERIC_REPORT_HEADINGS
+            ):
+                values.append(text)
+        elif isinstance(item, list | tuple):
+            for nested in item:
+                walk(nested)
+
+    if explicit_title:
+        walk(value)
+    elif isinstance(value, list | tuple) and value:
+        walk(value[0])
+    else:
+        walk(value)
+    return list(dict.fromkeys(values))
 
 
 class UnknownEvolutionMethodError(ValueError):
@@ -227,6 +352,7 @@ def text_memory_reflector(
         raise ValueError("text_memory_reflector requires an input dataset artifact")
 
     manifest, records = _read_dataset_artifact(dataset)
+    audit_job = _job_with_source_record_leakage(job, records)
     reflected_records = _reflection_records(
         records,
         max_records=_int_config(job.config.get("max_records"), 20),
@@ -243,7 +369,7 @@ def text_memory_reflector(
     )
     reflection_prompt = _redact_generic_reflector_prompt(
         reflection_prompt,
-        job=job,
+        job=audit_job,
         manifests=[manifest],
     )
     llm_config = _reflector_llm_config(job)
@@ -260,7 +386,7 @@ def text_memory_reflector(
     )
     memory_markdown, audit_report = _guard_generic_reflector_output(
         memory_markdown,
-        job=job,
+        job=audit_job,
         manifests=[manifest],
     )
 
@@ -296,6 +422,7 @@ def text_memory_reflector(
                 "failure_count": failure_count,
                 "reflector_provider": llm_config["provider"],
                 "reflector_model": llm_config["model"],
+                "reflector_runtime_receipt": _reflector_runtime_receipt_manifest(),
                 "reflection_audit": audit_report,
                 "promotion_support": _reflector_promotion_support(
                     job,
@@ -348,6 +475,7 @@ def text_memory_expel_reflector(
         manifest, dataset_records = _read_dataset_artifact(dataset_artifact)
         manifests.append(manifest)
         records.extend(dataset_records)
+    audit_job = _job_with_source_record_leakage(job, records)
     source_dataset_artifact_ids = [artifact.artifact_id for artifact in dataset_artifacts]
     source_dataset_uris = [artifact.uri for artifact in dataset_artifacts]
     manifest = {
@@ -372,7 +500,7 @@ def text_memory_expel_reflector(
     )
     reflection_prompt = _redact_generic_reflector_prompt(
         reflection_prompt,
-        job=job,
+        job=audit_job,
         manifests=manifests,
     )
     llm_config = _reflector_llm_config(job)
@@ -390,7 +518,7 @@ def text_memory_expel_reflector(
     )
     memory_markdown, audit_report = _guard_generic_reflector_output(
         memory_markdown,
-        job=job,
+        job=audit_job,
         manifests=manifests,
     )
     _require_text_memory_expel_sections(memory_markdown)
@@ -433,6 +561,7 @@ def text_memory_expel_reflector(
                 "required_sections": required_sections,
                 "reflector_provider": llm_config["provider"],
                 "reflector_model": llm_config["model"],
+                "reflector_runtime_receipt": _reflector_runtime_receipt_manifest(),
                 "reflection_audit": audit_report,
                 "promotion_support": _reflector_promotion_support(
                     job,
@@ -508,6 +637,7 @@ def skill_bundle_reflector(
         raise ValueError("skill_bundle_reflector requires an input dataset artifact")
 
     manifest, records = _read_dataset_artifact(dataset)
+    audit_job = _job_with_source_record_leakage(job, records)
     reflected_records = _reflection_records(
         records,
         max_records=_int_config(job.config.get("max_records"), 20),
@@ -524,7 +654,7 @@ def skill_bundle_reflector(
     )
     reflection_prompt = _redact_generic_reflector_prompt(
         reflection_prompt,
-        job=job,
+        job=audit_job,
         manifests=[manifest],
     )
     llm_config = _reflector_llm_config(job)
@@ -541,7 +671,7 @@ def skill_bundle_reflector(
     )
     skill_markdown, audit_report = _guard_generic_reflector_output(
         skill_markdown,
-        job=job,
+        job=audit_job,
         manifests=[manifest],
     )
 
@@ -573,6 +703,7 @@ def skill_bundle_reflector(
         "failure_count": failure_count,
         "reflector_provider": llm_config["provider"],
         "reflector_model": llm_config["model"],
+        "reflector_runtime_receipt": _reflector_runtime_receipt_manifest(),
         "reflection_audit": audit_report,
         "promotion_support": _reflector_promotion_support(
             job,
@@ -719,6 +850,7 @@ def agent_system_reflector(
                 "method": "agent_system_reflector",
                 "reflector_provider": llm_config["provider"],
                 "reflector_model": llm_config["model"],
+                "reflector_runtime_receipt": _reflector_runtime_receipt_manifest(),
                 "agent_system_audit": audit_report,
                 "promotion_support": _reflector_promotion_support(
                     job,
@@ -856,6 +988,7 @@ def agent_system_history_reflector(
                 "shared_evolution_feedback_count": len(shared_feedback_ids),
                 "reflector_provider": llm_config["provider"],
                 "reflector_model": llm_config["model"],
+                "reflector_runtime_receipt": _reflector_runtime_receipt_manifest(),
                 "agent_system_audit": audit_report,
                 "promotion_support": _reflector_promotion_support(
                     job,
@@ -1063,6 +1196,7 @@ def agent_system_pareto_reflector(
                 "shared_evolution_feedback_count": len(shared_feedback_ids),
                 "reflector_provider": llm_config["provider"],
                 "reflector_model": llm_config["model"],
+                "reflector_runtime_receipt": _reflector_runtime_receipt_manifest(),
                 "promotion_support": _reflector_promotion_support(
                     job,
                     method="agent_system_pareto_reflector",
@@ -1156,6 +1290,7 @@ def agent_system_gepa_reflector(
         record for history_round in rounds for record in history_round["reflected_records"]
     ]
     records = [record for history_round in rounds for record in history_round["records"]]
+    audit_job = _job_with_source_record_leakage(job, records)
     human_feedback = _human_feedback_from_records(records)
     shared_feedback_ids = _shared_evolution_feedback_ids_from_records(records)
     success_count = sum(1 for record in reflected_records if record["kind"] == "success")
@@ -1182,7 +1317,7 @@ def agent_system_gepa_reflector(
         markdown, audit_report = _generate_audited_agent_system_reflection(
             prompt,
             llm_config,
-            job=job,
+            job=audit_job,
             manifests=manifests,
         )
         candidate_dir = candidates_dir / f"{index:02d}-{_slug(strategy)}"
@@ -1228,6 +1363,7 @@ def agent_system_gepa_reflector(
             "agent_system_audit": audit_report,
             "reflector_provider": llm_config["provider"],
             "reflector_model": llm_config["model"],
+            "reflector_runtime_receipt": _reflector_runtime_receipt_manifest(),
             "promotion_support": _reflector_promotion_support(
                 job,
                 method="agent_system_gepa_reflector",
@@ -4111,15 +4247,28 @@ def _generate_audited_agent_system_reflection(
     manifests: list[dict[str, Any]],
 ) -> tuple[str, dict[str, Any]]:
     audit_config = _agent_system_audit_config(job)
+    raw_leakage_basis = audit_config.get("leakage_basis")
+    leakage_basis = raw_leakage_basis if isinstance(raw_leakage_basis, dict) else {}
+    forbidden_literals = _agent_system_forbidden_literals(job, manifests)
+    declared_basis_sha256 = audit_config.get("declared_leakage_basis_sha256")
+    if (
+        not isinstance(declared_basis_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", declared_basis_sha256) is None
+    ):
+        declared_basis_sha256 = canonical_digest(leakage_basis)
+    public_basis_receipt = {
+        "leakage_basis_sha256": declared_basis_sha256,
+        "forbidden_literal_count": len(forbidden_literals),
+    }
     if audit_config.get("enabled") is False:
         return _generate_agent_system_reflection(prompt, llm_config), {
             "enabled": False,
             "repair_count": 0,
             "finding_count": 0,
+            **public_basis_receipt,
         }
 
     max_repairs = _int_config(audit_config.get("max_repair_attempts"), 2)
-    forbidden_literals = _agent_system_forbidden_literals(job, manifests)
     content = _generate_agent_system_reflection(prompt, llm_config)
     findings = _audit_agent_system_markdown(
         content,
@@ -4148,6 +4297,7 @@ def _generate_audited_agent_system_reflection(
         "enabled": True,
         "repair_count": repair_count,
         "finding_count": 0,
+        **public_basis_receipt,
     }
 
 
@@ -4198,6 +4348,24 @@ def _generate_agent_system_reflection_with_codex_cli(
     error_context: str,
     temp_prefix: str,
 ) -> str:
+    runtime_mode = llm_config.get("runtime_mode")
+    if runtime_mode == _REFLECTOR_RUNTIME_MANAGED:
+        runtime = ManagedReflectorRuntimeConfig.model_validate(llm_config.get("runtime"))
+        response = require_active_reflector_service().infer(
+            ReflectorInferenceRequest(
+                request_id=f"reflector-{secrets.token_hex(16)}",
+                prompt=prompt_input,
+                model_name=str(llm_config["model"]),
+                reasoning_effort=str(llm_config.get("reasoning_effort") or "high"),
+                timeout_seconds=float(llm_config["timeout_seconds"]),
+                runtime=runtime,
+            )
+        )
+        _LAST_REFLECTOR_RUNTIME_RECEIPT.set(response.receipt.model_dump(mode="json"))
+        return response.text.strip()
+    if runtime_mode != _REFLECTOR_RUNTIME_LEGACY_PATH:
+        raise ValueError(f"{error_context} has no explicit reflector runtime")
+    _LAST_REFLECTOR_RUNTIME_RECEIPT.set(None)
     with tempfile.TemporaryDirectory(prefix=temp_prefix) as tmp:
         tmpdir = Path(tmp)
         output_path = tmpdir / "last-message.md"
@@ -4316,6 +4484,182 @@ def _agent_system_audit_config(job: WorkerClaimedJob) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _job_with_source_record_leakage(
+    job: WorkerClaimedJob,
+    records: list[dict[str, Any]],
+) -> WorkerClaimedJob:
+    """Bind a bounded, task-specific overlap denylist to one worker job."""
+
+    derived = _source_record_leakage_basis(records)
+    if not derived:
+        return job
+    config = dict(job.config)
+    audit = dict(_agent_system_audit_config(job))
+    existing = audit.get("leakage_basis")
+    leakage_basis = dict(existing) if isinstance(existing, dict) else {}
+    audit["declared_leakage_basis_sha256"] = canonical_digest(leakage_basis)
+    leakage_basis["source_record_scan"] = derived
+    audit["leakage_basis"] = leakage_basis
+    config["agent_system_audit"] = audit
+    return job.model_copy(update={"config": config})
+
+
+def _source_record_leakage_basis(
+    records: list[dict[str, Any]],
+) -> dict[str, list[str]]:
+    """Extract bounded exact literals without classifying generic section names.
+
+    The scan never publishes values in a receipt.  It supplies only the private
+    method audit and is intentionally conservative about long verbatim response
+    sentences: a transferable global artifact should paraphrase, not copy, a
+    prior task report or transcript.
+    """
+
+    texts: list[str] = []
+    response_texts: list[str] = []
+    source_titles: list[str] = []
+    total_chars = 0
+
+    def add_text(value: object, *, response: bool = False) -> None:
+        nonlocal total_chars
+        if not isinstance(value, str) or total_chars >= _MAX_LEAKAGE_SCAN_CHARS:
+            return
+        text = value[: _MAX_LEAKAGE_SCAN_CHARS - total_chars]
+        total_chars += len(text)
+        texts.append(text)
+        if response:
+            response_texts.append(text)
+
+    def walk(value: object, *, response: bool = False, depth: int = 0) -> None:
+        if depth > 12 or total_chars >= _MAX_LEAKAGE_SCAN_CHARS:
+            return
+        if isinstance(value, str):
+            add_text(value, response=response)
+        elif isinstance(value, dict):
+            for key, nested in value.items():
+                normalized_key = str(key).strip().lower().replace("-", "_")
+                if normalized_key in {"report_title", "document_title"}:
+                    source_titles.extend(
+                        task_specific_report_titles(nested, explicit_title=True)
+                    )
+                elif normalized_key in {"report_heading", "report_headings"}:
+                    source_titles.extend(task_specific_report_titles(nested))
+                walk(
+                    nested,
+                    response=response
+                    or str(key)
+                    in {
+                        "candidate_report",
+                        "report_content",
+                        "report_markdown",
+                        "response_messages",
+                    },
+                    depth=depth + 1,
+                )
+        elif isinstance(value, list | tuple):
+            for nested in value:
+                walk(nested, response=response, depth=depth + 1)
+
+    for record in records[:_MAX_LEAKAGE_SCAN_RECORDS]:
+        walk(record)
+
+    joined = "\n".join(texts)
+    task_ids = {
+        str(record.get("task_id")).strip()
+        for record in records[:_MAX_LEAKAGE_SCAN_RECORDS]
+        if isinstance(record.get("task_id"), str)
+        and str(record.get("task_id")).strip()
+    }
+    task_ids.update(
+        re.findall(r"\b[A-Za-z][A-Za-z0-9-]{1,48}_[0-9]{3,}\b", joined)
+    )
+    ignored_files = {
+        "agents.md",
+        "instructions.md",
+        "memory.md",
+        "report.md",
+        "skill.md",
+    }
+    source_files = {
+        match
+        for match in re.findall(
+            r"(?<![A-Za-z0-9_.-])([A-Za-z0-9][A-Za-z0-9_.-]{1,127}\."
+            r"(?:csv|tsv|xlsx?|jsonl?|npy|npz|nc|hdf5?|parquet|txt))\b",
+            joined,
+            flags=re.IGNORECASE,
+        )
+        if match.lower() not in ignored_files
+    }
+    dois = set(
+        re.findall(r"\b10\.[0-9]{4,9}/[-._;()/:A-Za-z0-9]+", joined)
+    )
+    result_values = _source_specific_numeric_literals(joined)
+    source_sentences: set[str] = set()
+    for value in response_texts:
+        for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", value):
+            normalized = " ".join(sentence.split())
+            if 80 <= len(normalized) <= 320:
+                source_sentences.add(normalized)
+                if len(source_sentences) >= _MAX_TRACE_LITERAL_COUNT:
+                    break
+        if len(source_sentences) >= _MAX_TRACE_LITERAL_COUNT:
+            break
+
+    result = {
+        "task_ids": sorted(task_ids),
+        "source_files": sorted(source_files),
+        "dois": sorted(dois),
+        "result_values": sorted(result_values),
+        "source_sentences": sorted(source_sentences),
+        "source_titles": sorted(set(source_titles)),
+    }
+    remaining = _MAX_TRACE_LITERAL_COUNT
+    bounded: dict[str, list[str]] = {}
+    for key, values in result.items():
+        if remaining <= 0:
+            break
+        selected = values[:remaining]
+        if selected:
+            bounded[key] = selected
+            remaining -= len(selected)
+    return bounded
+
+
+def _source_specific_numeric_literals(text: str) -> set[str]:
+    """Return exact task-result number spellings without treating years as results."""
+
+    values = set(
+        re.findall(
+            r"(?<![A-Za-z0-9.,])[-+]?\d{6,}(?![A-Za-z0-9]|[.,]\d)",
+            text,
+        )
+    )
+    for match in re.finditer(
+        r"(?<![A-Za-z0-9.,])[-+]?\d{1,3}(?:,\d{3})+"
+        r"(?![A-Za-z0-9]|[.,]\d)",
+        text,
+    ):
+        raw = match.group(0)
+        canonical = raw.replace(",", "")
+        if len(canonical.lstrip("+-")) >= 6:
+            values.update((raw, canonical))
+    values.update(
+        re.findall(
+            r"(?<![A-Za-z0-9.,])[-+]?(?:\d+\.\d{6,}|\.\d{6,})"
+            r"(?![A-Za-z0-9]|[.,]\d)",
+            text,
+        )
+    )
+    values.update(
+        re.findall(
+            r"(?<![A-Za-z0-9.,])[-+]?(?:\d+(?:\.\d+)?|\.\d+)"
+            r"[eE][-+]?\d+(?![A-Za-z0-9]|[.,]\d)",
+            text,
+        )
+    )
+    return values
+
+
 def _agent_system_forbidden_literals(
     job: WorkerClaimedJob,
     manifests: list[dict[str, Any]],
@@ -4391,19 +4735,11 @@ def _require_text_memory_expel_sections(markdown: str) -> None:
         )
 
 
-_FORBIDDEN_LITERAL_KEYS = {
-    "article_id",
-    "article_ids",
-    "article_title",
-    "article_titles",
-    "source_file",
-    "source_files",
-    "source_sheet",
-    "source_sheets",
-    "source_row",
-    "source_rows",
-    "sequence",
-    "sequences",
+_FORBIDDEN_LITERAL_KEYS = set(TASK_SPECIFIC_LITERAL_KEYS) | {
+    "source_sentences",
+    "source_titles",
+    "task_ids",
+    "task_scope_ids",
 }
 
 
@@ -4570,7 +4906,14 @@ def _actionability_findings(text: str) -> list[dict[str, str]]:
             findings.append(
                 {
                     "code": "slogan_rule",
-                    "message": f"rule is too generic to execute: {_redact_for_finding(line)}",
+                    # Finding messages are allowed to cross the worker/Core boundary
+                    # and therefore must never echo reflector output.  The line may
+                    # itself contain a protected task literal even when the separate
+                    # forbidden-literal finding also fires.
+                    "message": (
+                        "agent-system output contains a rule that is too generic "
+                        "to execute"
+                    ),
                 }
             )
 
@@ -4772,10 +5115,6 @@ def _unique_findings(findings: list[dict[str, str]]) -> list[dict[str, str]]:
         seen.add(key)
         unique.append(finding)
     return unique
-
-
-def _redact_for_finding(text: str) -> str:
-    return _snippet(text, limit=160)
 
 
 def _render_agent_system_audit_repair_prompt(
@@ -5374,15 +5713,32 @@ def _reflector_llm_config(job: WorkerClaimedJob) -> dict[str, Any]:
         default_timeout_seconds,
     )
     max_tokens = raw_config.get("max_tokens", job.config.get("reflector_max_tokens"))
+    runtime_value = raw_config.get("runtime")
+    runtime = runtime_value if isinstance(runtime_value, dict) else {}
+    runtime_mode = _config_string(runtime, "mode")
     codex_home = _config_string(raw_config, "codex_home") or _config_string(
-        job.config,
-        "reflector_codex_home",
+        job.config, "reflector_codex_home"
     )
-    codex_bin = (
-        _config_string(raw_config, "codex_bin")
-        or _config_string(job.config, "reflector_codex_bin")
-        or "codex"
+    codex_bin = _config_string(raw_config, "codex_bin") or _config_string(
+        job.config, "reflector_codex_bin"
     )
+    reasoning_effort = _config_string(raw_config, "reasoning_effort") or "high"
+    if provider == _REFLECTOR_PROVIDER_CODEX_CLI:
+        if runtime_mode == _REFLECTOR_RUNTIME_MANAGED:
+            managed_runtime = ManagedReflectorRuntimeConfig.model_validate(runtime)
+            if codex_home or codex_bin:
+                raise ValueError("managed reflector forbids host Codex overrides")
+            codex_bin = managed_runtime.codex_binary
+        elif runtime_mode == _REFLECTOR_RUNTIME_LEGACY_PATH:
+            if runtime.get("path_fallback_allowed") is not True:
+                raise ValueError("legacy reflector PATH mode must be explicitly enabled")
+            if not codex_bin or not Path(codex_bin).is_absolute():
+                raise ValueError("legacy reflector requires an absolute codex_bin")
+            managed_runtime = None
+        else:
+            raise ValueError("codex_cli reflector requires an explicit runtime mode")
+    else:
+        managed_runtime = None
     return {
         "provider": provider,
         "model": model,
@@ -5393,7 +5749,19 @@ def _reflector_llm_config(job: WorkerClaimedJob) -> dict[str, Any]:
         "max_tokens": _optional_int(max_tokens),
         "codex_home": codex_home,
         "codex_bin": codex_bin,
+        "reasoning_effort": reasoning_effort,
+        "runtime_mode": runtime_mode or None,
+        "runtime": (
+            managed_runtime.model_dump(mode="json")
+            if managed_runtime is not None
+            else dict(runtime)
+        ),
     }
+
+
+def _reflector_runtime_receipt_manifest() -> dict[str, Any] | None:
+    receipt = _LAST_REFLECTOR_RUNTIME_RECEIPT.get()
+    return None if receipt is None else dict(receipt)
 
 
 def _record_reward(record: dict[str, Any]) -> float | None:

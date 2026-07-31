@@ -837,6 +837,37 @@ def test_marker_binds_database_inode_and_pending_identity_rejects_managed_state(
         WorkspaceStoreV2(pending_root)
 
 
+def test_marker_accepts_container_mount_device_renumbering_only() -> None:
+    class Identity:
+        def __init__(self, device: int, inode: int) -> None:
+            self.st_dev = device
+            self.st_ino = inode
+
+    store_id = "a" * 64
+    original = {
+        "root": Identity(134, 170496),
+        "database": Identity(134, 170499),
+        "uploads": Identity(134, 170497),
+        "snapshots": Identity(134, 170498),
+    }
+    payload = workspace_module._marker_bytes(store_id, **original)
+    restarted = {
+        key: Identity(126, value.st_ino) for key, value in original.items()
+    }
+    assert workspace_module._marker_matches(
+        payload,
+        store_id,
+        **restarted,
+    )
+
+    restarted["database"] = Identity(126, 170500)
+    assert not workspace_module._marker_matches(
+        payload,
+        store_id,
+        **restarted,
+    )
+
+
 @pytest.mark.parametrize("publication_step", ["before_link", "after_link"])
 def test_pending_marker_publication_recovers_exact_owned_temporary_link(
     tmp_path: Path,

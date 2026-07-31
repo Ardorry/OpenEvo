@@ -27,6 +27,7 @@ import httpx
 
 from openevo.backend.workspace_handoff_v2 import (
     WorkspaceHandoffErrorV2,
+    WorkspaceHandoffResultValidationErrorV2,
     WorkspaceHandoffStoreV2,
 )
 from openevo.backend.runtime_context_binding_v2 import RuntimeContextBindingV2
@@ -96,6 +97,7 @@ from openevo.runtime.docker_host import DockerHostPathSpec, HeldDockerSessionRoo
 from openevo.runtime.codex_isolation import (
     CODEX_SUBSCRIPTION_CONTRACT_KEY,
     CODEX_SUBSCRIPTION_READINESS_KEY,
+    CodexSubscriptionIsolationError,
     codex_subscription_contract,
     codex_subscription_readiness_receipt,
     validate_codex_subscription_surface,
@@ -109,6 +111,11 @@ from openevo.runtime.managed import (
     reject_managed_subscription_env,
     require_managed_runtime_binding,
     require_managed_subscription_runtime,
+)
+from openevo.runtime.managed_candidate_readiness import (
+    ManagedCandidateRuntimeProbe,
+    ManagedCandidateRuntimeReadiness,
+    managed_candidate_runtime_probe_failure_frame,
 )
 from openevo.runtime.models import ExecInput, RuntimeSpec
 from openevo.trajectory.models import (
@@ -2012,11 +2019,49 @@ class GatewayNodeManager:
         self._cleanup_journal_dir = cleanup_base / ".openevo-gateway-cleanup" / node_key
         self._docker_ownership_root = cleanup_base / ".openevo-gateway-docker-ownership" / node_key
         self._log_authority_root = cleanup_base / ".openevo-gateway-log-authority" / node_key
+        self._candidate_runtime_readiness: ManagedCandidateRuntimeReadiness | None = None
 
     async def start(self) -> None:
         await DockerRuntime.recover_ownership_root(self._docker_ownership_root)
         self._load_cleanup_retries()
         await self._reconcile_cleanup_retries()
+        if self._service_identity is not None:
+            authority = self._credential_authority
+            mapping = self._docker_host_path
+            if authority is None or mapping is None:
+                raise RuntimeError(
+                    "release Gateway lacks managed candidate readiness authority"
+                )
+            try:
+                self._candidate_runtime_readiness = await ManagedCandidateRuntimeProbe(
+                    root=self._cleanup_journal_dir.parent
+                    / ".openevo-managed-candidate-readiness"
+                    / hashlib.sha256(self.node_id.encode("utf-8")).hexdigest()[:24],
+                    credential_authority=authority,
+                    docker_host_path=mapping,
+                    generation_digest=self._service_identity.generation_digest,
+                    release_registry_digest=self._service_identity.registry_digest,
+                    framework_lock_digest=self._service_identity.framework_lock_digest,
+                ).verify()
+            except BaseException as exc:
+                # The release parent consumes this closed JSON line after its
+                # credential-aware stream redactor. It contains no exception
+                # text, path, credential, or caller-controlled payload.
+                print(
+                    json.dumps(
+                        managed_candidate_runtime_probe_failure_frame(
+                            exc,
+                            generation_digest=self._service_identity.generation_digest,
+                            release_registry_digest=self._service_identity.registry_digest,
+                        ),
+                        ensure_ascii=True,
+                        allow_nan=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                    flush=True,
+                )
+                raise
         await self._dispatcher.start()
         self._cleanup_retry_task = asyncio.create_task(self._cleanup_retry_loop())
         if self._rollout_server_url is not None:
@@ -2113,6 +2158,8 @@ class GatewayNodeManager:
                 logger.warning("Node heartbeat failed", exc_info=True)
 
     async def internal_rollout_readiness(self) -> tuple[bool, str]:
+        if self._service_identity is not None and self._candidate_runtime_readiness is None:
+            return False, "managed candidate runtime readiness is absent"
         if self._control_client is None or not self._rollout_registered:
             return False, "gateway is not registered with rollout"
         try:
@@ -2132,6 +2179,10 @@ class GatewayNodeManager:
             return True, "gateway is registered and schedulable"
         except Exception:
             return False, "gateway could not authenticate rollout health"
+
+    def managed_candidate_runtime_readiness(self) -> dict[str, object] | None:
+        receipt = self._candidate_runtime_readiness
+        return None if receipt is None else receipt.model_dump(mode="json")
 
     async def dispatch(self, request: SessionDispatchRequest) -> None:
         self._canonicalize_request_capture_mode(request)
@@ -2660,6 +2711,13 @@ class GatewayNodeManager:
         runtime_spec: RuntimeSpec,
         session_dir: Path | None,
     ) -> None:
+        if (
+            runtime_spec.allow_model_control_plane_network
+            and not _is_subscription_agent(request.agent)
+        ):
+            raise RuntimeError(
+                "model control-plane network requires a managed subscription agent"
+            )
         if not _is_subscription_agent(request.agent):
             return
         GatewayNodeManager._canonicalize_request_capture_mode(request)
@@ -2864,16 +2922,45 @@ class GatewayNodeManager:
                 request.agent.env.update(evolution_env)
 
             # Setup
+            self._publish_candidate_execution_status(
+                managed,
+                phase="harness_setup",
+                model_started=False,
+                benchmark_started=False,
+            )
             await self._await_with_budget(harness.setup(runtime), managed)
             if _is_codex_subscription_agent(request.agent):
                 self._publish_codex_subscription_credential_isolation(
                     managed,
                     harness,
                 )
+            if (
+                evolution_injection is not None
+                and evolution_injection.staged.injection_plan is not None
+            ):
+                # Persist the exact runtime-context receipt before the terminal
+                # agent result freezes the subscription finalization request.
+                # A second readback after execution proves that the agent did
+                # not mutate the injected context.
+                receipt = await self._await_with_budget(
+                    _runtime_injection_receipt_from_readback(
+                        runtime=runtime,
+                        target_dir=self.evolution.context.target_dir,
+                        plan=evolution_injection.staged.injection_plan,
+                    ),
+                    managed,
+                )
+                self._publish_runtime_injection_receipt(managed, receipt)
 
             # Run
             steps = harness.run_steps(request.instruction)
             env = self._runtime_env(request, managed, include_agent_env=True)
+            self._publish_candidate_execution_status(
+                managed,
+                phase="benchmark_execution",
+                model_started=True,
+                benchmark_started=True,
+            )
             agent_result = await self._run_exec_inputs(runtime, steps, env, managed)
 
             # Postprocess always runs so harnesses can collect artifacts from
@@ -2918,6 +3005,32 @@ class GatewayNodeManager:
                     ),
                 )
         except Exception as exc:
+            if (
+                _is_codex_subscription_agent(request.agent)
+                and managed.agent_result is None
+            ):
+                execution_status = _existing_openevo_metadata(
+                    managed.request.metadata
+                ).get("candidate_execution_status")
+                execution_status = (
+                    execution_status if isinstance(execution_status, dict) else {}
+                )
+                self._publish_candidate_execution_status(
+                    managed,
+                    phase="terminal_failure",
+                    # Once benchmark execution has been admitted, preserve that
+                    # durable fact even when the subprocess raises before an
+                    # ``AgentRunResult`` can be materialized.
+                    model_started=execution_status.get("model_started") is True,
+                    benchmark_started=(
+                        execution_status.get("benchmark_started") is True
+                    ),
+                    failure_code=(
+                        "candidate_subscription_isolation_not_ready"
+                        if isinstance(exc, CodexSubscriptionIsolationError)
+                        else "candidate_execution_failed"
+                    ),
+                )
             if managed.cancel_requested:
                 logger.info("Agent execution cancelled for session %s", request.session_id)
             elif _is_codex_subscription_agent(request.agent):
@@ -2967,6 +3080,57 @@ class GatewayNodeManager:
                 "Codex subscription credential-isolation receipt was supplied by the caller"
             )
         openevo_metadata[CODEX_SUBSCRIPTION_READINESS_KEY] = expected
+        managed.request.metadata["openevo"] = openevo_metadata
+        session_registry = getattr(self, "session_registry", None)
+        if session_registry is not None:
+            session_registry.update_metadata(
+                managed.request.session_id,
+                {"openevo": openevo_metadata},
+            )
+
+    def _publish_candidate_execution_status(
+        self,
+        managed: ManagedSession,
+        *,
+        phase: str,
+        model_started: bool,
+        benchmark_started: bool,
+        failure_code: str | None = None,
+    ) -> None:
+        """Publish a closed, credential-free execution-stage authority."""
+
+        if phase not in {"harness_setup", "benchmark_execution", "terminal_failure"}:
+            raise ValueError("candidate execution phase is invalid")
+        if type(model_started) is not bool or type(benchmark_started) is not bool:
+            raise TypeError("candidate execution flags must be booleans")
+        if benchmark_started and not model_started:
+            raise ValueError("benchmark execution cannot precede model execution")
+        if failure_code is not None and failure_code not in {
+            "candidate_subscription_isolation_not_ready",
+            "candidate_execution_failed",
+        }:
+            raise ValueError("candidate execution failure code is invalid")
+        openevo_metadata = _existing_openevo_metadata(managed.request.metadata)
+        existing = openevo_metadata.get("candidate_execution_status")
+        if existing is not None and not isinstance(existing, dict):
+            raise RuntimeError("candidate execution status was supplied by the caller")
+        if existing is not None:
+            prior_phase = existing.get("phase")
+            allowed = {
+                "harness_setup": {"benchmark_execution", "terminal_failure"},
+                "benchmark_execution": {"terminal_failure"},
+                "terminal_failure": set(),
+            }
+            if phase not in allowed.get(str(prior_phase), set()):
+                raise RuntimeError("candidate execution status transition is invalid")
+        status = {
+            "schema_version": "openevo.candidate_execution_status.v1",
+            "phase": phase,
+            "model_started": model_started,
+            "benchmark_started": benchmark_started,
+            "failure_code": failure_code,
+        }
+        openevo_metadata["candidate_execution_status"] = status
         managed.request.metadata["openevo"] = openevo_metadata
         session_registry = getattr(self, "session_registry", None)
         if session_registry is not None:
@@ -3153,6 +3317,9 @@ class GatewayNodeManager:
         evolution_metadata = _existing_evolution_metadata(request.metadata)
         if evolution_metadata.get("context_id") != receipt.get("context_id"):
             raise ValueError("runtime injection receipt context changed before publication")
+        existing = evolution_metadata.get("runtime_injection_receipt")
+        if existing is not None and existing != receipt:
+            raise ValueError("runtime injection receipt changed after publication")
         evolution_metadata["runtime_injection_receipt"] = receipt
         request.metadata["evolution"] = evolution_metadata
         session_registry = getattr(self, "session_registry", None)
@@ -3809,6 +3976,18 @@ class GatewayNodeManager:
                 managed,
                 result,
             )
+        except WorkspaceHandoffResultValidationErrorV2 as exc:
+            self._log_credential_safe_exception(
+                managed,
+                "Workspace result failed permanent archive validation",
+                exc,
+            )
+            result = self._terminal_result_from_base(
+                result,
+                SessionStatus.ERROR,
+                "workspace result failed closed archive validation",
+            )
+            managed.final_result = result
         except WorkspaceHandoffErrorV2 as exc:
             if request.workspace_handoff is not None:
                 self._log_credential_safe_exception(
@@ -4901,6 +5080,37 @@ class GatewayNodeManager:
         return (state.st_dev, state.st_ino, state.st_uid, stat.S_IFMT(state.st_mode))
 
     @staticmethod
+    def _cleanup_journal_restart_identities_match(
+        persisted: object,
+        current: tuple[tuple[int, int, int, int], ...],
+    ) -> bool:
+        """Accept only a consistent mount-device renumbering after restart."""
+
+        if not isinstance(persisted, list) or len(persisted) != len(current):
+            return False
+        stored_to_current: dict[int, int] = {}
+        current_to_stored: dict[int, int] = {}
+        for raw, observed in zip(persisted, current, strict=True):
+            if (
+                not isinstance(raw, list)
+                or len(raw) != 4
+                or any(type(item) is not int for item in raw)
+                or raw[0] < 0
+                or raw[1] <= 0
+                or raw[2] < 0
+                or raw[3] <= 0
+                or tuple(raw[1:]) != observed[1:]
+            ):
+                return False
+            stored_device = raw[0]
+            current_device = observed[0]
+            if stored_to_current.setdefault(stored_device, current_device) != current_device:
+                return False
+            if current_to_stored.setdefault(current_device, stored_device) != stored_device:
+                return False
+        return True
+
+    @staticmethod
     def _cleanup_journal_marker_name(path: Path) -> str:
         digest = hashlib.sha256(str(path).encode("utf-8")).hexdigest()[:24]
         return f".{path.name}.{digest}.root.json"
@@ -5219,8 +5429,10 @@ class GatewayNodeManager:
                     or set(marker_payload) != expected_marker_keys
                     or (marker_version == 2 and marker_payload["epoch_required"] is not True)
                     or marker_payload["path"] != str(path)
-                    or marker_payload["ancestor_identities"]
-                    != [list(item) for item in ancestor_identities]
+                    or not self._cleanup_journal_restart_identities_match(
+                        marker_payload["ancestor_identities"],
+                        tuple(ancestor_identities),
+                    )
                 ):
                     raise RuntimeError(
                         "cleanup journal ancestor identity does not match authority"
@@ -5229,7 +5441,7 @@ class GatewayNodeManager:
                 if (
                     not isinstance(persisted_root_identity, list)
                     or len(persisted_root_identity) != 4
-                    or any(not isinstance(item, int) for item in persisted_root_identity)
+                    or any(type(item) is not int for item in persisted_root_identity)
                 ):
                     raise RuntimeError("cleanup journal root identity marker is invalid")
                 root_fd = os.open(root_name, _CLEANUP_DIRECTORY_FLAGS, dir_fd=parent_fd)
@@ -5237,7 +5449,10 @@ class GatewayNodeManager:
                 root_identity = self._cleanup_journal_identity(root_opened)
                 if (
                     self._cleanup_journal_identity(root_before) != root_identity
-                    or list(root_identity) != persisted_root_identity
+                    or not self._cleanup_journal_restart_identities_match(
+                        [*marker_payload["ancestor_identities"], persisted_root_identity],
+                        (*ancestor_identities, root_identity),
+                    )
                 ):
                     raise RuntimeError("cleanup journal root identity does not match authority")
                 if (
@@ -7036,8 +7251,15 @@ class GatewayNodeManager:
         if lock is None:
             lock = asyncio.Lock()
             self._cleanup_reconcile_lock = lock
+        dispatcher = getattr(self, "_dispatcher", None)
         async with lock:
             for session_id, ownership in list(retries.items()):
+                # The normal dispatcher lifecycle is the sole cleanup owner
+                # until it releases the session. Reconciliation is recovery
+                # for abandoned/retry state and must not race post-run journal
+                # revisions produced by a live session.
+                if dispatcher is not None and await dispatcher.owns_session(session_id):
+                    continue
                 try:
                     await self._reconcile_cleanup_ownership(ownership)
                 except Exception as exc:

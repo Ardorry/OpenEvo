@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+import hashlib
+import json
 import re
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -151,6 +153,158 @@ class ArtifactResponse(BaseModel):
     scores: dict[str, float] = Field(default_factory=dict)
     tags: list[str] = Field(default_factory=list)
     promoted: bool = False
+
+
+class ArtifactContentAdmissionReceipt(BaseModel):
+    """Redacted receipt for a verified proposal payload leakage scan."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["openevo.artifact_content_admission.v1"] = (
+        "openevo.artifact_content_admission.v1"
+    )
+    basis_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    proposal_artifact_ids: tuple[str, ...] = Field(min_length=1, max_length=128)
+    source_artifact_ids: tuple[str, ...] = Field(default=(), max_length=256)
+    source_payload_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    scanned_file_count: int = Field(ge=1, le=4096)
+    scanned_byte_count: int = Field(ge=0, le=128 * 1024 * 1024)
+    finding_count: int = Field(ge=0, le=4096)
+    finding_categories: tuple[str, ...] = Field(default=(), max_length=16)
+    passed: bool
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def _closed_content_receipt(self) -> "ArtifactContentAdmissionReceipt":
+        if (
+            self.proposal_artifact_ids
+            != tuple(sorted(self.proposal_artifact_ids))
+            or len(self.proposal_artifact_ids)
+            != len(set(self.proposal_artifact_ids))
+            or self.source_artifact_ids != tuple(sorted(self.source_artifact_ids))
+            or len(self.source_artifact_ids) != len(set(self.source_artifact_ids))
+            or bool(self.source_artifact_ids)
+            != (self.source_payload_sha256 is not None)
+            or self.finding_categories
+            != tuple(sorted(self.finding_categories))
+            or len(self.finding_categories)
+            != len(set(self.finding_categories))
+            or self.passed is not (self.finding_count == 0)
+        ):
+            raise ValueError("artifact content admission inventory is invalid")
+        payload = self.model_dump(mode="json", exclude={"content_sha256"})
+        digest = hashlib.sha256(
+            json.dumps(
+                payload,
+                ensure_ascii=True,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        if digest != self.content_sha256:
+            raise ValueError("artifact content admission receipt hash is invalid")
+        return self
+
+
+class SuccessorArtifactAuthorityResponse(BaseModel):
+    """Closed registry/job authority for one committed successor output."""
+
+    successor_transition_id: str = Field(min_length=1, max_length=256)
+    job_id: str = Field(min_length=1, max_length=256)
+    input_artifact_ids: tuple[str, ...] = Field(default=(), max_length=256)
+    artifact: ArtifactResponse
+    payload_manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    payload_byte_size: int = Field(ge=0)
+    proposal_artifact_ids: tuple[str, ...] = Field(min_length=1, max_length=128)
+    admission_decision_id: str | None = None
+    admission_decision_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    content_admission: ArtifactContentAdmissionReceipt | None = None
+    promotion_status: Literal["promoted"] = "promoted"
+
+    @model_validator(mode="after")
+    def _closed_successor_output(self) -> "SuccessorArtifactAuthorityResponse":
+        if (
+            self.artifact.state is not ArtifactState.SEALED
+            or self.artifact.promoted is not True
+            or self.proposal_artifact_ids
+            != tuple(sorted(self.proposal_artifact_ids))
+            or len(self.proposal_artifact_ids)
+            != len(set(self.proposal_artifact_ids))
+            or self.artifact.artifact_id not in self.proposal_artifact_ids
+            or len(self.input_artifact_ids) != len(set(self.input_artifact_ids))
+            or (self.admission_decision_id is None)
+            != (self.admission_decision_sha256 is None)
+            or (self.admission_decision_id is None)
+            != (self.content_admission is None)
+            or (
+                self.content_admission is not None
+                and self.content_admission.proposal_artifact_ids
+                != self.proposal_artifact_ids
+            )
+        ):
+            raise ValueError("successor artifact authority is not sealed and promoted")
+        return self
+
+
+class FailedPlanBoundJobAuthorityResponse(BaseModel):
+    """Read-only identity of one terminal non-retryable planned job."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    job_id: str = Field(min_length=1, max_length=256)
+    state: Literal["failed"]
+    retryable: Literal[False]
+    successor_transition_id: str = Field(min_length=1, max_length=256)
+    plan_id: str = Field(min_length=1, max_length=256)
+    plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    target_id: str = Field(min_length=1, max_length=256)
+    method_id: str = Field(min_length=1, max_length=256)
+    method_identity_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    execution_envelope_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    declared_output_artifact_types: tuple[str, ...] = Field(min_length=1)
+    output_artifact_ids: tuple[str, ...] = Field(default=(), max_length=0)
+    job_result_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class SuccessorTransitionJobInventoryResponse(BaseModel):
+    """Read-only closed inventory of jobs bound to one successor identity."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    successor_transition_id: str = Field(min_length=1, max_length=256)
+    job_ids: tuple[str, ...] = Field(default=(), max_length=128)
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def _closed_inventory(self) -> "SuccessorTransitionJobInventoryResponse":
+        if (
+            self.job_ids != tuple(sorted(self.job_ids))
+            or len(self.job_ids) != len(set(self.job_ids))
+        ):
+            raise ValueError("successor transition job inventory is not sorted and unique")
+        payload = {
+            "job_ids": list(self.job_ids),
+            "successor_transition_id": self.successor_transition_id,
+        }
+        digest = hashlib.sha256(
+            json.dumps(
+                payload,
+                ensure_ascii=True,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        if digest != self.content_sha256:
+            raise ValueError("successor transition job inventory digest is invalid")
+        return self
 
 
 class ArtifactPromotionUpdateRequest(BaseModel):
@@ -345,6 +499,98 @@ class WorkerFailRequest(BaseModel):
     lease_id: str = Field(min_length=1)
     error: str = Field(min_length=1)
     retryable: bool = True
+
+
+class WorkerReflectorInferenceReserveRequest(BaseModel):
+    """Reserve the only paid reflector inference allowed for one native job."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    lease_id: str = Field(min_length=1, max_length=256)
+    request_id: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+    )
+    max_model_calls: Literal[1]
+
+
+class WorkerReflectorInferenceCompleteRequest(BaseModel):
+    """Seal successful completion of a previously started inference."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    lease_id: str = Field(min_length=1, max_length=256)
+    request_id: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+    )
+    runtime_receipt_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ReflectorInferenceReservationReceipt(BaseModel):
+    """Durable per-job evidence that prevents a second paid inference."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    schema_version: Literal["openevo.reflector_inference_reservation.v1"] = (
+        "openevo.reflector_inference_reservation.v1"
+    )
+    reservation_id: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+    )
+    job_id: str = Field(min_length=1, max_length=256)
+    request_id: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+    )
+    state: Literal["started", "completed"]
+    max_model_calls: Literal[1]
+    model_calls_started: Literal[1]
+    started_at: str = Field(min_length=1, max_length=64)
+    completed_at: str | None = Field(default=None, min_length=1, max_length=64)
+    runtime_receipt_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def _sealed_shape_and_digest(self) -> ReflectorInferenceReservationReceipt:
+        if self.state == "started" and (
+            self.completed_at is not None or self.runtime_receipt_sha256 is not None
+        ):
+            raise ValueError("started reflector reservation contains completion evidence")
+        if self.state == "completed" and (
+            self.completed_at is None or self.runtime_receipt_sha256 is None
+        ):
+            raise ValueError("completed reflector reservation lacks completion evidence")
+        payload = self.model_dump(mode="json", exclude={"content_sha256"})
+        expected = hashlib.sha256(
+            json.dumps(
+                payload,
+                ensure_ascii=True,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        if expected != self.content_sha256:
+            raise ValueError("reflector inference reservation digest is invalid")
+        return self
+
+
+class WorkerReflectorInferenceReserveResponse(BaseModel):
+    """A reservation authorizes execution only on its first successful write."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    receipt: ReflectorInferenceReservationReceipt
+    execute_allowed: bool
 
 
 class ContextLimits(BaseModel):

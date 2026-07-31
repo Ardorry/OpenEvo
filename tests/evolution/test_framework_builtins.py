@@ -320,12 +320,32 @@ def test_reflector_catalog_requires_model_and_codex_harness_provider(
                 "reflector_llm": {
                     "model": "gpt-5.5",
                     "provider": "codex_cli",
+                    "runtime": {
+                        "mode": "managed",
+                        "profile": "managed_science",
+                        "image_digest": "sha256:" + "a" * 64,
+                        "codex_binary": "/opt/codex/bin/codex",
+                        "expected_cli_version": "0.144.1",
+                        "auth_mode": "subscription",
+                        "capture_mode": "transcript",
+                        "path_fallback_allowed": False,
+                    },
                 }
             },
         )
         assert normalized["reflector_llm"] == {
             "model": "gpt-5.5",
             "provider": "codex_cli",
+            "runtime": {
+                "mode": "managed",
+                "profile": "managed_science",
+                "image_digest": "sha256:" + "a" * 64,
+                "codex_binary": "/opt/codex/bin/codex",
+                "expected_cli_version": "0.144.1",
+                "auth_mode": "subscription",
+                "capture_mode": "transcript",
+                "path_fallback_allowed": False,
+            },
         }
 
 

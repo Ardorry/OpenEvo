@@ -2,25 +2,27 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import socket
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+from openevo.internal_auth import INTERNAL_OWNERSHIP_ENV
 from openevo.runtime import docker_host as docker_host_module
 from openevo.runtime.docker_host import (
+    DOCKER_EXECUTABLE_PATH,
     DOCKER_HOST_ENDPOINT,
-    DockerSocketAuthority,
+    DockerExecutableAuthority,
     DockerHostPathError,
     DockerHostPathSpec,
+    DockerSocketAuthority,
     HeldDockerSessionRoot,
     discover_docker_host_path,
     docker_cli_environment,
     docker_self_inspect_argv,
     verify_docker_host_path,
 )
-
 
 _HOSTNAME = "1" * 12
 _CONTAINER_ID = _HOSTNAME + ("2" * 52)
@@ -326,6 +328,7 @@ def test_docker_cli_environment_is_complete_and_ignores_user_configuration(
     monkeypatch.setenv("DOCKER_CONTEXT", "attacker")
     monkeypatch.setenv("DOCKER_CONFIG", "/tmp/attacker-config")
     monkeypatch.setenv("HOME", "/tmp/attacker-home")
+    monkeypatch.delenv(INTERNAL_OWNERSHIP_ENV, raising=False)
 
     assert docker_cli_environment() == {
         "DOCKER_CONFIG": "/proc/self",
@@ -335,6 +338,60 @@ def test_docker_cli_environment_is_complete_and_ignores_user_configuration(
         "PATH": "/usr/bin:/bin",
     }
     assert "DOCKER_CONTEXT" not in docker_cli_environment()
+
+
+def test_docker_cli_environment_preserves_only_valid_core_process_ownership(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ownership = "a" * 64
+    monkeypatch.setenv(INTERNAL_OWNERSHIP_ENV, ownership)
+    monkeypatch.setenv("DOCKER_CONTEXT", "attacker")
+
+    environment = docker_cli_environment()
+
+    assert environment[INTERNAL_OWNERSHIP_ENV] == ownership
+    assert "DOCKER_CONTEXT" not in environment
+
+
+def test_docker_cli_environment_rejects_invalid_core_process_ownership(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(INTERNAL_OWNERSHIP_ENV, "not-a-process-ownership-digest")
+
+    with pytest.raises(
+        DockerHostPathError,
+        match="Docker child process ownership identity is invalid",
+    ):
+        docker_cli_environment()
+
+
+def test_docker_executable_authority_accepts_only_immutable_wsl_release_symlink() -> None:
+    executable = Path(DOCKER_EXECUTABLE_PATH)
+    if not executable.is_symlink():
+        pytest.skip("Docker executable is not the WSL Docker Desktop release symlink")
+    target = executable.resolve(strict=True)
+    if not os.statvfs(target).f_flag & os.ST_RDONLY:
+        pytest.skip("Docker executable target is not on a read-only release filesystem")
+
+    authority = DockerExecutableAuthority.open()
+
+    assert authority.identity[0] == 1
+    authority.verify()
+
+
+def test_docker_executable_authority_rejects_writable_symlink_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "docker-real"
+    target.write_bytes(b"binary")
+    target.chmod(0o755)
+    link = tmp_path / "docker"
+    link.symlink_to(target)
+    monkeypatch.setattr(docker_host_module, "DOCKER_EXECUTABLE_PATH", os.fspath(link))
+
+    with pytest.raises(DockerHostPathError, match="executable identity is invalid"):
+        DockerExecutableAuthority.open()
 
 
 @pytest.mark.skipif(os.geteuid() != 0, reason="release socket authority is root-owned")

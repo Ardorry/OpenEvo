@@ -1,21 +1,23 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
-from pathlib import Path
+import shutil
 import socket
 import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from openevo.backend import service_supervisor as supervisor_module
-from openevo.backend.service_control import ServiceRestartAttempt, ServiceRestartAttemptState
-from openevo.gateway import session_files as session_files_module
 from openevo.backend.contracts.v1.models import LogEntryV1, ServiceSummaryV1
+from openevo.backend.service_control import ServiceRestartAttempt, ServiceRestartAttemptState
 from openevo.backend.service_supervisor import (
     BoundedProbeCommandRunner,
     CoreServiceSupervisor,
@@ -23,8 +25,8 @@ from openevo.backend.service_supervisor import (
     LocalManagedScienceRuntimeProbe,
     ManagedScienceRuntimeReadiness,
     ManagedScienceRuntimeRequest,
-    ProcessIdentity,
     ProbeCommandResult,
+    ProcessIdentity,
     RealSubprocessBackend,
     ServiceComponent,
     ServiceExecutionMode,
@@ -38,13 +40,13 @@ from openevo.backend.service_supervisor import (
     SupervisorStateError,
 )
 from openevo.config import TopologyConfig
-from openevo.internal_auth import InternalServiceIdentity
+from openevo.gateway import session_files as session_files_module
 from openevo.gateway.session_files import (
     HeldCodexCredentialAuthority,
     PreparedCodexCredentialSnapshot,
     SessionFileSecurityError,
 )
-from openevo.runtime.managed import MANAGED_CODEX_VERSION, MANAGED_RUNTIME_RELEASES
+from openevo.internal_auth import InternalServiceIdentity
 from openevo.runtime.docker_host import (
     DOCKER_EXECUTABLE_PATH,
     DockerHostPathSpec,
@@ -52,11 +54,17 @@ from openevo.runtime.docker_host import (
     docker_cli_environment,
     docker_self_inspect_argv,
 )
+from openevo.runtime.managed import MANAGED_CODEX_VERSION, MANAGED_RUNTIME_RELEASES
+from openevo.runtime.managed_reflector_mount import (
+    ManagedReflectorCredentialMountReadiness,
+    ManagedReflectorMountAuthority,
+    ManagedReflectorMountRegistrationExpectation,
+)
 from tests.framework_testkit import verified_builtin_registry
-
 
 INSTALL_DIGEST = "a" * 64
 REGISTRY_DIGEST = "b" * 64
+DAEMON_RELEASE_IDENTITY = "c" * 64
 
 
 class FakeProcessBackend:
@@ -198,9 +206,15 @@ class FakeManagedScienceRuntimeProbe:
         *,
         ready: bool = True,
         docker_host_path: DockerHostPathSpec | None = None,
+        runtime_image_immutable_reference: str | None = None,
     ) -> None:
         self.ready = ready
         self.docker_host_path = docker_host_path
+        self.runtime_image_immutable_reference = (
+            MANAGED_RUNTIME_RELEASES["managed_science"].trusted_digest
+            if runtime_image_immutable_reference is None
+            else runtime_image_immutable_reference
+        )
         self.requests: list[ManagedScienceRuntimeRequest] = []
         self.auth_path: Path | None = None
 
@@ -231,7 +245,7 @@ class FakeManagedScienceRuntimeProbe:
             ),
             identity_digest="f" * 64 if self.ready else None,
             runtime_image_immutable_reference=(
-                MANAGED_RUNTIME_RELEASES["managed_science"].trusted_digest if self.ready else None
+                self.runtime_image_immutable_reference if self.ready else None
             ),
             message=(
                 "Managed Science runtime bootstrap is verified."
@@ -523,6 +537,16 @@ def test_subscription_plan_is_deterministic_and_ready_requires_health_and_identi
             spec.argv[spec.argv.index("--framework-lock") + 1] == os.fspath(framework_lock)
             for spec in framework_specs
         )
+        evolution_backend = next(
+            spec for spec in backend.spawned if spec.service_id == "evolution-backend"
+        )
+        evolution_worker = next(
+            spec for spec in backend.spawned if spec.service_id == "evolution-worker"
+        )
+        assert "--managed-reflector-root" not in evolution_backend.argv
+        assert evolution_worker.argv[
+            evolution_worker.argv.index("--managed-reflector-root") + 1
+        ] == os.fspath(tmp_path / "core-services" / "evolution" / "managed-reflector")
         assert not (tmp_path / "core-services" / "framework-lock.json").exists()
         assert all("PYTHONPATH" not in spec.env for spec in backend.spawned)
         assert all("PYTHONHOME" not in spec.env for spec in backend.spawned)
@@ -564,6 +588,123 @@ def test_subscription_plan_is_deterministic_and_ready_requires_health_and_identi
         supervisor.close()
 
 
+def test_current_generation_adoption_returns_none_only_for_pristine_state(
+    tmp_path: Path,
+    framework_lock: Path,
+) -> None:
+    supervisor, backend, _, runtime_probe = _supervisor(tmp_path, framework_lock)
+    try:
+        assert (
+            supervisor.adopt_current_run_binding(
+                ServiceExecutionMode.CODEX_SUBSCRIPTION_TRANSCRIPT,
+                codex_model="gpt-5.1-codex-mini",
+                runtime_image="openevo/science-runtime:0.1.1",
+            )
+            is None
+        )
+        assert backend.spawned == []
+        assert runtime_probe.requests == []
+    finally:
+        supervisor.close()
+
+
+def test_current_generation_adopts_only_verified_worker_startup_tail(
+    tmp_path: Path,
+    framework_lock: Path,
+) -> None:
+    supervisor, backend, health, runtime_probe = _supervisor(tmp_path, framework_lock)
+    try:
+        initial = _ensure_subscription(supervisor)
+        initial_generation = initial.generation_digest
+        initial_spawn_count = len(backend.spawned)
+        initial_probe_count = len(runtime_probe.requests)
+        with supervisor._mutex:
+            supervisor._set_starting("evolution-worker")
+        health.checked.clear()
+
+        adopted = supervisor.adopt_current_run_binding(
+            ServiceExecutionMode.CODEX_SUBSCRIPTION_TRANSCRIPT,
+            codex_model="gpt-5.1-codex-mini",
+            runtime_image="openevo/science-runtime:0.1.1",
+        )
+
+        assert adopted is not None
+        snapshot, lease = adopted
+        try:
+            assert snapshot.run_ready is True
+            assert snapshot.generation_digest == initial_generation
+            assert snapshot.service("evolution-worker").status is ServiceStatus.RUNNING
+            assert lease.binding.generation_digest == initial_generation
+            assert len(backend.spawned) == initial_spawn_count
+            assert backend.terminated == []
+            assert len(runtime_probe.requests) == initial_probe_count
+            assert health.checked == [
+                "evolution-backend",
+                "rollout",
+                "gateway",
+                "evolution-worker",
+            ]
+        finally:
+            lease.close()
+    finally:
+        supervisor.close()
+
+
+def test_current_generation_adopts_all_running_without_runtime_reprobe(
+    tmp_path: Path,
+    framework_lock: Path,
+) -> None:
+    supervisor, backend, _, runtime_probe = _supervisor(tmp_path, framework_lock)
+    try:
+        initial = _ensure_subscription(supervisor)
+        initial_spawn_count = len(backend.spawned)
+        initial_probe_count = len(runtime_probe.requests)
+
+        adopted = supervisor.adopt_current_run_binding(
+            ServiceExecutionMode.CODEX_SUBSCRIPTION_TRANSCRIPT,
+            codex_model="gpt-5.1-codex-mini",
+            runtime_image="openevo/science-runtime:0.1.1",
+        )
+
+        assert adopted is not None
+        snapshot, lease = adopted
+        try:
+            assert snapshot.generation_digest == initial.generation_digest
+            assert len(backend.spawned) == initial_spawn_count
+            assert backend.terminated == []
+            assert len(runtime_probe.requests) == initial_probe_count
+        finally:
+            lease.close()
+    finally:
+        supervisor.close()
+
+
+def test_current_generation_rejects_non_worker_startup_tail_without_restart(
+    tmp_path: Path,
+    framework_lock: Path,
+) -> None:
+    supervisor, backend, _, runtime_probe = _supervisor(tmp_path, framework_lock)
+    try:
+        _ensure_subscription(supervisor)
+        initial_spawn_count = len(backend.spawned)
+        initial_probe_count = len(runtime_probe.requests)
+        with supervisor._mutex:
+            supervisor._set_starting("gateway")
+
+        with pytest.raises(SupervisorStateError, match="not an adoptable startup tail"):
+            supervisor.adopt_current_run_binding(
+                ServiceExecutionMode.CODEX_SUBSCRIPTION_TRANSCRIPT,
+                codex_model="gpt-5.1-codex-mini",
+                runtime_image="openevo/science-runtime:0.1.1",
+            )
+
+        assert len(backend.spawned) == initial_spawn_count
+        assert backend.terminated == []
+        assert len(runtime_probe.requests) == initial_probe_count
+    finally:
+        supervisor.close()
+
+
 def test_subscription_plan_carries_verified_docker_host_path_into_gateway(
     tmp_path: Path,
     framework_lock: Path,
@@ -583,7 +724,7 @@ def test_subscription_plan_carries_verified_docker_host_path_into_gateway(
         minimum_available_bytes=0,
     )
     runtime_probe = FakeManagedScienceRuntimeProbe(docker_host_path=authority)
-    supervisor, _, _, _ = _supervisor(
+    supervisor, backend, _, _ = _supervisor(
         tmp_path,
         framework_lock,
         runtime_probe=runtime_probe,
@@ -593,6 +734,287 @@ def test_subscription_plan_carries_verified_docker_host_path_into_gateway(
         assert snapshot.run_ready is True
         topology = TopologyConfig.load(tmp_path / "core-services" / "topology.json")
         assert topology.gateway.nodes[0].docker_host_path == authority
+        worker = next(spec for spec in backend.spawned if spec.service_id == "evolution-worker")
+        evolution_backend = next(
+            spec for spec in backend.spawned if spec.service_id == "evolution-backend"
+        )
+        mount_authority = worker.managed_reflector_mount_authority
+        assert isinstance(mount_authority, ManagedReflectorMountAuthority)
+        expectation = ManagedReflectorMountRegistrationExpectation.model_validate_json(
+            evolution_backend.argv[
+                evolution_backend.argv.index("--managed-reflector-mount-expectation") + 1
+            ]
+        )
+        assert expectation == (
+            ManagedReflectorMountRegistrationExpectation.from_authority(mount_authority)
+        )
+        worker_identity = worker.internal_identity
+        assert worker_identity is not None
+        launch_id = worker.argv[worker.argv.index("--managed-reflector-mount-launch-id") + 1]
+        mapping_identity = worker.argv[
+            worker.argv.index("--managed-reflector-docker-host-path-identity") + 1
+        ]
+        mount_authority.verify(
+            worker_identity,
+            expected_worker_launch_id=launch_id,
+            expected_docker_host_path_identity=mapping_identity,
+            expected_daemon_release_identity=(mount_authority.grant.daemon_release_identity),
+            expected_release_install_digest=INSTALL_DIGEST,
+            expected_runtime_profile="managed_science",
+            expected_runtime_image=mount_authority.grant.runtime_image,
+            expected_runtime_identity_digest=snapshot.runtime_identity_digest,
+        )
+        assert mount_authority.docker_host_path == authority
+        assert mapping_identity == authority.identity_digest
+        assert mount_authority.grant.runtime_profile == "managed_science"
+        assert mount_authority.grant.runtime_image == (
+            MANAGED_RUNTIME_RELEASES["managed_science"].trusted_digest
+        )
+        assert (
+            worker.argv[worker.argv.index("--managed-reflector-runtime-image") + 1]
+            == MANAGED_RUNTIME_RELEASES["managed_science"].trusted_digest
+        )
+        assert mount_authority.grant.runtime_identity_digest == snapshot.runtime_identity_digest
+        assert mount_authority.grant.release_install_digest == INSTALL_DIGEST
+        assert mount_authority.grant.release_registry_digest == REGISTRY_DIGEST
+        assert worker.env["HOME"] == "/nonexistent-openevo-evolution-worker-home"
+        assert worker.env["PATH"] == "/usr/bin:/bin"
+        assert "CODEX_HOME" not in worker.env
+        assert os.fspath(Path.home()) not in worker.env.values()
+        assert all(
+            spec.managed_reflector_mount_authority is None
+            for spec in backend.spawned
+            if spec.service_id != "evolution-worker"
+        )
+        assert mount_authority.signature not in "\0".join(worker.argv)
+        assert mount_authority.signature not in json.dumps(dict(worker.env))
+        assert mount_authority.signature not in repr(worker)
+        assert mount_authority.signature not in (
+            tmp_path / "core-services" / "ledger.json"
+        ).read_text(encoding="utf-8")
+    finally:
+        supervisor.close()
+
+
+def test_worker_health_probe_requires_exact_mount_authority_runtime_identity(
+    tmp_path: Path,
+    framework_lock: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hostname = "e" * 12
+    data_root = tmp_path / "release-data"
+    data_root.mkdir()
+    docker_host_path = discover_docker_host_path(
+        _docker_host_evidence(
+            data_root,
+            hostname=hostname,
+            container_id=hostname + ("f" * 52),
+        ),
+        namespace="core-health-probe",
+        hostname=hostname,
+        minimum_available_bytes=0,
+    )
+    supervisor, backend, _, _ = _supervisor(
+        tmp_path,
+        framework_lock,
+        runtime_probe=FakeManagedScienceRuntimeProbe(docker_host_path=docker_host_path),
+    )
+    try:
+        _ensure_subscription(supervisor)
+        worker = next(spec for spec in backend.spawned if spec.service_id == "evolution-worker")
+        identity = worker.internal_identity
+        authority = worker.managed_reflector_mount_authority
+        assert identity is not None
+        assert authority is not None
+        grant = authority.grant
+
+        def receipt(*, runtime_digest: str) -> dict[str, object]:
+            raw: dict[str, object] = {
+                "schema_version": ("openevo.managed_reflector_credential_mount_readiness.v1"),
+                "authority_id": authority.authority_id,
+                "container_authority_id": "7" * 64,
+                "worker_launch_id": grant.worker_launch_id,
+                "container_launch_id": "openevo_reflector_health_probe",
+                "adoption_nonce_sha256": "8" * 64,
+                "service_identity_digest": grant.service_identity_digest,
+                "runtime_profile": grant.runtime_profile,
+                "runtime_digest": runtime_digest,
+                "docker_host_path_identity": grant.docker_host_path.identity_digest,
+                "generation_digest": identity.generation_digest,
+                "daemon_release_identity": grant.daemon_release_identity,
+                "release_install_digest": grant.release_install_digest,
+                "release_registry_digest": identity.registry_digest,
+                "credential_target": "/openevo/credentials/codex",
+                "container_uid": grant.docker_host_path.runtime_uid,
+                "container_gid": os.getgid(),
+                "authority_issued": True,
+                "docker_mount_created": True,
+                "container_path_visible": True,
+                "container_user_can_read": True,
+                "auth_file_read_only": True,
+                "generation_matches": True,
+                "release_identity_matches": True,
+                "adoption_receipt_valid": True,
+                "container_authority_verified": True,
+                "cleanup_verified": True,
+                "codex_cli_started": False,
+                "model_started": False,
+                "created_at": "2026-07-29T00:00:00+00:00",
+            }
+            raw["content_sha256"] = hashlib.sha256(
+                json.dumps(
+                    raw,
+                    ensure_ascii=True,
+                    allow_nan=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            return ManagedReflectorCredentialMountReadiness.model_validate(raw).model_dump(
+                mode="json"
+            )
+
+        def health_payload(mount: dict[str, object]) -> bytes:
+            runtime_readiness: dict[str, object] = {
+                "schema_version": "openevo.managed_reflector_readiness.v1",
+                "authority_id": mount["authority_id"],
+                "container_authority_id": "9" * 64,
+                "worker_launch_id": mount["worker_launch_id"],
+                "container_launch_id": "openevo_reflector_runtime_health_probe",
+                "adoption_nonce_sha256": "a" * 64,
+                "service_identity_digest": mount["service_identity_digest"],
+                "generation_digest": mount["generation_digest"],
+                "daemon_release_identity": mount["daemon_release_identity"],
+                "release_install_digest": mount["release_install_digest"],
+                "release_registry_digest": mount["release_registry_digest"],
+                "runtime_profile": mount["runtime_profile"],
+                "runtime_digest": mount["runtime_digest"],
+                "docker_host_path_identity": mount["docker_host_path_identity"],
+                "credential_mount_content_sha256": mount["content_sha256"],
+                "codex_binary": "/opt/codex/bin/codex",
+                "expected_cli_version": "0.144.1",
+                "actual_cli_version": "0.144.1",
+                "model": "readiness-only",
+                "auth_mode": "subscription",
+                "capture_mode": "transcript",
+                "path_fallback_allowed": False,
+                "exit_status": 0,
+                "container_authority_verified": True,
+                "adoption_receipt_valid": True,
+                "cleanup_verified": True,
+                "codex_cli_started": True,
+                "model_started": False,
+                "created_at": "2026-07-29T00:00:01+00:00",
+            }
+            runtime_readiness["content_sha256"] = hashlib.sha256(
+                json.dumps(
+                    runtime_readiness,
+                    ensure_ascii=True,
+                    allow_nan=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            health_identity = identity.health_identity()
+            health_identity["service_id"] = "evolution-backend"
+            return json.dumps(
+                {
+                    "internal_identity": health_identity,
+                    "registry_digest": identity.registry_digest,
+                    "workers": [
+                        {
+                            "framework_lock_digest": identity.framework_lock_digest,
+                            "generation_digest": identity.generation_digest,
+                            "managed_reflector_credential_mount": mount,
+                            "managed_reflector_runtime_readiness": runtime_readiness,
+                            "registry_digest": identity.registry_digest,
+                            "worker_id": "core-reference-worker",
+                        }
+                    ],
+                }
+            ).encode("utf-8")
+
+        class _Response:
+            status = 200
+
+            def __init__(self, payload: bytes) -> None:
+                self.payload = payload
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def read(self, _limit: int) -> bytes:
+                return self.payload
+
+        payloads = [
+            health_payload(receipt(runtime_digest=grant.runtime_image)),
+            health_payload(
+                receipt(
+                    runtime_digest=(MANAGED_RUNTIME_RELEASES["managed_science"].loaded_image_id)
+                )
+            ),
+        ]
+        monkeypatch.setattr(
+            supervisor_module,
+            "urlopen",
+            lambda *_args, **_kwargs: _Response(payloads.pop(0)),
+        )
+
+        assert supervisor_module._probe_http(worker, 1) == (
+            True,
+            "authenticated service identity is healthy",
+        )
+        assert supervisor_module._probe_http(worker, 1) == (
+            False,
+            "reflector runtime readiness identity mismatch",
+        )
+    finally:
+        supervisor.close()
+
+
+def test_reflector_mount_uses_release_digest_when_runtime_probe_reports_loaded_image_id(
+    tmp_path: Path,
+    framework_lock: Path,
+) -> None:
+    """Offline Docker execution identity must not replace release authority."""
+
+    hostname = "9" * 12
+    data_root = tmp_path / "release-data"
+    data_root.mkdir()
+    docker_host_path = discover_docker_host_path(
+        _docker_host_evidence(
+            data_root,
+            hostname=hostname,
+            container_id=hostname + ("8" * 52),
+        ),
+        namespace="core-loaded-image-authority",
+        hostname=hostname,
+        minimum_available_bytes=0,
+    )
+    release = MANAGED_RUNTIME_RELEASES["managed_science"]
+    supervisor, backend, _, _ = _supervisor(
+        tmp_path,
+        framework_lock,
+        runtime_probe=FakeManagedScienceRuntimeProbe(
+            docker_host_path=docker_host_path,
+            runtime_image_immutable_reference=release.loaded_image_id,
+        ),
+    )
+    try:
+        snapshot = _ensure_subscription(supervisor)
+        assert snapshot.run_ready is True
+        assert snapshot.runtime_image_immutable_reference == release.loaded_image_id
+        worker = next(spec for spec in backend.spawned if spec.service_id == "evolution-worker")
+        authority = worker.managed_reflector_mount_authority
+        assert authority is not None
+        assert authority.grant.runtime_image == release.trusted_digest
+        assert (
+            worker.argv[worker.argv.index("--managed-reflector-runtime-image") + 1]
+            == release.trusted_digest
+        )
     finally:
         supervisor.close()
 
@@ -637,6 +1059,148 @@ def test_spawn_success_without_health_is_rolled_back(
         supervisor.close()
 
 
+def test_terminal_frame_emitted_before_spawn_returns_is_adopted(
+    tmp_path: Path,
+    framework_lock: Path,
+) -> None:
+    class EarlyTerminalBackend(FakeProcessBackend):
+        def __init__(self) -> None:
+            super().__init__()
+            self.callback_complete = threading.Event()
+
+        def spawn(self, spec, on_output, on_exit) -> ProcessIdentity:
+            identity = super().spawn(spec, on_output, on_exit)
+            if spec.service_id != "gateway":
+                return identity
+            frame = json.dumps(
+                {
+                    "component": "managed_candidate_subscription_isolation",
+                    "event": "managed_candidate_runtime_probe_terminal",
+                    "status": "failed",
+                    "failure_code": "sandbox_invocation_failed",
+                    "phase": "subscription_isolation",
+                    "generation_digest": "1" * 64,
+                    "release_registry_digest": "2" * 64,
+                    "codex_cli_started": True,
+                    "model_started": False,
+                    "retryable": False,
+                    "secret_recorded": False,
+                },
+                sort_keys=True,
+            ).encode() + b"\n"
+
+            def terminal() -> None:
+                with self._condition:
+                    self.alive[spec.service_id] = False
+                    self.returncodes[spec.service_id] = 2
+                    self._condition.notify_all()
+                on_output(identity, frame)
+                on_exit(identity, 2)
+                self.callback_complete.set()
+
+            threading.Thread(target=terminal, daemon=True).start()
+            return identity
+
+        def wait(self, identity: ProcessIdentity, timeout: float | None) -> int | None:
+            result = super().wait(identity, timeout)
+            if self._service_id(identity) == "gateway":
+                assert self.callback_complete.wait(timeout=1)
+            return result
+
+    backend = EarlyTerminalBackend()
+    supervisor, _, _, _ = _supervisor(tmp_path, framework_lock, backend=backend)
+    try:
+        snapshot = _ensure_subscription(supervisor)
+        gateway = snapshot.service("gateway")
+        assert gateway.status is ServiceStatus.FAILED
+        assert gateway.error_code == "sandbox_invocation_failed"
+        assert gateway.status_message == (
+            "Managed child failed during subscription_isolation with status 2."
+        )
+    finally:
+        supervisor.close()
+
+
+def test_terminal_frame_redactor_preserves_closed_isolation_diagnostics() -> None:
+    payload = {
+        "component": "managed_candidate_subscription_isolation",
+        "event": "managed_candidate_runtime_probe_terminal",
+        "status": "failed",
+        "failure_code": "sandbox_child_not_started",
+        "phase": "subscription_isolation",
+        "nested_return_code": 1,
+        "probe_progress": "not_started",
+        "stderr_class": "policy_rejected",
+        "helper_started": True,
+        "helper_return_code": 127,
+        "missing_executable_basename": "bwrap",
+        "model_started": False,
+        "secret_recorded": False,
+        "untrusted_output": "must not survive",
+    }
+
+    redacted = supervisor_module._sanitize_structured_log(payload)
+
+    assert redacted["nested_return_code"] == 1
+    assert redacted["probe_progress"] == "not_started"
+    assert redacted["stderr_class"] == "policy_rejected"
+    assert redacted["helper_started"] is True
+    assert redacted["helper_return_code"] == 127
+    assert redacted["missing_executable_basename"] == "bwrap"
+    assert redacted["untrusted_output"] == "<redacted>"
+
+
+def test_health_identity_exception_is_persisted_and_rolled_back(
+    tmp_path: Path,
+    framework_lock: Path,
+) -> None:
+    class IdentityFailureHealthChecker(FakeHealthChecker):
+        def wait_ready(
+            self,
+            spec,
+            identity,
+            process_backend,
+            deadline,
+            cancellation=None,
+        ) -> HealthCheckResult:
+            if spec.service_id == "evolution-worker":
+                raise SupervisorStateError("controlled process-group observation race")
+            return super().wait_ready(
+                spec,
+                identity,
+                process_backend,
+                deadline,
+                cancellation,
+            )
+
+    health = IdentityFailureHealthChecker()
+    supervisor, backend, _, _ = _supervisor(tmp_path, framework_lock, health=health)
+    try:
+        snapshot = _ensure_subscription(supervisor)
+
+        worker = snapshot.service("evolution-worker")
+        assert snapshot.run_ready is False
+        assert worker.status is ServiceStatus.FAILED
+        assert worker.error_code == "service_process_identity_unverified"
+        assert all(service.status is not ServiceStatus.STARTING for service in snapshot.services)
+        assert backend.terminated == [
+            "evolution-worker",
+            "gateway",
+            "rollout",
+            "evolution-backend",
+        ]
+        persisted = json.loads(
+            (tmp_path / "core-services" / "ledger.json").read_text(encoding="utf-8")
+        )
+        persisted_worker = next(
+            item for item in persisted["services"] if item["service_id"] == "evolution-worker"
+        )
+        assert persisted_worker["status"] == "failed"
+        assert persisted_worker["error_code"] == "service_process_identity_unverified"
+    finally:
+        supervisor.close()
+
+
 def test_total_startup_deadline_rolls_back_partial_group(
     tmp_path: Path,
     framework_lock: Path,
@@ -647,12 +1211,15 @@ def test_total_startup_deadline_rolls_back_partial_group(
         tmp_path,
         framework_lock,
         health=health,
-        startup_timeout=0.03,
+        # The evolution worker now receives its own sealed Codex credential
+        # authority before startup, so retain enough budget to reach the
+        # deliberately blocked rollout readiness probe.
+        startup_timeout=0.3,
     )
     try:
         started = time.monotonic()
         snapshot = _ensure_subscription(supervisor)
-        assert time.monotonic() - started < 0.3
+        assert time.monotonic() - started < 0.6
         assert snapshot.services_available is False
         assert backend.terminated == ["rollout", "evolution-backend"]
         assert snapshot.service("rollout").error_code == "service_readiness_timeout"
@@ -990,6 +1557,29 @@ def test_streaming_log_redaction_hides_fragmented_credentials_and_flushes_carry(
         supervisor.close()
 
 
+def test_evolution_worker_logs_redact_fragmented_codex_snapshot_secrets(
+    tmp_path: Path,
+    framework_lock: Path,
+) -> None:
+    supervisor, backend, _, _ = _supervisor(tmp_path, framework_lock)
+    secret = b"test-secret"
+    try:
+        _ensure_subscription(supervisor)
+        backend.emit("evolution-worker", b"credential probe: " + secret[:4])
+        backend.emit("evolution-worker", secret[4:] + b"\n")
+        backend.crash("evolution-worker", 19)
+
+        rendered = "\n".join(
+            entry.message for entry in supervisor.logs("evolution-worker", limit=100)
+        )
+        ledger = (tmp_path / "core-services" / "ledger.json").read_text(encoding="utf-8")
+        assert secret.decode("ascii") not in rendered
+        assert secret.decode("ascii") not in ledger
+        assert "[REDACTED: Codex credential]" in rendered
+    finally:
+        supervisor.close()
+
+
 @pytest.mark.parametrize(
     ("payload", "forbidden", "preserved"),
     [
@@ -1128,6 +1718,34 @@ def test_structured_unknown_field_names_retain_scalar_uri_sanitization() -> None
     assert "#tail" not in rendered
     safe_key = "https://<redacted>@example.test/path?<redacted>"
     assert structured[safe_key] == "<redacted>"
+
+
+def test_managed_candidate_terminal_frame_survives_redaction_and_is_classified() -> None:
+    rendered = supervisor_module._sanitize(
+        json.dumps(
+            {
+                "component": "managed_candidate_subscription_isolation",
+                "event": "managed_candidate_runtime_probe_terminal",
+                "status": "failed",
+                "failure_code": "sandbox_invocation_failed",
+                "phase": "subscription_isolation",
+                "generation_digest": "1" * 64,
+                "release_registry_digest": "2" * 64,
+                "codex_cli_started": True,
+                "model_started": False,
+                "retryable": False,
+                "secret_recorded": False,
+                "credential": "must-not-survive",
+            }
+        )
+    )
+    record = SimpleNamespace(logs=[SimpleNamespace(message=rendered)])
+
+    assert supervisor_module._managed_child_terminal_failure(record) == (
+        "sandbox_invocation_failed",
+        "subscription_isolation",
+    )
+    assert "must-not-survive" not in rendered
 
 
 @pytest.mark.parametrize(
@@ -1348,6 +1966,7 @@ def test_release_mode_requires_verified_registry_and_reverifies_each_ensure(
         launch_mode=ServiceLaunchMode.RELEASE,
         service_root=tmp_path / "release-services",
         framework_lock=framework_lock,
+        daemon_release_identity=DAEMON_RELEASE_IDENTITY,
         verified_registry=registry,
     )
     try:
@@ -1403,6 +2022,7 @@ def test_release_restart_completed_replay_reverifies_inventory_before_return(
         launch_mode=ServiceLaunchMode.RELEASE,
         service_root=tmp_path / "release-restart-services",
         framework_lock=framework_lock,
+        daemon_release_identity=DAEMON_RELEASE_IDENTITY,
         verified_registry=registry,
     )
     try:
@@ -1460,6 +2080,7 @@ def test_release_restart_inventory_failure_is_transactional_between_reverificati
         launch_mode=ServiceLaunchMode.RELEASE,
         service_root=tmp_path / "release-transaction-services",
         framework_lock=framework_lock,
+        daemon_release_identity=DAEMON_RELEASE_IDENTITY,
         verified_registry=registry,
     )
     try:
@@ -1685,6 +2306,7 @@ def test_release_registry_reverification_is_private_and_rejects_unsealed_objects
             launch_mode=ServiceLaunchMode.RELEASE,
             service_root=tmp_path / "unsealed-release-services",
             framework_lock=framework_lock,
+            daemon_release_identity=DAEMON_RELEASE_IDENTITY,
             verified_registry=object(),
         )
 
@@ -2155,6 +2777,12 @@ def test_local_managed_runtime_probe_binds_image_codex_and_private_auth(
     assert readiness.ready is True
     assert readiness.code is ServiceRunReadinessCode.READY
     assert readiness.identity_digest is not None
+    assert readiness.runtime_image_immutable_reference == (
+        MANAGED_RUNTIME_RELEASES["managed_science"].trusted_digest
+    )
+    assert readiness.runtime_image_immutable_reference != (
+        MANAGED_RUNTIME_RELEASES["managed_science"].loaded_image_id
+    )
     assert command_runner.calls == [
         ("codex", "--version"),
         ("codex", "login", "status"),
@@ -2163,7 +2791,7 @@ def test_local_managed_runtime_probe_binds_image_codex_and_private_auth(
             DOCKER_EXECUTABLE_PATH,
             "image",
             "inspect",
-            "openevo/science-runtime:0.1.1",
+            MANAGED_RUNTIME_RELEASES["managed_science"].loaded_image_id,
         ),
     ]
     assert all(call[0] != os.fspath(polluted_docker) for call in command_runner.calls)
@@ -2751,7 +3379,7 @@ def test_local_managed_runtime_probe_rejects_wrong_release_digest_before_run(
                 DOCKER_EXECUTABLE_PATH,
                 "image",
                 "inspect",
-                "openevo/science-runtime:0.1.1",
+                MANAGED_RUNTIME_RELEASES["managed_science"].loaded_image_id,
             ),
             ProbeCommandResult(1, b"", b"No such image"),
             ServiceRunReadinessCode.RUNTIME_IMAGE_UNAVAILABLE,
@@ -2840,19 +3468,13 @@ def test_local_managed_runtime_probe_rejects_missing_auth_evidence(tmp_path: Pat
 
 def test_probe_executable_size_bound_accepts_current_codex_binary_scale() -> None:
     def executable_stat(size: int) -> os.stat_result:
-        return os.stat_result(
-            (0o100755, 2, 1, 1, os.geteuid(), os.getegid(), size, 0, 0, 0)
-        )
+        return os.stat_result((0o100755, 2, 1, 1, os.geteuid(), os.getegid(), size, 0, 0, 0))
 
-    identity = supervisor_module._probe_executable_identity(
-        executable_stat(300 * 1024 * 1024)
-    )
+    identity = supervisor_module._probe_executable_identity(executable_stat(300 * 1024 * 1024))
 
     assert identity[5] == 300 * 1024 * 1024
     with pytest.raises(OSError, match="identity is invalid"):
-        supervisor_module._probe_executable_identity(
-            executable_stat((512 * 1024 * 1024) + 1)
-        )
+        supervisor_module._probe_executable_identity(executable_stat((512 * 1024 * 1024) + 1))
 
 
 def test_real_probe_command_is_cancelled_and_reaped_within_bound() -> None:
@@ -3062,11 +3684,14 @@ def test_restart_once_completed_receipt_replays_across_restart_until_acknowledge
     try:
         assert expected is not None
         assert completed is not None
-        assert replay.restart_once(
-            "gateway",
-            operation_id="durable-completed",
-            expected_service_etag=expected.etag,
-        ) == completed
+        assert (
+            replay.restart_once(
+                "gateway",
+                operation_id="durable-completed",
+                expected_service_etag=expected.etag,
+            )
+            == completed
+        )
         assert replay_backend.spawned == []
         with pytest.raises(SupervisorStateError, match="different request"):
             replay.restart_once(
@@ -3214,8 +3839,7 @@ def test_restart_once_ack_publication_failure_resyncs_deleted_receipt(
             ledger = json.loads(payload)
             attempts = ledger.get("restart_attempts", [])
             if not injected and not any(
-                item.get("operation_id") == "durable-published-ack"
-                for item in attempts
+                item.get("operation_id") == "durable-published-ack" for item in attempts
             ):
                 injected = True
                 raise OSError("post-publication fsync observation failure")
@@ -3384,6 +4008,237 @@ def test_real_process_group_reaps_child_and_grandchild() -> None:
             backend.wait(identity, 1)
 
 
+def test_real_process_group_accepts_closed_docker_cli_child_environment() -> None:
+    """The reflector adoption probe remains owned while Docker CLI is live."""
+
+    backend = RealSubprocessBackend()
+    output: list[bytes] = []
+    source_root = Path(supervisor_module.__file__).parents[2]
+    code = (
+        "import subprocess,sys,time;"
+        f"sys.path.insert(0,{os.fspath(source_root)!r});"
+        "from openevo.runtime.docker_host import docker_cli_environment;"
+        "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'],"
+        "env=docker_cli_environment());"
+        "print(child.pid,flush=True);time.sleep(60)"
+    )
+    spec = ServiceProcessSpec(
+        service_id="docker-child-ownership-probe",
+        display_name="Docker child ownership probe",
+        component=ServiceComponent.EVOLUTION_WORKER,
+        argv=(sys.executable, "-c", code),
+        env={"PATH": os.environ.get("PATH", "")},
+        argv_digest="a" * 64,
+        env_digest="b" * 64,
+        identity_digest="e" * 64,
+        port=None,
+        health_probe=ServiceHealthProbe.process(),
+    )
+    identity = backend.spawn(
+        spec,
+        lambda _identity, payload: output.append(payload),
+        lambda _identity, _returncode: None,
+    )
+    try:
+        child_pid = _wait_for_probe_pid(output)
+        assert _pid_is_live(child_pid)
+        assert backend.is_alive(identity) is True
+    finally:
+        if backend.is_alive(identity):
+            backend.kill(identity)
+            backend.wait(identity, 1)
+
+
+def test_process_group_observer_ignores_only_a_proven_vanished_child(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proc_root = tmp_path / "proc"
+    child = proc_root / "4242"
+    child.mkdir(parents=True)
+    stat_path = child / "stat"
+    stat_path.write_text(
+        "4242 (docker) S 1 7000 7001 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 424242\n",
+        encoding="ascii",
+    )
+    (child / "environ").write_bytes(b"OPENEVO_INTERNAL_OWNERSHIP_DIGEST=" + b"e" * 64)
+    identity = ProcessIdentity(
+        pid=7002,
+        birth_token="d" * 64,
+        session_id=7001,
+        process_group_id=7000,
+        ownership_digest="e" * 64,
+    )
+    original_read_text = Path.read_text
+
+    def read_then_vanish(path: Path, *args, **kwargs):
+        payload = original_read_text(path, *args, **kwargs)
+        if path == stat_path:
+            shutil.rmtree(child)
+        return payload
+
+    monkeypatch.setattr(Path, "read_text", read_then_vanish)
+
+    assert (
+        supervisor_module._owned_process_group_members(
+            identity,
+            proc_root=proc_root,
+        )
+        == ()
+    )
+
+
+def test_process_group_observer_rejects_a_live_unreadable_child(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proc_root = tmp_path / "proc"
+    child = proc_root / "4242"
+    child.mkdir(parents=True)
+    (child / "stat").write_text(
+        "4242 (docker) S 1 7000 7001 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 424242\n",
+        encoding="ascii",
+    )
+    environment_path = child / "environ"
+    environment_path.write_bytes(b"OPENEVO_INTERNAL_OWNERSHIP_DIGEST=" + b"e" * 64)
+    identity = ProcessIdentity(
+        pid=7002,
+        birth_token="d" * 64,
+        session_id=7001,
+        process_group_id=7000,
+        ownership_digest="e" * 64,
+    )
+    original_read_bytes = Path.read_bytes
+
+    def deny_environment(path: Path, *args, **kwargs):
+        if path == environment_path:
+            raise PermissionError("controlled unreadable process environment")
+        return original_read_bytes(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_bytes", deny_environment)
+
+    assert supervisor_module._owned_process_group_members(identity, proc_root=proc_root) is None
+
+
+def test_process_group_observer_ignores_same_child_that_becomes_zombie(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proc_root = tmp_path / "proc"
+    child = proc_root / "4242"
+    child.mkdir(parents=True)
+    stat_path = child / "stat"
+    live = "4242 (docker) S 1 7000 7001 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 424242\n"
+    zombie = "4242 (docker) Z 1 7000 7001 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 424242\n"
+    stat_path.write_text(live, encoding="ascii")
+    (child / "environ").write_bytes(b"")
+    identity = ProcessIdentity(
+        pid=7002,
+        birth_token="d" * 64,
+        session_id=7001,
+        process_group_id=7000,
+        ownership_digest="e" * 64,
+    )
+    original_read_text = Path.read_text
+    reads = 0
+
+    def become_zombie(path: Path, *args, **kwargs):
+        nonlocal reads
+        if path == stat_path:
+            reads += 1
+            if reads == 2:
+                return zombie
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", become_zombie)
+
+    assert supervisor_module._owned_process_group_members(identity, proc_root=proc_root) == ()
+    assert reads == 2
+
+
+def test_process_group_observer_rejects_pid_reuse_after_environment_race(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proc_root = tmp_path / "proc"
+    child = proc_root / "4242"
+    child.mkdir(parents=True)
+    stat_path = child / "stat"
+    live = "4242 (docker) S 1 7000 7001 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 424242\n"
+    reused = "4242 (other) Z 1 7000 7001 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 999999\n"
+    stat_path.write_text(live, encoding="ascii")
+    (child / "environ").write_bytes(b"")
+    identity = ProcessIdentity(
+        pid=7002,
+        birth_token="d" * 64,
+        session_id=7001,
+        process_group_id=7000,
+        ownership_digest="e" * 64,
+    )
+    original_read_text = Path.read_text
+    reads = 0
+
+    def reuse_pid(path: Path, *args, **kwargs):
+        nonlocal reads
+        if path == stat_path:
+            reads += 1
+            if reads == 2:
+                return reused
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", reuse_pid)
+
+    assert supervisor_module._owned_process_group_members(identity, proc_root=proc_root) is None
+    assert reads == 2
+
+
+def test_process_group_observer_stabilizes_a_transient_unverified_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identity = ProcessIdentity(
+        pid=7002,
+        birth_token="d" * 64,
+        session_id=7001,
+        process_group_id=7000,
+        ownership_digest="e" * 64,
+    )
+    observations = iter((None, None, (7002,)))
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        supervisor_module,
+        "_owned_process_group_members",
+        lambda _identity: next(observations),
+    )
+    monkeypatch.setattr(supervisor_module.time, "sleep", sleeps.append)
+
+    assert supervisor_module._stabilized_owned_process_group_members(identity) == (7002,)
+    assert sleeps == [0.01, 0.01]
+
+
+def test_process_group_observer_does_not_accept_persistent_unverified_members(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identity = ProcessIdentity(
+        pid=7002,
+        birth_token="d" * 64,
+        session_id=7001,
+        process_group_id=7000,
+        ownership_digest="e" * 64,
+    )
+    observations = 0
+
+    def unverified(_identity: ProcessIdentity) -> None:
+        nonlocal observations
+        observations += 1
+        return None
+
+    monkeypatch.setattr(supervisor_module, "_owned_process_group_members", unverified)
+    monkeypatch.setattr(supervisor_module.time, "sleep", lambda _seconds: None)
+
+    assert supervisor_module._stabilized_owned_process_group_members(identity) is None
+    assert observations == 10
+
+
 def test_real_subprocess_inherits_credential_and_prebound_listener_fds() -> None:
     backend = RealSubprocessBackend()
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -3437,6 +4292,93 @@ def test_real_subprocess_inherits_credential_and_prebound_listener_fds() -> None
         assert internal_identity.credential not in "\0".join(spec.argv)
         with socket.create_connection(("127.0.0.1", port), timeout=0.2):
             pass
+    finally:
+        if backend.is_alive(identity):
+            backend.kill(identity)
+            backend.wait(identity, 1)
+
+
+def test_real_subprocess_inherits_authenticated_reflector_mount_authority(
+    tmp_path: Path,
+) -> None:
+    backend = RealSubprocessBackend()
+    hostname = "c" * 12
+    data_root = tmp_path / "release-data"
+    data_root.mkdir()
+    docker_host_path = discover_docker_host_path(
+        _docker_host_evidence(
+            data_root,
+            hostname=hostname,
+            container_id=hostname + ("d" * 52),
+        ),
+        namespace="mount-fd-probe",
+        hostname=hostname,
+        minimum_available_bytes=0,
+    )
+    internal_identity = InternalServiceIdentity(
+        service_id="evolution-worker",
+        generation_digest="1" * 64,
+        registry_digest="2" * 64,
+        framework_lock_digest="3" * 64,
+        credential="real-fd-credential-value-0123456789abcdef",
+    )
+    launch_id = f"mrl-{'4' * 32}"
+    release_install_digest = "5" * 64
+    runtime_identity_digest = "6" * 64
+    runtime_image = f"sha256:{'7' * 64}"
+    mount_authority = ManagedReflectorMountAuthority.issue(
+        identity=internal_identity,
+        daemon_release_identity="8" * 64,
+        release_install_digest=release_install_digest,
+        runtime_identity_digest=runtime_identity_digest,
+        runtime_image=runtime_image,
+        worker_launch_id=launch_id,
+        docker_host_path=docker_host_path,
+    )
+    code = (
+        "import fcntl,json,os;"
+        "from openevo.internal_auth import read_internal_service_identity;"
+        "identity=read_internal_service_identity(required=True,expected_service_id='evolution-worker');"
+        "fd=int(os.environ.pop('OPENEVO_MANAGED_REFLECTOR_MOUNT_AUTHORITY_FD'));"
+        "assert fcntl.fcntl(fd,1034)==15;"
+        "payload=os.read(fd,65537);os.close(fd);authority=json.loads(payload);"
+        "print(json.dumps({'authority_id':authority['grant']['authority_id'],"
+        "'mapping':authority['grant']['docker_host_path']['identity_digest']}),flush=True)"
+    )
+    output: list[bytes] = []
+    spec = ServiceProcessSpec(
+        service_id="evolution-worker",
+        display_name="Reflector mount FD probe",
+        component=ServiceComponent.EVOLUTION_WORKER,
+        argv=(sys.executable, "-c", code),
+        env={"PATH": os.environ.get("PATH", "")},
+        argv_digest="8" * 64,
+        env_digest="9" * 64,
+        identity_digest="a" * 64,
+        port=None,
+        health_probe=ServiceHealthProbe.process(),
+        internal_identity=internal_identity,
+        managed_reflector_mount_authority=mount_authority,
+    )
+    identity = backend.spawn(
+        spec,
+        lambda _identity, payload: output.append(payload),
+        lambda _identity, _returncode: None,
+    )
+    try:
+        assert backend.wait(identity, 2) == 0
+        deadline = time.monotonic() + 1
+        while not output:
+            assert time.monotonic() < deadline
+            time.sleep(0.005)
+        observed = json.loads(b"".join(output))
+        assert observed == {
+            "authority_id": mount_authority.authority_id,
+            "mapping": docker_host_path.identity_digest,
+        }
+        assert internal_identity.credential not in repr(spec)
+        assert mount_authority.signature not in repr(spec)
+        assert mount_authority.signature not in "\0".join(spec.argv)
     finally:
         if backend.is_alive(identity):
             backend.kill(identity)
@@ -3514,7 +4456,11 @@ def _sleep_process_spec(
 
 
 def _wait_for_probe_pid(output: list[bytes]) -> int:
-    deadline = time.monotonic() + 1
+    # Importing the source checkout in the ownership-child regression can take
+    # longer than one second on a busy shared host.  Keep the wait bounded but
+    # leave enough room for Python startup before treating missing output as a
+    # functional failure.
+    deadline = time.monotonic() + 5
     while not output:
         assert time.monotonic() < deadline
         time.sleep(0.005)

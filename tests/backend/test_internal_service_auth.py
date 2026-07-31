@@ -7,23 +7,24 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 
-from fastapi.testclient import TestClient
 import httpx
-from fastapi import FastAPI
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
-from openevo.evolution.server import create_app
+from openevo.backend.run_admission import install_core_run_admission_endpoint
 from openevo.evolution.models import (
     ArtifactRegisterRequest,
     ArtifactType,
     ContextResolveRequest,
 )
+from openevo.evolution.server import create_app
 from openevo.gateway import server as gateway_server
 from openevo.gateway.session_files import HeldCodexCredentialAuthority
 from openevo.internal_auth import (
-    GenerationBoundRunAdmissionCheck,
-    CoreRunAdmissionHttpVerifier,
     INTERNAL_CREDENTIAL_FD_ENV,
+    CoreRunAdmissionHttpVerifier,
+    GenerationBoundRunAdmissionCheck,
     InternalAuthError,
     InternalServiceIdentity,
     RunAdmissionError,
@@ -31,10 +32,11 @@ from openevo.internal_auth import (
     read_internal_service_identity,
     verified_private_file_sha256,
 )
-from openevo.backend.run_admission import install_core_run_admission_endpoint
-from openevo.rollout.models import SessionDispatchRequest, canonicalize_task_request
 from openevo.rollout import server as rollout_server
-
+from openevo.rollout.models import SessionDispatchRequest, canonicalize_task_request
+from openevo.runtime.managed_reflector_mount import (
+    ManagedReflectorMountRegistrationExpectation,
+)
 
 GENERATION = "a" * 64
 REGISTRY = "b" * 64
@@ -50,6 +52,130 @@ def _identity(service_id: str = "evolution-backend") -> InternalServiceIdentity:
         framework_lock_digest=FRAMEWORK_LOCK,
         credential=CREDENTIAL,
     )
+
+
+def _mount_readiness() -> dict[str, object]:
+    receipt: dict[str, object] = {
+        "schema_version": "openevo.managed_reflector_credential_mount_readiness.v1",
+        "authority_id": "d" * 64,
+        "container_authority_id": "4" * 64,
+        "worker_launch_id": f"mrl-{'e' * 32}",
+        "container_launch_id": "openevo_reflector_mount_probe",
+        "adoption_nonce_sha256": "5" * 64,
+        "service_identity_digest": "6" * 64,
+        "runtime_profile": "managed_science",
+        "runtime_digest": f"sha256:{'f' * 64}",
+        "docker_host_path_identity": "1" * 64,
+        "generation_digest": GENERATION,
+        "daemon_release_identity": "3" * 64,
+        "release_install_digest": "2" * 64,
+        "release_registry_digest": REGISTRY,
+        "credential_target": "/openevo/credentials/codex",
+        "container_uid": 1000,
+        "container_gid": 1000,
+        "authority_issued": True,
+        "docker_mount_created": True,
+        "container_path_visible": True,
+        "container_user_can_read": True,
+        "auth_file_read_only": True,
+        "generation_matches": True,
+        "release_identity_matches": True,
+        "adoption_receipt_valid": True,
+        "container_authority_verified": True,
+        "cleanup_verified": True,
+        "codex_cli_started": False,
+        "model_started": False,
+        "created_at": "2026-07-29T00:00:00+00:00",
+    }
+    receipt["content_sha256"] = hashlib.sha256(
+        json.dumps(
+            receipt,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return receipt
+
+
+def _mount_expectation() -> ManagedReflectorMountRegistrationExpectation:
+    receipt = _mount_readiness()
+    payload = {
+        "schema_version": (
+            "openevo.managed_reflector_mount_registration_expectation.v1"
+        ),
+        **{
+            key: receipt[key]
+            for key in (
+                "authority_id",
+                "service_identity_digest",
+                "worker_launch_id",
+                "runtime_profile",
+                "runtime_digest",
+                "docker_host_path_identity",
+                "generation_digest",
+                "daemon_release_identity",
+                "release_install_digest",
+                "release_registry_digest",
+                "container_uid",
+            )
+        },
+    }
+    payload["content_sha256"] = hashlib.sha256(
+        json.dumps(
+            payload,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return ManagedReflectorMountRegistrationExpectation.model_validate(payload)
+
+
+def _runtime_readiness(mount: dict[str, object]) -> dict[str, object]:
+    receipt: dict[str, object] = {
+        "schema_version": "openevo.managed_reflector_readiness.v1",
+        "authority_id": mount["authority_id"],
+        "container_authority_id": "7" * 64,
+        "worker_launch_id": mount["worker_launch_id"],
+        "container_launch_id": "openevo_reflector_runtime_probe",
+        "adoption_nonce_sha256": "8" * 64,
+        "service_identity_digest": mount["service_identity_digest"],
+        "generation_digest": mount["generation_digest"],
+        "daemon_release_identity": mount["daemon_release_identity"],
+        "release_install_digest": mount["release_install_digest"],
+        "release_registry_digest": mount["release_registry_digest"],
+        "runtime_profile": mount["runtime_profile"],
+        "runtime_digest": mount["runtime_digest"],
+        "docker_host_path_identity": mount["docker_host_path_identity"],
+        "credential_mount_content_sha256": mount["content_sha256"],
+        "codex_binary": "/opt/codex/bin/codex",
+        "expected_cli_version": "0.144.1",
+        "actual_cli_version": "0.144.1",
+        "model": "readiness-only",
+        "auth_mode": "subscription",
+        "capture_mode": "transcript",
+        "path_fallback_allowed": False,
+        "exit_status": 0,
+        "container_authority_verified": True,
+        "adoption_receipt_valid": True,
+        "cleanup_verified": True,
+        "codex_cli_started": True,
+        "model_started": False,
+        "created_at": "2026-07-29T00:00:01+00:00",
+    }
+    receipt["content_sha256"] = hashlib.sha256(
+        json.dumps(
+            receipt,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return receipt
 
 
 def _credential_authority(tmp_path: Path) -> HeldCodexCredentialAuthority:
@@ -222,6 +348,7 @@ def test_evolution_internal_surface_fails_closed_and_registers_exact_worker(tmp_
         db_path=tmp_path / "evolution.db",
         artifact_root=tmp_path / "artifacts",
         internal_identity=identity,
+        managed_reflector_mount_expectation=_mount_expectation(),
     )
     with TestClient(app) as client:
         assert client.get("/v1/health").status_code == 401
@@ -292,9 +419,12 @@ def test_evolution_internal_surface_fails_closed_and_registers_exact_worker(tmp_
         assert authority_response.status_code == 200
         assert authority_response.json() == context.model_dump(mode="json")
 
+        mount = _mount_readiness()
         registration = {
             "framework_lock_digest": FRAMEWORK_LOCK,
             "generation_digest": GENERATION,
+            "managed_reflector_credential_mount": mount,
+            "managed_reflector_runtime_readiness": _runtime_readiness(mount),
             "registry_digest": REGISTRY,
             "worker_id": "core-reference-worker",
         }

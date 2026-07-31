@@ -4,22 +4,20 @@
 from __future__ import annotations
 
 import argparse
-from email.parser import Parser
 import hashlib
 import json
 import os
-from pathlib import Path
 import platform
-from pathlib import PurePosixPath
 import re
 import shutil
 import stat
 import subprocess
 import sys
+from email.parser import Parser
+from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from typing import Any, Sequence
 from zipfile import BadZipFile, ZipFile
-
 
 BUNDLE_NAME = "openevo-daemon-linux-x86_64"
 MANIFEST_NAME = "openevo-daemon-bundle.json"
@@ -210,11 +208,30 @@ def _isolated_environment(base: dict[str, str]) -> dict[str, str]:
     return environment
 
 
+def _resolve_uv_executable(value: Path | None) -> Path:
+    if value is None:
+        discovered = shutil.which("uv")
+        if discovered is None:
+            raise BundleBuildError(
+                "uv executable must be supplied explicitly or available on PATH"
+            )
+        value = Path(discovered)
+    try:
+        resolved = value.resolve(strict=True)
+        metadata = resolved.stat()
+    except OSError as exc:
+        raise BundleBuildError("uv executable is unavailable") from exc
+    if not stat.S_ISREG(metadata.st_mode) or not os.access(resolved, os.X_OK):
+        raise BundleBuildError("uv executable must resolve to an executable regular file")
+    return resolved
+
+
 def _prepare_build_environment(
     root: Path,
     *,
     wheel: Path,
     uv_lock: Path,
+    uv_executable: Path,
 ) -> tuple[Path, dict[str, str]]:
     project = root / "project"
     project.mkdir()
@@ -226,7 +243,7 @@ def _prepare_build_environment(
     environment["UV_LINK_MODE"] = "copy"
     _run(
         [
-            "uv",
+            str(uv_executable),
             "sync",
             "--frozen",
             "--no-install-project",
@@ -244,7 +261,7 @@ def _prepare_build_environment(
     python = environment_path / "bin" / "python"
     _run(
         [
-            "uv",
+            str(uv_executable),
             "pip",
             "install",
             "--python",
@@ -515,6 +532,7 @@ def build_bundle(
     wheel: Path,
     framework_lock: Path,
     uv_lock: Path,
+    uv_executable: Path | None = None,
     source_commit: str,
     output_dir: Path,
 ) -> Path:
@@ -524,6 +542,7 @@ def build_bundle(
     wheel = wheel.resolve(strict=True)
     framework_lock = framework_lock.resolve(strict=True)
     uv_lock = uv_lock.resolve(strict=True)
+    uv_executable = _resolve_uv_executable(uv_executable)
     if uv_lock.name != "uv.lock":
         raise BundleBuildError("dependency lock must be named uv.lock")
     version, wheel_size = _validate_wheel(wheel)
@@ -535,7 +554,12 @@ def build_bundle(
 
     with TemporaryDirectory(prefix="openevo-daemon-build-") as temporary:
         root = Path(temporary)
-        python, environment = _prepare_build_environment(root, wheel=wheel, uv_lock=uv_lock)
+        python, environment = _prepare_build_environment(
+            root,
+            wheel=wheel,
+            uv_lock=uv_lock,
+            uv_executable=uv_executable,
+        )
         installed_identity = _installed_identity(
             python,
             framework_lock=framework_lock,
@@ -698,6 +722,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--wheel", type=Path, required=True)
     parser.add_argument("--framework-lock", type=Path, required=True)
     parser.add_argument("--uv-lock", type=Path, default=REPO_ROOT / "uv.lock")
+    parser.add_argument(
+        "--uv-executable",
+        type=Path,
+        help="Exact uv executable; production release builds should set this explicitly.",
+    )
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     return parser
@@ -709,6 +738,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         wheel=args.wheel,
         framework_lock=args.framework_lock,
         uv_lock=args.uv_lock,
+        uv_executable=args.uv_executable,
         source_commit=args.source_commit,
         output_dir=args.output_dir,
     )

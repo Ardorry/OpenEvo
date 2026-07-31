@@ -94,6 +94,31 @@ def _skill_bundle_config() -> ScienceProjectConfigV2:
     return ScienceProjectConfigV2.model_validate(payload)
 
 
+def test_reflector_feedback_gate_is_project_scoped_and_schema_validated(
+    tmp_path: Path,
+) -> None:
+    runtime = _Runtime(tmp_path)
+    payload = _skill_bundle_config().model_dump(mode="json")
+    payload["evolution"]["targets"]["skill_bundle"]["config"] = {
+        "training_feedback_required": True,
+    }
+    gated = ScienceProjectConfigV2.model_validate(payload)
+    record = runtime.create(gated)
+    assert runtime.authority.ensure_project(record) is not None
+    runtime.close()
+
+    payload["evolution"]["targets"]["skill_bundle"]["config"] = {
+        "training_feedback_required": "true",
+    }
+    invalid = ScienceProjectConfigV2.model_validate(payload)
+    invalid_runtime = _Runtime(tmp_path / "invalid")
+    rejected = invalid_runtime.create(invalid)
+    with pytest.raises(ProjectAuthorityInvalidV2) as exc:
+        invalid_runtime.authority.ensure_project(rejected)
+    assert exc.value.reason_code == "invalid_method_config_or_profile"
+    invalid_runtime.close()
+
+
 def _binding(
     registry_sha256: str,
     *,

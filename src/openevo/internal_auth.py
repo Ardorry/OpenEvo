@@ -442,6 +442,18 @@ def health_identity_payload(identity: InternalServiceIdentity | None) -> dict[st
 
 
 def verified_private_file_sha256(path: os.PathLike[str], *, max_bytes: int) -> str:
+    try:
+        path_metadata = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise InternalAuthError("internal identity file could not be opened safely") from exc
+    if (
+        not stat.S_ISREG(path_metadata.st_mode)
+        or path_metadata.st_nlink != 1
+        or path_metadata.st_uid != os.getuid()
+        or stat.S_IMODE(path_metadata.st_mode) not in {0o400, 0o600}
+        or path_metadata.st_size > max_bytes
+    ):
+        raise InternalAuthError("internal identity file is outside private-file policy")
     flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
     try:
         fd = os.open(path, flags)
@@ -461,6 +473,18 @@ def verified_private_file_sha256(path: os.PathLike[str], *, max_bytes: int) -> s
             or before.st_size > max_bytes
         ):
             raise InternalAuthError("internal identity file is outside private-file policy")
+        if (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+        ) != (
+            path_metadata.st_dev,
+            path_metadata.st_ino,
+            path_metadata.st_size,
+            path_metadata.st_mtime_ns,
+        ):
+            raise InternalAuthError("internal identity file changed before hashing")
         payload = os.pread(fd, before.st_size + 1, 0)
         after = os.fstat(fd)
         if (

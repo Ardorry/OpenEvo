@@ -29,9 +29,15 @@ from openevo.runtime.docker_host import (
 from openevo.runtime.managed import (
     MANAGED_CODEX_HOME,
     ManagedCredentialMount,
+    managed_runtime_image_inspect_reference,
     managed_runtime_image_release,
     require_immutable_managed_runtime_image,
     verified_managed_runtime_image_reference,
+)
+from openevo.runtime.managed_reflector_mount import (
+    ManagedReflectorContainerMountAdoptionReceipt,
+    ManagedReflectorContainerMountAuthority,
+    ManagedReflectorMountAuthority,
 )
 from openevo.runtime.models import ExecResult, RuntimeSpec
 
@@ -88,6 +94,10 @@ async def _inspect_managed_runtime_image(
     profile: str | None,
     requested_image: str,
 ) -> str:
+    inspect_image = managed_runtime_image_inspect_reference(
+        profile=profile,
+        image=requested_image,
+    )
     try:
         docker = DockerEngineAuthority.open()
     except DockerHostPathError as exc:
@@ -97,7 +107,7 @@ async def _inspect_managed_runtime_image(
         DOCKER_EXECUTABLE_PATH,
         "image",
         "inspect",
-        requested_image,
+        inspect_image,
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -152,7 +162,7 @@ async def _inspect_managed_runtime_image(
     try:
         return verified_managed_runtime_image_reference(
             profile=profile,
-            image=requested_image,
+            image=inspect_image,
             image_id=record.get("Id"),
             repo_digests=record.get("RepoDigests"),
             labels=labels,
@@ -282,12 +292,21 @@ class DockerRuntime(BaseRuntime):
         credential_mount: ManagedCredentialMount | None = None,
         ownership_root: Path | None = None,
         docker_host_path: DockerHostPathSpec | None = None,
+        managed_reflector_mount_authority: ManagedReflectorMountAuthority | None = None,
+        managed_reflector_container_mount_authority: (
+            ManagedReflectorContainerMountAuthority | None
+        ) = None,
     ) -> None:
         super().__init__(spec, session_id, session_dir)
         if credential_mount is not None and spec.kwargs:
             raise ValueError("managed subscription containers forbid custom Docker options")
         self._docker_engine = DockerEngineAuthority.open()
         self._docker_host_path = docker_host_path
+        self._managed_reflector_mount_authority = managed_reflector_mount_authority
+        self._managed_reflector_container_mount_authority = (
+            managed_reflector_container_mount_authority
+        )
+        self._managed_reflector_container_adopted = False
         self._docker_session_root: HeldDockerSessionRoot | None = None
         self._session_mount_fd = -1
         self._session_marker_name: str | None = None
@@ -319,6 +338,26 @@ class DockerRuntime(BaseRuntime):
         self._credential_docker_source = credential_docker_source
         self._session_docker_source = session_docker_source
         self._credential_mount = credential_mount
+        if (managed_reflector_mount_authority is None) != (
+            managed_reflector_container_mount_authority is None
+        ):
+            raise ValueError(
+                "managed reflector parent and container authorities must be paired"
+            )
+        if managed_reflector_container_mount_authority is not None:
+            if credential_mount is None or docker_host_path is None:
+                raise ValueError(
+                    "managed reflector container authority requires credential and "
+                    "Docker host-path authorities"
+                )
+            assert managed_reflector_mount_authority is not None
+            managed_reflector_container_mount_authority.verify(
+                managed_reflector_mount_authority,
+                expected_container_launch_id=session_id,
+                expected_docker_host_path_identity=docker_host_path.identity_digest,
+                expected_credential_root_identity=credential_mount.root_identity,
+                expected_credential_auth_identity=credential_mount.auth_identity,
+            )
         self._credential_root_fd = -1
         self._credential_view_fd = -1
         self._credential_target_fd = -1
@@ -552,6 +591,74 @@ class DockerRuntime(BaseRuntime):
                 os.close(auth_fd)
             if root_fd >= 0:
                 os.close(root_fd)
+
+    def _verify_managed_reflector_container_authority(self) -> None:
+        container_authority = self._managed_reflector_container_mount_authority
+        if container_authority is None:
+            return
+        parent = self._managed_reflector_mount_authority
+        credential = self._credential_mount
+        docker_host_path = self._docker_host_path
+        if parent is None or credential is None or docker_host_path is None:
+            raise RuntimeError(
+                "managed reflector container mount authority is incomplete"
+            )
+        container_authority.verify(
+            parent,
+            expected_container_launch_id=self.session_id,
+            expected_docker_host_path_identity=docker_host_path.identity_digest,
+            expected_credential_root_identity=credential.root_identity,
+            expected_credential_auth_identity=credential.auth_identity,
+        )
+
+    def managed_reflector_container_mount_receipt(
+        self,
+    ) -> ManagedReflectorContainerMountAdoptionReceipt:
+        """Return a non-secret receipt after one exact container adopted its grant."""
+
+        authority = self._managed_reflector_container_mount_authority
+        if authority is None or not self._managed_reflector_container_adopted:
+            raise RuntimeError(
+                "managed reflector container mount adoption is not complete"
+            )
+        self._verify_managed_reflector_container_authority()
+        grant = authority.grant
+        receipt: dict[str, object] = {
+            "schema_version": "openevo.managed_reflector_container_mount_adoption.v1",
+            "parent_authority_id": grant.parent_authority_id,
+            "container_authority_id": grant.container_authority_id,
+            "worker_launch_id": grant.worker_launch_id,
+            "container_launch_id": grant.container_launch_id,
+            "adoption_nonce_sha256": sha256(
+                grant.adoption_nonce.encode("ascii")
+            ).hexdigest(),
+            "service_identity_digest": grant.service_identity_digest,
+            "generation_digest": grant.generation_digest,
+            "daemon_release_identity": grant.daemon_release_identity,
+            "release_install_digest": grant.release_install_digest,
+            "release_registry_digest": grant.release_registry_digest,
+            "runtime_profile": grant.runtime_profile,
+            "runtime_digest": grant.runtime_image,
+            "docker_host_path_identity": grant.docker_host_path_identity,
+            "credential_root_identity_sha256": sha256(
+                json.dumps(grant.credential_root_identity).encode("ascii")
+            ).hexdigest(),
+            "credential_auth_identity_sha256": sha256(
+                json.dumps(grant.credential_auth_identity).encode("ascii")
+            ).hexdigest(),
+            "container_authority_verified": True,
+            "adoption_receipt_valid": True,
+        }
+        receipt["content_sha256"] = sha256(
+            json.dumps(
+                receipt,
+                ensure_ascii=True,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("ascii")
+        ).hexdigest()
+        return ManagedReflectorContainerMountAdoptionReceipt.model_validate(receipt)
 
     def _verify_credential_mount_pins(self) -> None:
         authority = self._credential_mount
@@ -805,7 +912,12 @@ class DockerRuntime(BaseRuntime):
         if self._session_marker_name is not None:
             raise RuntimeError("managed session adoption marker already exists")
         name = f".openevo-adoption-{secrets.token_hex(16)}"
-        content = secrets.token_hex(_SESSION_ADOPTION_MARKER_BYTES // 2).encode("ascii")
+        container_authority = self._managed_reflector_container_mount_authority
+        content = (
+            secrets.token_hex(_SESSION_ADOPTION_MARKER_BYTES // 2).encode("ascii")
+            if container_authority is None
+            else container_authority.grant.adoption_nonce.encode("ascii")
+        )
         descriptor = -1
         try:
             descriptor = os.open(
@@ -965,6 +1077,7 @@ class DockerRuntime(BaseRuntime):
             raise RuntimeError("managed session Docker bind configuration changed")
 
     async def start(self) -> None:
+        self._verify_managed_reflector_container_authority()
         if self._docker_host_path is None:
             await self._start()
             return
@@ -1024,7 +1137,10 @@ class DockerRuntime(BaseRuntime):
             # to --user. Start at the existing session root so preparation can
             # create the managed workspace with the host user's ownership.
             create_args.extend(["--workdir", self.runtime_session_dir])
-        if not self.spec.allow_internet:
+        if (
+            not self.spec.allow_internet
+            and not self.spec.allow_model_control_plane_network
+        ):
             create_args.extend(["--network", "none"])
         elif self.spec.network:
             create_args.extend(["--network", self.spec.network])
@@ -1135,6 +1251,9 @@ class DockerRuntime(BaseRuntime):
         if self._docker_host_path is not None:
             try:
                 await self._verify_adopted_session_mount()
+                self._verify_managed_reflector_container_authority()
+                if self._managed_reflector_container_mount_authority is not None:
+                    self._managed_reflector_container_adopted = True
                 self._remove_session_adoption_marker()
             except Exception as exc:
                 await self.stop()
@@ -1168,11 +1287,15 @@ class DockerRuntime(BaseRuntime):
         )
         if release is None:
             return self.spec.image
+        inspect_image = managed_runtime_image_inspect_reference(
+            profile=self.spec.profile,
+            image=self.spec.image,
+        )
         rc, stdout, _ = await self._run_local_command(
             DOCKER_EXECUTABLE_PATH,
             "image",
             "inspect",
-            self.spec.image,
+            inspect_image,
             capture=True,
             timeout=self._START_TIMEOUT,
         )
@@ -1192,7 +1315,7 @@ class DockerRuntime(BaseRuntime):
         try:
             return verified_managed_runtime_image_reference(
                 profile=self.spec.profile,
-                image=self.spec.image,
+                image=inspect_image,
                 image_id=record.get("Id"),
                 repo_digests=record.get("RepoDigests"),
                 labels=labels,

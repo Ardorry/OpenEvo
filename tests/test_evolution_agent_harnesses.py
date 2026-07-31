@@ -446,7 +446,8 @@ def test_codex_run_steps_subscription_auth_mode_uses_existing_login_state():
     assert "--ignore-user-config" in step.command
     assert "--ignore-rules" in step.command
     assert 'default_permissions="openevo_codex_subscription_v1"' in step.command
-    assert '"/openevo/credentials/codex"="deny"' in step.command
+    assert '"/openevo/credentials/codex"="read"' in step.command
+    assert '"/openevo/credentials/codex/auth.json"="deny"' in step.command
     assert "features.hooks=false" in step.command
     assert "features.multi_agent=false" in step.command
     assert "features.plugins=false" in step.command
@@ -756,7 +757,7 @@ def test_codex_subscription_json_pipeline_matches_gateway_capture_limit(
 
 @pytest.mark.parametrize("allow_internet", [True, False])
 @pytest.mark.asyncio
-async def test_codex_subscription_setup_requires_real_exec_canary(
+async def test_codex_subscription_setup_uses_no_model_sandbox_canary(
     tmp_path: Path,
     allow_internet: bool,
 ) -> None:
@@ -771,7 +772,7 @@ async def test_codex_subscription_setup_requires_real_exec_canary(
         ) -> ExecResult:
             del env, timeout_sec
             self.commands.append(command)
-            if "-probe.sh" in command and "command_execution" in command:
+            if " sandbox " in command and "login status" in command:
                 assert cwd == CODEX_SUBSCRIPTION_CANARY_CWD
                 return ExecResult(
                     stdout=f"{CODEX_SUBSCRIPTION_CANARY_OK}\n",
@@ -798,24 +799,20 @@ async def test_codex_subscription_setup_requires_real_exec_canary(
 
     joined = "\n".join(runtime.commands)
     assert "config.toml" not in joined
-    assert "/opt/codex/bin/codex exec " in joined
-    assert joined.count("/opt/codex/bin/codex exec ") == 2
-    assert joined.count(f"network.enabled={str(allow_internet).lower()}") == 2
-    assert "sandbox linux" not in joined
-    assert "command_execution" in joined
-    assert "turn.completed" in joined
+    assert "/opt/codex/bin/codex exec " not in joined
+    assert "/opt/codex/bin/codex" in joined
+    assert joined.count(f"network.enabled={str(allow_internet).lower()}") == 1
+    assert " sandbox " in joined
+    assert "login status" in joined
     assert "test -r /openevo/credentials/codex/auth.json" in joined
     assert "/proc/self/root /proc/[0-9]*/root" in joined
-    assert "command -v sudo" in joined
-    assert "sudo -n /bin/cat" in joined
-    assert "-events.jsonl" in joined
-    assert "-workspace" in joined
-    assert "-write" in joined
+    assert "test ! -e /var/run/docker.sock" in joined
+    assert "OPENEVO_CORE_CONTROL_BEARER" in joined
     assert "test ! -e /openevo/session/home/.openevo-codex-readiness/AGENTS.md" in joined
     assert "test ! -e /openevo/session/home/.agents/skills" in joined
     assert harness.subscription_credential_isolation_receipt is not None
     canary_index = next(
-        index for index, command in enumerate(runtime.commands) if "-probe.sh" in command
+        index for index, command in enumerate(runtime.commands) if " sandbox " in command
     )
     assert not any("cp -R --" in command for command in runtime.commands[:canary_index])
     assert any("cp -R --" in command for command in runtime.commands[canary_index + 1 :])
@@ -836,7 +833,10 @@ async def test_codex_subscription_setup_fails_closed_without_exact_canary(
     runtime = RecordingRuntime(tmp_path)
     harness.env["OPENEVO_SKILLS_DIR"] = "/openevo/session/evolution/skills"
 
-    with pytest.raises(RuntimeError, match="credential isolation could not be proven"):
+    with pytest.raises(
+        RuntimeError,
+        match="CANDIDATE_SUBSCRIPTION_ISOLATION_NOT_READY:sandbox_invocation_failed",
+    ):
         await harness.setup(runtime)
 
     assert harness.subscription_credential_isolation_receipt is None
@@ -858,7 +858,7 @@ async def test_codex_subscription_publishes_readiness_only_after_skill_install(
         ) -> ExecResult:
             del env, timeout_sec
             self.commands.append(command)
-            if "-probe.sh" in command and "command_execution" in command:
+            if " sandbox " in command and "login status" in command:
                 assert cwd == CODEX_SUBSCRIPTION_CANARY_CWD
                 return ExecResult(
                     stdout=f"{CODEX_SUBSCRIPTION_CANARY_OK}\n",

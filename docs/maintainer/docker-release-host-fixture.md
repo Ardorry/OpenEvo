@@ -65,14 +65,22 @@ live fixture and matching provenance. A conflicting container is left
 untouched. A failed new create gets a separate bounded cleanup attempt; destroy
 is idempotent and removes only a correctly labelled fixture container.
 
-The `docker_user_container_v1` fixture accepts the closed first-release set
-containing Docker Engine server version `29.3.0`, API version `1.54`, server OS
-`linux`, and architecture `amd64`. Any other value fails before fixture
-mutation. Ready evidence records both the observed server identity and the
-closed supported sets. It also records the immutable image reference, observed
-image content ID, exact Ubuntu `24.04`/`noble` guest identity, and platform.
+The `docker_user_container_v1` fixture accepts the closed local compatibility
+set containing Docker Engine server versions `29.3.0` and `29.5.2`, API version
+`1.54`, server OS `linux`, and architecture `amd64`. These are exact versions:
+adding `29.5.2` does not admit every `29.x` release. Any other value fails before
+fixture mutation, and both accepted versions must still pass the complete API,
+OS, architecture, image, hostname, socket, mount, provenance, and SSH checks.
+Ready evidence records both the observed server identity and the closed
+supported sets. It also records the immutable image reference, observed image
+content ID, exact Ubuntu `24.04`/`noble` guest identity, and platform.
 The data-root admission is recorded as either `fresh_empty` or
 `same_fixture_provenance`; the random provenance value itself is not emitted.
+
+This is an OpenEvo repository compatibility-set extension, not a change to any
+ResearchClawBench requirement. Docker socket access still grants daemon-level
+host control, so this fixture remains restricted to disposable or otherwise
+controlled maintainer E2E hosts.
 
 The fixture intentionally does not pass `--hostname`. Docker's default
 12-character container-ID hostname is a first-release profile invariant:

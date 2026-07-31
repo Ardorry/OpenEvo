@@ -14,6 +14,8 @@ from openevo.runtime.managed import (
     MANAGED_RUNTIME_ARCHIVE_RELEASE,
     MANAGED_RUNTIME_RELEASES,
     ManagedRuntimeArchiveVerificationError,
+    managed_runtime_image_inspect_reference,
+    managed_runtime_release_authority_digest,
     verify_managed_runtime_archive,
     verified_managed_runtime_image_reference,
 )
@@ -68,7 +70,10 @@ def test_release_contract_binds_actual_archive_config_authority() -> None:
     )
     assert release.aliases == ("openevo/science-runtime:0.1.1",)
     assert {item.loaded_image_id for item in MANAGED_RUNTIME_RELEASES.values()} == {
-        release.oci_index_id
+        "sha256:d8e691fa6d07ec62bb8616e607909202df9c17cff88e8944a82d3ba24d7f3b20"
+    }
+    assert release.oci_index_id not in {
+        item.loaded_image_id for item in MANAGED_RUNTIME_RELEASES.values()
     }
 
 
@@ -121,6 +126,66 @@ def test_offline_image_authority_is_distinct_from_registry_authority() -> None:
             image_id=release.loaded_image_id,
             repo_digests=[],
             labels=labels,
+        )
+
+
+@pytest.mark.parametrize(
+    "requested_image",
+    [
+        MANAGED_RUNTIME_RELEASES["managed_science"].image,
+        MANAGED_RUNTIME_RELEASES["managed_science"].trusted_digest,
+        MANAGED_RUNTIME_RELEASES["managed_science"].immutable_reference,
+        MANAGED_RUNTIME_RELEASES["managed_science"].loaded_image_id,
+    ],
+)
+def test_science_release_resolves_to_pinned_offline_inspect_identity(
+    requested_image: str,
+) -> None:
+    release = MANAGED_RUNTIME_RELEASES["managed_science"]
+
+    assert (
+        managed_runtime_image_inspect_reference(
+            profile="managed_science",
+            image=requested_image,
+        )
+        == release.loaded_image_id
+    )
+
+
+@pytest.mark.parametrize(
+    "image",
+    [
+        MANAGED_RUNTIME_RELEASES["managed_science"].trusted_digest,
+        MANAGED_RUNTIME_RELEASES["managed_science"].immutable_reference,
+        MANAGED_RUNTIME_RELEASES["managed_science"].loaded_image_id,
+    ],
+)
+def test_science_release_authority_digest_is_distinct_from_loaded_image_id(
+    image: str,
+) -> None:
+    release = MANAGED_RUNTIME_RELEASES["managed_science"]
+
+    assert managed_runtime_release_authority_digest(
+        profile="managed_science",
+        image=image,
+    ) == release.trusted_digest
+    assert release.trusted_digest != release.loaded_image_id
+
+
+@pytest.mark.parametrize(
+    "image",
+    [
+        MANAGED_RUNTIME_RELEASES["managed_science"].image,
+        "sha256:" + "0" * 64,
+    ],
+)
+def test_science_release_authority_digest_rejects_mutable_or_unknown_identity(
+    image: str,
+) -> None:
+    with pytest.raises(ValueError):
+        managed_runtime_release_authority_digest(
+            profile="managed_science",
+            image=image,
         )
 
 

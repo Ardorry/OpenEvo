@@ -7,6 +7,7 @@ from openevo.evolution.framework.builtins import (
     build_builtin_registry,
 )
 from openevo.experiments import ExperimentConfig, compile_experiment
+from openevo.runtime.managed import MANAGED_RUNTIME_RELEASES
 
 
 PROTECTED_METHOD_CONTRACTS = {
@@ -66,7 +67,17 @@ def test_protected_methods_keep_generic_project_job_projection() -> None:
         {
             "version": 1,
             "experiment": {"name": "protected-method-projection"},
-            "agent": {"preset": "codex", "model": "gpt-5.1-codex-mini"},
+            "agent": {
+                "preset": "codex",
+                "model": "gpt-5.1-codex-mini",
+                "auth": "subscription",
+                "settings": {"capture_mode": "transcript"},
+            },
+            "runtime": {
+                "profile": "managed_science",
+                "image": MANAGED_RUNTIME_RELEASES["managed_science"].immutable_reference,
+                "container_user": "host",
+            },
             "tasks": [{"id": "protected-task", "instruction": "Run task."}],
             "evolution": {
                 "targets": {
@@ -119,9 +130,14 @@ def test_protected_methods_keep_generic_project_job_projection() -> None:
     assert [job["config"]["max_records"] for job in jobs[:2]] == [17, 13]
     assert jobs[2]["config"]["candidate_count"] == 2
     assert jobs[2]["config"]["target_path"] == "AGENTS.md"
+    assert all(job["config"]["reflector_llm"]["provider"] == "codex_cli" for job in jobs)
     assert all(
-        job["config"]["reflector_llm"]
-        == {"provider": "codex_cli", "model": "gpt-5.1-codex-mini"}
+        job["config"]["reflector_llm"]["model"] == "gpt-5.1-codex-mini"
+        for job in jobs
+    )
+    assert all(
+        job["config"]["reflector_llm"]["runtime"]["mode"] == "managed"
+        and job["config"]["reflector_llm"]["runtime"]["path_fallback_allowed"] is False
         for job in jobs
     )
     assert all(

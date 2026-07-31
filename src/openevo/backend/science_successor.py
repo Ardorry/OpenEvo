@@ -16,6 +16,7 @@ from pydantic import (
 )
 
 from openevo.backend.contracts.v2 import models as m2
+from openevo.evolution.models import ArtifactContentAdmissionReceipt
 from openevo.evolution.revisions import (
     SuccessorArtifactContributionV2,
 )
@@ -100,6 +101,32 @@ class SealedTranscriptDatasetV2(_ScienceSuccessorModel):
     capture_mode: Literal["transcript"]
     token_level_metrics_available: Literal[False]
     sealed: Literal[True]
+    training_feedback: "TrainingFeedbackBindingV2 | None" = None
+
+
+class TrainingFeedbackBindingV2(_ScienceSuccessorModel):
+    """Immutable Core receipt for one resolved evaluator supplement view."""
+
+    training_feedback_binding_contract_version: Literal["2"] = "2"
+    completed_dataset_id: str = Field(pattern=_SCIENCE_ID_PATTERN)
+    completed_dataset_revision: str = Field(pattern=_SCIENCE_ID_PATTERN)
+    attachment_ids: tuple[str, ...] = Field(min_length=1, max_length=32)
+    attachment_sha256: tuple[str, ...] = Field(min_length=1, max_length=32)
+    resolved_dataset_artifact_id: str = Field(pattern=_SCIENCE_ID_PATTERN)
+    resolved_view_sha256: str = Field(pattern=_SCIENCE_SHA256_PATTERN)
+    task_scope_id: str = Field(pattern=_SCIENCE_ID_PATTERN)
+
+    @model_validator(mode="after")
+    def _closed_binding(self) -> "TrainingFeedbackBindingV2":
+        if (
+            len(self.attachment_ids) != len(self.attachment_sha256)
+            or self.attachment_ids != tuple(sorted(self.attachment_ids))
+            or len(self.attachment_ids) != len(set(self.attachment_ids))
+            or any(re.fullmatch(_SCIENCE_ID_PATTERN, value) is None for value in self.attachment_ids)
+            or any(re.fullmatch(_SCIENCE_SHA256_PATTERN, value) is None for value in self.attachment_sha256)
+        ):
+            raise ValueError("training feedback binding inventory is invalid")
+        return self
 
 
 class ScienceMethodOutputV2(_ScienceSuccessorModel):
@@ -115,6 +142,78 @@ class ScienceMethodOutputV2(_ScienceSuccessorModel):
     manifest_sha256: str = Field(pattern=_SCIENCE_SHA256_PATTERN)
     byte_size: int = Field(ge=0, le=m2.MAX_SNAPSHOT_BYTES)
     execution_boundary: Literal["outside_inference"]
+    evolution_job_id: str | None = Field(
+        default=None,
+        pattern=_SCIENCE_ID_PATTERN,
+    )
+    admission_action: Literal["update", "keep", "reject"] | None = None
+    admission_decision_id: str | None = Field(
+        default=None,
+        pattern=_SCIENCE_ID_PATTERN,
+    )
+    admission_decision_sha256: str | None = Field(
+        default=None,
+        pattern=_SCIENCE_SHA256_PATTERN,
+    )
+    content_admission_sha256: str | None = Field(
+        default=None,
+        pattern=_SCIENCE_SHA256_PATTERN,
+    )
+    content_admission: ArtifactContentAdmissionReceipt | None = None
+    proposal_artifact_ids: tuple[str, ...] = Field(default=(), max_length=128)
+    origin: Literal["produced", "inherited"] = "produced"
+    owner_successor_transition_id: str | None = Field(
+        default=None,
+        pattern=_SCIENCE_ID_PATTERN,
+    )
+
+    @model_validator(mode="after")
+    def _native_admission_shape(self) -> "ScienceMethodOutputV2":
+        admission_fields = (
+            self.admission_action,
+            self.evolution_job_id,
+            self.admission_decision_id,
+            self.admission_decision_sha256,
+            self.content_admission_sha256,
+            self.content_admission,
+        )
+        if any(item is not None for item in admission_fields):
+            if (
+                any(item is None for item in admission_fields)
+                or not self.proposal_artifact_ids
+                or self.proposal_artifact_ids
+                != tuple(sorted(self.proposal_artifact_ids))
+                or len(self.proposal_artifact_ids)
+                != len(set(self.proposal_artifact_ids))
+                or self.owner_successor_transition_id is None
+                or self.content_admission is None
+                or self.content_admission.content_sha256
+                != self.content_admission_sha256
+                or self.content_admission.proposal_artifact_ids
+                != self.proposal_artifact_ids
+                or (
+                    self.admission_action == "update"
+                    and (
+                        self.origin != "produced"
+                        or self.artifact_id not in self.proposal_artifact_ids
+                    )
+                )
+                or (
+                    self.admission_action in {"keep", "reject"}
+                    and (
+                        self.origin != "inherited"
+                        or self.artifact_id in self.proposal_artifact_ids
+                    )
+                )
+            ):
+                raise ValueError("native method admission evidence is incomplete")
+        elif (
+            self.proposal_artifact_ids
+            or self.owner_successor_transition_id is not None
+            or self.origin != "produced"
+        ):
+            raise ValueError("legacy method output cannot carry partial admission evidence")
+        return self
 
 
 class ValidatedScienceOutputsV2(_ScienceSuccessorModel):
@@ -158,6 +257,7 @@ class ValidatedScienceOutputsV2(_ScienceSuccessorModel):
                 item.artifact_type,
             )
             for item in self.outputs
+            if item.origin == "produced"
         )
         if (
             target_ids != tuple(sorted(target_ids))
@@ -444,6 +544,7 @@ __all__ = [
     "ScienceSuccessorTransitionAttemptV2",
     "SealedTranscriptDatasetV2",
     "SuccessorMaterializationV2",
+    "TrainingFeedbackBindingV2",
     "ValidatedScienceOutputsV2",
     "science_successor_plan_sha256",
 ]

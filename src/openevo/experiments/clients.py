@@ -17,6 +17,10 @@ class RolloutClientProtocol(Protocol):
 
 
 class EvolutionClientProtocol(Protocol):
+    def get_internal_health(self) -> dict[str, Any]: ...
+
+    def get_completed_dataset_authority(self, dataset_id: str) -> dict[str, Any]: ...
+
     def create_dataset(self, payload: dict[str, Any]) -> dict[str, Any]: ...
 
     def get_dataset(self, dataset_id: str) -> dict[str, Any]: ...
@@ -33,6 +37,16 @@ class EvolutionClientProtocol(Protocol):
 
     def get_artifact(self, artifact_id: str) -> dict[str, Any]: ...
 
+    def create_training_feedback_attachment(self, payload: dict[str, Any]) -> dict[str, Any]: ...
+
+    def get_training_feedback_attachment(self, attachment_id: str) -> dict[str, Any]: ...
+
+    def list_training_feedback_attachments_for_session(
+        self, session_id: str
+    ) -> dict[str, Any]: ...
+
+    def resolve_evolution_dataset_view(self, payload: dict[str, Any]) -> dict[str, Any]: ...
+
     def get_context_runtime_authority(self, context_id: str) -> dict[str, Any]: ...
 
     def create_materialized_context(self, payload: dict[str, Any]) -> dict[str, Any]: ...
@@ -41,7 +55,28 @@ class EvolutionClientProtocol(Protocol):
 
     def get_internal_job_result(self, job_id: str) -> dict[str, Any]: ...
 
+    def get_internal_failed_plan_bound_job_authority(
+        self,
+        job_id: str,
+    ) -> dict[str, Any]: ...
+
+    def get_internal_successor_transition_job_inventory(
+        self,
+        successor_transition_id: str,
+    ) -> dict[str, Any]: ...
+
+    def get_internal_reflector_inference_reservation(
+        self,
+        job_id: str,
+    ) -> dict[str, Any]: ...
+
     def get_internal_successor_artifact(
+        self,
+        successor_transition_id: str,
+        artifact_id: str,
+    ) -> dict[str, Any]: ...
+
+    def get_internal_successor_artifact_authority(
         self,
         successor_transition_id: str,
         artifact_id: str,
@@ -57,6 +92,11 @@ class EvolutionClientProtocol(Protocol):
         artifact_id: str,
         *,
         promoted: bool,
+    ) -> dict[str, Any]: ...
+
+    def apply_internal_artifact_admission(
+        self,
+        payload: dict[str, Any],
     ) -> dict[str, Any]: ...
 
     def create_review_request(self, payload: dict[str, Any]) -> dict[str, Any]: ...
@@ -145,16 +185,23 @@ class RolloutHttpClient:
 
 
 class EvolutionHttpStatusError(RuntimeError):
-    def __init__(self, *, status_code: int) -> None:
+    def __init__(self, *, status_code: int, detail_code: str = "unspecified") -> None:
         if type(status_code) is not int or not 100 <= status_code <= 599:
             raise ValueError("evolution HTTP status code is invalid")
+        if detail_code not in {
+            "conflict",
+            "core_config_contains_non_core_owned_fields",
+            "not_found",
+            "request_validation_failed",
+            "server_failure",
+            "unspecified",
+        }:
+            raise ValueError("evolution HTTP detail code is invalid")
         self.status_code = status_code
-        self.retryable = (
-            status_code >= 500
-            or status_code in {408, 425, 429}
-        )
+        self.detail_code = detail_code
+        self.retryable = status_code >= 500 or status_code in {408, 425, 429}
         super().__init__(
-            f"evolution service returned HTTP status {status_code}"
+            f"evolution service returned HTTP status {status_code} ({detail_code})"
         )
 
 
@@ -189,11 +236,41 @@ class EvolutionHttpClient:
     def close(self) -> None:
         self._client.close()
 
+    def get_internal_health(self) -> dict[str, Any]:
+        response = self._client.get(f"{self.base_url}/v1/health")
+        self._raise_for_status(response)
+        result = response.json()
+        if not isinstance(result, dict):
+            raise TypeError("evolution health response was not a JSON object")
+        return result
+
     @staticmethod
     def _raise_for_status(response: httpx.Response) -> None:
         if 200 <= response.status_code < 300:
             return
-        raise EvolutionHttpStatusError(status_code=response.status_code)
+        detail_code = "unspecified"
+        try:
+            body = response.json()
+        except (TypeError, ValueError):
+            body = None
+        detail = body.get("detail") if isinstance(body, dict) else None
+        if (
+            isinstance(detail, str)
+            and detail.startswith("core config may only contain Core-owned fields:")
+        ):
+            detail_code = "core_config_contains_non_core_owned_fields"
+        elif response.status_code == 404:
+            detail_code = "not_found"
+        elif response.status_code == 409:
+            detail_code = "conflict"
+        elif response.status_code == 422:
+            detail_code = "request_validation_failed"
+        elif response.status_code >= 500:
+            detail_code = "server_failure"
+        raise EvolutionHttpStatusError(
+            status_code=response.status_code,
+            detail_code=detail_code,
+        )
 
     def create_dataset(self, payload: dict[str, Any]) -> dict[str, Any]:
         response = self._client.post(f"{self.base_url}/v1/datasets", json=payload)
@@ -210,6 +287,17 @@ class EvolutionHttpClient:
         result = response.json()
         if not isinstance(result, dict):
             raise ValueError("evolution dataset response was not a JSON object")
+        return result
+
+    def get_completed_dataset_authority(self, dataset_id: str) -> dict[str, Any]:
+        encoded = quote(dataset_id, safe="")
+        response = self._client.get(
+            f"{self.base_url}/v1/internal/training-feedback/datasets/{encoded}"
+        )
+        self._raise_for_status(response)
+        result = response.json()
+        if not isinstance(result, dict):
+            raise ValueError("completed dataset authority was not a JSON object")
         return result
 
     def create_job(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -241,9 +329,7 @@ class EvolutionHttpClient:
         self._raise_for_status(response)
         result = response.json()
         if not isinstance(result, dict):
-            raise ValueError(
-                "planned evolution job retry response was not a JSON object"
-            )
+            raise ValueError("planned evolution job retry response was not a JSON object")
         return result
 
     def get_artifact(self, artifact_id: str) -> dict[str, Any]:
@@ -253,6 +339,50 @@ class EvolutionHttpClient:
         result = response.json()
         if not isinstance(result, dict):
             raise ValueError("evolution artifact response was not a JSON object")
+        return result
+
+    def create_training_feedback_attachment(self, payload: dict[str, Any]) -> dict[str, Any]:
+        response = self._client.post(
+            f"{self.base_url}/v1/internal/training-feedback/attachments",
+            json=payload,
+        )
+        self._raise_for_status(response)
+        result = response.json()
+        if not isinstance(result, dict):
+            raise ValueError("training feedback response was not a JSON object")
+        return result
+
+    def get_training_feedback_attachment(self, attachment_id: str) -> dict[str, Any]:
+        encoded = quote(attachment_id, safe="")
+        response = self._client.get(
+            f"{self.base_url}/v1/internal/training-feedback/attachments/{encoded}"
+        )
+        self._raise_for_status(response)
+        result = response.json()
+        if not isinstance(result, dict):
+            raise ValueError("training feedback response was not a JSON object")
+        return result
+
+    def list_training_feedback_attachments_for_session(self, session_id: str) -> dict[str, Any]:
+        encoded = quote(session_id, safe="")
+        response = self._client.get(
+            f"{self.base_url}/v1/internal/training-feedback/sessions/{encoded}/attachments"
+        )
+        self._raise_for_status(response)
+        result = response.json()
+        if not isinstance(result, dict):
+            raise ValueError("training feedback list was not a JSON object")
+        return result
+
+    def resolve_evolution_dataset_view(self, payload: dict[str, Any]) -> dict[str, Any]:
+        response = self._client.post(
+            f"{self.base_url}/v1/internal/training-feedback/resolve",
+            json=payload,
+        )
+        self._raise_for_status(response)
+        result = response.json()
+        if not isinstance(result, dict):
+            raise ValueError("resolved evolution dataset view was not a JSON object")
         return result
 
     def get_context_runtime_authority(self, context_id: str) -> dict[str, Any]:
@@ -297,6 +427,63 @@ class EvolutionHttpClient:
             raise ValueError("evolution job result was not a JSON object")
         return result
 
+    def get_internal_failed_plan_bound_job_authority(
+        self,
+        job_id: str,
+    ) -> dict[str, Any]:
+        encoded_job_id = quote(job_id, safe="")
+        response = self._client.get(
+            f"{self.base_url}/v1/internal/jobs/{encoded_job_id}/failed-plan-authority"
+        )
+        self._raise_for_status(response)
+        result = response.json()
+        if not isinstance(result, dict):
+            raise ValueError("failed plan-bound job authority was not a JSON object")
+        return result
+
+    def get_internal_successor_transition_job_inventory(
+        self,
+        successor_transition_id: str,
+    ) -> dict[str, Any]:
+        encoded_transition_id = quote(successor_transition_id, safe="")
+        response = self._client.get(
+            f"{self.base_url}/v1/internal/successor-transitions/"
+            f"{encoded_transition_id}/jobs"
+        )
+        self._raise_for_status(response)
+        result = response.json()
+        if not isinstance(result, dict):
+            raise ValueError("successor transition job inventory was not a JSON object")
+        return result
+
+    def get_internal_reflector_inference_reservation(
+        self,
+        job_id: str,
+    ) -> dict[str, Any]:
+        encoded_job_id = quote(job_id, safe="")
+        response = self._client.get(
+            f"{self.base_url}/v1/internal/jobs/{encoded_job_id}/reflector-inference"
+        )
+        self._raise_for_status(response)
+        result = response.json()
+        if not isinstance(result, dict):
+            raise ValueError("reflector inference reservation was not a JSON object")
+        return result
+
+    def apply_internal_artifact_admission(
+        self,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        response = self._client.post(
+            f"{self.base_url}/v1/internal/artifact-admission/decisions",
+            json=payload,
+        )
+        self._raise_for_status(response)
+        result = response.json()
+        if not isinstance(result, dict):
+            raise ValueError("artifact admission response was not a JSON object")
+        return result
+
     def get_internal_successor_artifact(
         self,
         successor_transition_id: str,
@@ -314,9 +501,24 @@ class EvolutionHttpClient:
         self._raise_for_status(response)
         result = response.json()
         if not isinstance(result, dict):
-            raise ValueError(
-                "successor transition artifact was not a JSON object"
-            )
+            raise ValueError("successor transition artifact was not a JSON object")
+        return result
+
+    def get_internal_successor_artifact_authority(
+        self,
+        successor_transition_id: str,
+        artifact_id: str,
+    ) -> dict[str, Any]:
+        encoded_transition_id = quote(successor_transition_id, safe="")
+        encoded_artifact_id = quote(artifact_id, safe="")
+        response = self._client.get(
+            f"{self.base_url}/v1/internal/successor-transitions/"
+            f"{encoded_transition_id}/artifacts/{encoded_artifact_id}/authority"
+        )
+        self._raise_for_status(response)
+        result = response.json()
+        if not isinstance(result, dict):
+            raise ValueError("successor artifact authority was not a JSON object")
         return result
 
     def discard_successor_transition_outputs(
@@ -328,15 +530,12 @@ class EvolutionHttpClient:
             safe="",
         )
         response = self._client.post(
-            f"{self.base_url}/v1/internal/successor-transitions/"
-            f"{encoded_transition_id}/discard"
+            f"{self.base_url}/v1/internal/successor-transitions/{encoded_transition_id}/discard"
         )
         self._raise_for_status(response)
         result = response.json()
         if not isinstance(result, dict):
-            raise ValueError(
-                "successor transition discard was not a JSON object"
-            )
+            raise ValueError("successor transition discard was not a JSON object")
         return result
 
     def update_artifact_promotion(

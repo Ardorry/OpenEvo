@@ -115,6 +115,16 @@ the complete group, including grandchildren, and fail closed if any member does
 not match owner, session, group, and generation evidence. On Linux, direct
 children also receive a parent-death signal.
 
+Core-owned host helpers that intentionally replace their environment with a
+closed allowlist must preserve that validated ownership digest. In particular,
+the release Docker CLI environment retains only
+`OPENEVO_INTERNAL_OWNERSHIP_DIGEST` in addition to its fixed Docker, locale,
+home, and path values. It still excludes user Docker configuration, credentials,
+and unrelated host variables, and the marker is not injected into the launched
+container. An absent marker remains valid for unsupervised maintenance calls;
+an invalid marker fails before Docker starts. This keeps an adoption-probe Docker
+child recognizable while its evolution-worker parent is still in `STARTING`.
+
 Startup recovery may signal only a stale group recognized by that full persisted
 identity. It sends TERM and then KILL within a bound, verifies convergence, and
 only then clears the ledger pin. An absent old group is safe; a reused PID,
@@ -169,8 +179,12 @@ command, malformed output, or API-key login fails closed.
 The image tag must resolve to the exact
 `MANAGED_RUNTIME_RELEASES["managed_science"]` trusted digest, have a SHA-256
 image ID, and carry the `io.openevo.managed-runtime=true` label produced by the
-managed Science Dockerfile. Readiness retains both the release alias and the
-verified immutable digest/reference. The sealed credential snapshot, not the
+managed Science Dockerfile. For the offline OCI release, Docker inspects and
+executes the pinned `loaded_image_id`, while every cross-process binding and
+receipt uses the distinct signed `trusted_digest`. The runtime identity digest
+binds both the observed Docker reference and the canonical release authority;
+the two values are never treated as interchangeable alternatives. The sealed
+credential snapshot, not the
 original pathname authority, is inherited by Gateway through a CLOEXEC-safe FD;
 Gateway clones only that snapshot before any session side effect. Auth content
 is never placed in argv, ordinary environment values, logs, public APIs, or
@@ -218,6 +232,19 @@ load and verify the copied framework lock; worker startup registers its actual
 generation/lock/registry identity. Gateway must authenticate to rollout, and
 rollout health must prove that the exact gateway node has registered and is
 schedulable. An arbitrary 2xx response is never readiness.
+
+For the release-owned evolution worker, registration additionally requires a
+no-model managed-reflector credential-mount adoption receipt. The supervisor
+pre-issues one private HMAC-authenticated mount authority to the worker over a
+sealed inherited FD and gives the evolution backend only the corresponding
+non-secret exact registration expectation. The backend compares the authority
+ID, worker launch ID, generation, install/registry identities, runtime
+profile/image, Docker host-path identity, and container UID before it records
+the worker; job claim is unavailable until that registration succeeds. The
+supervisor health probe verifies the same receipt against its private authority.
+This preserves the candidate Docker host-path mapping rules for reflectors and
+prevents a user-container-local credential path from being mistaken for a
+daemon-visible bind source.
 
 `ensure` is serialized and generation-idempotent. Before every ensure/restart it
 re-runs Codex auth/version, managed-image, framework-lock pathname/content, and
@@ -345,6 +372,31 @@ That future interface must own all of the following before it can return ready:
 Until that interface exists, a model name, cache directory, installed `vllm`
 module, open port, or successful spawn must not be converted into `ready`.
 
+## Managed Candidate Pre-Intent Readiness
+
+Release startup now proves the candidate credential/runtime path before a
+benchmark supervisor may persist a candidate intent. The Gateway launches one
+disposable, no-model `managed_science` canary through the same
+`ManagedCredentialMount` and `DockerRuntime` contract used by candidate
+sessions. It stages a separate private subscription snapshot, verifies that the
+container user can read but cannot write the fixed Codex credential target,
+checks `/opt/codex/bin/codex` reports exactly `0.144.1`, then proves the owned
+container absent before removing the canary's private trees.
+
+Gateway health carries a content-addressed receipt bound to the Core generation,
+release registry, framework lock, immutable managed runtime, and the exact
+Docker host-path mapping. The service supervisor validates that receipt before
+declaring the release group healthy. Core exposes the result only through the
+bearer-authenticated private `GET /v2/internal/managed-candidate/readiness`
+endpoint, which additionally binds it to the daemon release and installed
+release identity. Missing, stale, malformed, or mismatched evidence fails
+closed. If container absence cannot be proved, credential and session trees are
+retained for typed-owner recovery; cleanup is never inferred from a failed stop.
+
+The canary starts the CLI only for `--version`; it never submits a prompt or
+starts a model operation. Host `PATH`, host `HOME`, and direct host
+`~/.codex` mounts are not accepted as candidate readiness evidence.
+
 ## Internal Typed Projection
 
 The supervisor exposes typed list, get, restart, group snapshot, and bounded log
@@ -373,6 +425,26 @@ oversize-line discard, aggregate probe-output termination, release-registry
 anti-bypass/fresh-import checks, tracked/replay capacity, unauthenticated HTTP
 rejection, exact worker/gateway registration, and real child-to-grandchild
 process-group termination and stale-owner recovery probes. No test downloads a model.
+
+Docker adoption creates several short-lived CLI children in the evolution
+worker's supervised process group. Process-group discovery treats a PID that
+vanishes between its `/proc/<pid>/stat` and environment observations as absent
+only after a second observation proves that the proc entry is still gone. A
+live unreadable PID, a reused PID, a UID mismatch, or a missing ownership marker
+remains unverified and fail-closed. A process-identity exception during startup
+is persisted as `service_process_identity_unverified` and rolls back the owned
+group; it can no longer leave an unaudited `STARTING` record.
+
+`adopt_current_run_binding()` is the only startup-tail recovery path. It may
+return `None` only for a pristine supervisor. Otherwise it accepts either an
+all-`RUNNING` group or exactly three `RUNNING` control services plus one
+`STARTING` evolution worker, and only while this same Core process still holds
+the original generation, plan, credential authority, specs, process handles,
+and release identity. It rechecks every process, authenticated health endpoint,
+the exact worker mount-adoption receipt, and the rollout graph before atomically
+committing the worker to `RUNNING`. It cannot probe a runtime, rotate authority,
+spawn, stop, restart, or change generation. Any other non-empty state is an
+error and must not fall back to ordinary ensure/restart.
 
 Residual integration risks remain explicit:
 

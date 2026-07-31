@@ -1583,10 +1583,12 @@ async def test_wait_terminated_requires_postrun_owner_to_release_session(tmp_pat
     try:
         await asyncio.wait_for(postrun_entered.wait(), timeout=1)
         await asyncio.sleep(0)
+        assert await dispatcher.owns_session(managed.session_id) is True
         assert waiter.done() is False
         allow_postrun.set()
         await asyncio.wait_for(cleanup, timeout=1)
         await asyncio.wait_for(waiter, timeout=1)
+        assert await dispatcher.owns_session(managed.session_id) is False
         assert managed.session_id not in dispatcher._sessions
     finally:
         allow_postrun.set()

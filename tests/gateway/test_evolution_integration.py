@@ -497,6 +497,33 @@ def test_gateway_subscription_admission_rejects_token_capture(tmp_path: Path) ->
         )
 
 
+def test_gateway_rejects_control_plane_network_for_non_subscription_agent(
+    tmp_path: Path,
+) -> None:
+    release = MANAGED_RUNTIME_RELEASES["managed_science"]
+    runtime = RuntimeSpec(
+        profile="managed_science",
+        image=release.loaded_image_id,
+        container_user="host",
+        allow_internet=False,
+        allow_model_control_plane_network=True,
+    )
+    request = SessionDispatchRequest(
+        session_id="control-plane-network-proxy",
+        task_id="task_1",
+        instruction="Do work.",
+        remaining_timeout_seconds=60,
+        runtime=runtime,
+        agent=AgentSpec(
+            harness="codex",
+            settings={"auth_mode": "proxy", "capture_mode": "transcript"},
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="managed subscription agent"):
+        GatewayNodeManager._validate_subscription_admission(request, runtime, tmp_path)
+
+
 @pytest.mark.parametrize("auth_mode", ["proxy", "subscription"])
 @pytest.mark.parametrize("capture_mode", ["transcript", "agent_transcript", "pure_text"])
 def test_gateway_boundary_writes_back_canonical_capture_mode(
@@ -1942,6 +1969,24 @@ async def test_cleanup_retry_reconciliation_retries_owned_runtime_and_roots(
 
 
 @pytest.mark.asyncio
+async def test_cleanup_retry_reconciliation_skips_live_dispatcher_owner(
+    tmp_path: Path,
+) -> None:
+    manager = _postrun_manager(calls=[])
+    managed = _managed_postrun_session(tmp_path, _session_result())
+    ownership = manager._cleanup_ownership_for(managed)
+    manager._cleanup_retries[managed.session_id] = ownership
+    manager._dispatcher = Mock(owns_session=AsyncMock(return_value=True))
+    manager._reconcile_cleanup_ownership = AsyncMock()
+
+    await manager._reconcile_cleanup_retries()
+
+    manager._dispatcher.owns_session.assert_awaited_once_with(managed.session_id)
+    manager._reconcile_cleanup_ownership.assert_not_awaited()
+    assert manager._cleanup_retries[managed.session_id] is ownership
+
+
+@pytest.mark.asyncio
 async def test_cleanup_ownership_persists_for_new_manager_startup_reconciliation(
     tmp_path: Path,
 ) -> None:
@@ -2136,6 +2181,36 @@ def test_cleanup_journal_recovery_rejects_symlinked_ancestor(
         restarted._load_cleanup_retries()
 
     assert len(list((displaced / "journal").glob("*.json"))) == 1
+
+
+def test_cleanup_journal_accepts_consistent_mount_device_renumbering_only() -> None:
+    persisted = [
+        [134, 168199, 0, 16384],
+        [134, 131800, 0, 16384],
+        [2096, 975259, 1000, 16384],
+        [2096, 974994, 1000, 16384],
+    ]
+    current = (
+        (126, 168199, 0, 16384),
+        (126, 131800, 0, 16384),
+        (2128, 975259, 1000, 16384),
+        (2128, 974994, 1000, 16384),
+    )
+    assert GatewayNodeManager._cleanup_journal_restart_identities_match(
+        persisted,
+        current,
+    )
+
+    inode_drift = (*current[:-1], (2128, 974995, 1000, 16384))
+    assert not GatewayNodeManager._cleanup_journal_restart_identities_match(
+        persisted,
+        inode_drift,
+    )
+    split_mount = (current[0], (127, *current[1][1:]), *current[2:])
+    assert not GatewayNodeManager._cleanup_journal_restart_identities_match(
+        persisted,
+        split_mount,
+    )
 
 
 @pytest.mark.parametrize(
@@ -4733,6 +4808,223 @@ async def test_gateway_runtime_receipt_binds_three_selected_artifacts(tmp_path: 
     assert "file://" not in runtime.uploads["/openevo/session/evolution/context.json"]
     assert str(tmp_path) not in runtime.uploads["/openevo/session/evolution/context.json"]
     assert runtime.downloads == []
+
+
+@pytest.mark.asyncio
+async def test_gateway_publishes_runtime_receipt_before_agent_completion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = GatewayNodeManager.__new__(GatewayNodeManager)
+    manager.gateway_url = "http://gateway.test"
+    manager.evolution = EvolutionConfig(
+        enabled=True,
+        context={"target_dir": "/openevo/session/evolution"},
+    )
+    manager.session_registry = None
+    request = SessionDispatchRequest(
+        session_id="session-receipt-order",
+        task_id="receipt-task",
+        instruction="Do work.",
+        remaining_timeout_seconds=60,
+        agent=AgentSpec(
+            harness="codex",
+            settings={"auth_mode": "subscription", "capture_mode": "transcript"},
+        ),
+        metadata={"evolution": {"context_id": "context-order"}},
+    )
+    managed = ManagedSession(
+        request=request,
+        timer=StageTimer(),
+        session_dir=tmp_path,
+        artifacts_dir=tmp_path / "artifacts",
+        runtime=FakeRuntime(),
+    )
+    managed.execution_deadline = asyncio.get_running_loop().time() + 60
+    injection = node_module._EvolutionInjection(
+        env={},
+        staged=node_module._EvolutionStagingResult(
+            env={},
+            artifacts=(),
+            staged_tree_sha256="0" * 64,
+            injection_plan=object(),
+        ),
+    )
+    receipt = {
+        "context_id": "context-order",
+        "runtime_tree_sha256": "1" * 64,
+    }
+    readbacks: list[str] = []
+
+    async def resolve_context(_managed, _harness):
+        return injection
+
+    async def readback(**_kwargs):
+        readbacks.append("readback")
+        return dict(receipt)
+
+    async def run_inputs(_runtime, _steps, _env, _managed):
+        assert request.metadata["evolution"]["runtime_injection_receipt"] == receipt
+        result = AgentRunResult(status="completed", return_code=0)
+        _managed.agent_result = result
+        return result
+
+    async def await_with_budget(awaitable, _managed):
+        return await awaitable
+
+    manager._start_eval_prewarm = lambda _managed: None
+    manager._resolve_agent_harness = lambda _request: RunStepHarness(_request.agent)
+    manager._resolve_and_inject_evolution_context = resolve_context
+    manager._publish_codex_subscription_credential_isolation = (
+        lambda _managed, _harness: None
+    )
+    manager._run_exec_inputs = run_inputs
+    manager._await_with_budget = await_with_budget
+    manager._redact_core_capture_authority = lambda _managed: None
+    manager._log_credential_safe_exception = (
+        lambda _managed, _message, error, **_kwargs: (_ for _ in ()).throw(error)
+    )
+    monkeypatch.setattr(
+        node_module,
+        "_runtime_injection_receipt_from_readback",
+        readback,
+    )
+
+    await manager._handle_run(managed)
+
+    assert managed.agent_result == AgentRunResult(status="completed", return_code=0)
+    assert readbacks == ["readback", "readback"]
+    assert request.metadata["evolution"]["runtime_injection_receipt"] == receipt
+
+
+@pytest.mark.asyncio
+async def test_gateway_does_not_rewrite_execution_status_after_agent_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = GatewayNodeManager.__new__(GatewayNodeManager)
+    manager.gateway_url = "http://gateway.test"
+    manager.evolution = EvolutionConfig(
+        enabled=True,
+        context={"target_dir": "/openevo/session/evolution"},
+    )
+    manager.session_registry = None
+    request = SessionDispatchRequest(
+        session_id="session-postrun-status-frozen",
+        task_id="receipt-task",
+        instruction="Do work.",
+        remaining_timeout_seconds=60,
+        agent=AgentSpec(
+            harness="codex",
+            settings={"auth_mode": "subscription", "capture_mode": "transcript"},
+        ),
+        metadata={"evolution": {"context_id": "context-postrun-status-frozen"}},
+    )
+    managed = ManagedSession(
+        request=request,
+        timer=StageTimer(),
+        session_dir=tmp_path,
+        artifacts_dir=tmp_path / "artifacts",
+        runtime=FakeRuntime(),
+    )
+    managed.execution_deadline = asyncio.get_running_loop().time() + 60
+    injection = node_module._EvolutionInjection(
+        env={},
+        staged=node_module._EvolutionStagingResult(
+            env={},
+            artifacts=(),
+            staged_tree_sha256="0" * 64,
+            injection_plan=object(),
+        ),
+    )
+    first_receipt = {
+        "context_id": "context-postrun-status-frozen",
+        "runtime_tree_sha256": "1" * 64,
+    }
+    second_receipt = {
+        "context_id": "context-postrun-status-frozen",
+        "runtime_tree_sha256": "2" * 64,
+    }
+    readbacks = iter((first_receipt, second_receipt))
+    failures: list[tuple[SessionStatus, str]] = []
+
+    async def resolve_context(_managed, _harness):
+        return injection
+
+    async def readback(**_kwargs):
+        return dict(next(readbacks))
+
+    async def run_inputs(_runtime, _steps, _env, _managed):
+        result = AgentRunResult(status="completed", return_code=0)
+        _managed.agent_result = result
+        return result
+
+    async def await_with_budget(awaitable, _managed):
+        return await awaitable
+
+    manager._start_eval_prewarm = lambda _managed: None
+    manager._resolve_agent_harness = lambda _request: RunStepHarness(_request.agent)
+    manager._resolve_and_inject_evolution_context = resolve_context
+    manager._publish_codex_subscription_credential_isolation = (
+        lambda _managed, _harness: None
+    )
+    manager._run_exec_inputs = run_inputs
+    manager._await_with_budget = await_with_budget
+    manager._redact_core_capture_authority = lambda _managed: None
+    manager._log_credential_safe_exception = lambda *_args, **_kwargs: None
+    manager._set_terminal_failure = (
+        lambda _managed, status, error: failures.append((status, error))
+    )
+    monkeypatch.setattr(
+        node_module,
+        "_runtime_injection_receipt_from_readback",
+        readback,
+    )
+
+    await manager._handle_run(managed)
+
+    assert managed.agent_result == AgentRunResult(status="completed", return_code=0)
+    assert request.metadata["openevo"]["candidate_execution_status"] == {
+        "schema_version": "openevo.candidate_execution_status.v1",
+        "phase": "benchmark_execution",
+        "model_started": True,
+        "benchmark_started": True,
+        "failure_code": None,
+    }
+    assert failures
+    assert failures[0][0] == SessionStatus.ERROR
+
+
+def test_gateway_runtime_injection_receipt_is_monotonic() -> None:
+    manager = GatewayNodeManager.__new__(GatewayNodeManager)
+    manager.session_registry = None
+    request = SessionDispatchRequest(
+        session_id="session-receipt-monotonic",
+        task_id="receipt-task",
+        instruction="Do work.",
+        remaining_timeout_seconds=60,
+        agent=AgentSpec(harness="fake"),
+        metadata={"evolution": {"context_id": "context-monotonic"}},
+    )
+    managed = ManagedSession(
+        request=request,
+        timer=StageTimer(),
+        session_dir=Path("/tmp/session-receipt-monotonic"),
+        artifacts_dir=Path("/tmp/session-receipt-monotonic/artifacts"),
+    )
+    receipt = {
+        "context_id": "context-monotonic",
+        "runtime_tree_sha256": "1" * 64,
+    }
+
+    manager._publish_runtime_injection_receipt(managed, receipt)
+    manager._publish_runtime_injection_receipt(managed, dict(receipt))
+
+    with pytest.raises(ValueError, match="changed after publication"):
+        manager._publish_runtime_injection_receipt(
+            managed,
+            {**receipt, "runtime_tree_sha256": "2" * 64},
+        )
 
 
 @pytest.mark.asyncio

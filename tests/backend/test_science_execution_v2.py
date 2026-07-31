@@ -25,6 +25,7 @@ from openevo.backend.contracts.v2.models import (
 from openevo.backend.contracts.v2.store import ProjectRecordV2
 from openevo.backend.science_execution_v2 import (
     ScienceAttemptCancelledV2,
+    ScienceAttemptExecutionV2Error,
     ScienceAttemptExecutionEvidenceV2,
     ScienceAttemptExecutionReceiptV2,
     ScienceAttemptExecutionRecordV2,
@@ -69,9 +70,29 @@ from openevo.internal_auth import (
 from openevo.projects.science.compiler import MANAGED_RUNTIME_IMAGES
 from openevo.rollout.models import SessionResult, TaskRequest, TaskStatus
 from openevo.runtime.managed import MANAGED_RUNTIME_RELEASES
+from openevo.runtime.codex_isolation import (
+    CODEX_SUBSCRIPTION_CONTRACT_KEY,
+    CODEX_SUBSCRIPTION_READINESS_KEY,
+    codex_subscription_contract,
+    codex_subscription_readiness_receipt,
+)
 from openevo.trajectory.models import Trace, Trajectory
 from tests.framework_testkit import verified_builtin_registry
 from openevo.backend.workspace_store_v2 import WorkspaceStoreV2
+
+
+def test_attempt_execution_record_omits_absent_failure_authority() -> None:
+    record = ScienceAttemptExecutionRecordV2(
+        task_id="task-db-compat",
+        attempt_id="attempt-db-compat",
+        state="preparing",
+        created_at="2026-07-23T02:00:00.000000Z",
+        updated_at="2026-07-23T02:00:00.000000Z",
+    )
+
+    payload = record.model_dump(mode="json")
+    assert "failure_authority" not in payload
+    assert ScienceAttemptExecutionRecordV2.model_validate(payload) == record
 
 
 class _Clock:
@@ -231,6 +252,22 @@ def _workspace_result(task) -> WorkspaceResultReceiptV2:
     )
 
 
+def _successful_candidate_execution_metadata() -> dict[str, object]:
+    return {
+        CODEX_SUBSCRIPTION_CONTRACT_KEY: codex_subscription_contract(),
+        CODEX_SUBSCRIPTION_READINESS_KEY: (
+            codex_subscription_readiness_receipt()
+        ),
+        "candidate_execution_status": {
+            "schema_version": "openevo.candidate_execution_status.v1",
+            "phase": "benchmark_execution",
+            "model_started": True,
+            "benchmark_started": True,
+            "failure_code": None,
+        },
+    }
+
+
 def _session_result(task) -> SessionResult:
     attempt = task.attempts[0]
     return canonical_subscription_session_result(
@@ -257,7 +294,10 @@ def _session_result(task) -> SessionResult:
                     )
                 ],
             ),
-            metadata={"policy_version": f"openevo:{task.task_id}:{attempt.attempt_id}"},
+            metadata={
+                "policy_version": f"openevo:{task.task_id}:{attempt.attempt_id}",
+                "openevo": _successful_candidate_execution_metadata(),
+            },
             workspace_result=_workspace_result(task),
         )
     )
@@ -333,6 +373,44 @@ def _receipt(task, evidence) -> ScienceAttemptExecutionReceiptV2:
             "receipt_sha256": science_attempt_execution_receipt_sha256(provisional),
         }
     )
+
+
+def test_historical_v1_isolation_authority_is_readback_only(tmp_path) -> None:
+    clock = _Clock()
+    store = ScienceTaskStoreV2(tmp_path / "state")
+    task = _admit(store, clock)
+    current = _session_result(task).model_dump(mode="python")
+    contract = {
+        "schema_version": 1,
+        "policy_id": "openevo.codex-subscription-credential-isolation.v1",
+        "policy_sha256": "59ea503b553aa414ddcc35ede66210ee901621eebcbd1cfbeb06023410e35d38",
+        "permission_profile": "openevo_codex_subscription_v1",
+        "codex_version": "0.144.1",
+        "default_model": "gpt-5.5",
+        "sandbox_backend": "linux-bubblewrap",
+        "refresh_persistence": "unsupported_read_only_auth_overlay",
+    }
+    openevo_metadata = current["metadata"]["openevo"]
+    openevo_metadata[CODEX_SUBSCRIPTION_CONTRACT_KEY] = contract
+    openevo_metadata[CODEX_SUBSCRIPTION_READINESS_KEY] = {
+        **contract,
+        "status": "passed",
+        "canary": "openevo-codex-subscription-real-exec-ready-v1",
+        "evidence": "completed_command_execution_event",
+    }
+    openevo_metadata.pop("candidate_execution_status")
+    historical = SessionResult.model_validate(current)
+
+    with pytest.raises(ValueError, match="isolation authority drifted"):
+        canonical_subscription_session_result(historical)
+    assert (
+        canonical_subscription_session_result(
+            historical,
+            allow_historical_isolation_authority=True,
+        )
+        == historical
+    )
+    store.close()
 
 
 def _terminal_bundle(task):
@@ -930,6 +1008,7 @@ def test_compiler_uses_saved_v2_authority_without_legacy_context_routes(tmp_path
     assert request.runtime is not None
     assert request.runtime.image == binding.runtime_image_immutable_reference
     assert request.runtime.allow_internet is False
+    assert request.runtime.allow_model_control_plane_network is True
     assert request.agent.harness == "codex"
     assert request.agent.model_name == "gpt-5.5"
     assert request.agent.settings["capture_mode"] == "transcript"
@@ -1031,6 +1110,9 @@ class _Rollout:
         self.request = request
         self.requests.append(request)
         metadata = dict(request.metadata)
+        openevo_metadata = dict(metadata.get("openevo", {}))
+        openevo_metadata.update(_successful_candidate_execution_metadata())
+        metadata["openevo"] = openevo_metadata
         runtime_context = request.runtime_context_binding
         assert runtime_context is not None
         evolution_metadata = {
@@ -1109,6 +1191,42 @@ class _Rollout:
         self.closed = True
 
 
+class _SetupErrorRollout(_Rollout):
+    """Return the exact pre-model terminal evidence emitted by Gateway."""
+
+    def submit_task(self, payload):
+        task_id = super().submit_task(payload)
+        assert self.request is not None and self.result is not None
+        metadata = dict(self.result.metadata)
+        metadata["openevo"] = {
+            "candidate_execution_status": {
+                "schema_version": "openevo.candidate_execution_status.v1",
+                "phase": "terminal_failure",
+                "model_started": False,
+                "benchmark_started": False,
+                "failure_code": (
+                    "candidate_subscription_isolation_not_ready"
+                ),
+            }
+        }
+        self.result = SessionResult(
+            session_id=self.result.session_id,
+            task_id=self.result.task_id,
+            status="ERROR",
+            trajectory=Trajectory(
+                status="ERROR",
+                metadata={
+                    "capture_mode": "transcript",
+                    "token_level_metrics_available": False,
+                },
+                traces=[],
+            ),
+            metadata=metadata,
+            workspace_result=None,
+        )
+        return task_id
+
+
 class _NotifyingExecutor:
     def __init__(self, delegate, completed: threading.Event) -> None:
         self.delegate = delegate
@@ -1119,6 +1237,38 @@ class _NotifyingExecutor:
             return self.delegate.execute(**kwargs)
         finally:
             self.completed.set()
+
+
+class _TerminalFailureExecutor:
+    def execute(self, *, task, attempt, cancellation):
+        del cancellation
+        failure = {
+            "schema_version": "openevo.science_attempt_failure_authority.v1",
+            "task_id": task.task_id,
+            "attempt_id": attempt.attempt_id,
+            "failure_code": "candidate_subscription_isolation_not_ready",
+            "retryable": False,
+            "rollout_task_id": f"rollout-{attempt.attempt_id}",
+            "session_id": "sk-openevo-terminal-error",
+            "session_status": "ERROR",
+            "model_started": False,
+            "benchmark_started": False,
+            "benchmark_trace_count": 0,
+        }
+        failure["content_sha256"] = hashlib.sha256(
+            json.dumps(
+                failure,
+                ensure_ascii=True,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        raise ScienceAttemptExecutionV2Error(
+            "candidate_subscription_isolation_not_ready",
+            retryable=False,
+            failure_authority=failure,
+        )
 
 
 class _BlockingExecutor:
@@ -1256,6 +1406,108 @@ def test_executor_captures_one_real_workspace_result_and_releases_generation(
     workspaces.close()
 
 
+def test_executor_surfaces_pre_model_terminal_error_without_seal_timeout(
+    tmp_path,
+) -> None:
+    clock = _Clock()
+    registry = verified_builtin_registry(tmp_path / "registry")
+    config = _project_config()
+    binding = _service_binding(registry.snapshot.registry_digest)
+    project_id = "project-terminal-error"
+    workspaces = WorkspaceStoreV2(tmp_path / "workspaces")
+    workspace = workspaces.ensure_empty_snapshot(project_id)
+    verified = resolve_genesis_execution_snapshot(
+        settings=EffectiveExecutionSettings(
+            execution_mode=config.execution.mode,
+            capture_mode=config.execution.capture_mode,
+            harness_id=config.execution.harness_id,
+            model_ref=config.execution.codex_model,
+            token_limit=config.execution.token_limit,
+            task_network_allow_internet=(
+                config.execution.task_network_allow_internet
+            ),
+        ),
+        service_binding=binding,
+    )
+    execution_sha256 = canonical_digest(verified.snapshot)
+    head = _head(
+        project_id,
+        registry_sha256=registry.snapshot.registry_digest,
+        workspace=workspace,
+        effective_execution=EffectiveExecutionSnapshotRefV2(
+            effective_execution_snapshot_id=f"exec-{execution_sha256}",
+            project_id=project_id,
+            execution_mode=config.execution.mode,
+            capture_mode=config.execution.capture_mode,
+            token_level_metrics_available=False,
+            producer_id=verified.producer_id,
+            snapshot_sha256=execution_sha256,
+        ),
+    )
+    authority = ScienceProjectAdmissionAuthorityV2(
+        project_id=project_id,
+        active_project_head=head,
+        project_config_sha256=project_config_sha256_for(config),
+        workspace_snapshot=workspace,
+        normalized_evolution_intent_sha256=canonical_digest(config.evolution),
+    )
+    ledger = ScienceTaskStoreV2(tmp_path / "state")
+    task = _admit(ledger, clock, authority)
+    attempt = task.attempts[0]
+    ledger.begin_attempt_execution(
+        task_id=task.task_id,
+        attempt_id=attempt.attempt_id,
+        now=clock(),
+    )
+    project = ProjectRecordV2(
+        project_id=project_id,
+        display_name="Terminal failure project",
+        config=config,
+        project_config_sha256=project_config_sha256_for(config),
+        created_at="2026-07-23T02:00:00.000000Z",
+        updated_at="2026-07-23T02:00:00.000000Z",
+        resource_version=1,
+    )
+    handoffs = WorkspaceHandoffStoreV2(tmp_path / "workspace-handoffs")
+    services = _Services(binding)
+    session_root = tmp_path / "gateway-sessions"
+    session_root.mkdir(mode=0o700)
+    rollout = _SetupErrorRollout(handoffs, binding, session_root)
+    executor = ScienceAttemptExecutorV2(
+        catalog=_Catalog(project),
+        workspaces=workspaces,
+        workspace_handoffs=handoffs,
+        ledger=ledger,
+        services=services,
+        executable_registry=registry,
+        rollout_factory=lambda _binding: rollout,
+        clock=clock,
+        poll_interval_seconds=30,
+        max_poll_attempts=130,
+    )
+
+    started = time.monotonic()
+    with pytest.raises(ScienceAttemptExecutionV2Error) as observed:
+        executor.execute(
+            task=task,
+            attempt=attempt,
+            cancellation=threading.Event(),
+        )
+    assert time.monotonic() - started < 1.0
+    assert observed.value.code == "candidate_subscription_isolation_not_ready"
+    assert observed.value.retryable is False
+    assert observed.value.failure_authority is not None
+    assert observed.value.failure_authority["session_status"] == "ERROR"
+    assert observed.value.failure_authority["model_started"] is False
+    assert observed.value.failure_authority["benchmark_started"] is False
+    assert observed.value.failure_authority["benchmark_trace_count"] == 0
+    assert services.released is True
+    assert rollout.closed is True
+    handoffs.close()
+    ledger.close()
+    workspaces.close()
+
+
 def test_task_owner_automatically_executes_a_new_immutable_attempt(tmp_path) -> None:
     clock = _Clock()
     registry = verified_builtin_registry(tmp_path / "registry")
@@ -1358,6 +1610,58 @@ def test_task_owner_automatically_executes_a_new_immutable_attempt(tmp_path) -> 
         owner.close()
         handoffs.close()
         workspaces.close()
+
+
+def test_task_owner_persists_terminal_failure_authority_for_fast_polling(
+    tmp_path,
+) -> None:
+    clock = _Clock()
+    owner = CoreScienceTaskOwnerV2(
+        state_root=tmp_path / "owner",
+        clock=clock,
+        attempt_executor_factory=lambda _ledger: _TerminalFailureExecutor(),
+    )
+    authority = _authority()
+    try:
+        owner.publish_project_admission_authority(authority)
+        task = owner.invoke(
+            "submitCoreTaskV2",
+            {
+                "request": TaskSubmitRequestV2(
+                    project_id=authority.project_id,
+                    expected_project_admission_etag=authority.project_etag,
+                    expected_project_head_id=(
+                        authority.active_project_head.project_head_id
+                    ),
+                    expected_project_head_manifest_sha256=(
+                        authority.active_project_head.manifest_sha256
+                    ),
+                    expected_project_config_sha256=(
+                        authority.project_config_sha256
+                    ),
+                ),
+                "idempotency_key": "terminal-failure-execution",
+            },
+        )
+        _wait_task_state(owner, task.task_id, "failed")
+        status = owner.get_training_attempt_execution_status(
+            task.task_id,
+            task.attempts[0].attempt_id,
+        )
+        assert status.state == "failed"
+        assert status.terminal is True
+        assert status.captured is False
+        assert status.error_code == (
+            "candidate_subscription_isolation_not_ready"
+        )
+        assert status.retryable is False
+        assert status.model_started is False
+        assert status.benchmark_started is False
+        assert status.failure_authority is not None
+        assert status.failure_authority.session_status == "ERROR"
+        assert status.failure_authority.benchmark_trace_count == 0
+    finally:
+        owner.close()
 
 
 def test_task_owner_cancellation_wins_before_terminal_capture(tmp_path) -> None:

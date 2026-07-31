@@ -11,6 +11,10 @@ from openevo.runtime.bubblewrap import BubblewrapRuntime
 from openevo.runtime.docker import DockerRuntime
 from openevo.runtime.docker_host import DockerHostPathSpec
 from openevo.runtime.managed import ManagedCredentialMount
+from openevo.runtime.managed_reflector_mount import (
+    ManagedReflectorContainerMountAuthority,
+    ManagedReflectorMountAuthority,
+)
 from openevo.runtime.models import RuntimeSpec
 
 _BUILTIN_BACKENDS: dict[str, type[BaseRuntime]] = {
@@ -28,6 +32,10 @@ def create_runtime(
     credential_mount: ManagedCredentialMount | None = None,
     docker_ownership_root: Path | None = None,
     docker_host_path: DockerHostPathSpec | None = None,
+    managed_reflector_mount_authority: ManagedReflectorMountAuthority | None = None,
+    managed_reflector_container_mount_authority: (
+        ManagedReflectorContainerMountAuthority | None
+    ) = None,
 ) -> BaseRuntime:
     """Instantiate a runtime from a RuntimeSpec.
 
@@ -40,6 +48,13 @@ def create_runtime(
             raise ValueError("Docker host paths cannot be passed to a plugin runtime")
         if credential_mount is not None:
             raise ValueError("managed credentials cannot be passed to a plugin runtime")
+        if (
+            managed_reflector_mount_authority is not None
+            or managed_reflector_container_mount_authority is not None
+        ):
+            raise ValueError(
+                "managed reflector authorities cannot be passed to a plugin runtime"
+            )
         cls = _import_runtime_class(spec.import_path)
         runtime = cls(spec, session_id, session_dir)
         _validate_runtime_capabilities(runtime)
@@ -55,12 +70,23 @@ def create_runtime(
             credential_mount=credential_mount,
             ownership_root=docker_ownership_root,
             docker_host_path=docker_host_path,
+            managed_reflector_mount_authority=managed_reflector_mount_authority,
+            managed_reflector_container_mount_authority=(
+                managed_reflector_container_mount_authority
+            ),
         )
     else:
         if docker_host_path is not None:
             raise ValueError("Docker host paths cannot be passed to a non-Docker runtime")
         if credential_mount is not None:
             raise ValueError("managed credentials require the Docker runtime")
+        if (
+            managed_reflector_mount_authority is not None
+            or managed_reflector_container_mount_authority is not None
+        ):
+            raise ValueError(
+                "managed reflector authorities require the Docker runtime"
+            )
         runtime = cls(spec, session_id, session_dir)
     _validate_runtime_capabilities(runtime)
     return runtime
@@ -81,7 +107,7 @@ def _validate_runtime_capabilities(runtime: BaseRuntime) -> None:
         raise ValueError(f"runtime backend {backend!r} does not support memory limits")
     if spec.storage_mb is not None and not runtime.supports_storage_limits:
         raise ValueError(f"runtime backend {backend!r} does not support storage limits")
-    if not spec.allow_internet:
+    if not spec.allow_internet and not spec.allow_model_control_plane_network:
         if not runtime.can_disable_internet:
             raise ValueError(f"runtime backend {backend!r} cannot disable internet access")
         if spec.network not in (None, "", "host", "none"):

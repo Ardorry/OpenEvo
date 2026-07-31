@@ -36,6 +36,7 @@ from openevo.backend.contracts.v2.snapshots import canonical_contract_bytes
 from openevo.evolution.materialization_root_lock import MaterializationRootLock
 from openevo.workspace_archive import (
     WorkspaceArchiveBuildError,
+    WorkspaceArchiveUnsupportedEntryError,
     write_workspace_archive,
 )
 
@@ -92,6 +93,10 @@ class WorkspaceHandoffConflictV2(WorkspaceHandoffErrorV2):
 
 class WorkspaceHandoffIntegrityErrorV2(WorkspaceHandoffErrorV2):
     pass
+
+
+class WorkspaceHandoffResultValidationErrorV2(WorkspaceHandoffErrorV2):
+    """The session workspace deterministically cannot be published."""
 
 
 def _serialized(
@@ -481,6 +486,10 @@ class WorkspaceHandoffStoreV2:
             )
             try:
                 archive = write_workspace_archive(workspace_root, descriptor)
+            except WorkspaceArchiveUnsupportedEntryError as exc:
+                raise WorkspaceHandoffResultValidationErrorV2(
+                    "workspace result failed closed archive validation"
+                ) from exc
             except WorkspaceArchiveBuildError as exc:
                 raise WorkspaceHandoffConflictV2(
                     "workspace result failed closed archive validation"
@@ -745,7 +754,6 @@ class WorkspaceHandoffStoreV2:
         )
 
     def _verify_marker(self, store_id: str) -> None:
-        expected = self._expected_marker_bytes(store_id)
         try:
             descriptor = os.open(
                 _MARKER_NAME,
@@ -763,8 +771,15 @@ class WorkspaceHandoffStoreV2:
                 or metadata.st_uid != os.geteuid()
                 or metadata.st_nlink != 1
                 or stat.S_IMODE(metadata.st_mode) != 0o600
-                or metadata.st_size != len(expected)
-                or _read_exact(descriptor, metadata.st_size) != expected
+                or metadata.st_size > 4096
+                or not _marker_matches(
+                    _read_exact(descriptor, metadata.st_size),
+                    store_id,
+                    root=os.fstat(self._root_fd),
+                    database=self._database_identity,
+                    inputs=os.fstat(self._inputs_fd),
+                    results=os.fstat(self._results_fd),
+                )
             ):
                 raise WorkspaceHandoffIntegrityErrorV2(
                     "workspace handoff identity marker is invalid"
@@ -1120,6 +1135,72 @@ def _marker_bytes(
     )
 
 
+def _marker_matches(
+    payload: bytes,
+    store_id: str,
+    *,
+    root: os.stat_result,
+    database: os.stat_result,
+    inputs: os.stat_result,
+    results: os.stat_result,
+) -> bool:
+    """Accept only mount-device renumbering for a durable handoff store."""
+
+    expected = _marker_bytes(
+        store_id,
+        root=root,
+        database=database,
+        inputs=inputs,
+        results=results,
+    )
+    if payload == expected:
+        return True
+    try:
+        value = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    if (
+        not isinstance(value, dict)
+        or set(value)
+        != {
+            "binding_version",
+            "database",
+            "inputs",
+            "results",
+            "root",
+            "schema_version",
+            "store_id",
+        }
+        or value.get("binding_version") != "1"
+        or value.get("schema_version") != 1
+        or value.get("store_id") != store_id
+        or _canonical_json_bytes(value) != payload
+    ):
+        return False
+    current = {
+        "root": root,
+        "database": database,
+        "inputs": inputs,
+        "results": results,
+    }
+    stored_devices: set[int] = set()
+    current_devices: set[int] = set()
+    for name, metadata in current.items():
+        identity = value.get(name)
+        if (
+            not isinstance(identity, list)
+            or len(identity) != 2
+            or any(type(item) is not int for item in identity)
+            or identity[0] < 0
+            or identity[1] <= 0
+            or identity[1] != metadata.st_ino
+        ):
+            return False
+        stored_devices.add(identity[0])
+        current_devices.add(metadata.st_dev)
+    return len(stored_devices) == 1 and len(current_devices) == 1
+
+
 def _schema_rows(connection: sqlite3.Connection) -> tuple[tuple[object, ...], ...]:
     rows = connection.execute(
         "SELECT type, name, tbl_name, sql FROM sqlite_schema "
@@ -1282,6 +1363,7 @@ __all__ = [
     "WorkspaceHandoffErrorV2",
     "WorkspaceHandoffIntegrityErrorV2",
     "WorkspaceHandoffRequestV2",
+    "WorkspaceHandoffResultValidationErrorV2",
     "WorkspaceHandoffStoreV2",
     "WorkspaceResultReceiptV2",
     "WORKSPACE_HANDOFF_ROOT_ENV",

@@ -584,6 +584,9 @@ def test_managed_runtime_bootstrap_builds_image_when_pull_fails() -> None:
     assert "node:22-bookworm-slim@sha256:" in docker_step.command
     assert "python:3.12-slim-bookworm@sha256:" in docker_step.command
     assert "@openai/codex@0.144.1" in docker_step.command
+    assert "bubblewrap=0.8.0-2+deb12u1" in docker_step.command
+    assert "codex-linux-sandbox" in docker_step.command
+    assert "test ! -e /opt/codex/bin/codex-linux-sandbox" in docker_step.command
     assert "npm cache clean --force" in docker_step.command
     assert "rm -rf /home/openevo/.npm" in docker_step.command
     assert "NPM_CONFIG_PREFIX=/opt/codex" in docker_step.command

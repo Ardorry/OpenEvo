@@ -41,6 +41,10 @@ class WorkspaceArchiveBuildError(ValueError):
     """A directory cannot be proven safe for deterministic publication."""
 
 
+class WorkspaceArchiveUnsupportedEntryError(WorkspaceArchiveBuildError):
+    """The workspace contains a symlink or another unsupported special entry."""
+
+
 @dataclass(frozen=True, slots=True)
 class _Identity:
     device: int
@@ -264,7 +268,9 @@ def _scan_directory(
                 )
             )
         else:
-            raise WorkspaceArchiveBuildError("workspace contains an unsupported entry type")
+            raise WorkspaceArchiveUnsupportedEntryError(
+                "workspace contains an unsupported entry type"
+            )
     if not _same_identity(os.fstat(descriptor), directory_identity):
         raise WorkspaceArchiveBuildError("workspace directory changed")
 
@@ -460,4 +466,8 @@ def write_workspace_archive(
         os.close(root_descriptor)
 
 
-__all__ = ["WorkspaceArchiveBuildError", "write_workspace_archive"]
+__all__ = [
+    "WorkspaceArchiveBuildError",
+    "WorkspaceArchiveUnsupportedEntryError",
+    "write_workspace_archive",
+]

@@ -161,7 +161,7 @@ def _execution_snapshot(
             harness_version="0.144.1" if subscription else "test-harness-v1",
             image_digest="c" * 64,
             policy_id=(
-                "openevo.codex-subscription-credential-isolation.v1"
+                "openevo.codex-subscription-credential-isolation.v2"
                 if subscription
                 else "openevo.self-deployed-test-policy.v1"
             ),

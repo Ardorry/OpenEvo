@@ -288,6 +288,19 @@ def _string_array(*, maximum: int) -> dict[str, Any]:
 
 
 def _reflector_llm_schema() -> dict[str, Any]:
+    runtime = _closed_object(
+        {
+            "mode": {"type": "string", "enum": ["managed", "legacy_path"]},
+            "profile": {"type": "string", "enum": ["managed_science"]},
+            "image_digest": _string(),
+            "codex_binary": _string(),
+            "expected_cli_version": _string(),
+            "auth_mode": {"type": "string", "enum": ["subscription"]},
+            "capture_mode": {"type": "string", "enum": ["transcript"]},
+            "path_fallback_allowed": {"type": "boolean"},
+        },
+        required=("mode", "path_fallback_allowed"),
+    )
     return _closed_object(
         {
             "model": _string(),
@@ -306,8 +319,15 @@ def _reflector_llm_schema() -> dict[str, Any]:
                 "maximum": 86_400.0,
             },
             "max_tokens": _positive_integer(maximum=1_048_576),
+            "reasoning_effort": {
+                "type": "string",
+                "enum": ["low", "medium", "high", "xhigh"],
+            },
+            "runtime": runtime,
+            "codex_bin": _string(),
+            "codex_home": _string(),
         },
-        required=("model", "provider"),
+        required=("model", "provider", "runtime"),
     )
 
 
@@ -319,6 +339,11 @@ def _reflector_schema(
     return _closed_object(
         {
             record_limit_name: _positive_integer(),
+            # Project-scoped gate consumed by the Core successor owner.  It is
+            # deliberately part of the verified method configuration rather
+            # than a daemon-wide switch: unrelated projects in the same Core
+            # service retain their ordinary post-run behavior.
+            "training_feedback_required": {"type": "boolean"},
             "reflector_llm": _reflector_llm_schema(),
             **dict(extra or {}),
         },

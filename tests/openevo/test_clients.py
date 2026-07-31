@@ -134,3 +134,24 @@ def test_evolution_http_client_exposes_closed_retryability(
 
     assert captured.value.status_code == status_code
     assert captured.value.retryable is retryable
+
+
+def test_evolution_http_client_classifies_core_config_failure_without_detail_leak() -> None:
+    private_detail = (
+        "core config may only contain Core-owned fields: "
+        "content_admission_basis_sha256; private-value-must-not-escape"
+    )
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(422, json={"detail": private_detail})
+
+    client = EvolutionHttpClient(
+        "http://evolution.example",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(EvolutionHttpStatusError) as captured:
+        client.create_dataset({"name": "dataset"})
+
+    assert captured.value.detail_code == "core_config_contains_non_core_owned_fields"
+    assert private_detail not in str(captured.value)

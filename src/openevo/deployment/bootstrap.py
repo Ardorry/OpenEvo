@@ -693,6 +693,7 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' \\
         ca-certificates \\
         curl \\
         git \\
+        bubblewrap=0.8.0-2+deb12u1 \\
         python-is-python3 \\
         rsync \\
         tmux \\
@@ -701,6 +702,15 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' \\
 RUN npm install -g {MANAGED_CODEX_NPM_PACKAGE} \\
     && npm cache clean --force \\
     && rm -rf /home/openevo/.npm \\
+    && codex_bin=/opt/codex/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex \\
+    && sandbox_bin=/opt/codex/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex-linux-sandbox \\
+    && test -x "$codex_bin" \\
+    && test ! -e "$sandbox_bin" \\
+    && ln -s codex "$sandbox_bin" \\
+    && test "$(readlink "$sandbox_bin")" = codex \\
+    && test ! -e /opt/codex/bin/codex-linux-sandbox \\
+    && ln -s ../lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex /opt/codex/bin/codex-linux-sandbox \\
+    && test -x /opt/codex/bin/codex-linux-sandbox \\
     && chown -R root:root /opt/codex \\
     && chmod -R go-w /opt/codex
 

@@ -9,8 +9,11 @@ from pydantic import Field, field_validator, model_validator
 from openevo.backend.contracts.v2 import models as m2
 from openevo.evolution.revisions import (
     AtomicEvolutionAbandonManifestV2,
+    AtomicFrozenProjectForkManifestV1,
+    AtomicHistoricalRestoreManifestV2,
     AtomicSuccessorCommitV2,
     AtomicSuccessorManifestV2,
+    AtomicSuccessorRecoverySeedManifestV1,
 )
 
 
@@ -163,7 +166,25 @@ def runtime_context_binding_for_head(
         raise ValueError("atomic successor receipt differs from the active project head")
     if len(manifest.method_artifact_ids) != head.evolution_revision.artifact_count:
         raise ValueError("atomic successor receipt has a different artifact set")
-    if type(manifest) is AtomicEvolutionAbandonManifestV2:
+    if type(manifest) is AtomicSuccessorRecoverySeedManifestV1:
+        return RuntimeContextBindingV2(
+            source="materialized_successor",
+            project_head=head,
+            service_generation_sha256=service_generation_sha256,
+            framework_lock_sha256=framework_lock_sha256,
+            successor_transition_id=manifest.recovery_id,
+            source_predecessor_project_head_id=manifest.predecessor_project_head_id,
+            materialized_context_id=manifest.materialized_context_id,
+            materialized_context_manifest_sha256=(
+                manifest.materialized_context_manifest_sha256
+            ),
+            selected_artifact_ids=manifest.method_artifact_ids,
+        )
+    if type(manifest) in {
+        AtomicEvolutionAbandonManifestV2,
+        AtomicFrozenProjectForkManifestV1,
+        AtomicHistoricalRestoreManifestV2,
+    }:
         if manifest.evolution_revision_id != head.evolution_revision.evolution_revision_id:
             raise ValueError("evolution abandon receipt differs from the inherited revision")
         if manifest.runtime_context_source == "empty_inherited":

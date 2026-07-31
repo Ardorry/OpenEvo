@@ -7,30 +7,30 @@ step.
 
 from __future__ import annotations
 
-from collections import OrderedDict
-from collections.abc import Callable, Mapping, Sequence
 import ctypes
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import StrEnum
 import errno
 import fcntl
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import secrets
 import selectors
-import signal
 import shutil
+import signal
 import socket
 import stat
 import subprocess
 import sys
-from tempfile import mkdtemp
 import threading
 import time
+from collections import OrderedDict
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import StrEnum
+from pathlib import Path
+from tempfile import mkdtemp
 from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -38,13 +38,6 @@ from urllib.request import Request, urlopen
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from openevo.codex_models import validate_codex_model_ref
-from openevo.backend.service_control import (
-    CoreServiceControlError,
-    ServiceRestartAttempt,
-    ServiceRestartAttemptState,
-)
-from openevo.backend.workspace_handoff_v2 import WORKSPACE_HANDOFF_ROOT_ENV
 from openevo.backend.contracts.v1.models import (
     ApiErrorV1,
     ErrorCategory,
@@ -56,13 +49,22 @@ from openevo.backend.contracts.v1.models import (
     ModelPreparationV1,
     RepairAction,
     ServiceKind,
-    ServiceStatus as ContractServiceStatus,
     ServiceSummaryV1,
 )
-from openevo.projects.science.compiler import MANAGED_RUNTIME_IMAGES
+from openevo.backend.contracts.v1.models import (
+    ServiceStatus as ContractServiceStatus,
+)
+from openevo.backend.service_control import (
+    CoreServiceControlError,
+    ServiceRestartAttempt,
+    ServiceRestartAttemptState,
+)
+from openevo.backend.workspace_handoff_v2 import WORKSPACE_HANDOFF_ROOT_ENV
+from openevo.codex_models import validate_codex_model_ref
 from openevo.gateway.session_files import (
     CODEX_CREDENTIAL_AUTHORITY_FD_ENV,
     CODEX_CREDENTIAL_SNAPSHOT_FD_ENV,
+    CredentialRedactor,
     HeldCodexCredentialAuthority,
     PreparedCodexCredentialSnapshot,
     SessionFileSecurityError,
@@ -70,11 +72,14 @@ from openevo.gateway.session_files import (
     remove_credential_tree,
     stage_codex_subscription_auth,
 )
-from openevo.runtime.managed import (
-    MANAGED_CODEX_VERSION,
-    require_immutable_managed_runtime_image,
-    verified_managed_runtime_image_reference,
+from openevo.internal_auth import (
+    CORE_RUN_ADMISSION_URL_ENV,
+    INTERNAL_CREDENTIAL_FD_ENV,
+    INTERNAL_LISTEN_FD_ENV,
+    INTERNAL_OWNERSHIP_ENV,
+    InternalServiceIdentity,
 )
+from openevo.projects.science.compiler import MANAGED_RUNTIME_IMAGES
 from openevo.runtime.docker_host import (
     DockerEngineAuthority,
     DockerExecutableAuthority,
@@ -84,14 +89,24 @@ from openevo.runtime.docker_host import (
     docker_cli_environment,
     docker_self_inspect_argv,
 )
-from openevo.internal_auth import (
-    INTERNAL_CREDENTIAL_FD_ENV,
-    INTERNAL_LISTEN_FD_ENV,
-    INTERNAL_OWNERSHIP_ENV,
-    CORE_RUN_ADMISSION_URL_ENV,
-    InternalServiceIdentity,
+from openevo.runtime.managed import (
+    MANAGED_CODEX_VERSION,
+    MANAGED_RUNTIME_RELEASES,
+    managed_runtime_image_inspect_reference,
+    managed_runtime_release_authority_digest,
+    require_immutable_managed_runtime_image,
+    verified_managed_runtime_image_reference,
 )
-
+from openevo.runtime.managed_candidate_readiness import (
+    ManagedCandidateRuntimeReadiness,
+)
+from openevo.runtime.managed_reflector_mount import (
+    MANAGED_REFLECTOR_MOUNT_AUTHORITY_FD_ENV,
+    ManagedReflectorCredentialMountReadiness,
+    ManagedReflectorMountAuthority,
+    ManagedReflectorMountRegistrationExpectation,
+    ManagedReflectorRuntimeReadiness,
+)
 
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _STRONG_ETAG_RE = re.compile(r'^"[0-9a-f]{64}"$')
@@ -118,16 +133,33 @@ _SAFE_STRUCTURED_LOG_KEYS = frozenset(
     {
         "code",
         "component",
+        "codex_cli_started",
+        "container_exit_code",
         "event",
+        "failure_code",
+        "generation_digest",
+        "helper_return_code",
+        "helper_started",
         "level",
         "logger",
         "message",
+        "model_started",
+        "missing_executable_basename",
         "msg",
         "name",
+        "nested_return_code",
+        "phase",
         "pid",
+        "probe_exit_code",
+        "probe_progress",
+        "process_uid",
+        "release_registry_digest",
+        "retryable",
+        "secret_recorded",
         "service",
         "service_id",
         "status",
+        "stderr_class",
         "time",
         "timestamp",
     }
@@ -299,6 +331,7 @@ class ServiceProcessSpec:
     port: int | None
     health_probe: ServiceHealthProbe
     cwd: str = "/"
+    docker_host_path_identity: str | None = field(default=None, repr=False)
     internal_identity: InternalServiceIdentity | None = field(
         default=None,
         repr=False,
@@ -308,6 +341,11 @@ class ServiceProcessSpec:
     codex_credential_authority: (
         HeldCodexCredentialAuthority | PreparedCodexCredentialSnapshot | None
     ) = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    managed_reflector_mount_authority: ManagedReflectorMountAuthority | None = field(
         default=None,
         repr=False,
         compare=False,
@@ -326,6 +364,11 @@ class ServiceProcessSpec:
             _require_digest(value, name)
         if self.port is not None and not 1 <= self.port <= 65535:
             raise ValueError("service port is outside the TCP range")
+        if self.docker_host_path_identity is not None:
+            _require_digest(
+                self.docker_host_path_identity,
+                "docker_host_path_identity",
+            )
         if not os.path.isabs(self.cwd) or any(ord(char) < 0x20 for char in self.cwd):
             raise ValueError("service cwd must be an absolute safe path")
 
@@ -921,9 +964,13 @@ class LocalManagedScienceRuntimeProbe:
                     "The managed Science runtime executable is unavailable.",
                 )
             try:
+                inspect_image = managed_runtime_image_inspect_reference(
+                    profile="managed_science",
+                    image=request.runtime_image,
+                )
                 image_result = self._run_docker(
                     docker_engine,
-                    ("image", "inspect", request.runtime_image),
+                    ("image", "inspect", inspect_image),
                     deadline,
                     cancellation,
                 )
@@ -950,12 +997,16 @@ class LocalManagedScienceRuntimeProbe:
                 repo_digests = image.get("RepoDigests")
                 config = image.get("Config")
                 labels = config.get("Labels") if isinstance(config, dict) else None
-                immutable_image = verified_managed_runtime_image_reference(
+                verified_docker_image = verified_managed_runtime_image_reference(
                     profile="managed_science",
-                    image=request.runtime_image,
+                    image=inspect_image,
                     image_id=image_id,
                     repo_digests=repo_digests,
                     labels=labels,
+                )
+                immutable_image = managed_runtime_release_authority_digest(
+                    profile="managed_science",
+                    image=verified_docker_image,
                 )
             except (
                 UnicodeDecodeError,
@@ -1008,6 +1059,7 @@ class LocalManagedScienceRuntimeProbe:
                         "runtime_engine_identity_digest": (docker_engine.identity_digest),
                         "runtime_image": request.runtime_image,
                         "runtime_image_id": image_id,
+                        "runtime_image_verified_docker_reference": verified_docker_image,
                         "runtime_image_immutable_reference": immutable_image,
                         "docker_host_path_identity": (
                             None if docker_host_path is None else docker_host_path.identity_digest
@@ -1466,10 +1518,17 @@ class _TrackedProcess:
 class _BoundedLogStreamRedactor:
     """Sanitize complete log lines while retaining a strictly bounded carry."""
 
-    def __init__(self, credential: str, *, max_line_bytes: int = _MAX_LOG_LINE_BYTES) -> None:
+    def __init__(
+        self,
+        credential: str,
+        *,
+        credential_redactor: CredentialRedactor | None = None,
+        max_line_bytes: int = _MAX_LOG_LINE_BYTES,
+    ) -> None:
         if not 1 <= max_line_bytes <= _MAX_LOG_LINE_BYTES:
             raise ValueError("log line limit is outside the supported bounds")
         self._credential = credential.encode("utf-8")
+        self._credential_redactor = credential_redactor
         self._max_line_bytes = max_line_bytes
         self._carry = bytearray()
         self._dropping_oversize = False
@@ -1520,6 +1579,8 @@ class _BoundedLogStreamRedactor:
         return self._sanitize_line(line, eof=True)
 
     def _sanitize_line(self, line: bytes, *, eof: bool) -> bytes:
+        if self._credential_redactor is not None:
+            line = self._credential_redactor.redact_bytes(line)
         line = line.replace(self._credential, b"<redacted>")
         if eof and len(self._credential) > _MIN_SENSITIVE_CREDENTIAL_PREFIX_BYTES:
             prefix_size = min(len(line), len(self._credential) - 1)
@@ -1560,6 +1621,7 @@ class RealSubprocessBackend:
         child_env[INTERNAL_OWNERSHIP_ENV] = spec.identity_digest
         pass_fds: list[int] = []
         credential_read_fd: int | None = None
+        mount_authority_read_fd: int | None = None
         cwd_fd: int | None = None
         process: subprocess.Popen[bytes] | None = None
         try:
@@ -1585,6 +1647,12 @@ class RealSubprocessBackend:
                 )
                 child_env[authority_env] = str(authority_fd)
                 pass_fds.append(authority_fd)
+            if spec.managed_reflector_mount_authority is not None:
+                mount_authority_read_fd = (
+                    spec.managed_reflector_mount_authority.open_inheritance_descriptor()
+                )
+                child_env[MANAGED_REFLECTOR_MOUNT_AUTHORITY_FD_ENV] = str(mount_authority_read_fd)
+                pass_fds.append(mount_authority_read_fd)
             if spec.listen_fd is not None:
                 child_env[INTERNAL_LISTEN_FD_ENV] = str(spec.listen_fd)
                 pass_fds.append(spec.listen_fd)
@@ -1603,6 +1671,8 @@ class RealSubprocessBackend:
             finally:
                 if credential_read_fd is not None:
                     os.close(credential_read_fd)
+                if mount_authority_read_fd is not None:
+                    os.close(mount_authority_read_fd)
                 if cwd_fd is not None:
                     os.close(cwd_fd)
         except Exception:
@@ -1661,7 +1731,7 @@ class RealSubprocessBackend:
         tracked = self._owned(identity)
         if tracked is None:
             return False
-        members = _owned_process_group_members(identity)
+        members = _stabilized_owned_process_group_members(identity)
         if members is None:
             raise SupervisorStateError("managed process-group identity could not be verified")
         alive = bool(members)
@@ -1691,9 +1761,16 @@ class RealSubprocessBackend:
                 returncode = tracked.process.poll()
             members = _owned_process_group_members(identity)
             if members == ():
-                result = returncode if returncode is not None else 0
-                self._retire_if_complete(identity)
-                return result
+                with self._lock:
+                    callback_complete = tracked.callback_complete
+                if callback_complete:
+                    result = returncode if returncode is not None else 0
+                    self._retire_if_complete(identity)
+                    return result
+                if deadline is not None and time.monotonic() >= deadline:
+                    return returncode
+                time.sleep(0.01)
+                continue
             if members is None:
                 completed_returncode = self._completed_returncode(identity)
                 if completed_returncode is not None:
@@ -2150,6 +2227,7 @@ class CoreServiceSupervisor:
         launch_mode: ServiceLaunchMode,
         service_root: Path,
         framework_lock: Path,
+        daemon_release_identity: str | None = None,
         release_identity: ServiceReleaseIdentity | None = None,
         verified_registry: object | None = None,
         run_admission_url: str | None = None,
@@ -2182,7 +2260,11 @@ class CoreServiceSupervisor:
             )
         )
         if launch_mode is ServiceLaunchMode.RELEASE:
-            if verified_registry is None or release_identity is not None:
+            if (
+                verified_registry is None
+                or release_identity is not None
+                or daemon_release_identity is None
+            ):
                 raise ValueError("release mode requires only a verified registry identity source")
             if injected_runtime_dependencies:
                 raise ValueError("release mode rejects development runtime dependency injection")
@@ -2193,6 +2275,13 @@ class CoreServiceSupervisor:
                     "development/test mode requires an explicit release identity and no registry"
                 )
             resolved_release_identity = release_identity
+        resolved_daemon_release_identity = (
+            daemon_release_identity or resolved_release_identity.install_digest
+        )
+        _require_digest(
+            resolved_daemon_release_identity,
+            "daemon release identity",
+        )
         self._mutex = threading.RLock()
         self._root = _SecureServiceRoot(service_root)
         self._closed = False
@@ -2208,6 +2297,7 @@ class CoreServiceSupervisor:
                 else None
             )
             self._release_identity = resolved_release_identity
+            self._daemon_release_identity = resolved_daemon_release_identity
             self._python = python_executable or sys.executable
             self._process_backend = process_backend or RealSubprocessBackend()
             self._health_checker = health_checker or DefaultHealthChecker()
@@ -2311,6 +2401,175 @@ class CoreServiceSupervisor:
                 binding=binding,
                 _release=lambda: self._release_run_lease(token),
             )
+
+    def adopt_current_run_binding(
+        self,
+        execution_mode: ServiceExecutionMode,
+        *,
+        model_ref: str | None = None,
+        codex_model: str | None = None,
+        runtime_image: str | None = None,
+        total_timeout: float | None = None,
+    ) -> tuple[ServiceGroupSnapshot, ServiceRunLease] | None:
+        """Adopt only a verified startup tail owned by this Core process.
+
+        This path never probes a new runtime, rotates credential authority,
+        starts or stops a service, or changes the generation.  It exists for
+        the narrow case where the worker completed its authenticated Docker
+        mount adoption after the original caller lost the startup response but
+        this exact Core process still owns every handle and private authority.
+        ``None`` is returned only for a truly pristine supervisor; every
+        non-empty state that is not the closed adoption shape fails closed.
+        """
+
+        with self._mutex:
+            self._require_open()
+            self._verify_release_installation()
+            if total_timeout is not None and total_timeout <= 0:
+                raise ValueError("total_timeout must be positive")
+            if self._active_run_lease is not None:
+                raise SupervisorStateError("managed service generation already has a run lease")
+            if self._ledger.generation_digest is None:
+                if any(
+                    (
+                        self._ledger.execution_mode is not None,
+                        bool(self._ledger.services),
+                        bool(self._specs),
+                        bool(self._handles),
+                        self._active_plan_key is not None,
+                        self._active_credential is not None,
+                        self._active_runtime_request is not None,
+                        self._active_runtime_image_immutable_reference is not None,
+                        self._active_credential_authority is not None,
+                    )
+                ):
+                    raise SupervisorStateError(
+                        "managed service state lacks a complete generation identity"
+                    )
+                return None
+            snapshot = self._adopt_current_group_locked(
+                execution_mode,
+                model_ref=model_ref,
+                codex_model=codex_model,
+                runtime_image=runtime_image,
+                total_timeout=total_timeout,
+            )
+            binding = self._run_binding_locked()
+            if not _binding_matches_snapshot(snapshot, binding):
+                raise SupervisorStateError(
+                    "managed service generation changed while adopting its run binding"
+                )
+            token = object()
+            self._active_run_lease = token
+            return snapshot, ServiceRunLease(
+                binding=binding,
+                _release=lambda: self._release_run_lease(token),
+            )
+
+    def _adopt_current_group_locked(
+        self,
+        execution_mode: ServiceExecutionMode,
+        *,
+        model_ref: str | None,
+        codex_model: str | None,
+        runtime_image: str | None,
+        total_timeout: float | None,
+    ) -> ServiceGroupSnapshot:
+        if (
+            execution_mode is not ServiceExecutionMode.CODEX_SUBSCRIPTION_TRANSCRIPT
+            or model_ref is not None
+            or codex_model is None
+            or runtime_image is None
+        ):
+            raise SupervisorStateError(
+                "current-generation adoption requires a subscription runtime identity"
+            )
+        expected_request = ManagedScienceRuntimeRequest(
+            runtime_image=runtime_image,
+            codex_model=codex_model,
+        )
+        if (
+            self._ledger.execution_mode is not execution_mode
+            or self._active_runtime_request != expected_request
+            or self._active_plan_key is None
+            or self._active_credential is None
+            or self._active_runtime_image_immutable_reference is None
+            or self._active_credential_authority is None
+            or self._ledger.runtime_identity_digest is None
+            or self._ledger.runtime_readiness_code is not ServiceRunReadinessCode.READY
+            or self._ledger.restart_attempts
+        ):
+            raise SupervisorStateError("current managed service generation is not adoptable")
+        self._framework_lock_source.verified_payload()
+        self._require_active_credential_authority()
+        expected_ids = (
+            "evolution-backend",
+            "rollout",
+            "gateway",
+            "evolution-worker",
+        )
+        if (
+            tuple(self._specs) != expected_ids
+            or tuple(record.service_id for record in self._ledger.services) != expected_ids
+            or set(self._handles) != set(expected_ids)
+        ):
+            raise SupervisorStateError("current managed service topology is not adoptable")
+        statuses = tuple(record.status for record in self._ledger.services)
+        all_running = statuses == (ServiceStatus.RUNNING,) * len(expected_ids)
+        startup_tail = statuses == (
+            ServiceStatus.RUNNING,
+            ServiceStatus.RUNNING,
+            ServiceStatus.RUNNING,
+            ServiceStatus.STARTING,
+        )
+        if not (all_running or startup_tail):
+            raise SupervisorStateError(
+                "current managed service status is not an adoptable startup tail"
+            )
+        cancellation = threading.Event()
+        deadline = time.monotonic() + (
+            self._startup_timeout if total_timeout is None else total_timeout
+        )
+        health_messages: dict[str, str] = {}
+        for service_id in expected_ids:
+            spec = self._specs[service_id]
+            record = self._record(service_id)
+            identity = self._handles[service_id]
+            if (
+                record.error_code is not None
+                or record.identity_digest != spec.identity_digest
+                or not self._record_matches_identity(record, identity)
+                or not self._process_backend.is_alive(identity)
+            ):
+                raise SupervisorStateError(
+                    "current managed service process identity is not adoptable"
+                )
+            health = self._health_checker.wait_ready(
+                spec,
+                identity,
+                self._process_backend,
+                deadline,
+                cancellation,
+            )
+            if not health.ready or not self._process_backend.is_alive(identity):
+                raise SupervisorStateError("current managed service health is not adoptable")
+            health_messages[service_id] = health.message
+        if isinstance(self._health_checker, DefaultHealthChecker):
+            graph_ready, _graph_message = _probe_rollout_registration(
+                self._specs["rollout"],
+                deadline - time.monotonic(),
+            )
+            if not graph_ready:
+                raise SupervisorStateError("current managed service graph is not adoptable")
+        if startup_tail:
+            self._set_running(
+                "evolution-worker",
+                health_messages["evolution-worker"],
+            )
+        snapshot = self._group_snapshot()
+        if not snapshot.run_ready:
+            raise SupervisorStateError("adopted managed service generation is not ready for a run")
+        return snapshot
 
     def _ensure_locked(
         self,
@@ -2474,6 +2733,7 @@ class CoreServiceSupervisor:
                 specs, topology = self._subscription_plan(
                     runtime_request,
                     plan_runtime_identity,
+                    runtime.runtime_image_immutable_reference,
                     generation_digest,
                     credential,
                     listeners,
@@ -2538,27 +2798,86 @@ class CoreServiceSupervisor:
                         self._rollback(started, deadline)
                         return self._group_snapshot()
                     self._set_starting(spec.service_id)
+                    # A real child may emit its complete terminal frame and
+                    # exit before ``spawn`` returns. Buffer callbacks until
+                    # the returned PID identity has been installed and the
+                    # initial health observation is complete. This avoids both
+                    # evidence loss and a callback/Supervisor-mutex deadlock.
+                    callback_lock = threading.Lock()
+                    callbacks_adopted = False
+                    pending_output: list[tuple[ProcessIdentity, bytes]] = []
+                    pending_exit: list[tuple[ProcessIdentity, int]] = []
+
+                    def record_output(
+                        process_identity: ProcessIdentity,
+                        payload: bytes,
+                        *,
+                        service_id: str = spec.service_id,
+                    ) -> None:
+                        with callback_lock:
+                            adopted = callbacks_adopted
+                            if not adopted:
+                                pending_output.append((process_identity, payload))
+                        if adopted:
+                            self._record_output(
+                                service_id,
+                                generation_digest,
+                                process_identity,
+                                payload,
+                            )
+
+                    def record_exit(
+                        process_identity: ProcessIdentity,
+                        returncode: int,
+                        *,
+                        service_id: str = spec.service_id,
+                    ) -> None:
+                        with callback_lock:
+                            adopted = callbacks_adopted
+                            if not adopted:
+                                pending_exit.append((process_identity, returncode))
+                        if adopted:
+                            self._record_exit(
+                                service_id,
+                                generation_digest,
+                                process_identity,
+                                returncode,
+                            )
+
+                    def adopt_callbacks() -> None:
+                        nonlocal callbacks_adopted
+                        with callback_lock:
+                            callbacks_adopted = True
+                            output = tuple(pending_output)
+                            exits = tuple(pending_exit)
+                            pending_output.clear()
+                            pending_exit.clear()
+                        for process_identity, payload in output:
+                            self._record_output(
+                                spec.service_id,
+                                generation_digest,
+                                process_identity,
+                                payload,
+                            )
+                        for process_identity, returncode in exits:
+                            self._record_exit(
+                                spec.service_id,
+                                generation_digest,
+                                process_identity,
+                                returncode,
+                            )
+
                     try:
                         identity = self._process_backend.spawn(
                             spec,
-                            lambda process_identity, payload, service_id=spec.service_id: (
-                                self._record_output(
-                                    service_id,
-                                    generation_digest,
-                                    process_identity,
-                                    payload,
-                                )
-                            ),
-                            lambda process_identity, returncode, service_id=spec.service_id: (
-                                self._record_exit(
-                                    service_id,
-                                    generation_digest,
-                                    process_identity,
-                                    returncode,
-                                )
-                            ),
+                            record_output,
+                            record_exit,
                         )
                     except Exception as exc:
+                        with callback_lock:
+                            callbacks_adopted = True
+                            pending_output.clear()
+                            pending_exit.clear()
                         self._fail_record(
                             spec.service_id,
                             "service_spawn_failed",
@@ -2566,21 +2885,57 @@ class CoreServiceSupervisor:
                         )
                         self._rollback(started, deadline)
                         return self._group_snapshot()
+                    self._handles[spec.service_id] = identity
                     if spec.service_id in listeners:
                         listeners[spec.service_id].close()
-                    self._handles[spec.service_id] = identity
                     self._write_process_identity(self._record(spec.service_id), identity)
                     self._persist()
                     started.append(spec.service_id)
-                    health = self._health_checker.wait_ready(
-                        spec,
-                        identity,
-                        self._process_backend,
-                        deadline,
-                        cancellation,
-                    )
+                    try:
+                        health = self._health_checker.wait_ready(
+                            spec,
+                            identity,
+                            self._process_backend,
+                            deadline,
+                            cancellation,
+                        )
+                    except SupervisorStateError as exc:
+                        adopt_callbacks()
+                        if cancellation.is_set():
+                            raise
+                        self._fail_record(
+                            spec.service_id,
+                            "service_process_identity_unverified",
+                            _safe_message(
+                                "Managed service process identity could not be verified",
+                                exc,
+                            ),
+                        )
+                        self._rollback(started, deadline)
+                        return self._group_snapshot()
+                    process_alive = self._process_backend.is_alive(identity)
+                    if not health.ready or not process_alive:
+                        # A child that already exited may have emitted a
+                        # redacted structured terminal frame. Drain its output
+                        # callback before using a generic health code.
+                        self._process_backend.wait(
+                            identity,
+                            min(1.0, max(0.0, deadline - time.monotonic())),
+                        )
+                    adopt_callbacks()
                     self._raise_if_cancelled(cancellation)
-                    if not health.ready or not self._process_backend.is_alive(identity):
+                    if not health.ready or not process_alive:
+                        record = self._record(spec.service_id)
+                        if (
+                            record.status is ServiceStatus.FAILED
+                            and record.error_code not in {
+                                None,
+                                "service_process_exited",
+                                "service_process_group_identity_unverified",
+                            }
+                        ):
+                            self._rollback(started, deadline)
+                            return self._group_snapshot()
                         code = (
                             "service_readiness_timeout"
                             if time.monotonic() >= deadline
@@ -2777,7 +3132,9 @@ class CoreServiceSupervisor:
                         "restart attempt was already started and cannot be executed again"
                     )
                 if prior.service is None:
-                    raise SupervisorStateError("completed restart attempt lacks its service result")
+                    raise SupervisorStateError(
+                        "completed restart attempt lacks its service result"
+                    )
                 return self._restart_service_summary(prior.service)
 
             record = self._record(service_id)
@@ -2941,6 +3298,7 @@ class CoreServiceSupervisor:
         self,
         runtime_request: ManagedScienceRuntimeRequest,
         runtime_identity_digest: str,
+        runtime_image_immutable_reference: str | None,
         generation_digest: str,
         credential: str,
         listeners: Mapping[str, socket.socket],
@@ -3006,6 +3364,68 @@ class CoreServiceSupervisor:
         base_env = _controlled_environment()
         if self._run_admission_url is not None:
             base_env[CORE_RUN_ADMISSION_URL_ENV] = self._run_admission_url
+        worker_launch_id = None if docker_host_path is None else f"mrl-{secrets.token_hex(16)}"
+        if docker_host_path is not None and runtime_image_immutable_reference is None:
+            raise SupervisorStateError(
+                "Docker host-path authority requires an immutable managed runtime image"
+            )
+        worker_internal_identity = InternalServiceIdentity(
+            service_id="evolution-worker",
+            generation_digest=generation_digest,
+            registry_digest=self._release_identity.registry_digest,
+            framework_lock_digest=self._framework_lock_digest,
+            credential=credential,
+        )
+        reflector_release_digest = (
+            None
+            if runtime_image_immutable_reference is None
+            else managed_runtime_release_authority_digest(
+                profile="managed_science",
+                image=runtime_image_immutable_reference,
+            )
+        )
+        worker_mount_authority = (
+            ManagedReflectorMountAuthority.issue(
+                identity=worker_internal_identity,
+                daemon_release_identity=self._daemon_release_identity,
+                release_install_digest=self._release_identity.install_digest,
+                runtime_identity_digest=runtime_identity_digest,
+                runtime_image=reflector_release_digest,
+                worker_launch_id=worker_launch_id,
+                docker_host_path=docker_host_path,
+            )
+            if worker_launch_id is not None
+            and docker_host_path is not None
+            and reflector_release_digest is not None
+            else None
+        )
+        worker_mount_expectation = (
+            None
+            if worker_mount_authority is None
+            else ManagedReflectorMountRegistrationExpectation.from_authority(
+                worker_mount_authority
+            )
+        )
+        worker_mount_argv = (
+            ()
+            if docker_host_path is None or worker_launch_id is None
+            else (
+                "--managed-reflector-mount-launch-id",
+                worker_launch_id,
+                "--managed-reflector-docker-host-path-identity",
+                docker_host_path.identity_digest,
+                "--managed-reflector-release-install-identity",
+                self._release_identity.install_digest,
+                "--managed-reflector-daemon-release-identity",
+                self._daemon_release_identity,
+                "--managed-reflector-runtime-profile",
+                "managed_science",
+                "--managed-reflector-runtime-image",
+                reflector_release_digest,
+                "--managed-reflector-runtime-identity",
+                runtime_identity_digest,
+            )
+        )
         plans = (
             (
                 "evolution-backend",
@@ -3027,6 +3447,14 @@ class CoreServiceSupervisor:
                     os.fspath(evolution_root / "artifacts"),
                     "--framework-lock",
                     os.fspath(self._framework_lock_path),
+                    *(
+                        ()
+                        if worker_mount_expectation is None
+                        else (
+                            "--managed-reflector-mount-expectation",
+                            worker_mount_expectation.model_dump_json(),
+                        )
+                    ),
                 ),
                 ports["evolution-backend"],
                 ServiceHealthProbe.http(
@@ -3093,6 +3521,9 @@ class CoreServiceSupervisor:
                     "core-reference-worker",
                     "--artifact-root",
                     os.fspath(evolution_root / "artifacts"),
+                    "--managed-reflector-root",
+                    os.fspath(evolution_root / "managed-reflector"),
+                    *worker_mount_argv,
                     "--framework-lock",
                     os.fspath(self._framework_lock_path),
                 ),
@@ -3107,19 +3538,31 @@ class CoreServiceSupervisor:
         topology_digest = _digest_json(topology)
         specs = []
         for service_id, display_name, component, argv, port, health_probe in plans:
-            internal_identity = InternalServiceIdentity(
-                service_id=service_id,
-                generation_digest=generation_digest,
-                registry_digest=self._release_identity.registry_digest,
-                framework_lock_digest=self._framework_lock_digest,
-                credential=credential,
+            internal_identity = (
+                worker_internal_identity
+                if service_id == "evolution-worker"
+                else InternalServiceIdentity(
+                    service_id=service_id,
+                    generation_digest=generation_digest,
+                    registry_digest=self._release_identity.registry_digest,
+                    framework_lock_digest=self._framework_lock_digest,
+                    credential=credential,
+                )
+            )
+            managed_reflector_mount_authority = (
+                worker_mount_authority if service_id == "evolution-worker" else None
             )
             argv_digest = _digest_json(list(argv))
             service_env = dict(base_env)
             if service_id == "gateway":
-                service_env[WORKSPACE_HANDOFF_ROOT_ENV] = os.fspath(
-                    self._workspace_handoff_root
-                )
+                service_env[WORKSPACE_HANDOFF_ROOT_ENV] = os.fspath(self._workspace_handoff_root)
+            if service_id == "evolution-worker":
+                # The worker receives a sealed credential snapshot and launches
+                # Codex only inside the managed container.  Never expose the
+                # supervisor user's HOME or PATH-based Codex installations.
+                service_env["HOME"] = "/nonexistent-openevo-evolution-worker-home"
+                service_env["PATH"] = "/usr/bin:/bin"
+                service_env.pop("CODEX_HOME", None)
             service_env = dict(sorted(service_env.items()))
             env_digest = _digest_json(service_env)
             identity_digest = _digest_json(
@@ -3138,6 +3581,11 @@ class CoreServiceSupervisor:
                     "topology_digest": topology_digest,
                     "generation_digest": generation_digest,
                     "auth_digest": internal_identity.auth_digest,
+                    "managed_reflector_mount_authority_id": (
+                        None
+                        if managed_reflector_mount_authority is None
+                        else managed_reflector_mount_authority.authority_id
+                    ),
                 }
             )
             specs.append(
@@ -3153,13 +3601,21 @@ class CoreServiceSupervisor:
                     port=port,
                     health_probe=health_probe,
                     cwd=os.fspath(self._child_cwd),
+                    docker_host_path_identity=(
+                        docker_host_path.identity_digest
+                        if service_id == "gateway" and docker_host_path is not None
+                        else None
+                    ),
                     internal_identity=internal_identity,
                     listen_fd=(
                         listeners[service_id].fileno() if service_id in listeners else None
                     ),
                     codex_credential_authority=(
-                        credential_authority if service_id == "gateway" else None
+                        credential_authority
+                        if service_id in {"gateway", "evolution-worker"}
+                        else None
                     ),
+                    managed_reflector_mount_authority=(managed_reflector_mount_authority),
                 )
             )
         return tuple(specs), topology
@@ -3447,7 +3903,18 @@ class CoreServiceSupervisor:
             key = (service_id, generation_digest, identity)
             redactor = self._output_redactors.get(key)
             if redactor is None:
-                redactor = _BoundedLogStreamRedactor(credential)
+                credential_authority = self._active_credential_authority
+                redactor = _BoundedLogStreamRedactor(
+                    credential,
+                    credential_redactor=(
+                        credential_authority.redactor
+                        if isinstance(
+                            credential_authority,
+                            PreparedCodexCredentialSnapshot,
+                        )
+                        else None
+                    ),
+                )
                 self._output_redactors[key] = redactor
             redacted = redactor.feed(payload)
             self._append_output_payload(service_id, redacted)
@@ -3493,8 +3960,16 @@ class CoreServiceSupervisor:
                 return
             self._flush_output(service_id, generation_digest, identity)
             record.status = ServiceStatus.FAILED
-            record.error_code = "service_process_exited"
-            record.status_message = f"Managed process exited with status {returncode}."
+            terminal = _managed_child_terminal_failure(record)
+            if terminal is None:
+                record.error_code = "service_process_exited"
+                record.status_message = f"Managed process exited with status {returncode}."
+            else:
+                failure_code, phase = terminal
+                record.error_code = failure_code
+                record.status_message = (
+                    f"Managed child failed during {phase} with status {returncode}."
+                )
             record.updated_at = _timestamp()
             try:
                 group_alive = self._process_backend.is_alive(identity)
@@ -3833,15 +4308,15 @@ class CoreServiceSupervisor:
             > self._max_log_bytes
         ):
             raise SupervisorStateError("service ledger aggregate log budget is exceeded")
-        restart_attempts = (
-            ledger.restart_attempts if isinstance(ledger, _Ledger) else ()
-        )
+        restart_attempts = ledger.restart_attempts if isinstance(ledger, _Ledger) else ()
         if len(restart_attempts) > self._max_restart_operations:
             raise SupervisorStateError("restart attempt receipt capacity is exceeded")
         operation_ids: set[str] = set()
         for attempt in restart_attempts:
             if attempt.operation_id in operation_ids:
-                raise SupervisorStateError("restart attempt ledger contains duplicate operation IDs")
+                raise SupervisorStateError(
+                    "restart attempt ledger contains duplicate operation IDs"
+                )
             operation_ids.add(attempt.operation_id)
             if attempt.state is ServiceRestartAttemptState.STARTED:
                 if attempt.service is not None:
@@ -3872,9 +4347,7 @@ class CoreServiceSupervisor:
                     raise SupervisorStateError(
                         "restart attempt service result etag is inconsistent"
                     )
-                if (service.status is ServiceStatus.FAILED) != (
-                    service.error_code is not None
-                ):
+                if (service.status is ServiceStatus.FAILED) != (service.error_code is not None):
                     raise SupervisorStateError(
                         "restart attempt service result failure state is inconsistent"
                     )
@@ -3965,7 +4438,9 @@ class CoreServiceSupervisor:
         service: SupervisorServiceSummary,
     ) -> _LedgerRestartService:
         return _LedgerRestartService.model_validate(
-            service.__dict__ if hasattr(service, "__dict__") else {
+            service.__dict__
+            if hasattr(service, "__dict__")
+            else {
                 "id": service.id,
                 "display_name": service.display_name,
                 "component": service.component.value,
@@ -4058,7 +4533,9 @@ class CoreServiceSupervisor:
             attempt.service_id != service_id
             or attempt.expected_service_etag != expected_service_etag
         ):
-            raise SupervisorStateError("restart operation identity was reused for a different request")
+            raise SupervisorStateError(
+                "restart operation identity was reused for a different request"
+            )
 
     def _record(self, service_id: str) -> _LedgerService:
         record = self._record_or_none(service_id)
@@ -4307,16 +4784,101 @@ def _probe_http(spec: ServiceProcessSpec, remaining: float) -> tuple[bool, str]:
                     or payload.get("direct_model_api") is not False
                 ):
                     return False, "gateway is not connected in transcript-only mode"
+                if probe.expected_service_id == "gateway":
+                    try:
+                        candidate = ManagedCandidateRuntimeReadiness.model_validate(
+                            payload.get("managed_candidate_runtime_readiness")
+                        )
+                    except (TypeError, ValueError):
+                        return False, "managed candidate runtime readiness is invalid"
+                    if (
+                        candidate.generation_digest != identity.generation_digest
+                        or candidate.release_registry_digest != identity.registry_digest
+                        or candidate.framework_lock_digest
+                        != identity.framework_lock_digest
+                        or candidate.docker_host_path_identity
+                        != spec.docker_host_path_identity
+                        or candidate.runtime_digest
+                        != MANAGED_RUNTIME_RELEASES["managed_science"].trusted_digest
+                        or candidate.actual_cli_version != MANAGED_CODEX_VERSION
+                        or candidate.adoption_verified is not True
+                        or candidate.cleanup_verified is not True
+                        or candidate.model_started is not False
+                    ):
+                        return False, "managed candidate runtime readiness identity mismatch"
                 if probe.required_worker_id is not None:
                     workers = payload.get("workers")
-                    expected_worker = {
-                        "framework_lock_digest": identity.framework_lock_digest,
-                        "generation_digest": identity.generation_digest,
-                        "registry_digest": identity.registry_digest,
-                        "worker_id": probe.required_worker_id,
-                    }
-                    if not isinstance(workers, list) or expected_worker not in workers:
+                    matches = (
+                        [
+                            worker
+                            for worker in workers
+                            if isinstance(worker, dict)
+                            and worker.get("framework_lock_digest")
+                            == identity.framework_lock_digest
+                            and worker.get("generation_digest") == identity.generation_digest
+                            and worker.get("registry_digest") == identity.registry_digest
+                            and worker.get("worker_id") == probe.required_worker_id
+                        ]
+                        if isinstance(workers, list)
+                        else []
+                    )
+                    if len(matches) != 1:
                         return False, "evolution worker is not registered"
+                    raw_mount = matches[0].get("managed_reflector_credential_mount")
+                    raw_runtime = matches[0].get(
+                        "managed_reflector_runtime_readiness"
+                    )
+                    mount_authority = spec.managed_reflector_mount_authority
+                    if mount_authority is None:
+                        if raw_mount is not None or raw_runtime is not None:
+                            return False, "unexpected reflector mount readiness"
+                    else:
+                        try:
+                            mount = ManagedReflectorCredentialMountReadiness.model_validate(
+                                raw_mount
+                            )
+                            runtime_readiness = (
+                                ManagedReflectorRuntimeReadiness.model_validate(
+                                    raw_runtime
+                                )
+                            )
+                        except (TypeError, ValueError):
+                            return False, "reflector runtime readiness is invalid"
+                        grant = mount_authority.grant
+                        if (
+                            mount.authority_id != mount_authority.authority_id
+                            or mount.daemon_release_identity != grant.daemon_release_identity
+                            or mount.service_identity_digest != grant.service_identity_digest
+                            or mount.worker_launch_id != grant.worker_launch_id
+                            or mount.generation_digest != identity.generation_digest
+                            or mount.release_install_digest != grant.release_install_digest
+                            or mount.release_registry_digest != identity.registry_digest
+                            or mount.runtime_profile != grant.runtime_profile
+                            or mount.runtime_digest != grant.runtime_image
+                            or mount.docker_host_path_identity
+                            != grant.docker_host_path.identity_digest
+                            or mount.container_uid != grant.docker_host_path.runtime_uid
+                            or runtime_readiness.authority_id
+                            != mount_authority.authority_id
+                            or runtime_readiness.worker_launch_id
+                            != grant.worker_launch_id
+                            or runtime_readiness.generation_digest
+                            != identity.generation_digest
+                            or runtime_readiness.release_install_digest
+                            != grant.release_install_digest
+                            or runtime_readiness.release_registry_digest
+                            != identity.registry_digest
+                            or runtime_readiness.runtime_digest != grant.runtime_image
+                            or runtime_readiness.credential_mount_content_sha256
+                            != mount.content_sha256
+                            or runtime_readiness.actual_cli_version
+                            != MANAGED_CODEX_VERSION
+                            or runtime_readiness.expected_cli_version
+                            != MANAGED_CODEX_VERSION
+                            or runtime_readiness.codex_cli_started is not True
+                            or runtime_readiness.model_started is not False
+                        ):
+                            return False, "reflector runtime readiness identity mismatch"
                 return True, "authenticated service identity is healthy"
             return False, f"HTTP health probe returned {response.status}"
     except (
@@ -4418,13 +4980,16 @@ def _same_process(identity: ProcessIdentity) -> bool:
         return False
 
 
-def _owned_process_group_members(identity: ProcessIdentity) -> tuple[int, ...] | None:
+def _owned_process_group_members(
+    identity: ProcessIdentity,
+    *,
+    proc_root: Path = Path("/proc"),
+) -> tuple[int, ...] | None:
     """Return owned live group members, empty for absent, or None when unverified."""
 
     if not sys.platform.startswith("linux"):
         return None
     members: list[int] = []
-    proc_root = Path("/proc")
     try:
         candidates = tuple(proc_root.iterdir())
     except OSError:
@@ -4433,14 +4998,10 @@ def _owned_process_group_members(identity: ProcessIdentity) -> tuple[int, ...] |
         if not candidate.name.isdecimal():
             continue
         try:
-            stat_text = (candidate / "stat").read_text(encoding="ascii")
-            end = stat_text.rfind(")")
-            fields = stat_text[end + 2 :].split()
-            state = fields[0]
-            process_group_id = int(fields[2])
-            session_id = int(fields[3])
+            snapshot = _proc_group_snapshot(candidate)
         except (OSError, UnicodeDecodeError, ValueError, IndexError):
             continue
+        state, process_group_id, session_id, start_ticks = snapshot
         if state == "Z" or (
             process_group_id != identity.process_group_id or session_id != identity.session_id
         ):
@@ -4451,14 +5012,92 @@ def _owned_process_group_members(identity: ProcessIdentity) -> tuple[int, ...] |
                 return None
             environment = (candidate / "environ").read_bytes().split(b"\0")
         except OSError:
+            # Docker adoption uses short-lived CLI children in the worker's
+            # process group.  A child may exit or become a zombie after its
+            # first proc stat established group membership but before its
+            # ownership environment is read.  Ignore only an entry that is
+            # provably absent or the same now-zombie process on a second
+            # observation.  PID reuse, permission failures and every live
+            # unreadable entry remain fail-closed.
+            if _proc_member_became_inert(
+                candidate,
+                process_group_id=process_group_id,
+                session_id=session_id,
+                start_ticks=start_ticks,
+            ):
+                continue
             return None
         expected = f"{INTERNAL_OWNERSHIP_ENV}={identity.ownership_digest}".encode("ascii")
         if expected not in environment:
+            if _proc_member_became_inert(
+                candidate,
+                process_group_id=process_group_id,
+                session_id=session_id,
+                start_ticks=start_ticks,
+            ):
+                continue
             return None
         if pid == identity.pid and not _same_process(identity):
             return None
         members.append(pid)
     return tuple(sorted(members))
+
+
+def _stabilized_owned_process_group_members(
+    identity: ProcessIdentity,
+    *,
+    attempts: int = 10,
+    interval_seconds: float = 0.01,
+) -> tuple[int, ...] | None:
+    """Return only a verified process-group observation after a short race window.
+
+    Docker CLI children used by the managed reflector are intentionally
+    short-lived.  Linux can expose an empty zombie ``environ`` immediately
+    before the second ``stat`` observation reports ``Z``.  A single strict
+    observation therefore has an unavoidable false-negative window.  Retry
+    that *observation* for at most 100 ms; no unverified state is accepted and
+    a live marker-less member still fails closed when the window expires.
+    """
+
+    if attempts < 1 or interval_seconds < 0:
+        raise ValueError("process-group stabilization settings are invalid")
+    members = _owned_process_group_members(identity)
+    for _ in range(attempts - 1):
+        if members is not None:
+            return members
+        time.sleep(interval_seconds)
+        members = _owned_process_group_members(identity)
+    return members
+
+
+def _proc_group_snapshot(candidate: Path) -> tuple[str, int, int, str]:
+    stat_text = (candidate / "stat").read_text(encoding="ascii")
+    end = stat_text.rfind(")")
+    if end < 0:
+        raise ValueError("proc stat command boundary is missing")
+    fields = stat_text[end + 2 :].split()
+    return fields[0], int(fields[2]), int(fields[3]), fields[19]
+
+
+def _proc_member_became_inert(
+    candidate: Path,
+    *,
+    process_group_id: int,
+    session_id: int,
+    start_ticks: str,
+) -> bool:
+    try:
+        state, observed_group, observed_session, observed_start = _proc_group_snapshot(candidate)
+    except FileNotFoundError:
+        return True
+    except (OSError, UnicodeDecodeError, ValueError, IndexError):
+        return False
+    return (
+        state == "Z"
+        and observed_group == process_group_id
+        and observed_session == session_id
+        and observed_start == start_ticks
+    )
 
 
 def _require_private_directory(info: os.stat_result, uid: int, label: str) -> None:
@@ -4606,6 +5245,37 @@ def _sanitize_structured_log(value: object, *, key: str | None = None) -> object
     if value is None or isinstance(value, (bool, int, float)):
         return value
     return "<redacted>"
+
+
+def _managed_child_terminal_failure(
+    record: _LedgerService,
+) -> tuple[str, str] | None:
+    """Read the last closed managed-runtime terminal frame from redacted logs."""
+
+    for item in reversed(record.logs):
+        try:
+            payload = json.loads(item.message)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(payload, dict) or (
+            payload.get("event") != "managed_candidate_runtime_probe_terminal"
+            or payload.get("component")
+            != "managed_candidate_subscription_isolation"
+            or payload.get("status") != "failed"
+            or payload.get("model_started") is not False
+            or payload.get("secret_recorded") is not False
+        ):
+            continue
+        failure_code = payload.get("failure_code")
+        phase = payload.get("phase")
+        if (
+            isinstance(failure_code, str)
+            and re.fullmatch(r"[a-z][a-z0-9_]{0,95}", failure_code)
+            and isinstance(phase, str)
+            and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", phase)
+        ):
+            return failure_code, phase
+    return None
 
 
 def _safe_message(prefix: str, exc: BaseException) -> str:
