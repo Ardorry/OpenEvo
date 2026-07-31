@@ -33,6 +33,14 @@ from openevo_chembench.supervised_transfer_v3.category_shard_recovery import (
     build_source_compatibility_receipt_v3,
 )
 from openevo_chembench.supervised_transfer_v3.config import load_config_v3
+from openevo_chembench.supervised_transfer_v3.continued_category_shard_recovery import (
+    CONTINUED_PARENT_RUN_ID,
+    CONTINUED_START_CATEGORY_INDEX,
+    ContinuedCategoryShardRecoveryV3,
+    audit_continued_parent_category_shards_v3,
+    build_continued_category_recovery_dry_run_v3,
+    build_continued_source_compatibility_receipt_v3,
+)
 from openevo_chembench.supervised_transfer_v3.experiment import (
     SupervisedTransferExperimentV3,
     build_complete_dry_run_v3,
@@ -87,6 +95,9 @@ def main() -> int:
             "same-profile-category-recovery-verify",
             "same-profile-category-recovery-dry-run",
             "same-profile-category-recover-online",
+            "continued-category-recovery-verify",
+            "continued-category-recovery-dry-run",
+            "continued-category-recover-online",
         ),
     )
     arguments = parser.parse_args()
@@ -190,6 +201,49 @@ def main() -> int:
                 audit=audit,
                 recovery_run_id=arguments.run_id,
             )
+    elif arguments.command in {
+        "continued-category-recovery-verify",
+        "continued-category-recovery-dry-run",
+    }:
+        start_category_index = (
+            CONTINUED_START_CATEGORY_INDEX
+            if arguments.start_category_index is None
+            else arguments.start_category_index
+        )
+        audit = audit_continued_parent_category_shards_v3(
+            repository_root=REPOSITORY_ROOT,
+            parent_run_id=arguments.parent_run_id or CONTINUED_PARENT_RUN_ID,
+            start_category_index=start_category_index,
+        )
+        if arguments.command == "continued-category-recovery-verify":
+            payload = {
+                "status": "PASS",
+                "parent_run_id": audit.parent_run_id,
+                "accepted_closed_shards_sha256": audit.accepted.digest,
+                "accepted_categories": [shard.category for shard in audit.accepted.shards],
+                "discarded_partial_shard_sha256": audit.discarded.digest,
+                "discarded_category": audit.discarded.category,
+                "parent_tree_sha256": audit.parent_tree_sha256,
+                "parent_artifacts_imported": False,
+                "parent_database_imported": False,
+                "first_category": audit.discarded.category,
+                "first_task": 0,
+                "generation_zero_targets": True,
+                "model_calls": 0,
+            }
+        else:
+            if not arguments.run_id:
+                parser.error("continued-category-recovery-dry-run requires --run-id")
+            inputs = load_experiment_inputs_v3(
+                REPOSITORY_ROOT,
+                config,
+                require_runtime=False,
+            )
+            payload = build_continued_category_recovery_dry_run_v3(
+                inputs=inputs,
+                audit=audit,
+                recovery_run_id=arguments.run_id,
+            )
     elif arguments.command == "services-start":
         if not arguments.service_run_id:
             parser.error("services-start requires --service-run-id")
@@ -264,7 +318,7 @@ def main() -> int:
         )
         write_public_file(write_path, canonical_pretty_json_bytes(compatibility))
         payload = experiment.run_category_shard_recovery()
-    else:
+    elif arguments.command == "same-profile-category-recover-online":
         if not arguments.allow_paid:
             parser.error("same-profile-category-recover-online requires --allow-paid")
         if not arguments.run_id:
@@ -303,6 +357,47 @@ def main() -> int:
         write_path = (
             experiment.result_root
             / "public/same_profile_category_shard_source_compatibility_receipt_v3.json"
+        )
+        write_public_file(write_path, canonical_pretty_json_bytes(compatibility))
+        payload = experiment.run_category_shard_recovery()
+    else:
+        if not arguments.allow_paid:
+            parser.error("continued-category-recover-online requires --allow-paid")
+        if not arguments.run_id:
+            parser.error("continued-category-recover-online requires --run-id")
+        if not arguments.smoke_run_id:
+            parser.error("continued-category-recover-online requires --smoke-run-id")
+        start_category_index = (
+            CONTINUED_START_CATEGORY_INDEX
+            if arguments.start_category_index is None
+            else arguments.start_category_index
+        )
+        require_paid_runtime_python_v2(repository_root=REPOSITORY_ROOT)
+        audit = audit_continued_parent_category_shards_v3(
+            repository_root=REPOSITORY_ROOT,
+            parent_run_id=arguments.parent_run_id or CONTINUED_PARENT_RUN_ID,
+            start_category_index=start_category_index,
+        )
+        compatibility = build_continued_source_compatibility_receipt_v3(
+            audit=audit,
+            recovery_run_id=arguments.run_id,
+        )
+        if compatibility["semantically_compatible"] is not True:
+            raise RuntimeError("RECOVERY_SOURCE_NOT_SEMANTICALLY_COMPATIBLE")
+        inputs = load_experiment_inputs_v3(
+            REPOSITORY_ROOT,
+            config,
+            require_runtime=True,
+        )
+        experiment = ContinuedCategoryShardRecoveryV3(
+            inputs=inputs,
+            run_id=arguments.run_id,
+            smoke_run_id=arguments.smoke_run_id,
+            parent_audit=audit,
+        )
+        write_path = (
+            experiment.result_root
+            / "public/continued_category_shard_source_compatibility_receipt_v3.json"
         )
         write_public_file(write_path, canonical_pretty_json_bytes(compatibility))
         payload = experiment.run_category_shard_recovery()
