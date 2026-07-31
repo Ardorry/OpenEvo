@@ -11,6 +11,7 @@ from openevo_chembench.supervised_transfer_v3.continued_category_shard_recovery 
     CONTINUED_START_CATEGORY_INDEX,
     ContinuedAcceptedClosedShardsReceiptV3,
     ContinuedCategoryShardRecoveryV3,
+    ContinuedDiscardedArtifactValidationShardReceiptV3,
     ContinuedDiscardedPartialShardReceiptV3,
     ContinuedRemainingShardExecutionPlanV3,
     audit_continued_parent_category_shards_v3,
@@ -37,6 +38,13 @@ CONFIG_PATH = (
     REPOSITORY / "benchmarks/chembench/configs/supervised_transfer_v3/"
     "chembench_supervised_transfer_v3_two_round_one_evolution.yaml"
 )
+ARTIFACT_FAILURE_PARENT_RUN_ID = "stv3-temperature-recovery-20260731T071432Z"
+ARTIFACT_FAILURE_PARENT_STATE = (
+    REPOSITORY
+    / "state/chembench_supervised_transfer_v3/runs"
+    / ARTIFACT_FAILURE_PARENT_RUN_ID
+    / "run_state.json"
+)
 
 
 @pytest.fixture(scope="module")
@@ -55,6 +63,17 @@ def live_inputs():
         REPOSITORY,
         load_config_v3(CONFIG_PATH),
         require_runtime=False,
+    )
+
+
+@pytest.fixture(scope="module")
+def artifact_failure_parent_audit():
+    if not ARTIFACT_FAILURE_PARENT_STATE.is_file():
+        pytest.skip("immutable artifact-validation recovery parent is unavailable")
+    return audit_continued_parent_category_shards_v3(
+        repository_root=REPOSITORY,
+        parent_run_id=ARTIFACT_FAILURE_PARENT_RUN_ID,
+        start_category_index=7,
     )
 
 
@@ -168,3 +187,64 @@ def test_parent_tree_is_unchanged_by_continued_audit(live_parent_audit) -> None:
     assert repeated.parent_tree_sha256 == live_parent_audit.parent_tree_sha256
     assert repeated.parent_tree_file_count == live_parent_audit.parent_tree_file_count
     assert repeated.parent_tree_size_bytes == live_parent_audit.parent_tree_size_bytes
+
+
+def test_artifact_validation_parent_accepts_only_closed_prefix(
+    artifact_failure_parent_audit,
+) -> None:
+    assert tuple(
+        shard.category for shard in artifact_failure_parent_audit.accepted.shards
+    ) == CHEMBENCH4K_CATEGORIES[:7]
+    receipt = artifact_failure_parent_audit.discarded
+    assert type(receipt) is ContinuedDiscardedArtifactValidationShardReceiptV3
+    assert receipt.category == "Temperature_Prediction"
+    assert receipt.completed_task_count == 20
+    assert receipt.partial_task_ordinal == 20
+    assert receipt.candidate_attempt_count_discarded == 44
+    assert receipt.candidate_completion_count_discarded == 41
+    assert receipt.candidate_attempts_without_completion_discarded == 3
+    assert receipt.closed_reflector_cycle_count_discarded == 20
+    assert receipt.reflector_call_count_discarded == 21
+    assert receipt.core_job_count_discarded == 61
+    assert receipt.artifact_count_discarded == 61
+    assert receipt.promoted_artifact_count_discarded == 60
+    assert receipt.rejected_unpromoted_artifact_count_discarded == 1
+    assert receipt.context_resolution_count_discarded == 60
+    assert receipt.validator_finding_codes == ("memory_structure_invalid",)
+    assert receipt.root_cause == "NUL_CONTROL_CHARACTER_IN_RENDERED_TEXT_MEMORY"
+    assert receipt.used_as_recovery_input is False
+    assert receipt.artifacts_imported is False
+    assert receipt.database_imported is False
+
+
+def test_artifact_validation_recovery_restarts_temperature_at_generation_zero(
+    live_inputs,
+    artifact_failure_parent_audit,
+) -> None:
+    dry_run = build_continued_category_recovery_dry_run_v3(
+        inputs=live_inputs,
+        audit=artifact_failure_parent_audit,
+        recovery_run_id="stv3-temperature-controlfix-recovery-20990101T000000Z",
+    )
+    assert dry_run["first_category"] == "Temperature_Prediction"
+    assert dry_run["first_task_ordinal"] == 0
+    assert dry_run["first_round"] == 0
+    assert dry_run["generation_zero_targets"] is True
+    assert dry_run["parent_artifacts_imported"] is False
+    assert dry_run["parent_database_imported"] is False
+
+
+def test_artifact_validation_parent_tree_is_unchanged_by_audit(
+    artifact_failure_parent_audit,
+) -> None:
+    repeated = audit_continued_parent_category_shards_v3(
+        repository_root=REPOSITORY,
+        parent_run_id=ARTIFACT_FAILURE_PARENT_RUN_ID,
+        start_category_index=7,
+    )
+    assert repeated.parent_tree_sha256 == artifact_failure_parent_audit.parent_tree_sha256
+    assert (
+        repeated.parent_tree_file_count
+        == artifact_failure_parent_audit.parent_tree_file_count
+    )
+    assert repeated.parent_tree_size_bytes == artifact_failure_parent_audit.parent_tree_size_bytes

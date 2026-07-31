@@ -9,6 +9,7 @@ starts that category again at task zero with generation-zero targets.
 from __future__ import annotations
 
 import subprocess
+import stat
 from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +26,10 @@ from openevo_chembench.supervised_transfer_v1.common import (
     write_public_file,
 )
 from openevo_chembench.supervised_transfer_v2 import experiment as v2
+from openevo_chembench.supervised_transfer_v2.reflector_boundary import (
+    _SUPERVISED_MULTITARGET_RENDER_ID,
+    _SUPERVISED_UNSAFE_CONTROL_RE,
+)
 from openevo_chembench.supervised_transfer_v3.category_shard_recovery import (
     _RUN_ID,
     _active_processes,
@@ -230,6 +235,83 @@ class ContinuedDiscardedPartialShardReceiptV3(_ClosedModel):
         return value
 
 
+class ContinuedDiscardedArtifactValidationShardReceiptV3(_ClosedModel):
+    """Content-free receipt for a category stopped by one rejected target."""
+
+    schema_version: Literal["ContinuedDiscardedArtifactValidationShardReceiptV3"] = (
+        "ContinuedDiscardedArtifactValidationShardReceiptV3"
+    )
+    parent_run_id: str
+    category_index: int = Field(ge=1, le=8)
+    category: str
+    discard_entire_category: Literal[True] = True
+    completed_task_count: int = Field(ge=0, le=49)
+    partial_task_ordinal: int = Field(ge=0, le=49)
+    partial_task_round_zero_completion_exists: Literal[True] = True
+    partial_task_round_one_attempt_exists: Literal[False] = False
+    partial_task_round_one_completion_exists: Literal[False] = False
+    candidate_attempt_count_discarded: int = Field(ge=1)
+    candidate_completion_count_discarded: int = Field(ge=1)
+    candidate_attempts_without_completion_discarded: int = Field(ge=0)
+    reflector_call_count_discarded: int = Field(ge=1)
+    closed_reflector_cycle_count_discarded: int = Field(ge=0)
+    core_job_count_discarded: int = Field(ge=1)
+    artifact_count_discarded: int = Field(ge=1)
+    promoted_artifact_count_discarded: int = Field(ge=0)
+    rejected_unpromoted_artifact_count_discarded: Literal[1] = 1
+    context_resolution_count_discarded: int = Field(ge=0)
+    failure_code: Literal["TASKWISE_ARTIFACT_VALIDATION_FAILED"] = (
+        "TASKWISE_ARTIFACT_VALIDATION_FAILED"
+    )
+    rejected_artifact_type: Literal["text_memory"] = "text_memory"
+    validator_finding_codes: tuple[Literal["memory_structure_invalid"], ...]
+    root_cause: Literal["NUL_CONTROL_CHARACTER_IN_RENDERED_TEXT_MEMORY"] = (
+        "NUL_CONTROL_CHARACTER_IN_RENDERED_TEXT_MEMORY"
+    )
+    rejected_artifact_payload_sha256: str
+    failure_evidence_sha256: str
+    included_in_final_statistics: Literal[False] = False
+    used_as_recovery_input: Literal[False] = False
+    artifacts_imported: Literal[False] = False
+    database_imported: Literal[False] = False
+    actual_paid_usage_retained: Literal[True] = True
+    parent_evidence_preserved: Literal[True] = True
+    category_tree_sha256: str
+
+    @model_validator(mode="after")
+    def _counts(self) -> ContinuedDiscardedArtifactValidationShardReceiptV3:
+        completed = self.completed_task_count
+        if (
+            self.partial_task_ordinal != completed
+            or self.candidate_completion_count_discarded != completed * 2 + 1
+            or self.candidate_attempt_count_discarded
+            != self.candidate_completion_count_discarded
+            + self.candidate_attempts_without_completion_discarded
+            or self.closed_reflector_cycle_count_discarded != completed
+            or self.reflector_call_count_discarded != completed + 1
+            or self.core_job_count_discarded != completed * 3 + 1
+            or self.artifact_count_discarded != completed * 3 + 1
+            or self.promoted_artifact_count_discarded != completed * 3
+            or self.context_resolution_count_discarded != completed * 3
+            or self.validator_finding_codes != ("memory_structure_invalid",)
+        ):
+            raise ValueError("discarded artifact-validation category counts are inconsistent")
+        return self
+
+    @field_validator(
+        "rejected_artifact_payload_sha256",
+        "failure_evidence_sha256",
+        "category_tree_sha256",
+    )
+    @classmethod
+    def _digest(cls, value: str) -> str:
+        if len(value) != _SHA256_LENGTH or any(
+            char not in "0123456789abcdef" for char in value
+        ):
+            raise ValueError("artifact-validation shard digest must be SHA-256")
+        return value
+
+
 class ContinuedCategoryRecoveryAmendmentV3(_ClosedModel):
     schema_version: Literal["ContinuedCategoryRecoveryAmendmentV3"] = (
         "ContinuedCategoryRecoveryAmendmentV3"
@@ -240,9 +322,10 @@ class ContinuedCategoryRecoveryAmendmentV3(_ClosedModel):
     recovery_protocol_id: Literal[
         "supervised_transfer_v3_two_round_one_evolution_chained_category_shard_recovery"
     ] = CONTINUED_CATEGORY_RECOVERY_PROTOCOL_ID
-    amendment_reason: Literal["RUNTIME_SERVICE_HEALTH_INVALID"] = (
-        "RUNTIME_SERVICE_HEALTH_INVALID"
-    )
+    amendment_reason: Literal[
+        "RUNTIME_SERVICE_HEALTH_INVALID",
+        "TASKWISE_ARTIFACT_VALIDATION_FAILED",
+    ]
     authorization: Literal["explicit_user_authorization"] = "explicit_user_authorization"
     parent_run_id: str
     recovery_run_id: str
@@ -367,7 +450,10 @@ class ContinuedAuditedParentShardsV3:
     parent_tree_file_count: int
     parent_tree_size_bytes: int
     accepted: ContinuedAcceptedClosedShardsReceiptV3
-    discarded: ContinuedDiscardedPartialShardReceiptV3
+    discarded: (
+        ContinuedDiscardedPartialShardReceiptV3
+        | ContinuedDiscardedArtifactValidationShardReceiptV3
+    )
 
 
 def continued_remaining_categories_v3(start_category_index: int) -> tuple[str, ...]:
@@ -613,6 +699,280 @@ def _audit_discarded_current_category(
     )
 
 
+def _read_rejected_artifact_payload(
+    *,
+    category_root: Path,
+    uri: object,
+) -> bytes:
+    if type(uri) is not str or not uri.startswith("file://"):
+        raise SupervisedExperimentV3Error(
+            "CONTINUED_REJECTED_ARTIFACT_URI_INVALID"
+        )
+    path = Path(uri.removeprefix("file://")).resolve(strict=True)
+    root = category_root.resolve(strict=True)
+    metadata = path.lstat()
+    if (
+        not path.is_relative_to(root)
+        or stat.S_ISLNK(metadata.st_mode)
+        or not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_size > 24_576
+    ):
+        raise SupervisedExperimentV3Error(
+            "CONTINUED_REJECTED_ARTIFACT_PATH_INVALID"
+        )
+    return path.read_bytes()
+
+
+def _audit_discarded_artifact_validation_category(
+    *,
+    state_root: Path,
+    public_events: list[dict[str, Any]],
+    private_events: list[dict[str, Any]],
+    parent_run_id: str,
+    category_index: int,
+) -> ContinuedDiscardedArtifactValidationShardReceiptV3:
+    category = CHEMBENCH4K_CATEGORIES[category_index]
+    category_root = state_root / "private/core/formal" / category
+    rows = _read_jsonl(category_root / "private_lineage_checkpoints_v2.jsonl")
+    completed_task_count = len(rows)
+    if not 1 <= completed_task_count <= 49:
+        raise SupervisedExperimentV3Error(
+            "CONTINUED_ARTIFACT_FAILURE_CHECKPOINT_COUNT_INVALID"
+        )
+    results = _validate_checkpoint_chain(
+        rows,
+        category=category,
+        expected_tasks=completed_task_count,
+    )
+    evaluations = _category_events(
+        private_events,
+        kind="PRIVATE_EVALUATED",
+        category=category,
+    )
+    cycles = _category_events(
+        public_events,
+        kind="REFLECTOR_SUPERVISED",
+        category=category,
+    )
+    attempts = _category_events(
+        private_events,
+        kind="TASK_MODEL_ATTEMPTED",
+        category=category,
+    )
+    for task_ordinal in range(completed_task_count):
+        if sorted(
+            row.get("round_index")
+            for row in evaluations
+            if row.get("task_ordinal") == task_ordinal
+        ) != [0, 1] or [
+            row.get("cycle") for row in cycles if row.get("task_index") == task_ordinal
+        ] != [1]:
+            raise SupervisedExperimentV3Error(
+                "CONTINUED_ARTIFACT_FAILURE_PREFIX_INVALID"
+            )
+    partial = completed_task_count
+    if (
+        [
+            row.get("round_index")
+            for row in evaluations
+            if row.get("task_ordinal") == partial
+        ]
+        != [0]
+        or any(
+            row.get("task_index") == partial
+            for row in cycles
+        )
+        or [
+            row.get("round_index")
+            for row in attempts
+            if row.get("task_ordinal") == partial
+        ]
+        != [0]
+        or len(evaluations) != completed_task_count * 2 + 1
+        or len(cycles) != completed_task_count
+        or len(attempts) < len(evaluations)
+    ):
+        raise SupervisedExperimentV3Error(
+            "CONTINUED_ARTIFACT_FAILURE_BOUNDARY_INVALID"
+        )
+
+    diagnostics = sorted(
+        (category_root / "private_core_failure_diagnostics").glob(
+            "taskwise_core_failure_*.json"
+        )
+    )
+    if len(diagnostics) != 1:
+        raise SupervisedExperimentV3Error(
+            "CONTINUED_ARTIFACT_FAILURE_EVIDENCE_INVALID"
+        )
+    diagnostic_path = diagnostics[0]
+    diagnostic = _read_json(diagnostic_path)
+    evidence = diagnostic.get("validator_finding_evidence")
+    if (
+        diagnostic.get("schema_version") != "chembench_supervised_core_failure_v2"
+        or diagnostic.get("stage") != "ARTIFACT_VALIDATION"
+        or diagnostic.get("finding_code") != "TASKWISE_ARTIFACT_VALIDATION_FAILED"
+        or diagnostic.get("task_index") != partial
+        or diagnostic.get("round_index") != 0
+        or diagnostic.get("update_index") != 1
+        or type(evidence) is not list
+        or len(evidence) != 1
+        or evidence[0].get("finding_code") != "memory_structure_invalid"
+        or evidence[0].get("source_kind") != "artifact"
+    ):
+        raise SupervisedExperimentV3Error(
+            "CONTINUED_ARTIFACT_FAILURE_EVIDENCE_INVALID"
+        )
+    artifact_id = diagnostic.get("artifact_id")
+    job_id = diagnostic.get("job_id")
+    if type(artifact_id) is not str or type(job_id) is not str:
+        raise SupervisedExperimentV3Error(
+            "CONTINUED_ARTIFACT_FAILURE_EVIDENCE_INVALID"
+        )
+
+    connection = _open_immutable_database(category_root / "evolution.sqlite3")
+    try:
+        for result in results:
+            _verify_result_lifecycle_read_only(connection, category_root, result)
+        states = {
+            str(row["state"]): int(row["count"])
+            for row in connection.execute(
+                "SELECT state, COUNT(*) AS count FROM jobs GROUP BY state"
+            )
+        }
+        type_counts = {
+            (str(row["type"]), int(row["promoted"])): int(row["count"])
+            for row in connection.execute(
+                "SELECT type, promoted, COUNT(*) AS count "
+                "FROM artifacts GROUP BY type, promoted"
+            )
+        }
+        leases = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM jobs WHERE claimed_by IS NOT NULL "
+                "OR lease_id IS NOT NULL OR lease_expires_at IS NOT NULL"
+            ).fetchone()[0]
+        )
+        staged = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM artifacts WHERE staging_job_id IS NOT NULL"
+            ).fetchone()[0]
+        )
+        contexts = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM context_materializations"
+            ).fetchone()[0]
+        )
+        artifact = connection.execute(
+            "SELECT type, state, uri, promoted, staging_job_id FROM artifacts "
+            "WHERE artifact_id = ?",
+            (artifact_id,),
+        ).fetchall()
+        job = connection.execute(
+            "SELECT state, attempt_count, claimed_by, lease_id, lease_expires_at "
+            "FROM jobs WHERE job_id = ?",
+            (job_id,),
+        ).fetchall()
+        expected_types = {
+            ("dataset", 1): completed_task_count + 1,
+            ("text_memory", 1): completed_task_count,
+            ("text_memory", 0): 1,
+            ("skill_bundle", 1): completed_task_count,
+            ("agent_system", 1): completed_task_count,
+        }
+        if (
+            states != {"succeeded": completed_task_count * 3 + 1}
+            or type_counts != expected_types
+            or leases != 0
+            or staged != 0
+            or contexts != completed_task_count * 3
+            or len(artifact) != 1
+            or artifact[0]["type"] != "text_memory"
+            or artifact[0]["state"] != "active"
+            or artifact[0]["promoted"] != 0
+            or artifact[0]["staging_job_id"] is not None
+            or len(job) != 1
+            or job[0]["state"] != "succeeded"
+            or job[0]["attempt_count"] != 1
+            or any(job[0][field] is not None for field in ("claimed_by", "lease_id", "lease_expires_at"))
+        ):
+            raise SupervisedExperimentV3Error(
+                "CONTINUED_ARTIFACT_FAILURE_CORE_COUNTS_INVALID"
+            )
+        payload = _read_rejected_artifact_payload(
+            category_root=category_root,
+            uri=artifact[0]["uri"],
+        )
+    finally:
+        connection.close()
+    payload_sha256 = sha256_bytes(payload)
+    if (
+        payload.count(b"\x00") != 1
+        or payload_sha256 != diagnostic.get("artifact_payload_sha256")
+        or payload_sha256 != evidence[0].get("segment_sha256")
+    ):
+        raise SupervisedExperimentV3Error(
+            "CONTINUED_ARTIFACT_FAILURE_ROOT_CAUSE_INVALID"
+        )
+
+    reflector_receipts = sorted(
+        (category_root / "private_reflector_events").glob("*/receipt.json")
+    )
+    loaded_receipts = [_read_json(path) for path in reflector_receipts]
+    if (
+        len(loaded_receipts) != completed_task_count + 1
+        or any(
+            receipt.get("status") != "COMPLETED"
+            or receipt.get("codex_returncode") != 0
+            or receipt.get("cleanup_complete") is not True
+            or receipt.get("event_counts") != {}
+            or receipt.get("real_codex_sha256") != EXPECTED_MANAGED_CODEX_SHA256
+            or receipt.get("retry_allowed") is not False
+            or receipt.get("resume_allowed") is not False
+            or receipt.get("replacement_completion_allowed") is not False
+            for receipt in loaded_receipts
+        )
+        or sum(
+            sha256_bytes(canonical_json_bytes(receipt).rstrip(b"\n"))
+            == diagnostic.get("reflector_receipt_digest")
+            for receipt in loaded_receipts
+        )
+        != 1
+    ):
+        raise SupervisedExperimentV3Error(
+            "CONTINUED_ARTIFACT_FAILURE_REFLECTOR_RECEIPTS_INVALID"
+        )
+    if any(
+        (category_root / f"evolution.sqlite3{suffix}").exists()
+        for suffix in ("-wal", "-shm")
+    ):
+        raise SupervisedExperimentV3Error(
+            "CONTINUED_ARTIFACT_FAILURE_DATABASE_RESIDUAL_INVALID"
+        )
+    return ContinuedDiscardedArtifactValidationShardReceiptV3(
+        parent_run_id=parent_run_id,
+        category_index=category_index,
+        category=category,
+        completed_task_count=completed_task_count,
+        partial_task_ordinal=partial,
+        candidate_attempt_count_discarded=len(attempts),
+        candidate_completion_count_discarded=len(evaluations),
+        candidate_attempts_without_completion_discarded=(
+            len(attempts) - len(evaluations)
+        ),
+        reflector_call_count_discarded=len(loaded_receipts),
+        closed_reflector_cycle_count_discarded=len(cycles),
+        core_job_count_discarded=completed_task_count * 3 + 1,
+        artifact_count_discarded=completed_task_count * 3 + 1,
+        promoted_artifact_count_discarded=completed_task_count * 3,
+        context_resolution_count_discarded=contexts,
+        validator_finding_codes=("memory_structure_invalid",),
+        rejected_artifact_payload_sha256=payload_sha256,
+        failure_evidence_sha256=sha256_bytes(diagnostic_path.read_bytes()),
+        category_tree_sha256=_tree_identity((category_root,))[0],
+    )
+
+
 def audit_continued_parent_category_shards_v3(
     *,
     repository_root: Path,
@@ -637,12 +997,17 @@ def audit_continued_parent_category_shards_v3(
     state = _read_json(state_root / "run_state.json")
     paid = _load_parent_paid_plan(result_root)
     expected_category = CHEMBENCH4K_CATEGORIES[start_category_index]
+    failure_code = state.get("failure_code")
     if (
         state.get("run_id") != parent_run_id
         or state.get("status") != "FAIL_CLOSED"
         or state.get("stage") != "ONLINE_TRAIN"
         or state.get("category") != expected_category
-        or state.get("failure_code") != "RUNTIME_SERVICE_HEALTH_INVALID"
+        or failure_code
+        not in {
+            "RUNTIME_SERVICE_HEALTH_INVALID",
+            "TASKWISE_ARTIFACT_VALIDATION_FAILED",
+        }
         or state.get("attempts_per_train_task") != 2
         or state.get("evolution_cycles_per_train_task") != 1
         or state.get("security_findings") != 0
@@ -697,13 +1062,22 @@ def audit_continued_parent_category_shards_v3(
         accepted_core_job_count=start_category_index * 150,
         accepted_context_resolution_count=start_category_index * 150,
     )
-    discarded = _audit_discarded_current_category(
-        state_root=state_root,
-        public_events=public_events,
-        private_events=private_events,
-        parent_run_id=parent_run_id,
-        category_index=start_category_index,
-    )
+    if failure_code == "TASKWISE_ARTIFACT_VALIDATION_FAILED":
+        discarded = _audit_discarded_artifact_validation_category(
+            state_root=state_root,
+            public_events=public_events,
+            private_events=private_events,
+            parent_run_id=parent_run_id,
+            category_index=start_category_index,
+        )
+    else:
+        discarded = _audit_discarded_current_category(
+            state_root=state_root,
+            public_events=public_events,
+            private_events=private_events,
+            parent_run_id=parent_run_id,
+            category_index=start_category_index,
+        )
     later_categories = set(CHEMBENCH4K_CATEGORIES[start_category_index + 1 :])
     if any(
         row.get("stage") == "ONLINE_TRAIN"
@@ -954,6 +1328,7 @@ class ContinuedCategoryShardRecoveryV3(SupervisedTransferExperimentV3):
 
     def _write_recovery_protocol_receipts(self) -> None:
         amendment = ContinuedCategoryRecoveryAmendmentV3(
+            amendment_reason=self.parent_audit.discarded.failure_code,
             parent_run_id=self.parent_audit.parent_run_id,
             recovery_run_id=self.run_id,
             accepted_parent_categories=CHEMBENCH4K_CATEGORIES[
@@ -1043,7 +1418,9 @@ class ContinuedCategoryShardRecoveryV3(SupervisedTransferExperimentV3):
                 "discarded_candidate_completions": (
                     self.parent_audit.discarded.candidate_completion_count_discarded
                 ),
-                "discarded_candidate_attempts_without_completion": 1,
+                "discarded_candidate_attempts_without_completion": (
+                    self.parent_audit.discarded.candidate_attempts_without_completion_discarded
+                ),
                 "discarded_successful_reflector_calls": (
                     self.parent_audit.discarded.reflector_call_count_discarded
                 ),
@@ -1221,6 +1598,127 @@ def _executor_digest_from_inputs(
     )
 
 
+def _accepted_parent_control_scan_sha256(
+    audit: ContinuedAuditedParentShardsV3,
+) -> str:
+    inventory: list[dict[str, str]] = []
+    for shard in audit.accepted.shards:
+        category_root = (
+            audit.repository_root
+            / "state/chembench_supervised_transfer_v3/runs"
+            / shard.source_run_id
+            / "private/core/formal"
+            / shard.category
+        ).resolve(strict=True)
+        connection = _open_immutable_database(category_root / "evolution.sqlite3")
+        try:
+            rows = connection.execute(
+                "SELECT artifact_id, uri FROM artifacts "
+                "WHERE type = 'text_memory' AND promoted = 1 ORDER BY artifact_id"
+            ).fetchall()
+        finally:
+            connection.close()
+        if len(rows) != 50:
+            raise SupervisedExperimentV3Error(
+                "RECOVERY_ACCEPTED_CONTROL_SCAN_INVALID"
+            )
+        for row in rows:
+            payload = _read_rejected_artifact_payload(
+                category_root=category_root,
+                uri=row["uri"],
+            )
+            try:
+                text = payload.decode("utf-8")
+            except UnicodeError as exc:
+                raise SupervisedExperimentV3Error(
+                    "RECOVERY_ACCEPTED_CONTROL_SCAN_INVALID"
+                ) from exc
+            if _SUPERVISED_UNSAFE_CONTROL_RE.search(text) is not None:
+                raise SupervisedExperimentV3Error(
+                    "RECOVERY_ACCEPTED_CONTROL_SCAN_INVALID"
+                )
+            inventory.append(
+                {
+                    "artifact_id": str(row["artifact_id"]),
+                    "payload_sha256": sha256_bytes(payload),
+                }
+            )
+    return sha256_bytes(canonical_json_bytes(inventory))
+
+
+def _require_control_normalization_only_reflector_diff(
+    *,
+    parent: bytes,
+    current: bytes,
+) -> str:
+    try:
+        expected = parent.decode("utf-8")
+    except UnicodeError as exc:
+        raise SupervisedExperimentV3Error(
+            "RECOVERY_SOURCE_NOT_SEMANTICALLY_COMPATIBLE"
+        ) from exc
+    replacements = (
+        (
+            '_SUPERVISED_MULTITARGET_RENDER_ID = "supervised_multitarget_structured_render_v3"\n',
+            '_SUPERVISED_MULTITARGET_RENDER_ID_V3 = "supervised_multitarget_structured_render_v3"\n'
+            '_SUPERVISED_MULTITARGET_RENDER_ID = "supervised_multitarget_structured_render_v4"\n'
+            '_SUPERVISED_MULTITARGET_RENDER_IDS = frozenset(\n'
+            '    {\n'
+            '        _SUPERVISED_MULTITARGET_RENDER_ID_V3,\n'
+            '        _SUPERVISED_MULTITARGET_RENDER_ID,\n'
+            '    }\n'
+            ')\n',
+            1,
+        ),
+        (
+            '}\n_SUPERVISED_RULE_VALUE_FIELDS = (\n',
+            '}\n_SUPERVISED_UNSAFE_CONTROL_RE = re.compile('
+            'r"[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f-\\x9f]"'
+            ')\n_SUPERVISED_RULE_VALUE_FIELDS = (\n',
+            1,
+        ),
+        (
+            '                    _SUPERVISED_MULTITARGET_RENDER_ID,\n',
+            '                    *_SUPERVISED_MULTITARGET_RENDER_IDS,\n',
+            3,
+        ),
+        (
+            '            or receipt.output_normalization_id != '
+            '_SUPERVISED_MULTITARGET_RENDER_ID\n',
+            '            or receipt.output_normalization_id\n'
+            '            not in _SUPERVISED_MULTITARGET_RENDER_IDS\n',
+            1,
+        ),
+        (
+            '    """Normalize one scalar and remove explicit answer-letter mappings."""\n\n'
+            '    normalized = " ".join(value.split()).strip()\n',
+            '    """Normalize one scalar and remove non-semantic transport controls."""\n\n'
+            '    normalized = _SUPERVISED_UNSAFE_CONTROL_RE.sub(" ", value)\n'
+            '    normalized = " ".join(normalized.split()).strip()\n',
+            1,
+        ),
+    )
+    for old, new, count in replacements:
+        if expected.count(old) != count:
+            raise SupervisedExperimentV3Error(
+                "RECOVERY_SOURCE_NOT_SEMANTICALLY_COMPATIBLE"
+            )
+        expected = expected.replace(old, new, count)
+    if current != expected.encode("utf-8"):
+        raise SupervisedExperimentV3Error(
+            "RECOVERY_SOURCE_NOT_SEMANTICALLY_COMPATIBLE"
+        )
+    return sha256_bytes(
+        canonical_json_bytes(
+            {
+                "parent_sha256": sha256_bytes(parent),
+                "current_sha256": sha256_bytes(current),
+                "change": "nonsemantic_control_character_canonicalization_only",
+            }
+        )
+    )
+
+
 def build_continued_source_compatibility_receipt_v3(
     *,
     audit: ContinuedAuditedParentShardsV3,
@@ -1241,10 +1739,6 @@ def build_continued_source_compatibility_receipt_v3(
         "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/core.py",
         "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/executor.py",
         "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/packet.py",
-        (
-            "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/"
-            "reflector_boundary.py"
-        ),
         "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/memory.py",
         "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/artifacts.py",
         "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/managed_codex.py",
@@ -1305,6 +1799,10 @@ def build_continued_source_compatibility_receipt_v3(
             "continued_category_shard_recovery.py"
         ),
         (
+            "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/"
+            "reflector_boundary.py"
+        ),
+        (
             "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v3/"
             "source_identity.py"
         ),
@@ -1312,11 +1810,41 @@ def build_continued_source_compatibility_receipt_v3(
             "benchmarks/chembench/tests/supervised_transfer_v3/"
             "test_continued_category_shard_recovery_v3.py"
         ),
+        (
+            "benchmarks/chembench/tests/supervised_transfer_v2/"
+            "test_reflector_contract_v2.py"
+        ),
     }
     if set(changed) - allowed_changed:
         raise SupervisedExperimentV3Error(
             "RECOVERY_SOURCE_NOT_SEMANTICALLY_COMPATIBLE"
         )
+    reflector_relative = (
+        "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/"
+        "reflector_boundary.py"
+    )
+    if (
+        reflector_relative not in changed
+        or type(audit.discarded)
+        is not ContinuedDiscardedArtifactValidationShardReceiptV3
+        or _SUPERVISED_MULTITARGET_RENDER_ID
+        != "supervised_multitarget_structured_render_v4"
+    ):
+        raise SupervisedExperimentV3Error(
+            "RECOVERY_SOURCE_NOT_SEMANTICALLY_COMPATIBLE"
+        )
+    reflector_current = (repository / reflector_relative).read_bytes()
+    reflector_parent = subprocess.run(
+        ("git", "show", f"{parent_commit}:{reflector_relative}"),
+        cwd=repository,
+        check=True,
+        capture_output=True,
+    ).stdout
+    reflector_diff_proof_sha256 = _require_control_normalization_only_reflector_diff(
+        parent=reflector_parent,
+        current=reflector_current,
+    )
+    accepted_control_scan_sha256 = _accepted_parent_control_scan_sha256(audit)
     return {
         "schema_version": "ContinuedCategoryShardRecoveryCompatibilityReceiptV3",
         "parent_run_id": audit.parent_run_id,
@@ -1330,7 +1858,17 @@ def build_continued_source_compatibility_receipt_v3(
             "category_start_selection",
             "chained_category_shard_orchestration",
             "shard_receipts_and_composition",
+            "invalid_control_character_transport_canonicalization",
         ],
+        "accepted_parent_text_memory_control_scan_sha256": (
+            accepted_control_scan_sha256
+        ),
+        "accepted_parent_text_memory_control_findings": 0,
+        "reflector_normalization_id": _SUPERVISED_MULTITARGET_RENDER_ID,
+        "reflector_control_only_diff_proof_sha256": reflector_diff_proof_sha256,
+        "raw_reflector_event_digest_preserved": True,
+        "valid_reflector_output_semantics_unchanged": True,
+        "invalid_control_character_output_now_canonicalized": True,
         "candidate_execution_path_unchanged": True,
         "reflector_execution_path_unchanged": True,
         "category_internal_protocol_unchanged": True,
@@ -1348,6 +1886,7 @@ __all__ = [
     "ContinuedAuditedParentShardsV3",
     "ContinuedCategoryRecoveryAmendmentV3",
     "ContinuedCategoryShardRecoveryV3",
+    "ContinuedDiscardedArtifactValidationShardReceiptV3",
     "ContinuedDiscardedPartialShardReceiptV3",
     "ContinuedFinalShardCompositionReceiptV3",
     "ContinuedRemainingShardExecutionPlanV3",

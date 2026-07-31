@@ -153,7 +153,14 @@ _TASKWISE_OPERATIONAL_LINE_RE = re.compile(
 _TASKWISE_EXACT_H1 = "# General Chemistry Memory"
 _SUPERVISED_SECTION_NORMALIZATION_ID = "supervised_memory_section_merge_v2"
 _SUPERVISED_STRUCTURED_RENDER_ID = "supervised_memory_structured_render_v3"
-_SUPERVISED_MULTITARGET_RENDER_ID = "supervised_multitarget_structured_render_v3"
+_SUPERVISED_MULTITARGET_RENDER_ID_V3 = "supervised_multitarget_structured_render_v3"
+_SUPERVISED_MULTITARGET_RENDER_ID = "supervised_multitarget_structured_render_v4"
+_SUPERVISED_MULTITARGET_RENDER_IDS = frozenset(
+    {
+        _SUPERVISED_MULTITARGET_RENDER_ID_V3,
+        _SUPERVISED_MULTITARGET_RENDER_ID,
+    }
+)
 _SUPERVISED_OUTPUT_SCHEMA_NAME = "supervised_memory_output_schema.json"
 _NO_OUTPUT_NORMALIZATION_ID = "none"
 _LAST_MESSAGE_OUTPUT_FILE = "output_file"
@@ -186,6 +193,7 @@ _SUPERVISED_RULE_SECTION_FIELDS = {
     "provisional_principles": ("provisional", 1),
     "retired_or_contradicted": ("retired", 0),
 }
+_SUPERVISED_UNSAFE_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 _SUPERVISED_RULE_VALUE_FIELDS = (
     "rule_id",
     "target_type",
@@ -772,7 +780,7 @@ class ReflectorExecutionReceiptV2:
                     _NO_OUTPUT_NORMALIZATION_ID,
                     _SUPERVISED_SECTION_NORMALIZATION_ID,
                     _SUPERVISED_STRUCTURED_RENDER_ID,
-                    _SUPERVISED_MULTITARGET_RENDER_ID,
+                    *_SUPERVISED_MULTITARGET_RENDER_IDS,
                 }
                 or type(normalization_applied) is not bool
                 or (
@@ -784,7 +792,7 @@ class ReflectorExecutionReceiptV2:
                     in {
                         _SUPERVISED_SECTION_NORMALIZATION_ID,
                         _SUPERVISED_STRUCTURED_RENDER_ID,
-                        _SUPERVISED_MULTITARGET_RENDER_ID,
+                        *_SUPERVISED_MULTITARGET_RENDER_IDS,
                     }
                     and source_split != SUPERVISED_TRAIN_SOURCE_SPLIT
                 )
@@ -921,7 +929,8 @@ class ReflectorBoundaryActivationV2:
         if (
             receipt.status is not ReflectorBoundaryStatusV2.COMPLETED
             or receipt.source_split != SUPERVISED_TRAIN_SOURCE_SPLIT
-            or receipt.output_normalization_id != _SUPERVISED_MULTITARGET_RENDER_ID
+            or receipt.output_normalization_id
+            not in _SUPERVISED_MULTITARGET_RENDER_IDS
         ):
             raise ReflectorBoundaryError("REFLECTOR_AUXILIARY_OUTPUT_UNAVAILABLE")
         event_path = self.receipt_path.parent / "events.jsonl"
@@ -1014,7 +1023,7 @@ class ReflectorBoundaryActivationV2:
                 source_message = event_response.strip() + "\n"
                 if receipt.output_normalization_id in {
                     _SUPERVISED_STRUCTURED_RENDER_ID,
-                    _SUPERVISED_MULTITARGET_RENDER_ID,
+                    *_SUPERVISED_MULTITARGET_RENDER_IDS,
                 }:
                     normalized_message = _render_supervised_structured_memory(
                         source_message
@@ -2136,9 +2145,10 @@ def _normalize_supervised_structured_value(
     *,
     maximum_utf8_bytes: int = _MAX_LAST_MESSAGE_BYTES,
 ) -> str:
-    """Normalize one scalar and remove explicit answer-letter mappings."""
+    """Normalize one scalar and remove non-semantic transport controls."""
 
-    normalized = " ".join(value.split()).strip()
+    normalized = _SUPERVISED_UNSAFE_CONTROL_RE.sub(" ", value)
+    normalized = " ".join(normalized.split()).strip()
     if normalized.startswith(("- ", "* ")):
         normalized = normalized[2:].strip()
     normalized = _SUPERVISED_DIRECT_ANSWER_REFERENCE_RE.sub(

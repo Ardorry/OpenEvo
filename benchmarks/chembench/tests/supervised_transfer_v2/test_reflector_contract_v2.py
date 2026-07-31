@@ -21,6 +21,7 @@ from openevo_chembench.supervised_transfer_v2.reflector_boundary import (
     _LAST_MESSAGE_OUTPUT_FILE,
     _LAST_MESSAGE_TERMINAL_TRANSCRIPT_RECOVERY,
     _SUPERVISED_MULTITARGET_RENDER_ID,
+    _SUPERVISED_MULTITARGET_RENDER_ID_V3,
     _SUPERVISED_OUTPUT_SCHEMA,
     ReflectorBoundaryError,
     ReflectorBoundaryStatusV2,
@@ -137,7 +138,9 @@ def test_contract_schema_parser_and_artifact_validator_are_aligned() -> None:
 
     payload = _valid_payload()
     response = _response(payload)
-    assert _supervised_structured_normalization_id(response).endswith("render_v3")
+    assert _supervised_structured_normalization_id(response) == (
+        _SUPERVISED_MULTITARGET_RENDER_ID
+    )
     memory = _render_supervised_structured_memory(response)
     auxiliary = _render_supervised_structured_auxiliary(response)
     evidence = tuple(payload["skill_evidence_digests"])
@@ -158,6 +161,65 @@ def test_contract_schema_parser_and_artifact_validator_are_aligned() -> None:
         forbidden_literals=(),
     ).passed
     assert "# Category Memory: Temperature_Prediction" in memory
+
+
+def test_structured_renderer_canonicalizes_nonsemantic_control_characters() -> None:
+    payload = _valid_payload()
+    payload["common_failure_modes"] = ["Separate alpha\x00beta constraints."]
+    payload["skill_workflow"] = ["Compare gamma\x7fdelta constraints."]
+    directive = payload["agent_system_directives"][0]
+    assert isinstance(directive, dict)
+    directive["instruction"] = "prioritize epsilon\x1fzeta constraints"
+    response = _response(payload)
+
+    assert _supervised_structured_normalization_id(response) == (
+        _SUPERVISED_MULTITARGET_RENDER_ID
+    )
+    memory = _render_supervised_structured_memory(response)
+    auxiliary = _render_supervised_structured_auxiliary(response)
+    for rendered in (
+        memory,
+        auxiliary.skill_markdown,
+        auxiliary.agent_system_markdown,
+    ):
+        assert "\x00" not in rendered
+        assert "\x1f" not in rendered
+        assert "\x7f" not in rendered
+    assert "alpha beta" in memory
+    assert "gamma delta" in auxiliary.skill_markdown
+    assert "epsilon zeta" in auxiliary.agent_system_markdown
+
+
+def test_historical_multitarget_normalization_id_remains_parseable() -> None:
+    source = (_response(_valid_payload()).strip() + "\n").encode()
+    rendered = _render_supervised_structured_memory(source.decode()).encode()
+    receipt = ReflectorExecutionReceiptV2(
+        invocation_id="b" * 32,
+        status=ReflectorBoundaryStatusV2.COMPLETED,
+        mechanism="bubblewrap",
+        wrapper_invoked=True,
+        real_codex_sha256=_sha("codex"),
+        dev_artifact_sha256=_sha("dataset"),
+        ordered_records_sha256=_sha("records"),
+        record_count=1,
+        event_stream_sha256=_sha("events"),
+        event_counts=(),
+        private_event_reference=f"{'b' * 32}/events.jsonl",
+        last_message_sha256=hashlib.sha256(rendered).hexdigest(),
+        cleanup_complete=True,
+        retry_allowed=False,
+        resume_allowed=False,
+        replacement_completion_allowed=False,
+        codex_returncode=0,
+        protocol_id="chembench_supervised_transfer_v2",
+        source_split="supervised_train",
+        projected_prompt_sha256=_sha("prompt"),
+        source_last_message_sha256=hashlib.sha256(source).hexdigest(),
+        output_normalization_id=_SUPERVISED_MULTITARGET_RENDER_ID_V3,
+        output_normalization_applied=True,
+        last_message_transport=_LAST_MESSAGE_OUTPUT_FILE,
+    )
+    assert ReflectorExecutionReceiptV2.from_payload(receipt.to_payload()) == receipt
 
 
 def test_text_memory_schema_reserves_utf8_capacity_headroom() -> None:
