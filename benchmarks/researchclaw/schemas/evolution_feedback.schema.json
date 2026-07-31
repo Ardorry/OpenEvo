@@ -1,0 +1,228 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.researchclaw-openevo/schemas/evolution_feedback.schema.json",
+  "title": "ResearchClawBench OpenEvo Evolution Feedback Allowlist",
+  "description": "Closed feedback records. Community Dev may release bounded operational fields and one scalar total score; Community Validation releases selection-only aggregate summaries; official test feedback is always withheld.",
+  "oneOf": [
+    {"$ref": "#/$defs/community_dev_feedback"},
+    {"$ref": "#/$defs/community_validation_summary"},
+    {"$ref": "#/$defs/official_test_withheld_receipt"}
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "bounded_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "generic_error_tag": {
+      "type": "string",
+      "enum": [
+        "DATA_LOAD_ERROR",
+        "DEPENDENCY_ERROR",
+        "EXECUTION_ERROR",
+        "TIMEOUT",
+        "REPORT_MISSING",
+        "REPORT_INVALID",
+        "IMAGE_MISSING",
+        "IMAGE_INVALID",
+        "PATH_POLICY_VIOLATION",
+        "TRACEABILITY_MISSING",
+        "RESOURCE_LIMIT",
+        "NETWORK_POLICY_VIOLATION",
+        "UNKNOWN_OPERATIONAL_FAILURE"
+      ]
+    },
+    "completion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "exit_code"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["completed", "failed", "timeout"]
+        },
+        "exit_code": {
+          "oneOf": [
+            {"type": "integer", "minimum": -255, "maximum": 255},
+            {"type": "null"}
+          ]
+        }
+      }
+    },
+    "artifact_validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "error_tags"],
+      "properties": {
+        "passed": {"type": "boolean"},
+        "error_tags": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/generic_error_tag"}
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wall_seconds"],
+      "properties": {
+        "wall_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 604800
+        }
+      }
+    },
+    "cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["amount_usd", "measurement"],
+      "properties": {
+        "amount_usd": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "measurement": {
+          "type": "string",
+          "enum": ["metered", "estimated", "unavailable"]
+        }
+      }
+    },
+    "community_dev_feedback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "record_type",
+        "stage",
+        "policy_id",
+        "task_id",
+        "run_id",
+        "candidate_artifact_sha256",
+        "completion",
+        "artifact_validation",
+        "runtime",
+        "cost",
+        "generic_error_tags"
+      ],
+      "properties": {
+        "schema_version": {"const": "1.0.0"},
+        "record_type": {"const": "community_dev_feedback"},
+        "stage": {"const": "community_dev"},
+        "policy_id": {"const": "researchclaw-openevo-feedback-v1"},
+        "task_id": {"$ref": "#/$defs/bounded_id"},
+        "run_id": {"$ref": "#/$defs/bounded_id"},
+        "candidate_artifact_sha256": {"$ref": "#/$defs/sha256"},
+        "completion": {"$ref": "#/$defs/completion"},
+        "artifact_validation": {"$ref": "#/$defs/artifact_validation"},
+        "runtime": {"$ref": "#/$defs/runtime"},
+        "cost": {"$ref": "#/$defs/cost"},
+        "generic_error_tags": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/generic_error_tag"}
+        },
+        "total_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        }
+      }
+    },
+    "community_validation_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "record_type",
+        "stage",
+        "policy_id",
+        "candidate_artifact_sha256",
+        "selection_only",
+        "released_to_reflector",
+        "evaluated_task_count",
+        "completed_task_count",
+        "artifact_valid_task_count",
+        "scored_task_count",
+        "mean_total_score",
+        "median_total_score",
+        "minimum_total_score",
+        "total_runtime_seconds",
+        "total_cost_usd"
+      ],
+      "properties": {
+        "schema_version": {"const": "1.0.0"},
+        "record_type": {"const": "community_validation_summary"},
+        "stage": {"const": "community_validation"},
+        "policy_id": {"const": "researchclaw-openevo-feedback-v1"},
+        "candidate_artifact_sha256": {"$ref": "#/$defs/sha256"},
+        "selection_only": {"const": true},
+        "released_to_reflector": {"const": false},
+        "evaluated_task_count": {"type": "integer", "minimum": 1, "maximum": 6},
+        "completed_task_count": {"type": "integer", "minimum": 0, "maximum": 6},
+        "artifact_valid_task_count": {"type": "integer", "minimum": 0, "maximum": 6},
+        "scored_task_count": {"type": "integer", "minimum": 0, "maximum": 6},
+        "mean_total_score": {
+          "oneOf": [
+            {"type": "number", "minimum": 0, "maximum": 100},
+            {"type": "null"}
+          ]
+        },
+        "median_total_score": {
+          "oneOf": [
+            {"type": "number", "minimum": 0, "maximum": 100},
+            {"type": "null"}
+          ]
+        },
+        "minimum_total_score": {
+          "oneOf": [
+            {"type": "number", "minimum": 0, "maximum": 100},
+            {"type": "null"}
+          ]
+        },
+        "total_runtime_seconds": {"type": "integer", "minimum": 0, "maximum": 3628800},
+        "total_cost_usd": {"type": "number", "minimum": 0, "maximum": 600000}
+      }
+    },
+    "official_test_withheld_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "record_type",
+        "stage",
+        "policy_id",
+        "protocol_id",
+        "feedback_released",
+        "scoring_deferred_until_all_runs_sealed",
+        "reason"
+      ],
+      "properties": {
+        "schema_version": {"const": "1.0.0"},
+        "record_type": {"const": "official_test_withheld_receipt"},
+        "stage": {"const": "official_test"},
+        "policy_id": {"const": "researchclaw-openevo-feedback-v1"},
+        "protocol_id": {"$ref": "#/$defs/bounded_id"},
+        "feedback_released": {"const": false},
+        "scoring_deferred_until_all_runs_sealed": {"const": true},
+        "reason": {
+          "type": "string",
+          "enum": [
+            "OFFICIAL_TEST_FEEDBACK_PERMANENTLY_WITHHELD",
+            "OFFICIAL_SCORING_NOT_AUTHORIZED",
+            "MAINTAINER_CONFIRMATION_PENDING"
+          ]
+        }
+      }
+    }
+  }
+}

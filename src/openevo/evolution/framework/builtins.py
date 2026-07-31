@@ -555,9 +555,6 @@ def _handler_descriptors(
             target_id="agent_system",
             artifact_types=("agent_system",),
             renderer_kind=RendererKind.MARKDOWN,
-            instruction_preamble=(
-                "Use the following evolved agent system instructions for this task:"
-            ),
             allowed_uri_schemes=("file",),
             allowed_media_types=("text/markdown", "text/plain"),
             allowed_destination_scopes=(
@@ -571,7 +568,6 @@ def _handler_descriptors(
                 "OPENEVO_AGENT_SYSTEM_TARGETS",
             ),
             allowed_contribution_kinds=(
-                ContributionKind.INSTRUCTION,
                 ContributionKind.STAGED_PAYLOAD,
                 ContributionKind.ENVIRONMENT,
             ),

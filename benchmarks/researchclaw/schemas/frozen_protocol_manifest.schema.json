@@ -1,0 +1,362 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.researchclaw-openevo/schemas/frozen_protocol_manifest.schema.json",
+  "title": "ResearchClawBench OpenEvo Frozen Protocol Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "protocol_id",
+    "status",
+    "benchmark",
+    "source_revisions",
+    "community_split",
+    "artifact",
+    "candidate",
+    "budgets",
+    "tools",
+    "network",
+    "environment",
+    "dependencies",
+    "execution",
+    "feedback",
+    "scorer",
+    "judge",
+    "images",
+    "run",
+    "operator",
+    "anomaly_rules",
+    "maintainer_confirmation"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "protocol_id": {"$ref": "#/$defs/id"},
+    "status": {
+      "type": "string",
+      "enum": ["DRAFT_NOT_AUTHORIZED", "FROZEN_AWAITING_CONFIRMATION", "CONFIRMED", "RETIRED"]
+    },
+    "benchmark": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "ResearchClawBench"},
+        "version": {"$ref": "#/$defs/nonempty"}
+      }
+    },
+    "source_revisions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "researchclawbench_commit",
+        "huggingface_dataset_revision",
+        "openevo_commit",
+        "adapter_commit",
+        "scorer_commit"
+      ],
+      "properties": {
+        "researchclawbench_commit": {"$ref": "#/$defs/commit_or_pending"},
+        "huggingface_dataset_revision": {"$ref": "#/$defs/commit_or_pending"},
+        "openevo_commit": {"$ref": "#/$defs/commit_or_pending"},
+        "adapter_commit": {"$ref": "#/$defs/commit_or_pending"},
+        "scorer_commit": {"$ref": "#/$defs/commit_or_pending"}
+      }
+    },
+    "community_split": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "semantic_sha256"],
+      "properties": {
+        "path": {"const": "configs/community_split.yaml"},
+        "sha256": {"$ref": "#/$defs/sha_or_pending"},
+        "semantic_sha256": {"$ref": "#/$defs/sha_or_pending"}
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "artifact_id", "sha256", "source_dev_only", "frozen_read_only"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["agent_system", "PENDING_ARTIFACT_FREEZE"]
+        },
+        "artifact_id": {"$ref": "#/$defs/nonempty"},
+        "sha256": {"$ref": "#/$defs/sha_or_pending"},
+        "source_dev_only": {"type": "boolean"},
+        "frozen_read_only": {"type": "boolean"}
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "harness",
+        "codex_cli_version",
+        "model_exact_name",
+        "provider",
+        "auth_mode",
+        "reasoning_level",
+        "capture_mode",
+        "token_level_metrics_available"
+      ],
+      "properties": {
+        "harness": {"const": "codex"},
+        "codex_cli_version": {"$ref": "#/$defs/nonempty"},
+        "model_exact_name": {"$ref": "#/$defs/nonempty"},
+        "provider": {"$ref": "#/$defs/nonempty"},
+        "auth_mode": {"$ref": "#/$defs/nonempty"},
+        "reasoning_level": {"$ref": "#/$defs/nonempty"},
+        "capture_mode": {
+          "type": "string",
+          "enum": ["transcript", "PENDING_MAINTAINER_CONFIRMATION"]
+        },
+        "token_level_metrics_available": {"type": "boolean"}
+      }
+    },
+    "budgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_steps", "max_runtime_seconds", "max_input_tokens", "max_output_tokens", "max_total_tokens", "max_cost_usd"],
+      "properties": {
+        "max_steps": {"$ref": "#/$defs/nonnegative_integer_or_pending"},
+        "max_runtime_seconds": {"$ref": "#/$defs/positive_integer_or_pending"},
+        "max_input_tokens": {"$ref": "#/$defs/positive_integer_or_pending"},
+        "max_output_tokens": {"$ref": "#/$defs/positive_integer_or_pending"},
+        "max_total_tokens": {"$ref": "#/$defs/positive_integer_or_pending"},
+        "max_cost_usd": {"$ref": "#/$defs/nonnegative_number_or_pending"}
+      }
+    },
+    "tools": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed", "mcp_servers", "package_installation"],
+      "properties": {
+        "allowed": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/nonempty"}
+        },
+        "mcp_servers": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/nonempty"}
+        },
+        "package_installation": {"$ref": "#/$defs/nonempty"}
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy", "allow_internet", "egress_profile_id", "target_paper_retrieval_prohibited"],
+      "properties": {
+        "policy": {"$ref": "#/$defs/nonempty"},
+        "allow_internet": {
+          "oneOf": [
+            {"type": "boolean"},
+            {"const": "PENDING_MAINTAINER_CONFIRMATION"}
+          ]
+        },
+        "egress_profile_id": {"$ref": "#/$defs/nonempty"},
+        "target_paper_retrieval_prohibited": {"const": true}
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inherit_host_environment", "variable_allowlist", "secret_values_recorded", "candidate_isolation_profile"],
+      "properties": {
+        "inherit_host_environment": {"const": false},
+        "variable_allowlist": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          }
+        },
+        "secret_values_recorded": {"const": false},
+        "candidate_isolation_profile": {"$ref": "#/$defs/nonempty"}
+      }
+    },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lock_file", "lock_file_sha256", "runtime_image_digest"],
+      "properties": {
+        "lock_file": {"$ref": "#/$defs/nonempty"},
+        "lock_file_sha256": {"$ref": "#/$defs/sha_or_pending"},
+        "runtime_image_digest": {"$ref": "#/$defs/nonempty"}
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_order", "randomness_policy", "seed", "evaluation_mode", "pass_k", "attempts_per_task", "cross_task_state_policy", "score_after_all_tasks"],
+      "properties": {
+        "task_order": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 57,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/id"}
+        },
+        "randomness_policy": {"$ref": "#/$defs/nonempty"},
+        "seed": {
+          "oneOf": [
+            {"type": "integer", "minimum": 0},
+            {"const": "PROVIDER_MANAGED_RECORDED_PER_RUN"},
+            {"const": "PENDING_MAINTAINER_CONFIRMATION"}
+          ]
+        },
+        "evaluation_mode": {
+          "type": "string",
+          "enum": ["pass_at_1", "pass_at_5", "PENDING_MAINTAINER_CONFIRMATION"]
+        },
+        "pass_k": {"$ref": "#/$defs/positive_integer_or_pending"},
+        "attempts_per_task": {"$ref": "#/$defs/positive_integer_or_pending"},
+        "cross_task_state_policy": {
+          "type": "string",
+          "enum": ["reset_per_task", "PENDING_MAINTAINER_CONFIRMATION"]
+        },
+        "score_after_all_tasks": {"const": true}
+      }
+    },
+    "feedback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_id", "schema_path", "official_feedback_released", "reflector_receives_judge_data"],
+      "properties": {
+        "policy_id": {"const": "researchclaw-openevo-feedback-v1"},
+        "schema_path": {"const": "schemas/evolution_feedback.schema.json"},
+        "official_feedback_released": {"const": false},
+        "reflector_receives_judge_data": {"const": false}
+      }
+    },
+    "scorer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["implementation", "commit", "invocation_phase", "prompt_modified"],
+      "properties": {
+        "implementation": {"const": "ResearchClawBench/evaluation/score.py:score_workspace"},
+        "commit": {"$ref": "#/$defs/commit_or_pending"},
+        "invocation_phase": {"const": "after_all_official_candidate_runs_are_sealed"},
+        "prompt_modified": {"const": false}
+      }
+    },
+    "judge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_exact_name", "provider", "temperature", "credentials_candidate_visible"],
+      "properties": {
+        "model_exact_name": {"$ref": "#/$defs/nonempty"},
+        "provider": {"$ref": "#/$defs/nonempty"},
+        "temperature": {
+          "oneOf": [
+            {"type": "number", "minimum": 0, "maximum": 2},
+            {"const": "PENDING_MAINTAINER_CONFIRMATION"}
+          ]
+        },
+        "credentials_candidate_visible": {"const": false}
+      }
+    },
+    "images": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generated_images_per_item_limit", "target_images_per_item_limit", "max_image_size_bytes", "maintainer_confirmation_required"],
+      "properties": {
+        "generated_images_per_item_limit": {"$ref": "#/$defs/positive_integer_or_pending"},
+        "target_images_per_item_limit": {"$ref": "#/$defs/positive_integer_or_pending"},
+        "max_image_size_bytes": {"$ref": "#/$defs/positive_integer_or_pending"},
+        "maintainer_confirmation_required": {"type": "boolean"}
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["planned_date", "timezone", "baseline_and_treatment_only_agent_system_differs"],
+      "properties": {
+        "planned_date": {"$ref": "#/$defs/nonempty"},
+        "timezone": {"$ref": "#/$defs/nonempty"},
+        "baseline_and_treatment_only_agent_system_differs": {"const": true}
+      }
+    },
+    "operator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "organization"],
+      "properties": {
+        "name": {"$ref": "#/$defs/nonempty"},
+        "organization": {"$ref": "#/$defs/nonempty"}
+      }
+    },
+    "anomaly_rules": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/nonempty"}
+    },
+    "maintainer_confirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status_file", "official_40_tasks_allowed", "official_judge_allowed", "pass5_allowed", "cross_task_evolution_allowed", "judge_feedback_evolution_allowed"],
+      "properties": {
+        "status_file": {"const": "configs/maintainer_confirmation_status.yaml"},
+        "official_40_tasks_allowed": {"type": "boolean"},
+        "official_judge_allowed": {"type": "boolean"},
+        "pass5_allowed": {"type": "boolean"},
+        "cross_task_evolution_allowed": {"type": "boolean"},
+        "judge_feedback_evolution_allowed": {"type": "boolean"}
+      }
+    }
+  },
+  "$defs": {
+    "nonempty": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "commit_or_pending": {
+      "oneOf": [
+        {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        {"enum": ["PENDING_IMPLEMENTATION", "PENDING_MAINTAINER_CONFIRMATION"]}
+      ]
+    },
+    "sha_or_pending": {
+      "oneOf": [
+        {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        {"enum": ["PENDING_IMPLEMENTATION", "PENDING_ARTIFACT_FREEZE", "PENDING_MAINTAINER_CONFIRMATION"]}
+      ]
+    },
+    "positive_integer_or_pending": {
+      "oneOf": [
+        {"type": "integer", "minimum": 1},
+        {"enum": ["PENDING_IMPLEMENTATION", "PENDING_ARTIFACT_FREEZE", "PENDING_MAINTAINER_CONFIRMATION"]}
+      ]
+    },
+    "nonnegative_integer_or_pending": {
+      "oneOf": [
+        {"type": "integer", "minimum": 0},
+        {"enum": ["PENDING_IMPLEMENTATION", "PENDING_ARTIFACT_FREEZE", "PENDING_MAINTAINER_CONFIRMATION"]}
+      ]
+    },
+    "nonnegative_number_or_pending": {
+      "oneOf": [
+        {"type": "number", "minimum": 0},
+        {"enum": ["PENDING_IMPLEMENTATION", "PENDING_ARTIFACT_FREEZE", "PENDING_MAINTAINER_CONFIRMATION"]}
+      ]
+    }
+  }
+}

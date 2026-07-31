@@ -1,0 +1,21 @@
+name: PyPI publishing disabled
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  disabled:
+    name: PyPI is outside the External Beta release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain disabled PyPI publish path
+        run: |
+          cat <<'EOF'
+          PyPI is not an External Beta release surface. This workflow intentionally
+          publishes nothing. Any future PyPI release requires a separate product
+          decision, issue, contract, and validated workflow; completing the External
+          Beta gates must not enable publication here.
+          EOF

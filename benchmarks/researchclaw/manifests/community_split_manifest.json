@@ -1,0 +1,100 @@
+{
+  "schema_version": "1.0.0",
+  "created_at": "2026-07-27T19:33:16+08:00",
+  "status": "FROZEN",
+  "split_file": "configs/community_split.yaml",
+  "split_file_sha256": "5fab6aa79d9f39d0c5f839110e17a8d616c05bcb0020bd0a25adb928fad2b123",
+  "split_semantic_sha256": "9e8df69c917398822914b084c624df16b1460d76f9d0ba252483914285080c66",
+  "dataset": {
+    "repo_id": "InternScience/ResearchClawBench",
+    "revision": "db5d2f4d9494e83c6f0ea0839b00f2b9c1ab66a4",
+    "community_task_count": 17,
+    "official_test_task_count": 40
+  },
+  "source_evidence": {
+    "community_tasks_validation": {
+      "path": "manifests/community_tasks_validation.json",
+      "sha256": "0a443bc1d36314341bfa95093f05f292940c71914f27ff26b18a66fea9a95935"
+    },
+    "huggingface_remote_snapshot": {
+      "path": "manifests/huggingface_remote_snapshot.json",
+      "sha256": "95502121f64bcdf0858efd57d2a859da03595fe43bf3579daebdcfe44c5db62f"
+    },
+    "community_file_inventory": {
+      "path": "manifests/community_tasks_files.tsv",
+      "sha256": "faa0bc70565d0fcbeb6a725cfd88d1c18eafb617c6256fb066f69ca18e06a03e"
+    }
+  },
+  "policy_assertions": {
+    "public_metadata_only": true,
+    "target_study_used": false,
+    "checklist_used": false,
+    "scorer_output_used": false,
+    "leaderboard_scores_used": false,
+    "official_tasks_excluded_from_dev_validation": true,
+    "score_driven_resplitting_allowed": false,
+    "multi_task_domains_present_on_both_sides": [
+      "Earth",
+      "Information",
+      "Life"
+    ],
+    "single_task_domain_coverage_limitation": [
+      "Astronomy",
+      "Chemistry",
+      "Energy",
+      "Material",
+      "Math",
+      "Neuroscience",
+      "Physics"
+    ]
+  },
+  "aggregates": {
+    "dev": {
+      "task_count": 11,
+      "candidate_visible_bytes": 630646111,
+      "candidate_visible_mib": 601.431,
+      "data_bytes": 462051276,
+      "related_work_bytes": 168528157
+    },
+    "validation": {
+      "task_count": 6,
+      "candidate_visible_bytes": 293612695,
+      "candidate_visible_mib": 280.011,
+      "data_bytes": 130553866,
+      "related_work_bytes": 163044603
+    }
+  },
+  "dev_tasks": [
+    {"task_id": "Astronomy_004", "domain": "Astronomy", "candidate_visible_bytes": 57380949, "formats": ["csv"], "dependency_complexity": "medium", "task_info_sha256": "606fa2a429515be405efd72ff7bacb31070ad9c2290c9ec3e522f655b30923a6"},
+    {"task_id": "Chemistry_004", "domain": "Chemistry", "candidate_visible_bytes": 24713408, "formats": ["no declared data file"], "dependency_complexity": "high", "task_info_sha256": "ba5337a57004752021ca580aef33bb99db4617884feb5d9dd746379566204dc0"},
+    {"task_id": "Earth_004", "domain": "Earth", "candidate_visible_bytes": 199645415, "formats": ["netcdf"], "dependency_complexity": "high", "task_info_sha256": "ac51cf6685c1471299a447bd422b5188d894c15db2e6ad51f68acae492df9ced"},
+    {"task_id": "Energy_004", "domain": "Energy", "candidate_visible_bytes": 88923275, "formats": ["xlsx"], "dependency_complexity": "medium_high", "task_info_sha256": "04d51ac7a9a73ba3927969ba45628496f3d1d98adb0d1a9e7528c67d39cf778d"},
+    {"task_id": "Information_005", "domain": "Information", "candidate_visible_bytes": 104231239, "formats": ["npz graph bundle"], "dependency_complexity": "high", "task_info_sha256": "5aad790d90ed4e285fad1b2003160c31b22865c04c727e81d345aa85dc66ef0c"},
+    {"task_id": "Information_006", "domain": "Information", "candidate_visible_bytes": 67135807, "formats": ["planetoid raw", "npz graph bundle"], "dependency_complexity": "high", "task_info_sha256": "d7dbab8925162450d19745476762b026185542fbc4f8980a043d94fbcda8694b"},
+    {"task_id": "Life_004", "domain": "Life", "candidate_visible_bytes": 33329190, "formats": ["fasta", "csv"], "dependency_complexity": "high", "task_info_sha256": "cc5ff07d5eda6c2208bf5f28bb02068659e5b95edc66392ec069c9ed5eb4dd87"},
+    {"task_id": "Life_005", "domain": "Life", "candidate_visible_bytes": 10326184, "formats": ["csv"], "dependency_complexity": "medium", "task_info_sha256": "0fde622ec1e7987b0350882ae01880adad987ba210ae35ca7327801e0a07ebb4"},
+    {"task_id": "Life_006", "domain": "Life", "candidate_visible_bytes": 7037902, "formats": ["csv", "tsv", "fasta"], "dependency_complexity": "high", "task_info_sha256": "67206eb38f92ef7dc3243f5f86f07701c5511826a1b12b0a7bd191445a969c0c"},
+    {"task_id": "Material_004", "domain": "Material", "candidate_visible_bytes": 4304341, "formats": ["csv"], "dependency_complexity": "high", "task_info_sha256": "8cb611a494a921b8865b9734743da462f162d52d0f033872d1cf682f64dc4f38"},
+    {"task_id": "Neuroscience_004", "domain": "Neuroscience", "candidate_visible_bytes": 33618401, "formats": ["npy"], "dependency_complexity": "medium_high", "task_info_sha256": "f44b152f1634b6dd51919a71b3fab1c51a77dd872c1fbd34c379bbe7bf0d5bfd"}
+  ],
+  "validation_tasks": [
+    {"task_id": "Earth_005", "domain": "Earth", "candidate_visible_bytes": 11720262, "formats": ["csv", "markdown", "source excerpt"], "dependency_complexity": "medium_high", "task_info_sha256": "79ed3b572a86b1d8a00ff36d6bdbae4b2b57644e7f76f95225e3281db62fcaa2"},
+    {"task_id": "Information_004", "domain": "Information", "candidate_visible_bytes": 128168520, "formats": ["images directory", "json"], "dependency_complexity": "high", "task_info_sha256": "ed821c8eaddc0dd3404e4dcc9aca0833e6c9aeb6c5e4f5f9e910d1f87d8e289c"},
+    {"task_id": "Information_007", "domain": "Information", "candidate_visible_bytes": 70199687, "formats": ["TUDataset text bundles"], "dependency_complexity": "high", "task_info_sha256": "625ced5c41e3c2d0c7089a0e3409d9f1adfeb2218f660362ff1f8bff0315a97c"},
+    {"task_id": "Life_007", "domain": "Life", "candidate_visible_bytes": 22112724, "formats": ["csv"], "dependency_complexity": "medium_high", "task_info_sha256": "c0e7f952a81b71845d13a2b60a7700b789017664f85c117ad19ea77132e8f289"},
+    {"task_id": "Math_004", "domain": "Math", "candidate_visible_bytes": 61192048, "formats": ["mat"], "dependency_complexity": "high", "task_info_sha256": "9babd56d419e7ddc2157873ad16572055a572b905e376265870f2b731f2ab80e"},
+    {"task_id": "Physics_004", "domain": "Physics", "candidate_visible_bytes": 219454, "formats": ["no declared data file"], "dependency_complexity": "high", "task_info_sha256": "9f77fc4d3e61ab57b9c603c43a4364e4dc09bc28c7f28b9ab246f224d130f4c0"}
+  ],
+  "official_test_tasks": [
+    "Astronomy_000", "Astronomy_001", "Astronomy_002", "Astronomy_003",
+    "Chemistry_000", "Chemistry_001", "Chemistry_002", "Chemistry_003",
+    "Earth_000", "Earth_001", "Earth_002", "Earth_003",
+    "Energy_000", "Energy_001", "Energy_002", "Energy_003",
+    "Information_000", "Information_001", "Information_002", "Information_003",
+    "Life_000", "Life_001", "Life_002", "Life_003",
+    "Material_000", "Material_001", "Material_002", "Material_003",
+    "Math_000", "Math_001", "Math_002", "Math_003",
+    "Neuroscience_000", "Neuroscience_001", "Neuroscience_002", "Neuroscience_003",
+    "Physics_000", "Physics_001", "Physics_002", "Physics_003"
+  ]
+}

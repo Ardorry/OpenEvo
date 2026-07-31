@@ -1,0 +1,37 @@
+# Batch evaluation config with different repeat counts per task.
+# Run with AGENT_MODEL_NAME/AGENT_API_BASE/AGENT_API_KEY and
+# JUDGE_MODEL_NAME/JUDGE_API_BASE/JUDGE_API_KEY set.
+
+name: researchharness_example_mixed_repeats
+
+agent_model:
+  name_env: AGENT_MODEL_NAME
+  api_base_env: AGENT_API_BASE
+  api_key_env: AGENT_API_KEY
+
+tasks:
+  - id: Earth_000
+    repeats: 1
+  - id: Physics_003
+    repeats: 2
+  - id: Chemistry_002
+    repeats: 3
+
+repeats_per_task: 1
+max_concurrent_runs: 2
+
+researchharness:
+  max_rounds: 500
+  max_runtime_seconds: 10800
+  llm_request_timeout_seconds: 1200
+  webfetch_tool_timeout_seconds: 300
+  readpdf_tool_timeout_seconds: 300
+  max_output_tokens: 16384
+  max_input_tokens: 131072
+  compact_trigger_tokens: "96k"
+
+judge_model:
+  enabled: true
+  name_env: JUDGE_MODEL_NAME
+  api_base_env: JUDGE_API_BASE
+  api_key_env: JUDGE_API_KEY

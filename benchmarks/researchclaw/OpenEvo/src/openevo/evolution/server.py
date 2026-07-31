@@ -1,0 +1,911 @@
+from __future__ import annotations
+
+import hashlib
+from pathlib import Path
+from typing import Any
+
+from fastapi import FastAPI, HTTPException, Request, Response
+
+from openevo.evolution.admission import (
+    ArtifactProposalDecisionReceipt,
+    ArtifactProposalDecisionRequest,
+)
+from openevo.evolution.context_materialization import MaterializedContext
+from openevo.evolution.context_projection import ContextProjectionResolveRequest
+from openevo.evolution.framework.builtins import (
+    VerifiedExecutableRegistry,
+    require_verified_executable_registry,
+)
+from openevo.evolution.framework.registry import RegistrySnapshot
+from openevo.evolution.models import (
+    ArtifactPromotionUpdateRequest,
+    ArtifactRegisterRequest,
+    ArtifactResponse,
+    ContextResolveRequest,
+    ContextResolveResponse,
+    DatasetCreateHttpRequest,
+    DatasetCreateResponse,
+    EventIngestRequest,
+    EventIngestResponse,
+    FailedPlanBoundJobAuthorityResponse,
+    FeedbackApplicationCreateRequest,
+    FeedbackApplicationResponse,
+    HumanFeedbackCreateRequest,
+    HumanFeedbackResponse,
+    HumanQueryDecisionCreateRequest,
+    HumanQueryDecisionResponse,
+    JobCreateRequest,
+    JobCreateResponse,
+    ReflectorInferenceReservationReceipt,
+    ReviewAdjudicationRequest,
+    ReviewClaimRequest,
+    ReviewPacketResponse,
+    ReviewRequestCreateRequest,
+    ReviewRequestResponse,
+    ReviewStatus,
+    SuccessorArtifactAuthorityResponse,
+    SuccessorTransitionJobInventoryResponse,
+    WorkerClaimRequest,
+    WorkerClaimResponse,
+    WorkerCompleteRequest,
+    WorkerFailRequest,
+    WorkerHeartbeatRequest,
+    WorkerReflectorInferenceCompleteRequest,
+    WorkerReflectorInferenceReserveRequest,
+    WorkerReflectorInferenceReserveResponse,
+)
+from openevo.evolution.planned_jobs import (
+    PlanBoundJobCreateRequest,
+    PlanBoundJobRetryRequest,
+)
+from openevo.evolution.store import (
+    DatasetIntegrityError,
+    DatasetNotFoundError,
+    EvolutionStore,
+)
+from openevo.evolution.training_feedback import (
+    CompletedDatasetAuthority,
+    EvolutionDatasetViewResolveRequest,
+    ResolvedEvolutionDatasetView,
+    TrainingFeedbackAttachment,
+    TrainingFeedbackAttachmentCreateRequest,
+    TrainingFeedbackAttachmentList,
+    TrainingFeedbackEvolutionService,
+)
+from openevo.internal_auth import (
+    INTERNAL_SERVICE_HEADER,
+    InternalServiceIdentity,
+    health_identity_payload,
+    install_internal_auth,
+)
+from openevo.runtime.base import RUNTIME_READBACK_MAX_BYTES
+from openevo.runtime.managed import MANAGED_CODEX_VERSION
+from openevo.runtime.managed_reflector_mount import (
+    ManagedReflectorCredentialMountReadiness,
+    ManagedReflectorMountAuthorityError,
+    ManagedReflectorMountRegistrationExpectation,
+    ManagedReflectorRuntimeReadiness,
+)
+
+
+def _review_write_error(exc: ValueError) -> HTTPException:
+    status_code = 404 if str(exc).startswith("unknown review:") else 422
+    return HTTPException(status_code=status_code, detail=str(exc))
+
+
+def _review_create_error(exc: ValueError) -> HTTPException:
+    status_code = 404 if str(exc).startswith("unknown query decision:") else 422
+    return HTTPException(status_code=status_code, detail=str(exc))
+
+
+def _feedback_application_create_error(exc: ValueError) -> HTTPException:
+    status_code = 404 if str(exc).startswith("unknown feedback:") else 422
+    return HTTPException(status_code=status_code, detail=str(exc))
+
+
+def create_app(
+    *,
+    db_path: str | Path,
+    artifact_root: str | Path,
+    registry_snapshot: RegistrySnapshot | None = None,
+    executable_registry: VerifiedExecutableRegistry | None = None,
+    internal_identity: InternalServiceIdentity | None = None,
+    managed_reflector_mount_expectation: (
+        ManagedReflectorMountRegistrationExpectation | None
+    ) = None,
+    training_feedback_official_mode: bool = False,
+) -> FastAPI:
+    verified_registry = (
+        None
+        if executable_registry is None
+        else require_verified_executable_registry(executable_registry)
+    )
+    effective_snapshot = (
+        verified_registry.snapshot if verified_registry is not None else registry_snapshot
+    )
+    root = Path(artifact_root)
+    root.mkdir(parents=True, exist_ok=True)
+    store = EvolutionStore(
+        db_path=db_path,
+        artifact_root=root,
+        registry_snapshot=registry_snapshot,
+        executable_registry=verified_registry,
+    )
+    store.initialize()
+    app = FastAPI(title="OpenEvo Evolution Backend", version="0.1.0")
+    app.state.db_path = Path(db_path)
+    app.state.artifact_root = root
+    app.state.store = store
+    app.state.registry_snapshot = effective_snapshot
+    app.state.evolution_registry = verified_registry
+    app.state.internal_identity = internal_identity
+    app.state.internal_workers = {}
+    app.state.managed_reflector_mount_expectation = (
+        managed_reflector_mount_expectation
+    )
+    feedback_service = TrainingFeedbackEvolutionService(
+        registry=store,
+        root=root / "core-control" / "training-feedback",
+        official_mode=training_feedback_official_mode,
+    )
+    feedback_authority = (
+        None
+        if training_feedback_official_mode
+        else feedback_service.issue_evaluator_authority(
+            producer="trusted_evaluator"
+        )
+    )
+    app.state.training_feedback_service = feedback_service
+    app.state.training_feedback_official_mode = training_feedback_official_mode
+    install_internal_auth(app, lambda: app.state.internal_identity)
+
+    @app.get("/v1/health")
+    async def health() -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "status": "ok",
+            "db": "ok",
+        }
+        if internal_identity is None:
+            payload["artifact_root"] = str(root)
+        else:
+            payload["registry_digest"] = (
+                effective_snapshot.registry_digest if effective_snapshot is not None else None
+            )
+            payload["workers"] = list(app.state.internal_workers.values())
+            payload.update(health_identity_payload(internal_identity))
+        return payload
+
+    @app.post("/v1/internal/workers/register")
+    def register_internal_worker(
+        payload: dict[str, Any],
+        request: Request,
+    ) -> dict[str, Any]:
+        if internal_identity is None:
+            raise HTTPException(status_code=404, detail="internal worker registration is disabled")
+        if request.headers.get(INTERNAL_SERVICE_HEADER) != "evolution-worker":
+            raise HTTPException(status_code=403, detail="worker caller identity mismatch")
+        if set(payload) != {
+            "framework_lock_digest",
+            "generation_digest",
+            "managed_reflector_credential_mount",
+            "managed_reflector_runtime_readiness",
+            "registry_digest",
+            "worker_id",
+        }:
+            raise HTTPException(
+                status_code=422, detail="worker registration is not a closed object"
+            )
+        worker_id = payload.get("worker_id")
+        generation_digest = payload.get("generation_digest")
+        registry_digest = payload.get("registry_digest")
+        framework_lock_digest = payload.get("framework_lock_digest")
+        raw_mount_readiness = payload.get("managed_reflector_credential_mount")
+        raw_runtime_readiness = payload.get("managed_reflector_runtime_readiness")
+        if (
+            worker_id != "core-reference-worker"
+            or generation_digest != internal_identity.generation_digest
+            or registry_digest != internal_identity.registry_digest
+            or framework_lock_digest != internal_identity.framework_lock_digest
+        ):
+            raise HTTPException(status_code=409, detail="worker registration identity mismatch")
+        if raw_mount_readiness is None:
+            raise HTTPException(
+                status_code=422,
+                detail="managed reflector credential mount readiness is required",
+            )
+        try:
+            mount_readiness = ManagedReflectorCredentialMountReadiness.model_validate(
+                raw_mount_readiness
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=422,
+                detail="managed reflector credential mount readiness is invalid",
+            ) from exc
+        if raw_runtime_readiness is None:
+            raise HTTPException(
+                status_code=422,
+                detail="managed reflector runtime readiness is required",
+            )
+        try:
+            runtime_readiness = ManagedReflectorRuntimeReadiness.model_validate(
+                raw_runtime_readiness
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=422,
+                detail="managed reflector runtime readiness is invalid",
+            ) from exc
+        expectation = app.state.managed_reflector_mount_expectation
+        if expectation is None:
+            raise HTTPException(
+                status_code=503,
+                detail="managed reflector mount registration expectation is unavailable",
+            )
+        try:
+            expectation.verify_readiness(mount_readiness)
+            expectation.verify_runtime_readiness(
+                runtime_readiness,
+                credential_mount=mount_readiness,
+            )
+        except ManagedReflectorMountAuthorityError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="managed reflector credential mount identity mismatch",
+            ) from exc
+        if (
+            mount_readiness.generation_digest != internal_identity.generation_digest
+            or mount_readiness.release_registry_digest
+            != internal_identity.registry_digest
+            or runtime_readiness.generation_digest
+            != internal_identity.generation_digest
+            or runtime_readiness.release_registry_digest
+            != internal_identity.registry_digest
+            or runtime_readiness.expected_cli_version != MANAGED_CODEX_VERSION
+            or runtime_readiness.actual_cli_version != MANAGED_CODEX_VERSION
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="managed reflector credential mount identity mismatch",
+            )
+        registration = {
+            "framework_lock_digest": framework_lock_digest,
+            "generation_digest": generation_digest,
+            "managed_reflector_credential_mount": (
+                mount_readiness.model_dump(mode="json")
+            ),
+            "managed_reflector_runtime_readiness": (
+                runtime_readiness.model_dump(mode="json")
+            ),
+            "registry_digest": registry_digest,
+            "worker_id": worker_id,
+        }
+        app.state.internal_workers[worker_id] = registration
+        return registration
+
+    @app.post("/v1/events", response_model=EventIngestResponse)
+    def ingest_event(request: EventIngestRequest) -> EventIngestResponse:
+        return store.ingest_event(request)
+
+    @app.post("/v1/artifacts", response_model=ArtifactResponse)
+    def register_artifact(request: ArtifactRegisterRequest) -> ArtifactResponse:
+        try:
+            return store.register_artifact(request)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/v1/artifacts/{artifact_id}", response_model=ArtifactResponse)
+    def get_artifact(artifact_id: str) -> ArtifactResponse:
+        try:
+            return store.get_artifact(artifact_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.patch("/v1/artifacts/{artifact_id}/promotion", response_model=ArtifactResponse)
+    def update_artifact_promotion(
+        artifact_id: str,
+        request: ArtifactPromotionUpdateRequest,
+    ) -> ArtifactResponse:
+        try:
+            return store.update_artifact_promotion_from_request(artifact_id, request)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post("/v1/contexts/resolve", response_model=ContextResolveResponse)
+    def resolve_context(request: ContextResolveRequest) -> ContextResolveResponse:
+        try:
+            return store.resolve_context(request)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get(
+        "/v1/internal/contexts/{context_id}/runtime-authority",
+        response_model=ContextResolveResponse,
+    )
+    def get_context_runtime_authority(
+        context_id: str,
+        request: Request,
+    ) -> ContextResolveResponse:
+        if internal_identity is None:
+            raise HTTPException(status_code=404, detail="context runtime authority is disabled")
+        if request.headers.get(INTERNAL_SERVICE_HEADER) != "core-control":
+            raise HTTPException(status_code=403, detail="context authority caller mismatch")
+        try:
+            return store.get_context_runtime_authority(context_id)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=404, detail="context runtime authority unavailable"
+            ) from exc
+
+    def require_materialized_context_caller(request: Request) -> None:
+        if internal_identity is None:
+            raise HTTPException(
+                status_code=404,
+                detail="materialized context transport is disabled",
+            )
+        if request.headers.get(INTERNAL_SERVICE_HEADER) not in {
+            "core-control",
+            "gateway",
+        }:
+            raise HTTPException(
+                status_code=403,
+                detail="materialized context caller mismatch",
+            )
+
+    def require_core_control_caller(request: Request) -> None:
+        if internal_identity is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Core control transport is disabled",
+            )
+        if request.headers.get(INTERNAL_SERVICE_HEADER) != "core-control":
+            raise HTTPException(
+                status_code=403,
+                detail="Core control caller mismatch",
+            )
+
+    def require_evolution_worker_caller(request: Request) -> None:
+        if internal_identity is not None and (
+            request.headers.get(INTERNAL_SERVICE_HEADER) != "evolution-worker"
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="evolution worker caller mismatch",
+            )
+
+    @app.post(
+        "/v1/internal/training-feedback/attachments",
+        response_model=TrainingFeedbackAttachment,
+    )
+    def create_training_feedback_attachment(
+        payload: TrainingFeedbackAttachmentCreateRequest,
+        request: Request,
+    ) -> TrainingFeedbackAttachment:
+        require_core_control_caller(request)
+        if feedback_authority is None:
+            raise HTTPException(
+                status_code=409,
+                detail="official frozen mode forbids training feedback",
+            )
+        try:
+            return feedback_service.create_training_feedback_attachment(
+                authority=feedback_authority,
+                request=payload,
+            )
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except ValueError as exc:
+            status = 409 if "conflict" in str(exc) else 422
+            raise HTTPException(status_code=status, detail=str(exc)) from exc
+
+    @app.get(
+        "/v1/internal/training-feedback/datasets/{dataset_id}",
+        response_model=CompletedDatasetAuthority,
+    )
+    def get_completed_dataset_authority(
+        dataset_id: str,
+        request: Request,
+    ) -> CompletedDatasetAuthority:
+        require_core_control_caller(request)
+        try:
+            return feedback_service.get_completed_dataset_authority(dataset_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get(
+        "/v1/internal/training-feedback/attachments/{attachment_id}",
+        response_model=TrainingFeedbackAttachment,
+    )
+    def get_training_feedback_attachment(
+        attachment_id: str,
+        request: Request,
+    ) -> TrainingFeedbackAttachment:
+        require_core_control_caller(request)
+        try:
+            return feedback_service.get_training_feedback_attachment(attachment_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get(
+        "/v1/internal/training-feedback/sessions/{session_id}/attachments",
+        response_model=TrainingFeedbackAttachmentList,
+    )
+    def list_training_feedback_attachments_for_session(
+        session_id: str,
+        request: Request,
+    ) -> TrainingFeedbackAttachmentList:
+        require_core_control_caller(request)
+        try:
+            return feedback_service.list_training_feedback_attachments_for_session(
+                session_id
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post(
+        "/v1/internal/training-feedback/resolve",
+        response_model=ResolvedEvolutionDatasetView,
+    )
+    def resolve_evolution_dataset_view(
+        payload: EvolutionDatasetViewResolveRequest,
+        request: Request,
+    ) -> ResolvedEvolutionDatasetView:
+        require_core_control_caller(request)
+        try:
+            return feedback_service.resolve_evolution_dataset_view(payload)
+        except ValueError as exc:
+            status = 404 if "unknown training feedback" in str(exc) else 422
+            raise HTTPException(status_code=status, detail=str(exc)) from exc
+
+    @app.post(
+        "/v1/internal/materialized-contexts",
+        response_model=MaterializedContext,
+    )
+    def create_materialized_context(
+        payload: ContextProjectionResolveRequest,
+        request: Request,
+    ) -> MaterializedContext:
+        require_materialized_context_caller(request)
+        if request.headers.get(INTERNAL_SERVICE_HEADER) != "core-control":
+            raise HTTPException(
+                status_code=403,
+                detail="only Core may create a materialized context",
+            )
+        try:
+            return store.resolve_materialized_context(payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get(
+        "/v1/internal/materialized-contexts/{context_id}",
+        response_model=MaterializedContext,
+    )
+    def get_materialized_context(
+        context_id: str,
+        request: Request,
+    ) -> MaterializedContext:
+        require_materialized_context_caller(request)
+        try:
+            return store.get_materialized_context(context_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get(
+        "/v1/internal/materialized-contexts/{context_id}/blobs/{blob_id}",
+        response_class=Response,
+    )
+    def get_materialized_context_blob(
+        context_id: str,
+        blob_id: str,
+        request: Request,
+    ) -> Response:
+        require_materialized_context_caller(request)
+        try:
+            with store.open_materialized_blob(context_id, blob_id) as lease:
+                if lease.blob.size_bytes > RUNTIME_READBACK_MAX_BYTES:
+                    raise ValueError(
+                        "materialized context blob exceeds the runtime transport budget"
+                    )
+                payload = lease.stream.read(lease.blob.size_bytes + 1)
+                if (
+                    len(payload) != lease.blob.size_bytes
+                    or lease.stream.read(1)
+                    or hashlib.sha256(payload).hexdigest() != lease.blob.sha256
+                ):
+                    raise ValueError("materialized context blob changed during transport")
+                return Response(
+                    content=payload,
+                    media_type=lease.blob.media_type,
+                    headers={
+                        "Content-Length": str(lease.blob.size_bytes),
+                        "X-OpenEvo-Content-SHA256": lease.blob.sha256,
+                    },
+                )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/v1/datasets", response_model=DatasetCreateResponse)
+    def create_dataset(
+        request: DatasetCreateHttpRequest,
+    ) -> DatasetCreateResponse:
+        try:
+            return store.create_dataset(request)
+        except DatasetIntegrityError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/v1/datasets/{dataset_id}", response_model=DatasetCreateResponse)
+    def get_dataset(dataset_id: str) -> DatasetCreateResponse:
+        try:
+            return store.get_dataset(dataset_id)
+        except DatasetNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except DatasetIntegrityError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/v1/reviews", response_model=ReviewRequestResponse)
+    def create_review(request: ReviewRequestCreateRequest) -> ReviewRequestResponse:
+        try:
+            return store.create_review_request(request)
+        except ValueError as exc:
+            raise _review_create_error(exc) from exc
+
+    @app.get("/v1/review-packets", response_model=list[ReviewPacketResponse])
+    def list_review_packets() -> list[ReviewPacketResponse]:
+        return store.list_review_packets()
+
+    @app.get("/v1/review-packets/{packet_id}", response_model=ReviewPacketResponse)
+    def get_review_packet(packet_id: str) -> ReviewPacketResponse:
+        try:
+            return store.get_review_packet(packet_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/v1/reviews", response_model=list[ReviewRequestResponse])
+    def list_reviews(
+        status: ReviewStatus | None = None,
+        task_id: str | None = None,
+        assigned_to: str | None = None,
+    ) -> list[ReviewRequestResponse]:
+        return store.list_review_requests(
+            status=status.value if status is not None else None,
+            task_id=task_id,
+            assigned_to=assigned_to,
+        )
+
+    @app.get("/v1/reviews/{review_id}", response_model=ReviewRequestResponse)
+    def get_review(review_id: str) -> ReviewRequestResponse:
+        try:
+            return store.get_review_request(review_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/v1/reviews/{review_id}/claim", response_model=ReviewRequestResponse)
+    def claim_review(
+        review_id: str,
+        request: ReviewClaimRequest,
+    ) -> ReviewRequestResponse:
+        try:
+            return store.claim_review_request(review_id, request)
+        except ValueError as exc:
+            raise _review_write_error(exc) from exc
+
+    @app.post("/v1/reviews/{review_id}/feedback", response_model=HumanFeedbackResponse)
+    def submit_review_feedback(
+        review_id: str,
+        request: HumanFeedbackCreateRequest,
+    ) -> HumanFeedbackResponse:
+        try:
+            return store.submit_human_feedback(review_id, request)
+        except ValueError as exc:
+            raise _review_write_error(exc) from exc
+
+    @app.get("/v1/reviews/{review_id}/feedback", response_model=list[HumanFeedbackResponse])
+    def list_review_feedback(review_id: str) -> list[HumanFeedbackResponse]:
+        try:
+            return store.list_human_feedback(review_id=review_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/v1/reviews/{review_id}/adjudicate", response_model=ReviewRequestResponse)
+    def adjudicate_review(
+        review_id: str,
+        request: ReviewAdjudicationRequest,
+    ) -> ReviewRequestResponse:
+        try:
+            return store.adjudicate_review_request(review_id, request)
+        except ValueError as exc:
+            raise _review_write_error(exc) from exc
+
+    @app.post("/v1/reviews/{review_id}/resolve", response_model=ReviewRequestResponse)
+    def resolve_review(review_id: str) -> ReviewRequestResponse:
+        try:
+            return store.resolve_review_request(review_id)
+        except ValueError as exc:
+            raise _review_write_error(exc) from exc
+
+    @app.post("/v1/reviews/{review_id}/mark-stale", response_model=ReviewRequestResponse)
+    def mark_review_stale(review_id: str) -> ReviewRequestResponse:
+        try:
+            return store.mark_review_stale(review_id)
+        except ValueError as exc:
+            raise _review_write_error(exc) from exc
+
+    @app.post("/v1/query-decisions", response_model=HumanQueryDecisionResponse)
+    def create_query_decision(
+        request: HumanQueryDecisionCreateRequest,
+    ) -> HumanQueryDecisionResponse:
+        try:
+            return store.create_human_query_decision(request)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get(
+        "/v1/query-decisions/{query_decision_id}",
+        response_model=HumanQueryDecisionResponse,
+    )
+    def get_query_decision(query_decision_id: str) -> HumanQueryDecisionResponse:
+        try:
+            return store.get_human_query_decision(query_decision_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/v1/feedback-applications", response_model=FeedbackApplicationResponse)
+    def create_feedback_application(
+        request: FeedbackApplicationCreateRequest,
+    ) -> FeedbackApplicationResponse:
+        try:
+            return store.create_feedback_application(request)
+        except ValueError as exc:
+            raise _feedback_application_create_error(exc) from exc
+
+    @app.get("/v1/feedback-applications", response_model=list[FeedbackApplicationResponse])
+    def list_feedback_applications(
+        feedback_id: str | None = None,
+    ) -> list[FeedbackApplicationResponse]:
+        try:
+            return store.list_feedback_applications(feedback_id=feedback_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/v1/jobs", response_model=JobCreateResponse)
+    def create_job(request: JobCreateRequest) -> JobCreateResponse:
+        try:
+            return store.create_job(request)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post("/v1/planned-jobs", response_model=JobCreateResponse)
+    def create_plan_bound_job(request: PlanBoundJobCreateRequest) -> JobCreateResponse:
+        if effective_snapshot is None:
+            raise HTTPException(
+                status_code=503,
+                detail="plan-bound execution requires an active verified registry",
+            )
+        try:
+            return store.create_plan_bound_job(request, snapshot=effective_snapshot)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post(
+        "/v1/planned-jobs/{job_id}/retry",
+        response_model=JobCreateResponse,
+    )
+    def retry_plan_bound_job(
+        job_id: str,
+        request: PlanBoundJobRetryRequest,
+    ) -> JobCreateResponse:
+        if effective_snapshot is None:
+            raise HTTPException(
+                status_code=503,
+                detail="plan-bound execution requires an active verified registry",
+            )
+        try:
+            return store.retry_plan_bound_job(
+                job_id,
+                request,
+                snapshot=effective_snapshot,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post("/v1/jobs/claim", response_model=WorkerClaimResponse)
+    def claim_job(request: WorkerClaimRequest) -> WorkerClaimResponse:
+        if internal_identity is not None:
+            registration = app.state.internal_workers.get(request.worker_id)
+            if (
+                not isinstance(registration, dict)
+                or registration.get("managed_reflector_credential_mount") is None
+                or registration.get("managed_reflector_runtime_readiness") is None
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="worker credential mount readiness is not registered",
+                )
+        return store.claim_job(request)
+
+    @app.post("/v1/jobs/{job_id}/heartbeat")
+    def heartbeat_job(job_id: str, request: WorkerHeartbeatRequest) -> dict[str, object]:
+        try:
+            return store.heartbeat_job(job_id, request)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post("/v1/jobs/{job_id}/complete")
+    def complete_job(job_id: str, request: WorkerCompleteRequest) -> dict[str, object]:
+        try:
+            return store.complete_job(job_id, request)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post("/v1/jobs/{job_id}/fail")
+    def fail_job(job_id: str, request: WorkerFailRequest) -> dict[str, object]:
+        try:
+            return store.fail_job(job_id, request)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post(
+        "/v1/internal/jobs/{job_id}/reflector-inference/reserve",
+        response_model=WorkerReflectorInferenceReserveResponse,
+    )
+    def reserve_reflector_inference(
+        job_id: str,
+        payload: WorkerReflectorInferenceReserveRequest,
+        request: Request,
+    ) -> WorkerReflectorInferenceReserveResponse:
+        require_evolution_worker_caller(request)
+        try:
+            return store.reserve_reflector_inference(job_id, payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post(
+        "/v1/internal/jobs/{job_id}/reflector-inference/complete",
+        response_model=ReflectorInferenceReservationReceipt,
+    )
+    def complete_reflector_inference(
+        job_id: str,
+        payload: WorkerReflectorInferenceCompleteRequest,
+        request: Request,
+    ) -> ReflectorInferenceReservationReceipt:
+        require_evolution_worker_caller(request)
+        try:
+            return store.complete_reflector_inference(job_id, payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get(
+        "/v1/internal/jobs/{job_id}/reflector-inference",
+        response_model=ReflectorInferenceReservationReceipt,
+    )
+    def get_reflector_inference_reservation(
+        job_id: str,
+        request: Request,
+    ) -> ReflectorInferenceReservationReceipt:
+        require_core_control_caller(request)
+        try:
+            return store.get_reflector_inference_reservation(job_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post(
+        "/v1/internal/artifact-admission/decisions",
+        response_model=ArtifactProposalDecisionReceipt,
+    )
+    def apply_internal_artifact_admission(
+        payload: ArtifactProposalDecisionRequest,
+        request: Request,
+    ) -> ArtifactProposalDecisionReceipt:
+        require_core_control_caller(request)
+        try:
+            return store.apply_internal_artifact_admission(payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/v1/internal/jobs/{job_id}")
+    def get_internal_job_result(
+        job_id: str,
+        request: Request,
+    ) -> dict[str, object]:
+        require_core_control_caller(request)
+        try:
+            return store.get_internal_job_result(job_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="job not found") from exc
+
+    @app.get(
+        "/v1/internal/jobs/{job_id}/failed-plan-authority",
+        response_model=FailedPlanBoundJobAuthorityResponse,
+    )
+    def get_internal_failed_plan_bound_job_authority(
+        job_id: str,
+        request: Request,
+    ) -> FailedPlanBoundJobAuthorityResponse:
+        require_core_control_caller(request)
+        try:
+            return store.get_internal_failed_plan_bound_job_authority(job_id)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail="failed plan-bound job authority not found",
+            ) from exc
+
+    @app.get(
+        "/v1/internal/successor-transitions/{successor_transition_id}/jobs",
+        response_model=SuccessorTransitionJobInventoryResponse,
+    )
+    def get_internal_successor_transition_job_inventory(
+        successor_transition_id: str,
+        request: Request,
+    ) -> SuccessorTransitionJobInventoryResponse:
+        require_core_control_caller(request)
+        try:
+            return store.get_internal_successor_transition_job_inventory(
+                successor_transition_id
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get(
+        "/v1/internal/successor-transitions/{successor_transition_id}"
+        "/artifacts/{artifact_id}",
+        response_model=ArtifactResponse,
+    )
+    def get_internal_successor_artifact(
+        successor_transition_id: str,
+        artifact_id: str,
+        request: Request,
+    ) -> ArtifactResponse:
+        require_core_control_caller(request)
+        try:
+            return store.get_internal_successor_artifact(
+                successor_transition_id,
+                artifact_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail="successor transition artifact not found",
+            ) from exc
+
+    @app.get(
+        "/v1/internal/successor-transitions/{successor_transition_id}"
+        "/artifacts/{artifact_id}/authority",
+        response_model=SuccessorArtifactAuthorityResponse,
+    )
+    def get_internal_successor_artifact_authority(
+        successor_transition_id: str,
+        artifact_id: str,
+        request: Request,
+    ) -> SuccessorArtifactAuthorityResponse:
+        require_core_control_caller(request)
+        try:
+            return store.get_internal_successor_artifact_authority(
+                successor_transition_id,
+                artifact_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail="successor transition artifact authority not found",
+            ) from exc
+
+    @app.post(
+        "/v1/internal/successor-transitions/{successor_transition_id}"
+        "/discard"
+    )
+    def discard_successor_transition_outputs(
+        successor_transition_id: str,
+        request: Request,
+    ) -> dict[str, object]:
+        require_core_control_caller(request)
+        try:
+            return store.discard_successor_transition_outputs(
+                successor_transition_id
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return app

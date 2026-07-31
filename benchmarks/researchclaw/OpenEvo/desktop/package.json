@@ -1,0 +1,51 @@
+{
+  "name": "openevo-desktop",
+  "private": true,
+  "version": "0.1.9",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:openevo": "vite --mode openevo-desktop",
+    "build": "vite build",
+    "build:openevo": "vite build --mode openevo-desktop && node scripts/package-openevo-product.mjs",
+    "generate:icons": "bash src-tauri/icons/generate-icons.sh",
+    "check:icons": "bash src-tauri/icons/generate-icons.sh --check",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "build:sidecar": "python packaging/build_sidecar.py",
+    "build:desktop": "npm run build:sidecar && npm run tauri:build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:product-browser": "npm run test:product-browser:preview && npm run test:product-browser:release-readonly",
+    "test:product-browser:preview": "playwright test",
+    "test:product-browser:release-readonly": "playwright test --config playwright.release-readonly.config.ts",
+    "test:product-browser:release-live": "playwright test --config playwright.release-live.config.ts",
+    "test:product-browser:update": "playwright test --update-snapshots",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@microsoft/fetch-event-source": "^2.0.1",
+    "@tanstack/react-query": "^5.59.0",
+    "@tauri-apps/api": "^2.11.1",
+    "lucide-react": "^1.23.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^6.27.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.61.1",
+    "@tailwindcss/vite": "^4.0.0",
+    "@tauri-apps/cli": "^2.0.0",
+    "@types/node": "^22.7.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^6.0.3",
+    "happy-dom": "^20.10.6",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.6.0",
+    "vite": "^8.1.3",
+    "vitest": "^4.1.10"
+  }
+}

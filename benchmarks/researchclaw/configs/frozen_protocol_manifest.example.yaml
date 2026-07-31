@@ -1,0 +1,154 @@
+schema_version: "1.0.0"
+protocol_id: "researchclawbench-openevo-formal-v1-draft"
+status: "DRAFT_NOT_AUTHORIZED"
+benchmark:
+  name: "ResearchClawBench"
+  version: "commit-53ee262a265d47e47e94cbb4c2249a0478dfdbfc"
+source_revisions:
+  researchclawbench_commit: "53ee262a265d47e47e94cbb4c2249a0478dfdbfc"
+  huggingface_dataset_revision: "db5d2f4d9494e83c6f0ea0839b00f2b9c1ab66a4"
+  openevo_commit: "b7baa85b6699ed797c61a3e2166fa0b5ad2a0284"
+  adapter_commit: "PENDING_IMPLEMENTATION"
+  scorer_commit: "53ee262a265d47e47e94cbb4c2249a0478dfdbfc"
+community_split:
+  path: "configs/community_split.yaml"
+  sha256: "5fab6aa79d9f39d0c5f839110e17a8d616c05bcb0020bd0a25adb928fad2b123"
+  semantic_sha256: "9e8df69c917398822914b084c624df16b1460d76f9d0ba252483914285080c66"
+artifact:
+  type: "agent_system"
+  artifact_id: "PENDING_ARTIFACT_FREEZE"
+  sha256: "PENDING_ARTIFACT_FREEZE"
+  source_dev_only: true
+  frozen_read_only: false
+candidate:
+  harness: "codex"
+  codex_cli_version: "PENDING_ARTIFACT_FREEZE"
+  model_exact_name: "PENDING_MAINTAINER_CONFIRMATION"
+  provider: "PENDING_MAINTAINER_CONFIRMATION"
+  auth_mode: "PENDING_MAINTAINER_CONFIRMATION"
+  reasoning_level: "PENDING_MAINTAINER_CONFIRMATION"
+  capture_mode: "transcript"
+  token_level_metrics_available: false
+budgets:
+  max_steps: "PENDING_MAINTAINER_CONFIRMATION"
+  max_runtime_seconds: "PENDING_MAINTAINER_CONFIRMATION"
+  max_input_tokens: "PENDING_MAINTAINER_CONFIRMATION"
+  max_output_tokens: "PENDING_MAINTAINER_CONFIRMATION"
+  max_total_tokens: "PENDING_MAINTAINER_CONFIRMATION"
+  max_cost_usd: "PENDING_MAINTAINER_CONFIRMATION"
+tools:
+  allowed:
+    - "PENDING_MAINTAINER_CONFIRMATION"
+  mcp_servers: []
+  package_installation: "forbidden_during_formal_run_prebuilt_image_only"
+network:
+  policy: "PENDING_MAINTAINER_CONFIRMATION"
+  allow_internet: "PENDING_MAINTAINER_CONFIRMATION"
+  egress_profile_id: "PENDING_MAINTAINER_CONFIRMATION"
+  target_paper_retrieval_prohibited: true
+environment:
+  inherit_host_environment: false
+  variable_allowlist:
+    - "HOME"
+    - "PATH"
+    - "LANG"
+    - "LC_ALL"
+    - "TMPDIR"
+    - "PYTHONUNBUFFERED"
+    - "OPENEVO_EVOLUTION_CONTEXT"
+    - "OPENEVO_AGENT_SYSTEM_FILE"
+  secret_values_recorded: false
+  candidate_isolation_profile: "PENDING_IMPLEMENTATION"
+dependencies:
+  lock_file: "PENDING_IMPLEMENTATION"
+  lock_file_sha256: "PENDING_IMPLEMENTATION"
+  runtime_image_digest: "PENDING_IMPLEMENTATION"
+execution:
+  task_order:
+    - "Astronomy_000"
+    - "Astronomy_001"
+    - "Astronomy_002"
+    - "Astronomy_003"
+    - "Chemistry_000"
+    - "Chemistry_001"
+    - "Chemistry_002"
+    - "Chemistry_003"
+    - "Earth_000"
+    - "Earth_001"
+    - "Earth_002"
+    - "Earth_003"
+    - "Energy_000"
+    - "Energy_001"
+    - "Energy_002"
+    - "Energy_003"
+    - "Information_000"
+    - "Information_001"
+    - "Information_002"
+    - "Information_003"
+    - "Life_000"
+    - "Life_001"
+    - "Life_002"
+    - "Life_003"
+    - "Material_000"
+    - "Material_001"
+    - "Material_002"
+    - "Material_003"
+    - "Math_000"
+    - "Math_001"
+    - "Math_002"
+    - "Math_003"
+    - "Neuroscience_000"
+    - "Neuroscience_001"
+    - "Neuroscience_002"
+    - "Neuroscience_003"
+    - "Physics_000"
+    - "Physics_001"
+    - "Physics_002"
+    - "Physics_003"
+  randomness_policy: "PENDING_MAINTAINER_CONFIRMATION"
+  seed: "PENDING_MAINTAINER_CONFIRMATION"
+  evaluation_mode: "PENDING_MAINTAINER_CONFIRMATION"
+  pass_k: "PENDING_MAINTAINER_CONFIRMATION"
+  attempts_per_task: "PENDING_MAINTAINER_CONFIRMATION"
+  cross_task_state_policy: "reset_per_task"
+  score_after_all_tasks: true
+feedback:
+  policy_id: "researchclaw-openevo-feedback-v1"
+  schema_path: "schemas/evolution_feedback.schema.json"
+  official_feedback_released: false
+  reflector_receives_judge_data: false
+scorer:
+  implementation: "ResearchClawBench/evaluation/score.py:score_workspace"
+  commit: "53ee262a265d47e47e94cbb4c2249a0478dfdbfc"
+  invocation_phase: "after_all_official_candidate_runs_are_sealed"
+  prompt_modified: false
+judge:
+  model_exact_name: "PENDING_MAINTAINER_CONFIRMATION"
+  provider: "PENDING_MAINTAINER_CONFIRMATION"
+  temperature: 0
+  credentials_candidate_visible: false
+images:
+  generated_images_per_item_limit: 5
+  target_images_per_item_limit: 1
+  max_image_size_bytes: 10485760
+  maintainer_confirmation_required: true
+run:
+  planned_date: "PENDING_MAINTAINER_CONFIRMATION"
+  timezone: "Asia/Shanghai"
+  baseline_and_treatment_only_agent_system_differs: true
+operator:
+  name: "PENDING_MAINTAINER_CONFIRMATION"
+  organization: "PENDING_MAINTAINER_CONFIRMATION"
+anomaly_rules:
+  - "No in-place resume after candidate launch; use a fresh run_id."
+  - "Candidate timeout, nonzero exit, invalid transcript, or invalid artifact fails closed."
+  - "Only predeclared infrastructure failures may be retried, without score inspection."
+  - "Any isolation, source, artifact, manifest, or feedback mismatch stops the protocol."
+  - "No official score may update, select, or repair the frozen artifact."
+maintainer_confirmation:
+  status_file: "configs/maintainer_confirmation_status.yaml"
+  official_40_tasks_allowed: false
+  official_judge_allowed: false
+  pass5_allowed: false
+  cross_task_evolution_allowed: false
+  judge_feedback_evolution_allowed: false
