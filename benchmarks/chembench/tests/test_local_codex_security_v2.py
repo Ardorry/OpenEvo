@@ -3,9 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
 import stat
 import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -33,7 +33,6 @@ from openevo_chembench.v2_config import (
     FrozenArtifactBinding,
     FrozenExperimentConfigV2,
 )
-
 
 _OFFICIAL_PROMPT = """There is a single choice question about chemistry. Answer the question by replying A, B, C or D.
 Question: Public chemistry question?
@@ -84,6 +83,18 @@ def _recoverable_transport_transcript() -> str:
         {
             "type": "error",
             "message": "stream disconnected; reconnecting (attempt 1/5)",
+        },
+    )
+    return "\n".join(json.dumps(event, sort_keys=True) for event in events) + "\n"
+
+
+def _recoverable_timeout_transcript() -> str:
+    events = [json.loads(line) for line in _safe_transcript().splitlines()]
+    events.insert(
+        2,
+        {
+            "type": "error",
+            "message": "Reconnecting... 2/5 (request timed out)",
         },
     )
     return "\n".join(json.dumps(event, sort_keys=True) for event in events) + "\n"
@@ -394,6 +405,20 @@ def test_recoverable_transport_error_followed_by_completion_is_accepted() -> Non
     }
 
 
+def test_recoverable_request_timeout_followed_by_completion_is_accepted() -> None:
+    transcript = _recoverable_timeout_transcript()
+    response, usage, digest = _parse_jsonl_transcript(transcript)
+
+    assert response == "A"
+    assert usage["output_tokens"] == 1
+    assert len(digest) == 64
+    assert _event_stream_summary(transcript) == {
+        "event_count": 5,
+        "tool_event_count": 0,
+        "last_event_type": "turn.completed",
+    }
+
+
 @pytest.mark.parametrize(
     "error_event",
     (
@@ -404,6 +429,8 @@ def test_recoverable_transport_error_followed_by_completion_is_accepted() -> Non
             "type": "error",
             "message": ("stream disconnected; reconnecting " + ("x" * 1024)),
         },
+        {"type": "error", "message": "Reconnecting... 6/5 (request timed out)"},
+        {"type": "error", "message": "request timed out"},
     ),
 )
 def test_unrecognized_or_malformed_error_event_remains_fail_closed(
@@ -424,6 +451,22 @@ def test_unrecognized_or_malformed_error_event_remains_fail_closed(
 
 def test_recoverable_transport_error_without_completion_fails_closed() -> None:
     events = [json.loads(line) for line in _recoverable_transport_transcript().splitlines()]
+    transcript = "\n".join(
+        json.dumps(event, sort_keys=True)
+        for event in events
+        if event["type"] not in {"item.completed", "turn.completed"}
+    )
+
+    with pytest.raises(LocalCodexExecutionError) as raised:
+        _parse_jsonl_transcript(transcript + "\n")
+
+    assert raised.value.code is LocalCodexExecutionErrorCode.CLI_FAILED
+    assert raised.value.taskwise_failure_code == "EXECUTOR_MODEL_TRANSPORT_FAILED"
+    assert raised.value.executor_stage == "MODEL_TRANSPORT"
+
+
+def test_recoverable_request_timeout_without_completion_fails_closed() -> None:
+    events = [json.loads(line) for line in _recoverable_timeout_transcript().splitlines()]
     transcript = "\n".join(
         json.dumps(event, sort_keys=True)
         for event in events

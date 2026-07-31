@@ -2869,7 +2869,7 @@ def _parse_jsonl_transcript(
 
 
 def _is_recoverable_transport_error_event(event: Mapping[str, object]) -> bool:
-    """Recognize Codex's bounded reconnect notice, never arbitrary error payloads."""
+    """Recognize bounded Codex reconnect notices, never arbitrary error payloads."""
 
     if set(event) != _RECOVERABLE_TRANSPORT_ERROR_KEYS or type(event.get("message")) is not str:
         return False
@@ -2878,7 +2878,16 @@ def _is_recoverable_transport_error_event(event: Mapping[str, object]) -> bool:
     if not encoded or len(encoded) > _MAX_TRANSPORT_ERROR_MESSAGE_BYTES:
         return False
     normalized = message.casefold()
-    return "reconnect" in normalized and "stream" in normalized and "disconnect" in normalized
+    disconnected_stream = (
+        "reconnect" in normalized
+        and "stream" in normalized
+        and "disconnect" in normalized
+    )
+    timed_out_request = (
+        re.fullmatch(r"reconnecting\.\.\. [1-5]/5 \(request timed out\)", normalized)
+        is not None
+    )
+    return disconnected_stream or timed_out_request
 
 
 def _is_valid_todo_list_item(

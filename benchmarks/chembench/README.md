@@ -362,6 +362,16 @@ artifact lifecycle, model, evaluator, parser, frozen split, and final-Test
 semantics are unchanged. See
 [`configs/supervised_transfer_v3/two_round_one_evolution.md`](configs/supervised_transfer_v3/two_round_one_evolution.md).
 
+Its same-profile recovery commands accept the first five completely closed
+categories from `stv3-one-update-online-20260730T165823Z`, discard the partial
+`Retrosynthesis` category in full, and start a fresh namespace at
+`Retrosynthesis` task 0 with generation-zero targets. They never import a
+parent database, artifact, context, or stream head. The strict transcript
+parser accepts Codex's bounded `request timed out` reconnect notice only when a
+complete agent response and `turn.completed` follow; incomplete or arbitrary
+errors still fail closed. See
+[`configs/supervised_transfer_v3/same_profile_category_shard_recovery.md`](configs/supervised_transfer_v3/same_profile_category_shard_recovery.md).
+
 ## Legacy protocol
 
 The older `jablonkagroup/ChemBench` adapter, configurations, and partial

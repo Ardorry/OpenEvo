@@ -32,6 +32,7 @@ _SHARED_FILES = (
     "benchmarks/chembench/src/openevo_chembench/chembench4k_prompt.py",
     "benchmarks/chembench/src/openevo_chembench/core_evolution_v2.py",
     "benchmarks/chembench/src/openevo_chembench/frozen_runtime_v2.py",
+    "benchmarks/chembench/src/openevo_chembench/local_codex_executor.py",
     "benchmarks/chembench/src/openevo_chembench/models.py",
     "benchmarks/chembench/src/openevo_chembench/taskwise_feedback_v1.py",
     "benchmarks/chembench/configs/supervised_transfer_v2/openevo_runtime_services_v2.yaml",
