@@ -372,6 +372,13 @@ complete agent response and `turn.completed` follow; incomplete or arbitrary
 errors still fail closed. See
 [`configs/supervised_transfer_v3/same_profile_category_shard_recovery.md`](configs/supervised_transfer_v3/same_profile_category_shard_recovery.md).
 
+After all nine two-round category shards close, `composed-final-test-verify`,
+`composed-final-test-dry-run`, and `composed-final-test` re-audit the shard
+composition, freeze the exact 27 final category targets, and execute the
+single-pass evolved-only Test in a new namespace. Source shard databases and
+artifacts remain read-only and are not imported. See
+[`configs/supervised_transfer_v3/composed_final_test.md`](configs/supervised_transfer_v3/composed_final_test.md).
+
 ## Legacy protocol
 
 The older `jablonkagroup/ChemBench` adapter, configurations, and partial

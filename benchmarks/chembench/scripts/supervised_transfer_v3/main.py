@@ -32,6 +32,13 @@ from openevo_chembench.supervised_transfer_v3.category_shard_recovery import (
     build_category_shard_recovery_dry_run_v3,
     build_source_compatibility_receipt_v3,
 )
+from openevo_chembench.supervised_transfer_v3.composed_final_test import (
+    COMPOSITION_RUN_ID,
+    ComposedFinalTestExperimentV3,
+    audit_composed_train_shards_v3,
+    build_composed_final_test_dry_run_v3,
+    build_composed_source_compatibility_receipt_v3,
+)
 from openevo_chembench.supervised_transfer_v3.config import load_config_v3
 from openevo_chembench.supervised_transfer_v3.continued_category_shard_recovery import (
     CONTINUED_PARENT_RUN_ID,
@@ -75,6 +82,7 @@ def main() -> int:
     parser.add_argument("--smoke-run-id")
     parser.add_argument("--service-run-id")
     parser.add_argument("--parent-run-id")
+    parser.add_argument("--composition-run-id")
     parser.add_argument("--start-category-index", type=int)
     parser.add_argument("--allow-paid", action="store_true")
     parser.add_argument(
@@ -98,6 +106,9 @@ def main() -> int:
             "continued-category-recovery-verify",
             "continued-category-recovery-dry-run",
             "continued-category-recover-online",
+            "composed-final-test-verify",
+            "composed-final-test-dry-run",
+            "composed-final-test",
         ),
     )
     arguments = parser.parse_args()
@@ -360,7 +371,7 @@ def main() -> int:
         )
         write_public_file(write_path, canonical_pretty_json_bytes(compatibility))
         payload = experiment.run_category_shard_recovery()
-    else:
+    elif arguments.command == "continued-category-recover-online":
         if not arguments.allow_paid:
             parser.error("continued-category-recover-online requires --allow-paid")
         if not arguments.run_id:
@@ -401,6 +412,75 @@ def main() -> int:
         )
         write_public_file(write_path, canonical_pretty_json_bytes(compatibility))
         payload = experiment.run_category_shard_recovery()
+    elif arguments.command in {
+        "composed-final-test-verify",
+        "composed-final-test-dry-run",
+    }:
+        audit = audit_composed_train_shards_v3(
+            repository_root=REPOSITORY_ROOT,
+            composition_run_id=arguments.composition_run_id or COMPOSITION_RUN_ID,
+        )
+        inputs = load_experiment_inputs_v3(
+            REPOSITORY_ROOT,
+            config,
+            require_runtime=False,
+        )
+        if arguments.command == "composed-final-test-verify":
+            payload = {
+                "status": "PASS",
+                "composition_run_id": audit.composition_run_id,
+                "composition_receipt_sha256": audit.composition_receipt_sha256,
+                "composition_audit_sha256": audit.digest,
+                "category_count": len(audit.categories),
+                "target_count": len(audit.categories) * 3,
+                "source_shards_opened_read_only": True,
+                "source_artifacts_imported": False,
+                "source_databases_imported": False,
+                "model_calls": 0,
+            }
+        else:
+            if not arguments.run_id:
+                parser.error("composed-final-test-dry-run requires --run-id")
+            payload = build_composed_final_test_dry_run_v3(
+                inputs=inputs,
+                audit=audit,
+                run_id=arguments.run_id,
+            )
+    else:
+        if not arguments.allow_paid:
+            parser.error("composed-final-test requires --allow-paid")
+        if not arguments.run_id:
+            parser.error("composed-final-test requires --run-id")
+        if not arguments.smoke_run_id:
+            parser.error("composed-final-test requires --smoke-run-id")
+        require_paid_runtime_python_v2(repository_root=REPOSITORY_ROOT)
+        audit = audit_composed_train_shards_v3(
+            repository_root=REPOSITORY_ROOT,
+            composition_run_id=arguments.composition_run_id or COMPOSITION_RUN_ID,
+        )
+        inputs = load_experiment_inputs_v3(
+            REPOSITORY_ROOT,
+            config,
+            require_runtime=True,
+        )
+        compatibility = build_composed_source_compatibility_receipt_v3(
+            inputs=inputs,
+            audit=audit,
+        )
+        if compatibility["semantically_compatible"] is not True:
+            raise RuntimeError("COMPOSED_TEST_SOURCE_NOT_COMPATIBLE")
+        experiment = ComposedFinalTestExperimentV3(
+            inputs=inputs,
+            run_id=arguments.run_id,
+            composition_audit=audit,
+            runtime_smoke_run_id=arguments.smoke_run_id,
+        )
+        write_public_file(
+            experiment.result_root
+            / "public/composed_final_test_source_compatibility_receipt_v3.json",
+            canonical_pretty_json_bytes(compatibility),
+        )
+        payload = experiment.run_composed_final_test()
     payload["config_sha256"] = config.digest
     print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
     return 0
