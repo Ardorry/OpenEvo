@@ -146,3 +146,47 @@ desktop/src-tauri/binaries/openevo-desktop-sidecar-*
 desktop/src-tauri/binaries/openevo-ssh-askpass-*
 desktop/src-tauri/gen/
 desktop/src-tauri/target/
+
+# ResearchClaw local secrets
+benchmarks/researchclaw/OpenEvo/desktop/.env.openevo-desktop
+benchmarks/researchclaw/**/.env
+benchmarks/researchclaw/**/.env.*
+benchmarks/researchclaw/**/*secret*
+benchmarks/researchclaw/**/*token*
+benchmarks/researchclaw/**/*api_key*
+benchmarks/researchclaw/**/*credential*
+
+# ResearchClaw local runtime outputs
+benchmarks/researchclaw/**/workspaces/
+benchmarks/researchclaw/**/.cache/
+benchmarks/researchclaw/**/.pytest_cache/
+benchmarks/researchclaw/**/.ruff_cache/
+benchmarks/researchclaw/**/__pycache__/
+benchmarks/researchclaw/**/*.pyc
+benchmarks/researchclaw/**/node_modules/
+benchmarks/researchclaw/**/dist/
+benchmarks/researchclaw/**/build/
+
+# Large local artifacts
+benchmarks/researchclaw/**/*.tar
+benchmarks/researchclaw/**/*.tar.gz
+benchmarks/researchclaw/**/*.zip
+benchmarks/researchclaw/**/*.7z
+benchmarks/researchclaw/**/*.pt
+benchmarks/researchclaw/**/*.pth
+benchmarks/researchclaw/**/*.ckpt
+benchmarks/researchclaw/**/*.safetensors
+
+# ResearchClaw local env / secrets
+benchmarks/researchclaw/OpenEvo/desktop/.env.openevo-desktop
+benchmarks/researchclaw/**/.env
+benchmarks/researchclaw/**/.env.*
+benchmarks/researchclaw/**/*secret*
+benchmarks/researchclaw/**/*token*
+benchmarks/researchclaw/**/*api_key*
+benchmarks/researchclaw/**/*credential*
+
+# ResearchClaw experiment outputs
+benchmarks/researchclaw/experiments/
+benchmarks/researchclaw/**/outputs/
+benchmarks/researchclaw/**/workspaces/
