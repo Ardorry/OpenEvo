@@ -9,6 +9,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from .config import FROZEN_TASKS
 from .hashing import UnsafePathError, ensure_within, iter_regular_files
 from .task_loader import load_public_task
 
@@ -66,19 +67,17 @@ def _build_sanitized_template(workspace: Path, template: Path) -> Path:
     if temporary.exists():
         raise FileExistsError(f"unfinished candidate template exists: {temporary}")
     temporary.mkdir(parents=True)
-    try:
-        shutil.copy2(workspace / "INSTRUCTIONS.md", temporary / "INSTRUCTIONS.md")
-        for name in ("data", "related_work"):
-            shutil.copytree(workspace / name, temporary / name, symlinks=False)
-        for name in ("code", "outputs", "artifacts", "skills"):
-            (temporary / name).mkdir()
-        (temporary / "report" / "images").mkdir(parents=True)
-        assert_candidate_workspace_shape(temporary)
-        template.parent.mkdir(parents=True, exist_ok=True)
-        temporary.rename(template)
-    except BaseException:
-        # Leave the named .building directory as fail-closed audit evidence.
-        raise
+    # Any failure deliberately leaves the named .building directory as
+    # fail-closed audit evidence.
+    shutil.copy2(workspace / "INSTRUCTIONS.md", temporary / "INSTRUCTIONS.md")
+    for name in ("data", "related_work"):
+        shutil.copytree(workspace / name, temporary / name, symlinks=False)
+    for name in ("code", "outputs", "artifacts", "skills"):
+        (temporary / name).mkdir()
+    (temporary / "report" / "images").mkdir(parents=True)
+    assert_candidate_workspace_shape(temporary)
+    template.parent.mkdir(parents=True, exist_ok=True)
+    temporary.rename(template)
     return template
 
 
@@ -97,11 +96,17 @@ def build_official_workspace(
     task_id: str,
     run_root: str | Path,
     run_id: str,
+    *,
+    allowed_task_ids: tuple[str, ...] = tuple(FROZEN_TASKS),
 ) -> WorkspaceReceipt:
     if not run_id.startswith(f"{task_id}_a") or any(char not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-" for char in run_id):
         raise ValueError("unsafe or mismatched run_id")
     repo_root = Path(rcb_root).resolve(strict=True)
-    public_task = load_public_task(repo_root, task_id)
+    public_task = load_public_task(
+        repo_root,
+        task_id,
+        allowed_task_ids=allowed_task_ids,
+    )
     root = Path(run_root).resolve(strict=False)
     root.mkdir(parents=True, exist_ok=True)
     workspace = ensure_within(root / run_id, root)

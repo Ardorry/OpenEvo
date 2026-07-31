@@ -8,7 +8,12 @@ version = "0.2.0"
 description = "Isolated Community Dev adapter for ResearchClawBench and OpenEvo."
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["PyYAML>=6.0"]
+dependencies = [
+  "PyYAML>=6.0",
+  "openai==2.50.0",
+  "packaging==26.2",
+  "structai==0.1.23",
+]
 
 [project.optional-dependencies]
 test = ["pytest>=8", "jsonschema>=4.20"]

@@ -54,6 +54,23 @@ def _compiled():
 
 
 def _decision() -> ArtifactProposalDecisionReceipt:
+    content_admission = {
+        "schema_version": "openevo.artifact_content_admission.v1",
+        "basis_sha256": "b" * 64,
+        "proposal_artifact_ids": ["artifact-1", "artifact-2"],
+        "source_artifact_ids": [],
+        "source_payload_sha256": None,
+        "scanned_file_count": 2,
+        "scanned_byte_count": 128,
+        "finding_count": 0,
+        "finding_categories": [],
+        "passed": True,
+    }
+    content_admission["content_sha256"] = hashlib.sha256(
+        json.dumps(
+            content_admission, sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
     body = {
         "schema_version": "openevo.artifact_proposal_decision.v1",
         "decision_id": "decision-1",
@@ -61,6 +78,7 @@ def _decision() -> ArtifactProposalDecisionReceipt:
         "artifact_type": "agent_system",
         "action": "update",
         "parent_artifact_id": "artifact-parent",
+        "genesis": False,
         "proposal_artifact_ids": ["artifact-1", "artifact-2"],
         "selected_artifact_id": "artifact-1",
         "rejected_artifact_ids": ["artifact-2"],
@@ -72,6 +90,7 @@ def _decision() -> ArtifactProposalDecisionReceipt:
             "passed": True,
             "report_sha256": "a" * 64,
         },
+        "content_admission": content_admission,
         "created_at": "2026-07-28T00:00:00+00:00",
     }
     body["content_sha256"] = hashlib.sha256(

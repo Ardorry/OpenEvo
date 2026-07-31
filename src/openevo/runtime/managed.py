@@ -157,9 +157,9 @@ class ManagedCredentialMount:
 MANAGED_RUNTIME_RELEASES: Final[dict[ManagedRuntimeProfile, ManagedRuntimeImageRelease]] = {
     profile: ManagedRuntimeImageRelease(
         image=image,
-        trusted_digest=("sha256:af67c6b8c9cb0debd3a29addc23f518a680369ad53ec5347a829ef7318529c5c"),
+        trusted_digest=("sha256:c60d4a60a7f0a353cccf07399407bac3f6b56991610a0457a6c1d4e5bdd61d88"),
         loaded_image_id=(
-            "sha256:7a0079f9cb1bce5768cff5bce3d1181811c6a231ad800cac8fb503d66852c81b"
+            "sha256:d8e691fa6d07ec62bb8616e607909202df9c17cff88e8944a82d3ba24d7f3b20"
         ),
     )
     for profile, image in MANAGED_RUNTIME_IMAGES.items()
@@ -658,6 +658,25 @@ def require_immutable_managed_runtime_image(
     return release
 
 
+def managed_runtime_release_authority_digest(
+    *,
+    profile: str | None,
+    image: str | None,
+) -> str:
+    """Return the canonical signed release digest for one managed image.
+
+    The managed Science OCI archive is executed by its locally loaded image
+    ID, which is intentionally distinct from the release's signed trusted
+    digest. Cross-process authorities and receipts bind the trusted digest;
+    Docker admission separately verifies and executes the loaded image ID.
+    """
+
+    return require_immutable_managed_runtime_image(
+        profile=profile,
+        image=image,
+    ).trusted_digest
+
+
 def managed_runtime_image_inspect_reference(
     *,
     profile: str | None,
@@ -816,6 +835,7 @@ __all__ = [
     "verify_managed_runtime_archive",
     "managed_runtime_image_release",
     "managed_runtime_image_inspect_reference",
+    "managed_runtime_release_authority_digest",
     "require_immutable_managed_runtime_image",
     "verified_managed_runtime_image_reference",
     "reject_managed_subscription_env",

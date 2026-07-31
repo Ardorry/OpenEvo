@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 import hashlib
 import json
+import re
 import secrets
 import shlex
+from collections.abc import Mapping, Sequence
 from typing import Final
 
 from openevo.runtime.managed import (
@@ -21,14 +22,15 @@ from openevo.runtime.managed import (
     MANAGED_WORKSPACE,
 )
 
-
-CODEX_SUBSCRIPTION_POLICY_ID: Final[str] = "openevo.codex-subscription-credential-isolation.v1"
+CODEX_SUBSCRIPTION_POLICY_ID: Final[str] = "openevo.codex-subscription-credential-isolation.v2"
 CODEX_SUBSCRIPTION_PERMISSION_PROFILE: Final[str] = "openevo_codex_subscription_v1"
 CODEX_SUBSCRIPTION_CODEX_VERSION: Final[str] = MANAGED_CODEX_VERSION
 CODEX_SUBSCRIPTION_SANDBOX_BACKEND: Final[str] = "linux-bubblewrap"
 CODEX_SUBSCRIPTION_CONTRACT_KEY: Final[str] = "credential_isolation"
 CODEX_SUBSCRIPTION_READINESS_KEY: Final[str] = "credential_isolation_receipt"
-CODEX_SUBSCRIPTION_CANARY_OK: Final[str] = "openevo-codex-subscription-real-exec-ready-v1"
+CODEX_SUBSCRIPTION_CANARY_OK: Final[str] = (
+    "openevo-codex-subscription-deterministic-sandbox-ready-v2"
+)
 CODEX_SUBSCRIPTION_REFRESH_PERSISTENCE: Final[str] = "unsupported_read_only_auth_overlay"
 CODEX_SUBSCRIPTION_CANARY_CWD: Final[str] = MANAGED_CODEX_READINESS_WORKSPACE
 _CANARY_RESULT: Final[str] = "isolated"
@@ -60,7 +62,11 @@ _FILESYSTEM_POLICY: Final[tuple[tuple[str, str], ...]] = (
     (_EVOLUTION_ROOT, "read"),
     (":tmpdir", "write"),
     ("/tmp", "write"),
-    (MANAGED_CODEX_HOME, "deny"),
+    # Codex 0.144.1 resolves Core-owned, non-secret configuration below
+    # CODEX_HOME while constructing its nested sandbox.  Keep that directory
+    # readable, but deny the exact credential leaf to every tool process.
+    (MANAGED_CODEX_HOME, "read"),
+    (f"{MANAGED_CODEX_HOME}/auth.json", "deny"),
 )
 _DISABLED_EXECUTION_FEATURES: Final[tuple[str, ...]] = (
     "apps",
@@ -125,19 +131,20 @@ _POLICY_SPEC: Final[dict[str, object]] = {
     "credential_auth_overlay_access": "read-only",
     "credential_tool_filesystem_access": "deny",
     "credential_refresh_persistence": CODEX_SUBSCRIPTION_REFRESH_PERSISTENCE,
-    "readiness_command": "codex exec",
+    "readiness_command": "codex login status + codex sandbox",
     "readiness_context": {
         "working_directory": CODEX_SUBSCRIPTION_CANARY_CWD,
         "project_instructions": "absent",
         "evolution_skills": "not_installed",
     },
-    "readiness_evidence": "completed_command_execution_event",
+    "readiness_evidence": "deterministic_no_model_sandbox",
     "readiness_canaries": [
         "exact_codex_version",
         "parent_auth_read",
         "tool_direct_auth_read_denied",
         "tool_proc_self_root_auth_read_denied",
         "tool_proc_pid_root_auth_read_denied",
+        "tool_proc_environment_secret_absent",
         "tool_sudo_auth_read_denied_or_absent",
         "workspace_write",
         "home_read_only",
@@ -153,6 +160,26 @@ CODEX_SUBSCRIPTION_POLICY_SHA256: Final[str] = hashlib.sha256(
         separators=(",", ":"),
     ).encode("utf-8")
 ).hexdigest()
+
+# Lifecycle-28 stored results were sealed with this exact v1 authority.  It is
+# accepted only for immutable database readback; new launches always require
+# the current v2 contract and deterministic no-model proof.
+_HISTORICAL_V1_CONTRACT: Final[dict[str, object]] = {
+    "schema_version": 1,
+    "policy_id": "openevo.codex-subscription-credential-isolation.v1",
+    "policy_sha256": "59ea503b553aa414ddcc35ede66210ee901621eebcbd1cfbeb06023410e35d38",
+    "permission_profile": CODEX_SUBSCRIPTION_PERMISSION_PROFILE,
+    "codex_version": CODEX_SUBSCRIPTION_CODEX_VERSION,
+    "default_model": MANAGED_CODEX_DEFAULT_MODEL,
+    "sandbox_backend": CODEX_SUBSCRIPTION_SANDBOX_BACKEND,
+    "refresh_persistence": CODEX_SUBSCRIPTION_REFRESH_PERSISTENCE,
+}
+_HISTORICAL_V1_RECEIPT: Final[dict[str, object]] = {
+    **_HISTORICAL_V1_CONTRACT,
+    "status": "passed",
+    "canary": "openevo-codex-subscription-real-exec-ready-v1",
+    "evidence": "completed_command_execution_event",
+}
 
 
 def codex_subscription_contract() -> dict[str, object]:
@@ -171,14 +198,666 @@ def codex_subscription_contract() -> dict[str, object]:
 
 
 def codex_subscription_readiness_receipt() -> dict[str, object]:
-    """Return the receipt published only after the real-exec canary passes."""
+    """Return the receipt published only after the deterministic probe passes."""
 
     return {
         **codex_subscription_contract(),
         "status": "passed",
         "canary": CODEX_SUBSCRIPTION_CANARY_OK,
-        "evidence": "completed_command_execution_event",
+        "evidence": "deterministic_no_model_sandbox",
+        "auth_status_checked": True,
+        "model_started": False,
     }
+
+
+def is_historical_codex_subscription_authority(
+    contract: object,
+    receipt: object,
+) -> bool:
+    """Recognize the one frozen v1 authority for immutable result readback."""
+
+    return contract == _HISTORICAL_V1_CONTRACT and receipt == _HISTORICAL_V1_RECEIPT
+
+
+class CodexSubscriptionIsolationError(RuntimeError):
+    """Closed, non-secret failure emitted by the deterministic isolation probe."""
+
+    _CODES: Final[frozenset[str]] = frozenset(
+        {
+            "parent_cli_version_mismatch",
+            "parent_auth_unreadable",
+            "parent_auth_status_unavailable",
+            "readiness_workspace_invalid",
+            "project_instructions_present",
+            "runtime_skills_present",
+            "sandbox_direct_credential_visible",
+            "sandbox_proc_credential_visible",
+            "sandbox_host_credential_visible",
+            "sandbox_docker_socket_visible",
+            "sandbox_environment_secret_visible",
+            "sandbox_parent_environment_secret_visible",
+            "sandbox_workspace_write_failed",
+            "sandbox_home_read_failed",
+            "sandbox_home_write_allowed",
+            "sandbox_tmp_write_failed",
+            "sandbox_namespace_unavailable",
+            "sandbox_executable_unavailable",
+            "sandbox_bwrap_unavailable",
+            "sandbox_shell_unavailable",
+            "sandbox_noop_executable_unavailable",
+            "sandbox_helper_executable_unavailable",
+            "sandbox_child_executable_unavailable",
+            "sandbox_cli_contract_invalid",
+            "sandbox_config_permission_denied",
+            "sandbox_child_not_started",
+            "sandbox_child_signalled",
+            "sandbox_permission_denied",
+            "sandbox_policy_rejected",
+            "sandbox_read_only_filesystem",
+            "sandbox_runtime_dependency_unavailable",
+            "sandbox_security_policy_denied",
+            "sandbox_timeout",
+            "sandbox_user_namespace_denied",
+            "sandbox_outer_command_failed",
+            "sandbox_invocation_failed",
+            "sandbox_output_invalid",
+        }
+    )
+
+    _PROGRESS: Final[frozenset[str]] = frozenset(
+        {
+            "not_started",
+            "outer_started",
+            "parent_cli_ready",
+            "parent_auth_readable",
+            "parent_auth_ready",
+            "workspace_ready",
+            "instructions_clean",
+            "uncredentialed_smoke",
+            "credential_smoke",
+            "sandbox_launched",
+            "sandbox_returned",
+            "classified",
+            "entered",
+            "direct_hidden",
+            "host_hidden",
+            "proc_hidden",
+            "socket_hidden",
+            "env_clean",
+            "parent_env_clean",
+            "workspace_write",
+            "home_contract",
+            "tmp_write",
+            "completed",
+            "invalid",
+        }
+    )
+    _STDERR_CLASSES: Final[frozenset[str]] = frozenset(
+        {
+            "empty",
+            "namespace_permission",
+            "executable_missing",
+            "cli_contract",
+            "config_permission",
+            "config_invalid",
+            "working_directory",
+            "policy_rejected",
+            "operation_not_permitted",
+            "permission_denied",
+            "read_only_filesystem",
+            "security_backend",
+            "timeout",
+            "outer_command_missing",
+            "outer_missing_bash",
+            "outer_missing_cat",
+            "outer_missing_codex",
+            "outer_missing_grep",
+            "outer_missing_id",
+            "outer_missing_rm",
+            "outer_missing_sh",
+            "outer_missing_stat",
+            "outer_missing_tr",
+            "unclassified",
+        }
+    )
+    _HELPER_MISSING_EXECUTABLES: Final[frozenset[str]] = frozenset(
+        {
+            "none",
+            "bwrap",
+            "bash",
+            "sh",
+            "true",
+            "env",
+            "codex-linux-sandbox",
+            "unclassified",
+        }
+    )
+
+    def __init__(
+        self,
+        code: str,
+        *,
+        nested_return_code: int | None = None,
+        probe_progress: str | None = None,
+        stderr_class: str | None = None,
+        helper_started: bool | None = None,
+        helper_return_code: int | None = None,
+        missing_executable_basename: str | None = None,
+    ) -> None:
+        if code not in self._CODES:
+            code = "sandbox_invocation_failed"
+        if nested_return_code is not None and not 0 <= nested_return_code <= 255:
+            nested_return_code = None
+        if probe_progress not in self._PROGRESS:
+            probe_progress = None
+        if stderr_class not in self._STDERR_CLASSES:
+            stderr_class = None
+        if type(helper_started) is not bool:
+            helper_started = None
+        if helper_return_code is not None and not 0 <= helper_return_code <= 255:
+            helper_return_code = None
+        if missing_executable_basename not in self._HELPER_MISSING_EXECUTABLES:
+            missing_executable_basename = None
+        super().__init__(f"CANDIDATE_SUBSCRIPTION_ISOLATION_NOT_READY:{code}")
+        self.code = code
+        self.nested_return_code = nested_return_code
+        self.probe_progress = probe_progress
+        self.stderr_class = stderr_class
+        self.helper_started = helper_started
+        self.helper_return_code = helper_return_code
+        self.missing_executable_basename = missing_executable_basename
+
+
+_ISOLATION_FAILURE_PREFIX: Final[str] = "OPENEVO_CODEX_ISOLATION_FAILURE:"
+_ISOLATION_FAILURE_DIAGNOSTIC = re.compile(
+    rf"^{re.escape(_ISOLATION_FAILURE_PREFIX)}"
+    r"(?P<code>[a-z][a-z0-9_]{0,95})"
+    r"\|nested_return_code=(?P<return_code>[0-9]{1,3})"
+    r"\|progress=(?P<progress>[a-z][a-z0-9_]{0,31})"
+    r"\|stderr_class=(?P<stderr_class>[a-z][a-z0-9_]{0,47})$"
+)
+
+
+def _codex_subscription_sandbox_command(
+    *,
+    allow_internet: bool,
+    child_argv: tuple[str, ...],
+) -> str:
+    """Render the one production Codex sandbox invocation contract."""
+
+    if not child_argv or any(
+        not isinstance(value, str) or not value for value in child_argv
+    ):
+        raise ValueError("Codex subscription sandbox child argv is invalid")
+    config_flags = " ".join(
+        f"-c {shlex.quote(value)}"
+        for value in codex_subscription_cli_overrides(allow_internet=allow_internet)
+    )
+    child = " ".join(shlex.quote(value) for value in child_argv)
+    return (
+        f"{shlex.quote(MANAGED_CODEX_BINARY)} {config_flags} sandbox "
+        "--include-managed-config "
+        f"--permission-profile {shlex.quote(CODEX_SUBSCRIPTION_PERMISSION_PROFILE)} "
+        f"-C {shlex.quote(CODEX_SUBSCRIPTION_CANARY_CWD)} -- {child}"
+    )
+
+
+def codex_subscription_sandbox_smoke_command(*, allow_internet: bool) -> str:
+    """Return the same production sandbox launcher with a no-op child."""
+
+    return _codex_subscription_sandbox_command(
+        allow_internet=allow_internet,
+        child_argv=("/bin/true",),
+    )
+
+
+def validate_codex_subscription_sandbox_smoke_result(
+    *,
+    return_code: int,
+    stderr: str | None,
+    probe_progress: str,
+    helper_started: bool | None = None,
+    helper_return_code: int | None = None,
+    missing_executable_basename: str | None = None,
+) -> None:
+    """Fail closed with bounded diagnostics when the no-op child cannot launch."""
+
+    if return_code == 0:
+        return
+    safe_return_code = return_code if 0 <= return_code <= 255 else None
+    stderr_class = _classify_outer_probe_stderr(stderr)
+    code = "sandbox_child_not_started"
+    if return_code >= 128:
+        code = "sandbox_child_signalled"
+    elif stderr_class == "namespace_permission":
+        code = "sandbox_namespace_unavailable"
+    elif stderr_class == "permission_denied":
+        code = "sandbox_permission_denied"
+    elif stderr_class == "operation_not_permitted":
+        code = "sandbox_user_namespace_denied"
+    elif stderr_class == "security_backend":
+        code = "sandbox_security_policy_denied"
+    elif missing_executable_basename == "bwrap":
+        code = "sandbox_bwrap_unavailable"
+    elif missing_executable_basename in {"bash", "sh"}:
+        code = "sandbox_shell_unavailable"
+    elif missing_executable_basename == "true":
+        code = "sandbox_noop_executable_unavailable"
+    elif missing_executable_basename == "codex-linux-sandbox":
+        code = "sandbox_helper_executable_unavailable"
+    elif missing_executable_basename in {"env", "unclassified"}:
+        code = "sandbox_child_executable_unavailable"
+    elif stderr_class == "executable_missing" or return_code == 127:
+        code = "sandbox_executable_unavailable"
+    raise CodexSubscriptionIsolationError(
+        code,
+        nested_return_code=safe_return_code,
+        probe_progress=probe_progress,
+        stderr_class=stderr_class,
+        helper_started=helper_started,
+        helper_return_code=helper_return_code,
+        missing_executable_basename=missing_executable_basename,
+    )
+
+
+_SANDBOX_HELPER_DIAGNOSTIC = re.compile(
+    r"\Astarted=(?P<started>[01])\n"
+    r"return_code=(?P<return_code>[0-9]{1,3})\n"
+    r"missing_executable=(?P<missing>none|bwrap|bash|sh|true|env|"
+    r"codex-linux-sandbox|unclassified)\n?\Z"
+)
+
+
+def parse_codex_sandbox_helper_diagnostic(
+    value: str | None,
+) -> tuple[bool | None, int | None, str | None]:
+    """Parse the optional closed diagnostic emitted by a managed helper wrapper."""
+
+    match = _SANDBOX_HELPER_DIAGNOSTIC.fullmatch(value or "")
+    if match is None:
+        return None, None, None
+    return_code = int(match.group("return_code"))
+    if return_code > 255:
+        return None, None, None
+    return match.group("started") == "1", return_code, match.group("missing")
+
+
+def codex_subscription_isolation_probe_command(
+    *,
+    allow_internet: bool,
+    nonce: str | None = None,
+) -> str:
+    """Build the no-model proof used by readiness and ``CodexHarness.setup``.
+
+    ``codex login status`` is the positive parent-auth control. ``codex
+    sandbox`` invokes the same production permission profile used for shell
+    tools without starting a model turn.  The child proves that the mounted
+    credential is absent through direct and ``/proc/*/root`` aliases while the
+    intended workspace and temporary-file capabilities remain usable.
+    """
+
+    checked_nonce = _new_or_checked_nonce(nonce)
+    marker = CODEX_SUBSCRIPTION_CANARY_OK
+    auth_file = f"{MANAGED_CODEX_HOME}/auth.json"
+    home_auth_file = f"{MANAGED_HOME}/.codex/auth.json"
+    workspace_canary = f"{MANAGED_WORKSPACE}/.openevo-isolation-{checked_nonce}"
+    home_read_canary = f"{MANAGED_HOME}/.openevo-isolation-read-{checked_nonce}"
+    home_write_canary = f"{MANAGED_HOME}/.openevo-isolation-write-{checked_nonce}"
+    tmp_canary = f"/tmp/.openevo-isolation-{checked_nonce}"
+    sandbox_stderr = f"/tmp/.openevo-isolation-{checked_nonce}.stderr"
+    progress_canary = f"{MANAGED_WORKSPACE}/.openevo-isolation-progress-{checked_nonce}"
+    sandbox_script = "\n".join(
+        [
+            "set -eu",
+            f"auth_file={shlex.quote(auth_file)}",
+            f"home_auth_file={shlex.quote(home_auth_file)}",
+            f"workspace_canary={shlex.quote(workspace_canary)}",
+            f"home_read_canary={shlex.quote(home_read_canary)}",
+            f"home_write_canary={shlex.quote(home_write_canary)}",
+            f"tmp_canary={shlex.quote(tmp_canary)}",
+            f"progress_canary={shlex.quote(progress_canary)}",
+            'printf entered > "$progress_canary" || exit 46',
+            'test ! -r "$auth_file" || exit 41',
+            '! /bin/cat "$auth_file" >/dev/null 2>&1 || exit 41',
+            'printf direct_hidden > "$progress_canary" || exit 46',
+            'test ! -r "$home_auth_file" || exit 43',
+            'test ! -r /root/.codex/auth.json || exit 43',
+            'printf host_hidden > "$progress_canary" || exit 46',
+            "for root_link in /proc/self/root /proc/[0-9]*/root; do",
+            '  test -e "$root_link" || continue',
+            '  candidate="$root_link$auth_file"',
+            '  test ! -r "$candidate" || exit 42',
+            '  ! /bin/cat "$candidate" >/dev/null 2>&1 || exit 42',
+            "done",
+            'printf proc_hidden > "$progress_canary" || exit 46',
+            "test ! -e /var/run/docker.sock || exit 44",
+            'printf socket_hidden > "$progress_canary" || exit 46',
+            (
+                "env | grep -E "
+                + shlex.quote(
+                    "^(OPENEVO_CORE_CONTROL_BEARER|JUDGE_API_KEY|OPENAI_API_KEY|"
+                    "SSH_AUTH_SOCK|DOCKER_HOST)="
+                )
+                + " >/dev/null && exit 45 || :"
+            ),
+            'printf env_clean > "$progress_canary" || exit 46',
+            "for process_env in /proc/[0-9]*/environ; do",
+            '  test -r "$process_env" || continue',
+            (
+                "  /usr/bin/tr '\\000' '\\n' < \"$process_env\" 2>/dev/null "
+                "| grep -E "
+                + shlex.quote(
+                    "^(OPENEVO_CORE_CONTROL_BEARER|JUDGE_API_KEY|OPENAI_API_KEY|"
+                    "SSH_AUTH_SOCK|DOCKER_HOST)="
+                )
+                + " >/dev/null && exit 50 || :"
+            ),
+            "done",
+            'printf parent_env_clean > "$progress_canary" || exit 46',
+            'printf "%s" "' + checked_nonce + '" > "$workspace_canary" || exit 46',
+            'printf workspace_write > "$progress_canary" || exit 46',
+            'test "$(/bin/cat "$home_read_canary")" = "' + checked_nonce + '" || exit 47',
+            '(printf blocked > "$home_write_canary") 2>/dev/null && exit 48 || :',
+            'test ! -e "$home_write_canary" || exit 48',
+            'printf home_contract > "$progress_canary" || exit 46',
+            'printf "%s" "' + checked_nonce + '" > "$tmp_canary" || exit 49',
+            'printf tmp_write > "$progress_canary" || exit 46',
+            'printf completed > "$progress_canary" || exit 46',
+            f"printf '%s\\n' {shlex.quote(marker)}",
+        ]
+    )
+    sandbox_command = _codex_subscription_sandbox_command(
+        allow_internet=allow_internet,
+        child_argv=("/bin/sh", "-c", sandbox_script),
+    )
+    cleanup_paths = " ".join(
+        shlex.quote(path)
+        for path in (
+            workspace_canary,
+            home_read_canary,
+            home_write_canary,
+            tmp_canary,
+            sandbox_stderr,
+            progress_canary,
+        )
+    )
+    return "\n".join(
+        [
+            "set -u",
+            "umask 077",
+            "diagnostic_emitted=0",
+            "outer_progress=outer_started",
+            f"cleanup() {{ /bin/rm -f -- {cleanup_paths}; }}",
+            (
+                "finish() { rc=$?; trap - EXIT; "
+                "if test \"$rc\" -ne 0 && test \"$diagnostic_emitted\" -eq 0; then "
+                "stderr_class=unclassified; "
+                "if test \"$rc\" -eq 127; then stderr_class=outer_command_missing; fi; "
+                "printf '%s%s|nested_return_code=%s|progress=%s|stderr_class=%s\\n' "
+                f"{shlex.quote(_ISOLATION_FAILURE_PREFIX)} "
+                "sandbox_outer_command_failed \"$rc\" \"$outer_progress\" "
+                "\"$stderr_class\" >&2; fi; cleanup; exit \"$rc\"; }"
+            ),
+            "trap finish EXIT",
+            "trap 'exit 129' HUP",
+            "trap 'exit 130' INT",
+            "trap 'exit 143' TERM",
+            (
+                "emit_diagnostic() { "
+                "diagnostic_emitted=1; "
+                "printf '%s%s|nested_return_code=%s|progress=%s|stderr_class=%s\\n' "
+                f"{shlex.quote(_ISOLATION_FAILURE_PREFIX)} "
+                '"$1" "$2" "$3" "$4" >&2; exit 70; }'
+            ),
+            (
+                f'test "$({shlex.quote(MANAGED_CODEX_BINARY)} --version)" = '
+                f"{shlex.quote(f'codex-cli {CODEX_SUBSCRIPTION_CODEX_VERSION}')} || "
+                "emit_diagnostic parent_cli_version_mismatch 70 "
+                '"$outer_progress" unclassified'
+            ),
+            "outer_progress=parent_cli_ready",
+            f"test -r {shlex.quote(auth_file)} || "
+            'emit_diagnostic parent_auth_unreadable 70 "$outer_progress" unclassified',
+            f"/bin/cat {shlex.quote(auth_file)} >/dev/null || "
+            'emit_diagnostic parent_auth_unreadable 70 "$outer_progress" unclassified',
+            "outer_progress=parent_auth_readable",
+            (
+                f"{shlex.quote(MANAGED_CODEX_BINARY)} login status </dev/null "
+                ">/dev/null 2>&1 || "
+                "emit_diagnostic parent_auth_status_unavailable 70 "
+                '"$outer_progress" unclassified'
+            ),
+            "outer_progress=parent_auth_ready",
+            f"test -d {shlex.quote(CODEX_SUBSCRIPTION_CANARY_CWD)} || "
+            'emit_diagnostic readiness_workspace_invalid 70 "$outer_progress" unclassified',
+            f"test ! -L {shlex.quote(CODEX_SUBSCRIPTION_CANARY_CWD)} || "
+            'emit_diagnostic readiness_workspace_invalid 70 "$outer_progress" unclassified',
+            (
+                f'test "$(/usr/bin/stat -c %u {shlex.quote(CODEX_SUBSCRIPTION_CANARY_CWD)})" = '
+                '"$(/usr/bin/id -u)" || '
+                "emit_diagnostic readiness_workspace_invalid 70 "
+                '"$outer_progress" unclassified'
+            ),
+            "outer_progress=workspace_ready",
+            f"test ! -e {shlex.quote(CODEX_SUBSCRIPTION_CANARY_CWD + '/AGENTS.md')} || "
+            'emit_diagnostic project_instructions_present 70 "$outer_progress" unclassified',
+            f"test ! -e {shlex.quote(MANAGED_HOME + '/.agents/skills')} || "
+            'emit_diagnostic runtime_skills_present 70 "$outer_progress" unclassified',
+            "outer_progress=instructions_clean",
+            f"printf '%s' {shlex.quote(checked_nonce)} > {shlex.quote(home_read_canary)}",
+            "set +e",
+            "outer_progress=sandbox_launched",
+            f"sandbox_output=$({sandbox_command} 2>{shlex.quote(sandbox_stderr)})",
+            "sandbox_rc=$?",
+            "outer_progress=sandbox_returned",
+            "set -e",
+            "progress=not_started",
+            f"if test -r {shlex.quote(progress_canary)}; then",
+            f"  progress=$(/bin/cat {shlex.quote(progress_canary)} 2>/dev/null || printf invalid)",
+            "  case \"$progress\" in",
+            (
+                "    entered|direct_hidden|host_hidden|proc_hidden|socket_hidden|"
+                "env_clean|parent_env_clean|workspace_write|home_contract|tmp_write|completed) ;;"
+            ),
+            "    *) progress=invalid ;;",
+            "  esac",
+            "fi",
+            "stderr_class=unclassified",
+            f"if test ! -s {shlex.quote(sandbox_stderr)}; then",
+            "  stderr_class=empty",
+            (
+                f"elif grep -F {shlex.quote('No permissions to create a new namespace')} "
+                f"{shlex.quote(sandbox_stderr)} >/dev/null 2>&1; then"
+            ),
+            "  stderr_class=namespace_permission",
+            (
+                f"elif grep -E {shlex.quote('required arguments were not provided|Usage: codex sandbox|unexpected argument|unrecognized option')} "
+                f"{shlex.quote(sandbox_stderr)} >/dev/null 2>&1; then"
+            ),
+            "  stderr_class=cli_contract",
+            (
+                f"elif grep -F {shlex.quote('Failed to read config file')} "
+                f"{shlex.quote(sandbox_stderr)} >/dev/null 2>&1 && "
+                f"grep -F {shlex.quote('Permission denied')} "
+                f"{shlex.quote(sandbox_stderr)} >/dev/null 2>&1; then"
+            ),
+            "  stderr_class=config_permission",
+            (
+                f"elif grep -Ei {shlex.quote('invalid (configuration|config)|config.*parse|TOML.*(parse|invalid)')} "
+                f"{shlex.quote(sandbox_stderr)} >/dev/null 2>&1; then"
+            ),
+            "  stderr_class=config_invalid",
+            (
+                f"elif grep -Ei {shlex.quote('working directory|current directory|chdir')} "
+                f"{shlex.quote(sandbox_stderr)} >/dev/null 2>&1; then"
+            ),
+            "  stderr_class=working_directory",
+            (
+                f"elif grep -Ei {shlex.quote('permission profile|default_permissions|managed requirements|sandbox policy')} "
+                f"{shlex.quote(sandbox_stderr)} >/dev/null 2>&1; then"
+            ),
+            "  stderr_class=policy_rejected",
+            (
+                f"elif grep -Ei {shlex.quote('seccomp|landlock|bubblewrap|bwrap')} "
+                f"{shlex.quote(sandbox_stderr)} >/dev/null 2>&1; then"
+            ),
+            "  stderr_class=security_backend",
+            (
+                f"elif grep -F {shlex.quote('Read-only file system')} "
+                f"{shlex.quote(sandbox_stderr)} >/dev/null 2>&1; then"
+            ),
+            "  stderr_class=read_only_filesystem",
+            (
+                f"elif grep -F {shlex.quote('Operation not permitted')} "
+                f"{shlex.quote(sandbox_stderr)} >/dev/null 2>&1; then"
+            ),
+            "  stderr_class=operation_not_permitted",
+            (
+                f"elif grep -F {shlex.quote('Permission denied')} "
+                f"{shlex.quote(sandbox_stderr)} >/dev/null 2>&1; then"
+            ),
+            "  stderr_class=permission_denied",
+            (
+                f"elif grep -Ei {shlex.quote('timed out|timeout')} "
+                f"{shlex.quote(sandbox_stderr)} >/dev/null 2>&1; then"
+            ),
+            "  stderr_class=timeout",
+            (
+                f"elif grep -F {shlex.quote('No such file or directory')} "
+                f"{shlex.quote(sandbox_stderr)} >/dev/null 2>&1; then"
+            ),
+            "  stderr_class=executable_missing",
+            "fi",
+            "outer_progress=classified",
+            "case \"$sandbox_rc\" in",
+            "  0) ;;",
+            "  41) emit_diagnostic sandbox_direct_credential_visible \"$sandbox_rc\" \"$progress\" \"$stderr_class\" ;;",
+            "  42) emit_diagnostic sandbox_proc_credential_visible \"$sandbox_rc\" \"$progress\" \"$stderr_class\" ;;",
+            "  43) emit_diagnostic sandbox_host_credential_visible \"$sandbox_rc\" \"$progress\" \"$stderr_class\" ;;",
+            "  44) emit_diagnostic sandbox_docker_socket_visible \"$sandbox_rc\" \"$progress\" \"$stderr_class\" ;;",
+            "  45) emit_diagnostic sandbox_environment_secret_visible \"$sandbox_rc\" \"$progress\" \"$stderr_class\" ;;",
+            "  46) emit_diagnostic sandbox_workspace_write_failed \"$sandbox_rc\" \"$progress\" \"$stderr_class\" ;;",
+            "  47) emit_diagnostic sandbox_home_read_failed \"$sandbox_rc\" \"$progress\" \"$stderr_class\" ;;",
+            "  48) emit_diagnostic sandbox_home_write_allowed \"$sandbox_rc\" \"$progress\" \"$stderr_class\" ;;",
+            "  49) emit_diagnostic sandbox_tmp_write_failed \"$sandbox_rc\" \"$progress\" \"$stderr_class\" ;;",
+            "  50) emit_diagnostic sandbox_parent_environment_secret_visible \"$sandbox_rc\" \"$progress\" \"$stderr_class\" ;;",
+            "  *)",
+            "    case \"$stderr_class\" in",
+            "      namespace_permission) failure=sandbox_namespace_unavailable ;;",
+            "      executable_missing) failure=sandbox_executable_unavailable ;;",
+            "      cli_contract) failure=sandbox_cli_contract_invalid ;;",
+            "      config_permission) failure=sandbox_config_permission_denied ;;",
+            "      policy_rejected|config_invalid) failure=sandbox_policy_rejected ;;",
+            "      security_backend) failure=sandbox_security_policy_denied ;;",
+            "      read_only_filesystem) failure=sandbox_read_only_filesystem ;;",
+            "      operation_not_permitted) failure=sandbox_user_namespace_denied ;;",
+            "      permission_denied) failure=sandbox_permission_denied ;;",
+            "      timeout) failure=sandbox_timeout ;;",
+            "      *) failure=sandbox_invocation_failed ;;",
+            "    esac",
+            "    if test \"$progress\" = not_started; then failure=sandbox_child_not_started; fi",
+            "    if test \"$sandbox_rc\" -ge 128; then failure=sandbox_child_signalled; fi",
+            "    emit_diagnostic \"$failure\" \"$sandbox_rc\" \"$progress\" \"$stderr_class\"",
+            "    ;;",
+            "esac",
+            f"test \"$sandbox_output\" = {shlex.quote(marker)} || "
+            'emit_diagnostic sandbox_output_invalid 70 "$progress" "$stderr_class"',
+            f"printf '%s\\n' {shlex.quote(marker)}",
+        ]
+    )
+
+
+def _failure_literal(code: str) -> str:
+    return shlex.quote(_ISOLATION_FAILURE_PREFIX + code)
+
+
+def validate_codex_subscription_isolation_result(
+    *,
+    return_code: int,
+    stdout: str | None,
+    stderr: str | None,
+) -> None:
+    """Validate a probe result without surfacing untrusted command output."""
+
+    if return_code == 0 and (stdout or "").strip() == CODEX_SUBSCRIPTION_CANARY_OK:
+        if (stderr or "").strip():
+            raise CodexSubscriptionIsolationError("sandbox_output_invalid")
+        return
+    rendered = (stderr or "").strip().splitlines()
+    code = "sandbox_invocation_failed"
+    diagnostics = [
+        diagnostic
+        for line in rendered
+        if (diagnostic := _ISOLATION_FAILURE_DIAGNOSTIC.fullmatch(line))
+        is not None
+    ]
+    if len(diagnostics) == 1:
+        diagnostic = diagnostics[0]
+        candidate = diagnostic.group("code")
+        nested_return_code = int(diagnostic.group("return_code"))
+        progress = diagnostic.group("progress")
+        stderr_class = diagnostic.group("stderr_class")
+        if (
+            candidate in CodexSubscriptionIsolationError._CODES
+            and nested_return_code <= 255
+            and progress in CodexSubscriptionIsolationError._PROGRESS
+            and stderr_class in CodexSubscriptionIsolationError._STDERR_CLASSES
+        ):
+            raise CodexSubscriptionIsolationError(
+                candidate,
+                nested_return_code=nested_return_code,
+                probe_progress=progress,
+                stderr_class=stderr_class,
+            )
+    for line in rendered:
+        if line.startswith(_ISOLATION_FAILURE_PREFIX):
+            candidate = line[len(_ISOLATION_FAILURE_PREFIX) :]
+            if candidate in CodexSubscriptionIsolationError._CODES:
+                code = candidate
+    safe_return_code = return_code if 0 <= return_code <= 255 else None
+    fallback_stderr_class = _classify_outer_probe_stderr(stderr)
+    if return_code == 127:
+        code = "sandbox_outer_command_failed"
+    raise CodexSubscriptionIsolationError(
+        code,
+        nested_return_code=safe_return_code,
+        stderr_class=fallback_stderr_class,
+    )
+
+
+def _classify_outer_probe_stderr(stderr: str | None) -> str:
+    """Classify transport stderr without retaining or surfacing its contents."""
+
+    rendered = stderr or ""
+    if not rendered.strip():
+        return "empty"
+    commands = {
+        "bash": "outer_missing_bash",
+        "cat": "outer_missing_cat",
+        "codex": "outer_missing_codex",
+        "grep": "outer_missing_grep",
+        "id": "outer_missing_id",
+        "rm": "outer_missing_rm",
+        "sh": "outer_missing_sh",
+        "stat": "outer_missing_stat",
+        "tr": "outer_missing_tr",
+    }
+    for command, failure_class in commands.items():
+        patterns = (
+            f"{command}: command not found",
+            f"{command}: not found",
+            f'"{command}": executable file not found',
+            f"/{command}: No such file or directory",
+        )
+        if any(pattern in rendered for pattern in patterns):
+            return failure_class
+    if "Permission denied" in rendered:
+        return "permission_denied"
+    if "Operation not permitted" in rendered:
+        return "operation_not_permitted"
+    if "No such file or directory" in rendered:
+        return "executable_missing"
+    return "unclassified"
 
 
 def validate_codex_subscription_surface(
@@ -899,11 +1578,16 @@ __all__ = [
     "CODEX_SUBSCRIPTION_READINESS_KEY",
     "CODEX_SUBSCRIPTION_REFRESH_PERSISTENCE",
     "CODEX_SUBSCRIPTION_SANDBOX_BACKEND",
+    "CodexSubscriptionIsolationError",
     "codex_subscription_cli_flags",
     "codex_subscription_cli_overrides",
     "codex_subscription_contract",
     "codex_subscription_exec_canary_command",
+    "codex_subscription_isolation_probe_command",
+    "codex_subscription_sandbox_smoke_command",
     "codex_subscription_readiness_receipt",
     "validate_codex_subscription_surface",
+    "validate_codex_subscription_isolation_result",
+    "validate_codex_subscription_sandbox_smoke_result",
     "validate_codex_subscription_version",
 ]

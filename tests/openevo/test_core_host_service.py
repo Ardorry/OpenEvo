@@ -134,6 +134,21 @@ DAEMON_V16 = CoreDaemonBundleIdentity(
     canonical_manifest_sha256="b" * 64,
     lifecycle_compatibility=16,
 )
+DAEMON_V17 = CoreDaemonBundleIdentity(
+    bundle_sha256="4" * 64,
+    canonical_manifest_sha256="c" * 64,
+    lifecycle_compatibility=17,
+)
+DAEMON_V18 = CoreDaemonBundleIdentity(
+    bundle_sha256="3" * 64,
+    canonical_manifest_sha256="d" * 64,
+    lifecycle_compatibility=18,
+)
+DAEMON_V19 = CoreDaemonBundleIdentity(
+    bundle_sha256="2" * 64,
+    canonical_manifest_sha256="e" * 64,
+    lifecycle_compatibility=19,
+)
 
 
 class FakeController:
@@ -2269,6 +2284,135 @@ def test_v16_candidate_starts_after_conditional_stop_persists_v15_floor(
     assert upgraded.attached is False
     assert upgraded.generation != old.generation
     assert upgraded.lifecycle_compatibility == 16
+
+
+def test_v17_candidate_starts_after_conditional_stop_persists_v16_floor(
+    tmp_path: Path,
+    service_fakes: tuple[FakeController, list[FakeChild]],
+) -> None:
+    controller, _children = service_fakes
+    root = _root(tmp_path)
+    lock = tmp_path / "framework-lock.json"
+    lock.write_text("{}", encoding="ascii")
+    old = ensure_core_service(
+        service_root=root,
+        framework_lock=lock,
+        source_commit=SOURCE_COMMIT,
+        expected_predecessor=CoreServicePredecessor.absent(),
+        daemon_bundle_identity=DAEMON_V16,
+        process_controller=controller,
+    )
+
+    stopped = service.stop_core_service_if_generation(
+        service_root=root,
+        expected_generation=old.generation,
+        expected_release_identity=old.release_identity,
+        process_controller=controller,
+    )
+    with HostServiceRoot(root, create=False) as pinned:
+        floor = pinned.read_json("service.json")
+
+    upgraded = ensure_core_service(
+        service_root=root,
+        framework_lock=lock,
+        source_commit=SOURCE_COMMIT,
+        expected_predecessor=CoreServicePredecessor.absent(),
+        daemon_bundle_identity=DAEMON_V17,
+        process_controller=controller,
+    )
+
+    assert stopped is True
+    assert floor["state"] == "stopped"
+    assert floor["lifecycle_compatibility"] == 16
+    assert upgraded.attached is False
+    assert upgraded.generation != old.generation
+    assert upgraded.lifecycle_compatibility == 17
+
+
+def test_v18_candidate_starts_after_conditional_stop_persists_v17_floor(
+    tmp_path: Path,
+    service_fakes: tuple[FakeController, list[FakeChild]],
+) -> None:
+    controller, _children = service_fakes
+    root = _root(tmp_path)
+    lock = tmp_path / "framework-lock.json"
+    lock.write_text("{}", encoding="ascii")
+    old = ensure_core_service(
+        service_root=root,
+        framework_lock=lock,
+        source_commit=SOURCE_COMMIT,
+        expected_predecessor=CoreServicePredecessor.absent(),
+        daemon_bundle_identity=DAEMON_V17,
+        process_controller=controller,
+    )
+
+    stopped = service.stop_core_service_if_generation(
+        service_root=root,
+        expected_generation=old.generation,
+        expected_release_identity=old.release_identity,
+        process_controller=controller,
+    )
+    with HostServiceRoot(root, create=False) as pinned:
+        floor = pinned.read_json("service.json")
+
+    upgraded = ensure_core_service(
+        service_root=root,
+        framework_lock=lock,
+        source_commit=SOURCE_COMMIT,
+        expected_predecessor=CoreServicePredecessor.absent(),
+        daemon_bundle_identity=DAEMON_V18,
+        process_controller=controller,
+    )
+
+    assert stopped is True
+    assert floor["state"] == "stopped"
+    assert floor["lifecycle_compatibility"] == 17
+    assert upgraded.attached is False
+    assert upgraded.generation != old.generation
+    assert upgraded.lifecycle_compatibility == 18
+
+
+def test_v19_candidate_starts_after_conditional_stop_persists_v18_floor(
+    tmp_path: Path,
+    service_fakes: tuple[FakeController, list[FakeChild]],
+) -> None:
+    controller, _children = service_fakes
+    root = _root(tmp_path)
+    lock = tmp_path / "framework-lock.json"
+    lock.write_text("{}", encoding="ascii")
+    old = ensure_core_service(
+        service_root=root,
+        framework_lock=lock,
+        source_commit=SOURCE_COMMIT,
+        expected_predecessor=CoreServicePredecessor.absent(),
+        daemon_bundle_identity=DAEMON_V18,
+        process_controller=controller,
+    )
+
+    stopped = service.stop_core_service_if_generation(
+        service_root=root,
+        expected_generation=old.generation,
+        expected_release_identity=old.release_identity,
+        process_controller=controller,
+    )
+    with HostServiceRoot(root, create=False) as pinned:
+        floor = pinned.read_json("service.json")
+
+    upgraded = ensure_core_service(
+        service_root=root,
+        framework_lock=lock,
+        source_commit=SOURCE_COMMIT,
+        expected_predecessor=CoreServicePredecessor.absent(),
+        daemon_bundle_identity=DAEMON_V19,
+        process_controller=controller,
+    )
+
+    assert stopped is True
+    assert floor["state"] == "stopped"
+    assert floor["lifecycle_compatibility"] == 18
+    assert upgraded.attached is False
+    assert upgraded.generation != old.generation
+    assert upgraded.lifecycle_compatibility == 19
 
 
 def test_dead_newer_daemon_floor_rejects_stale_desktop_downgrade(

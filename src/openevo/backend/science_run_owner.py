@@ -42,6 +42,21 @@ from openevo.backend.science_successor import (
     SuccessorMaterializationV2,
     ValidatedScienceOutputsV2,
 )
+from openevo.backend.project_freeze_control import (
+    FrozenProjectArtifactV1,
+    FrozenProjectForkAuthorityV1,
+    FrozenProjectForkRequestV1,
+    ProjectFreezeAuthorityV1,
+    ProjectFreezeRequestV1,
+)
+from openevo.backend.science_successor_recovery_v1 import (
+    ExhaustedSuccessorRecoveryAuthorityV1,
+    ScienceSuccessorRecoveryProjectSeedAuthorityV1,
+    ScienceSuccessorRecoveryProjectSeedRequestV1,
+    ScienceSuccessorRecoverySnapshotV1,
+    ScienceSuccessorRecoveryTargetResultV1,
+    science_successor_recovery_source_sha256,
+)
 from openevo.backend.science_run_store import (
     ProjectInFlightCoordinator,
     ScienceAttemptNotFoundV2,
@@ -54,6 +69,7 @@ from openevo.backend.science_run_store import (
     ScienceRunStore,
     ScienceRunStoreError,
     ScienceProjectAdmissionAuthorityV2,
+    ScienceProjectFrozenV2,
     ScienceTaskConflictV2,
     ScienceTaskETagChangedV2,
     ScienceTaskIdempotencyConflictV2,
@@ -67,6 +83,7 @@ from openevo.backend.science_run_store import (
     ScienceTaskTerminalV2,
     page_items,
 )
+from openevo.backend.project_head_transfer import build_cross_project_restored_head
 from openevo.backend.service_supervisor import (
     CoreServiceSupervisor,
     ServiceExecutionMode,
@@ -80,8 +97,12 @@ from openevo.evolution.framework.execution import ResolvedMethodInputBinding
 from openevo.evolution.runtime_injection import build_runtime_injection_plan
 from openevo.evolution.revisions import (
     AtomicEvolutionAbandonManifestV2,
+    AtomicFrozenProjectForkManifestV1,
+    AtomicHistoricalRestoreManifestV2,
     AtomicSuccessorCommitV2,
     AtomicSuccessorManifestV2,
+    AtomicSuccessorRecoverySeedManifestV1,
+    SuccessorArtifactContributionV2,
     atomic_successor_manifest_sha256,
 )
 from openevo.experiments import EvolutionHttpClient, RolloutHttpClient
@@ -413,6 +434,270 @@ class CoreScienceTaskOwnerV2:
         except Exception as exc:
             _raise_v2_owner_error(exc, operation_id="getCoreProjectHeadV2")
 
+    def freeze_project(
+        self,
+        request: ProjectFreezeRequestV1,
+        *,
+        verified_artifacts: tuple[FrozenProjectArtifactV1, ...],
+    ) -> ProjectFreezeAuthorityV1:
+        try:
+            return self._ledger.freeze_project(
+                request,
+                verified_artifacts=verified_artifacts,
+                now=self._clock(),
+            )
+        except Exception as exc:
+            _raise_v2_owner_error(exc, operation_id="freezeCoreProjectV2")
+
+    def project_freeze(self, project_id: str) -> ProjectFreezeAuthorityV1:
+        try:
+            return self._ledger.project_freeze(project_id)
+        except Exception as exc:
+            _raise_v2_owner_error(exc, operation_id="getCoreProjectFreezeV2")
+
+    def fork_frozen_project(
+        self,
+        request: FrozenProjectForkRequestV1,
+    ) -> FrozenProjectForkAuthorityV1:
+        """Seed one independent project from an immutable frozen authority."""
+
+        try:
+            request = FrozenProjectForkRequestV1.model_validate(
+                request.model_dump(mode="python")
+            )
+            fork_seed = hashlib.sha256(
+                json.dumps(
+                    {
+                        "destination_project_id": request.destination_project_id,
+                        "idempotency_key": request.idempotency_key,
+                        "source_freeze_receipt_id": request.source_freeze_receipt_id,
+                        "source_project_id": request.source_project_id,
+                    },
+                    ensure_ascii=True,
+                    allow_nan=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            fork_request_id = f"frozen-project-fork-{fork_seed[:32]}"
+            try:
+                existing = self._ledger.frozen_project_fork(fork_request_id)
+            except ScienceTaskNotFoundV2:
+                existing = None
+            if existing is not None:
+                manifest = existing.commit.manifest
+                request_sha256 = hashlib.sha256(
+                    json.dumps(
+                        request.model_dump(mode="json"),
+                        ensure_ascii=True,
+                        allow_nan=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest()
+                if (
+                    type(manifest) is not AtomicFrozenProjectForkManifestV1
+                    or existing.request_sha256 != request_sha256
+                    or existing.source_project_id != request.source_project_id
+                    or existing.source_freeze_receipt_id
+                    != request.source_freeze_receipt_id
+                    or existing.destination_project_id
+                    != request.destination_project_id
+                    or existing.predecessor_destination_project_head_id
+                    != request.expected_destination_project_head_id
+                ):
+                    raise ScienceTaskPreconditionFailedV2(
+                        "frozen project fork idempotency key was reused"
+                    )
+                return existing
+
+            source_freeze = self._ledger.project_freeze(request.source_project_id)
+            source_head = self._ledger.active_project_head(request.source_project_id)
+            source_commit = self._ledger.successor_commit_for_project_head(
+                source_head.project_head_id
+            )
+            destination_head = self._ledger.active_project_head(
+                request.destination_project_id
+            )
+            if (
+                source_freeze.freeze_receipt_id
+                != request.source_freeze_receipt_id
+                or source_freeze.authority_sha256
+                != request.source_freeze_authority_sha256
+                or source_head.project_head_id
+                != request.expected_source_project_head_id
+                or source_head.manifest_sha256
+                != request.expected_source_project_head_manifest_sha256
+                or destination_head.project_head_id
+                != request.expected_destination_project_head_id
+                or destination_head.manifest_sha256
+                != request.expected_destination_project_head_manifest_sha256
+                or type(source_commit) is not AtomicSuccessorCommitV2
+            ):
+                raise ScienceTaskPreconditionFailedV2(
+                    "frozen project fork authority changed"
+                )
+            created_at = self._clock()
+            successor = _build_v2_frozen_project_fork_head(
+                predecessor=destination_head,
+                source=source_head,
+                source_freeze=source_freeze,
+                fork_request_id=fork_request_id,
+            )
+            manifest = _build_atomic_frozen_project_fork_manifest(
+                request=request,
+                predecessor=destination_head,
+                source=source_head,
+                source_commit=source_commit,
+                source_freeze=source_freeze,
+                successor=successor,
+                fork_request_id=fork_request_id,
+                created_at=created_at,
+            )
+            commit = AtomicSuccessorCommitV2(
+                manifest_sha256=atomic_successor_manifest_sha256(manifest),
+                manifest=manifest,
+            )
+            return self._ledger.fork_frozen_project(
+                request,
+                successor=successor,
+                commit=commit,
+                now=created_at,
+            )
+        except Exception as exc:
+            _raise_v2_owner_error(exc, operation_id="forkCoreFrozenProjectV1")
+
+    def frozen_project_fork(
+        self,
+        fork_request_id: str,
+    ) -> FrozenProjectForkAuthorityV1:
+        try:
+            return self._ledger.frozen_project_fork(fork_request_id)
+        except Exception as exc:
+            _raise_v2_owner_error(exc, operation_id="getCoreFrozenProjectForkV1")
+
+    def restore_historical_project_head(
+        self,
+        *,
+        project_id: str,
+        expected_project_head_id: str,
+        source_project_head_id: str,
+        restore_request_id: str,
+        cross_project: bool = False,
+    ) -> tuple[m2.ProjectHeadRefV2, AtomicSuccessorCommitV2]:
+        """Publish an adjacent head with exact historical runtime authority."""
+
+        try:
+            restore_seed_payload: dict[str, object] = {
+                "project_id": project_id,
+                "restore_request_id": restore_request_id,
+            }
+            if cross_project:
+                restore_seed_payload["cross_project"] = True
+            restore_seed = hashlib.sha256(
+                json.dumps(
+                    restore_seed_payload,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            transition_id = f"historical-restore-{restore_seed}"
+            try:
+                existing = self._ledger.historical_restore_commit(transition_id)
+            except ScienceTaskNotFoundV2:
+                existing = None
+            if existing is not None:
+                manifest = existing.manifest
+                if (
+                    type(manifest) is not AtomicHistoricalRestoreManifestV2
+                    or manifest.project_id != project_id
+                    or manifest.restore_request_id != restore_request_id
+                    or manifest.predecessor_project_head_id
+                    != expected_project_head_id
+                    or manifest.source_project_head_id != source_project_head_id
+                    or (
+                        (
+                            self._ledger.get_project_head(
+                                manifest.source_project_head_id
+                            ).project_id
+                            != manifest.project_id
+                        )
+                        != cross_project
+                    )
+                ):
+                    raise ScienceTaskPreconditionFailedV2(
+                        "historical restore idempotency key was reused"
+                    )
+                return (
+                    self._ledger.get_project_head(
+                        manifest.successor_project_head_id
+                    ),
+                    existing,
+                )
+            predecessor = self._ledger.active_project_head(project_id)
+            if predecessor.project_head_id != expected_project_head_id:
+                raise ScienceTaskPreconditionFailedV2(
+                    "historical restore active head changed"
+                )
+            source = self._ledger.get_project_head(source_project_head_id)
+            if (source.project_id != predecessor.project_id) != cross_project:
+                raise ScienceTaskPreconditionFailedV2(
+                    "historical restore source project differs from its mode"
+                )
+            source_commit = self._ledger.successor_commit_for_project_head(
+                source.project_head_id
+            )
+            created_at = self._clock()
+            if cross_project:
+                successor = build_cross_project_restored_head(
+                    predecessor=predecessor,
+                    source=source,
+                    restore_transition_id=transition_id,
+                )
+            else:
+                successor = _build_v2_historical_restore_project_head(
+                    predecessor=predecessor,
+                    source=source,
+                    restore_transition_id=transition_id,
+                )
+            manifest = _build_atomic_historical_restore_manifest(
+                predecessor=predecessor,
+                source=source,
+                source_commit=source_commit,
+                successor=successor,
+                restore_transition_id=transition_id,
+                restore_request_id=restore_request_id,
+                created_at=created_at,
+            )
+            commit = AtomicSuccessorCommitV2(
+                manifest_sha256=atomic_successor_manifest_sha256(manifest),
+                manifest=manifest,
+            )
+            return self._ledger.restore_historical_project_head(
+                project_id=project_id,
+                expected_project_head_id=expected_project_head_id,
+                source_project_head_id=source_project_head_id,
+                idempotency_key=restore_request_id,
+                successor=successor,
+                commit=commit,
+                now=created_at,
+                cross_project=cross_project,
+            )
+        except Exception as exc:
+            _raise_v2_owner_error(
+                exc, operation_id="restoreCoreHistoricalProjectHeadV2"
+            )
+
+    def historical_restore_commit(
+        self, restore_request_id: str
+    ) -> AtomicSuccessorCommitV2:
+        try:
+            return self._ledger.historical_restore_commit(restore_request_id)
+        except Exception as exc:
+            _raise_v2_owner_error(
+                exc, operation_id="getCoreHistoricalProjectHeadRestoreV2"
+            )
+
     def get_successor_transition(
         self,
         successor_transition_id: str,
@@ -449,6 +734,18 @@ class CoreScienceTaskOwnerV2:
         except Exception as exc:
             _raise_v2_owner_error(exc, operation_id="getCoreSuccessorCommitV2")
 
+    def successor_commit_for_project_head(
+        self,
+        project_head_id: str,
+    ) -> AtomicSuccessorCommitV2 | None:
+        try:
+            return self._ledger.successor_commit_for_project_head(project_head_id)
+        except Exception as exc:
+            _raise_v2_owner_error(
+                exc,
+                operation_id="getCoreProjectHeadSuccessorCommitV2",
+            )
+
     def successor_transition_attempts(
         self,
         successor_transition_id: str,
@@ -461,6 +758,319 @@ class CoreScienceTaskOwnerV2:
             _raise_v2_owner_error(
                 exc,
                 operation_id="getCoreSuccessorTransitionAttemptsV2",
+            )
+
+    def recovery_successor_context(
+        self,
+        source: ExhaustedSuccessorRecoveryAuthorityV1,
+        plan: ScienceSuccessorPlanV2,
+    ) -> ScienceSuccessorPreparationContextV2:
+        """Return the failed source context for a fresh append-only recovery."""
+
+        try:
+            transition = self._ledger.get_successor_transition(
+                source.successor_transition_id
+            )
+            attempts = self._ledger.successor_transition_attempts(
+                source.successor_transition_id
+            )
+            active_head = self._ledger.active_project_head(source.project_id)
+            if (
+                transition.state != "failed"
+                or transition.transition.project_id != source.project_id
+                or transition.transition.task_admission is None
+                or transition.transition.task_admission.task_id != source.task_id
+                or transition.transition.accepted_attempt is None
+                or transition.transition.accepted_attempt.attempt_id
+                != source.accepted_attempt_id
+                or transition.transition.predecessor_project_head.project_head_id
+                != source.predecessor_project_head_id
+                or not attempts
+                or attempts[-1].state != "failed"
+                or len(attempts) != source.transition_attempt_count
+                or source.transition_attempt_count != source.transition_attempt_capacity
+                or self._ledger.successor_commit(source.successor_transition_id)
+                is not None
+                or active_head.project_head_id != source.active_project_head_id
+                or active_head.manifest_sha256 != source.active_project_head_sha256
+            ):
+                raise ScienceTaskStoreV2Error(
+                    "recovery source no longer has exact failed successor authority"
+                )
+            return self._successor_context(
+                source.successor_transition_id,
+                transition_attempt=attempts[-1],
+                plan=plan,
+            )
+        except Exception as exc:
+            _raise_v2_owner_error(
+                exc,
+                operation_id="getCoreScienceSuccessorRecoveryContextV1",
+            )
+
+    def recovery_successor_source_context(
+        self,
+        successor_transition_id: str,
+    ) -> tuple[ScienceSuccessorPreparationContextV2, int]:
+        """Read one failed transition and its persisted plan for source export."""
+
+        try:
+            transition, plan = self._ledger.successor_abandon_evidence(
+                successor_transition_id
+            )
+            attempts = self._ledger.successor_transition_attempts(
+                successor_transition_id
+            )
+            predecessor = transition.transition.predecessor_project_head
+            active_head = self._ledger.active_project_head(
+                transition.transition.project_id
+            )
+            if (
+                not attempts
+                or attempts[-1].state != "failed"
+                or self._ledger.successor_commit(successor_transition_id) is not None
+                or active_head.project_head_id != predecessor.project_head_id
+                or active_head.manifest_sha256 != predecessor.manifest_sha256
+            ):
+                raise ScienceTaskStoreV2Error(
+                    "recovery source is not an uncommitted failed terminal successor"
+                )
+            return (
+                self._successor_context(
+                    successor_transition_id,
+                    transition_attempt=attempts[-1],
+                    plan=plan,
+                ),
+                len(attempts),
+            )
+        except Exception as exc:
+            _raise_v2_owner_error(
+                exc,
+                operation_id="resolveCoreScienceSuccessorRecoverySourceV1",
+            )
+
+    def seed_successor_recovery_project(
+        self,
+        request: ScienceSuccessorRecoveryProjectSeedRequestV1,
+        *,
+        source: ExhaustedSuccessorRecoveryAuthorityV1,
+        recovery: ScienceSuccessorRecoverySnapshotV1,
+        results: tuple[ScienceSuccessorRecoveryTargetResultV1, ...],
+        binding: ServiceRunBinding,
+        evolution: EvolutionClientProtocol,
+    ) -> ScienceSuccessorRecoveryProjectSeedAuthorityV1:
+        """Atomically seed one unused project from completed recovery outputs."""
+
+        preparer = self._successor_preparer
+        if preparer is None:
+            raise CoreTaskControlError(
+                "successor_preparer_unavailable",
+                "Core has no verified science successor preparer.",
+                http_status=503,
+                retryable=False,
+            )
+        try:
+            request = ScienceSuccessorRecoveryProjectSeedRequestV1.model_validate(
+                request.model_dump(mode="python")
+            )
+            context = self.recovery_successor_context(source, self._ledger.successor_abandon_evidence(
+                source.successor_transition_id
+            )[1])
+            predecessor = self._ledger.active_project_head(
+                request.destination_project_id
+            )
+            if (
+                recovery.record.recovery_id != request.recovery_id
+                or recovery.record_sha256 != request.recovery_record_sha256
+                or recovery.record.state != "all_targets_completed_awaiting_commit"
+                or tuple(item.target_id for item in results)
+                != recovery.record.target_authorization_order
+                or predecessor.project_head_id
+                != request.expected_destination_project_head_id
+                or predecessor.manifest_sha256
+                != request.expected_destination_project_head_sha256
+            ):
+                raise ScienceTaskPreconditionFailedV2(
+                    "successor recovery seed input authority changed"
+                )
+            revision, materialized, composition = (
+                preparer.materialize_recovery_project_seed(
+                    context,
+                    source=source,
+                    recovery_id=request.recovery_id,
+                    destination_predecessor=predecessor,
+                    results=results,
+                    binding=binding,
+                    client=evolution,
+                    carried_completed_targets=(
+                        ()
+                        if recovery.record.supersession_authority is None
+                        else recovery.record.supersession_authority.carried_completed_targets
+                    ),
+                )
+            )
+            head_payload = {
+                "effective_execution_snapshot": (
+                    predecessor.effective_execution_snapshot.model_dump(mode="json")
+                ),
+                "evolution_revision": revision.model_dump(mode="json"),
+                "generation": predecessor.generation + 1,
+                "predecessor_project_head_id": predecessor.project_head_id,
+                "project_id": predecessor.project_id,
+                "recovery_id": request.recovery_id,
+                "registry_sha256": materialized.runtime_context_snapshot.registry_sha256,
+                "runtime_context_snapshot": (
+                    materialized.runtime_context_snapshot.model_dump(mode="json")
+                ),
+                "transition_outcome": "successor_recovery_seed",
+                "workspace_snapshot": predecessor.workspace_snapshot.model_dump(mode="json"),
+            }
+            head_sha256 = hashlib.sha256(
+                json.dumps(
+                    head_payload,
+                    ensure_ascii=True,
+                    allow_nan=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            successor = m2.ProjectHeadRefV2(
+                project_head_id=f"project-head-{head_sha256}",
+                project_id=predecessor.project_id,
+                generation=predecessor.generation + 1,
+                predecessor_project_head_id=predecessor.project_head_id,
+                workspace_snapshot=predecessor.workspace_snapshot,
+                evolution_revision=revision,
+                runtime_context_snapshot=materialized.runtime_context_snapshot,
+                effective_execution_snapshot=predecessor.effective_execution_snapshot,
+                registry_sha256=materialized.runtime_context_snapshot.registry_sha256,
+                manifest_sha256=head_sha256,
+            )
+            request_sha256 = hashlib.sha256(
+                json.dumps(
+                    request.model_dump(mode="json"),
+                    ensure_ascii=True,
+                    allow_nan=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            seed_request_id = f"recovery-seed-{request_sha256[:32]}"
+            created_at = self._clock()
+            result_sha256 = tuple(
+                hashlib.sha256(
+                    json.dumps(
+                        item.model_dump(mode="json"),
+                        ensure_ascii=True,
+                        allow_nan=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest()
+                for item in results
+            )
+            manifest = AtomicSuccessorRecoverySeedManifestV1(
+                project_id=successor.project_id,
+                seed_request_id=seed_request_id,
+                recovery_id=request.recovery_id,
+                recovery_record_sha256=recovery.record_sha256,
+                source_project_id=source.project_id,
+                source_transition_id=source.successor_transition_id,
+                source_authority_sha256=science_successor_recovery_source_sha256(source),
+                predecessor_project_head_id=predecessor.project_head_id,
+                predecessor_generation=predecessor.generation,
+                predecessor_manifest_sha256=predecessor.manifest_sha256,
+                successor_project_head_id=successor.project_head_id,
+                successor_generation=successor.generation,
+                successor_manifest_sha256=successor.manifest_sha256,
+                workspace_snapshot_id=successor.workspace_snapshot.workspace_snapshot_id,
+                workspace_manifest_sha256=successor.workspace_snapshot.manifest_sha256,
+                evolution_revision_id=successor.evolution_revision.evolution_revision_id,
+                evolution_revision_manifest_sha256=successor.evolution_revision.manifest_sha256,
+                runtime_context_snapshot_id=(
+                    successor.runtime_context_snapshot.runtime_context_snapshot_id
+                ),
+                runtime_context_manifest_sha256=(
+                    successor.runtime_context_snapshot.manifest_sha256
+                ),
+                effective_execution_snapshot_id=(
+                    successor.effective_execution_snapshot.effective_execution_snapshot_id
+                ),
+                effective_execution_snapshot_sha256=(
+                    successor.effective_execution_snapshot.snapshot_sha256
+                ),
+                registry_sha256=successor.registry_sha256,
+                materialized_context_id=materialized.materialized_context_id,
+                materialized_context_manifest_sha256=(
+                    materialized.materialized_context_manifest_sha256
+                ),
+                method_artifact_ids=tuple(item.artifact_id for item in composition),
+                recovery_target_result_sha256=result_sha256,
+                artifacts=composition,
+                created_at=created_at,
+            )
+            commit = AtomicSuccessorCommitV2(
+                manifest_sha256=atomic_successor_manifest_sha256(manifest),
+                manifest=manifest,
+            )
+            authority_payload = {
+                "successor_recovery_project_seed_authority_contract_version": "1",
+                "seed_request_id": seed_request_id,
+                "request_sha256": request_sha256,
+                "recovery_id": request.recovery_id,
+                "recovery_record_sha256": recovery.record_sha256,
+                "source_project_id": source.project_id,
+                "source_transition_id": source.successor_transition_id,
+                "source_authority_sha256": science_successor_recovery_source_sha256(source),
+                "destination_project_id": successor.project_id,
+                "predecessor_destination_project_head_id": predecessor.project_head_id,
+                "successor_destination_project_head": successor.model_dump(mode="json"),
+                "commit": commit.model_dump(mode="json"),
+                "target_result_sha256": result_sha256,
+                "created_at": created_at.astimezone(timezone.utc).isoformat().replace(
+                    "+00:00", "Z"
+                ),
+            }
+            authority_wire = {
+                **authority_payload,
+                "content_sha256": hashlib.sha256(
+                    json.dumps(
+                        authority_payload,
+                        ensure_ascii=True,
+                        allow_nan=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest(),
+            }
+            # ``authority_payload`` is deliberately a JSON-mode wire payload:
+            # nested strict contracts therefore contain JSON arrays and UTC
+            # strings rather than their in-process tuple/datetime forms.  Parse
+            # it through Pydantic's JSON path, exactly as durable readback does,
+            # instead of applying strict Python-mode validation to wire values.
+            authority = _successor_recovery_seed_authority_from_wire(
+                authority_wire
+            )
+            return self._ledger.seed_project_from_successor_recovery(
+                request,
+                authority,
+            )
+        except Exception as exc:
+            _raise_v2_owner_error(
+                exc,
+                operation_id="seedCoreProjectFromSuccessorRecoveryV1",
+            )
+
+    def successor_recovery_project_seed(
+        self,
+        seed_request_id: str,
+    ) -> ScienceSuccessorRecoveryProjectSeedAuthorityV1:
+        try:
+            return self._ledger.successor_recovery_project_seed(seed_request_id)
+        except Exception as exc:
+            _raise_v2_owner_error(
+                exc,
+                operation_id="getCoreSuccessorRecoveryProjectSeedV1",
             )
 
     def run_successor_transition(
@@ -994,6 +1604,82 @@ class CoreScienceTaskOwnerV2:
         except Exception as exc:
             _raise_v2_owner_error(exc, operation_id="getCoreTaskTimelineV2")
 
+    def get_captured_training_attempt_authority(self, task_id: str, attempt_id: str):
+        """Return immutable terminal authority for trusted training control."""
+
+        from openevo.backend.training_attempt_control import (
+            CapturedTrainingAttemptAuthorityV2,
+        )
+
+        try:
+            record = self._ledger.get_attempt_execution(task_id, attempt_id)
+            if (
+                record.state != "captured"
+                or record.receipt is None
+                or record.evidence is None
+            ):
+                raise RuntimeError("Science Attempt is not captured and sealed")
+            result = self._ledger.get_captured_session_result(task_id, attempt_id)
+            return CapturedTrainingAttemptAuthorityV2(
+                execution_receipt=record.receipt,
+                execution_evidence=record.evidence,
+                session_result=result,
+            )
+        except (ValueError, RuntimeError):
+            raise
+        except Exception as exc:
+            _raise_v2_owner_error(exc, operation_id="getCapturedTrainingAttemptV2")
+
+    def get_training_attempt_execution_status(self, task_id: str, attempt_id: str):
+        """Return a non-mutating lifecycle authority for one v2 Attempt."""
+
+        from openevo.backend.training_attempt_control import (
+            TrainingAttemptExecutionStatusV1,
+        )
+
+        try:
+            task = self._ledger.get_task(task_id)
+            attempt = self._ledger.get_attempt(task_id, attempt_id)
+            if attempt.attempt_id != attempt_id or task.task_id != task_id:
+                raise ValueError("Science Attempt ownership changed")
+            record = self._ledger.get_attempt_execution_optional(task_id, attempt_id)
+            if record is None:
+                return TrainingAttemptExecutionStatusV1(
+                    task_id=task_id,
+                    attempt_id=attempt_id,
+                    state="not_started",
+                    terminal=False,
+                    captured=False,
+                )
+            failure = record.failure_authority
+            terminal = record.state in {"captured", "failed", "cancelled"}
+            retryable = None
+            model_started = None
+            benchmark_started = None
+            if failure is not None:
+                retryable = failure.retryable
+                model_started = failure.model_started
+                benchmark_started = failure.benchmark_started
+            return TrainingAttemptExecutionStatusV1(
+                task_id=task_id,
+                attempt_id=attempt_id,
+                state=record.state,
+                terminal=terminal,
+                captured=record.state == "captured",
+                error_code=record.error_code,
+                retryable=retryable,
+                model_started=model_started,
+                benchmark_started=benchmark_started,
+                failure_authority=failure,
+            )
+        except (ValueError, RuntimeError):
+            raise
+        except Exception as exc:
+            _raise_v2_owner_error(
+                exc,
+                operation_id="getTrainingAttemptExecutionStatusV1",
+            )
+
     async def verify(self, check: GenerationBoundRunAdmissionCheck) -> None:
         """Authorize only service calls derived from an active v2 Attempt."""
 
@@ -1231,7 +1917,12 @@ class CoreScienceTaskOwnerV2:
                     except ScienceTaskTerminalV2:
                         pass
         except ScienceAttemptExecutionV2Error as exc:
-            self._finish_attempt_failed_if_owned(task, attempt, exc.code)
+            self._finish_attempt_failed_if_owned(
+                task,
+                attempt,
+                exc.code,
+                failure_authority=exc.failure_authority,
+            )
         except Exception as exc:
             logger.error(
                 "v2 science Attempt %s failed inside its executor [%s]",
@@ -1253,12 +1944,15 @@ class CoreScienceTaskOwnerV2:
         task: m2.TaskV2,
         attempt: m2.AttemptRefV2,
         error_code: str,
+        *,
+        failure_authority: Mapping[str, object] | None = None,
     ) -> None:
         try:
             self._ledger.finish_attempt_failed(
                 task_id=task.task_id,
                 attempt_id=attempt.attempt_id,
                 error_code=error_code,
+                failure_authority=failure_authority,
                 now=self._clock(),
             )
         except ScienceTaskTerminalV2:
@@ -1544,6 +2238,367 @@ def _build_v2_abandoned_successor_project_head(
     )
 
 
+def _build_v2_frozen_project_fork_head(
+    *,
+    predecessor: m2.ProjectHeadRefV2,
+    source: m2.ProjectHeadRefV2,
+    source_freeze: ProjectFreezeAuthorityV1,
+    fork_request_id: str,
+) -> m2.ProjectHeadRefV2:
+    """Build a destination-owned head with source-frozen artifact authority."""
+
+    evolution_payload = {
+        "artifact_count": 3,
+        "destination_project_id": predecessor.project_id,
+        "fork_request_id": fork_request_id,
+        "source_evolution_revision": source.evolution_revision.model_dump(mode="json"),
+        "source_freeze_authority_sha256": source_freeze.authority_sha256,
+        "source_frozen_artifacts": [
+            item.model_dump(mode="json") for item in source_freeze.artifacts
+        ],
+    }
+    evolution_sha256 = hashlib.sha256(
+        json.dumps(
+            evolution_payload,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    evolution = m2.EvolutionRevisionRefV2(
+        evolution_revision_id=f"evolution-revision-{evolution_sha256}",
+        project_id=predecessor.project_id,
+        manifest_sha256=evolution_sha256,
+        artifact_count=3,
+    )
+    runtime_payload = {
+        "destination_project_id": predecessor.project_id,
+        "evolution_revision_id": evolution.evolution_revision_id,
+        "evolution_revision_manifest_sha256": evolution.manifest_sha256,
+        "fork_request_id": fork_request_id,
+        "registry_sha256": source.registry_sha256,
+        "runtime_contract_sha256": (
+            source.runtime_context_snapshot.runtime_contract_sha256
+        ),
+        "source_runtime_context_snapshot": (
+            source.runtime_context_snapshot.model_dump(mode="json")
+        ),
+    }
+    runtime_sha256 = hashlib.sha256(
+        json.dumps(
+            runtime_payload,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    runtime = m2.RuntimeContextSnapshotRefV2(
+        runtime_context_snapshot_id=f"runtime-context-{runtime_sha256}",
+        project_id=predecessor.project_id,
+        evolution_revision_id=evolution.evolution_revision_id,
+        evolution_revision_manifest_sha256=evolution.manifest_sha256,
+        registry_sha256=source.registry_sha256,
+        runtime_contract_sha256=(
+            source.runtime_context_snapshot.runtime_contract_sha256
+        ),
+        manifest_sha256=runtime_sha256,
+    )
+    composition = {
+        "effective_execution_snapshot": (
+            predecessor.effective_execution_snapshot.model_dump(mode="json")
+        ),
+        "evolution_revision": evolution.model_dump(mode="json"),
+        "generation": predecessor.generation + 1,
+        "predecessor_project_head_id": predecessor.project_head_id,
+        "project_id": predecessor.project_id,
+        "registry_sha256": source.registry_sha256,
+        "runtime_context_snapshot": runtime.model_dump(mode="json"),
+        "source_freeze_authority_sha256": source_freeze.authority_sha256,
+        "source_project_head_id": source.project_head_id,
+        "successor_transition_id": fork_request_id,
+        "transition_outcome": "frozen_project_fork",
+        "workspace_snapshot": predecessor.workspace_snapshot.model_dump(mode="json"),
+    }
+    manifest_sha256 = hashlib.sha256(
+        json.dumps(
+            composition,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return m2.ProjectHeadRefV2(
+        project_head_id=f"project-head-{manifest_sha256}",
+        project_id=predecessor.project_id,
+        generation=predecessor.generation + 1,
+        predecessor_project_head_id=predecessor.project_head_id,
+        workspace_snapshot=predecessor.workspace_snapshot,
+        evolution_revision=evolution,
+        runtime_context_snapshot=runtime,
+        effective_execution_snapshot=predecessor.effective_execution_snapshot,
+        registry_sha256=source.registry_sha256,
+        manifest_sha256=manifest_sha256,
+    )
+
+
+def _as_inherited_successor_contribution(
+    contribution: SuccessorArtifactContributionV2,
+) -> SuccessorArtifactContributionV2:
+    """Project existing artifact authority without replaying its admission.
+
+    Admission evidence describes the transition that made a proposal active.
+    A later abandon, restore, or fork only inherits that active artifact, so it
+    retains the original owner but must not repeat the prior update/keep/reject
+    decision as if the later transition had made it.
+    """
+
+    return SuccessorArtifactContributionV2(
+        target_id=contribution.target_id,
+        artifact_id=contribution.artifact_id,
+        artifact_type=contribution.artifact_type,
+        owner_successor_transition_id=(
+            contribution.owner_successor_transition_id
+        ),
+        origin="inherited",
+    )
+
+
+def _build_atomic_frozen_project_fork_manifest(
+    *,
+    request: FrozenProjectForkRequestV1,
+    predecessor: m2.ProjectHeadRefV2,
+    source: m2.ProjectHeadRefV2,
+    source_commit: AtomicSuccessorCommitV2,
+    source_freeze: ProjectFreezeAuthorityV1,
+    successor: m2.ProjectHeadRefV2,
+    fork_request_id: str,
+    created_at: datetime,
+) -> AtomicFrozenProjectForkManifestV1:
+    source_manifest = source_commit.manifest
+    if type(source_manifest) is not AtomicSuccessorManifestV2:
+        raise ValueError("frozen project fork source lacks native artifact authority")
+    if source_manifest.runtime_context_source == "materialized_new":
+        source_transition_id = source_manifest.successor_transition_id
+        source_predecessor_id = source_manifest.predecessor_project_head_id
+    elif source_manifest.runtime_context_source == "materialized_inherited":
+        source_transition_id = (
+            source_manifest.materialized_source_successor_transition_id
+        )
+        source_predecessor_id = (
+            source_manifest.materialized_source_predecessor_project_head_id
+        )
+    else:
+        raise ValueError("frozen project fork source has no materialized context")
+    if (
+        source_transition_id is None
+        or source_predecessor_id is None
+        or source_manifest.materialized_context_id is None
+        or source_manifest.materialized_context_manifest_sha256 is None
+    ):
+        raise ValueError("frozen project fork source context is incomplete")
+    frozen = tuple(
+        sorted(source_freeze.artifacts, key=lambda item: item.artifact_type)
+    )
+    artifacts = tuple(
+        _as_inherited_successor_contribution(item)
+        for item in sorted(source_manifest.artifacts, key=lambda item: item.target_id)
+    )
+    execution = successor.effective_execution_snapshot
+    return AtomicFrozenProjectForkManifestV1(
+        project_id=successor.project_id,
+        fork_request_id=fork_request_id,
+        created_at=created_at,
+        source_project_id=source.project_id,
+        source_freeze_receipt_id=request.source_freeze_receipt_id,
+        source_freeze_authority_sha256=request.source_freeze_authority_sha256,
+        source_project_head_id=source.project_head_id,
+        source_manifest_sha256=source.manifest_sha256,
+        source_evolution_revision_id=(
+            source.evolution_revision.evolution_revision_id
+        ),
+        source_evolution_revision_manifest_sha256=(
+            source.evolution_revision.manifest_sha256
+        ),
+        source_runtime_context_snapshot_id=(
+            source.runtime_context_snapshot.runtime_context_snapshot_id
+        ),
+        source_runtime_context_manifest_sha256=(
+            source.runtime_context_snapshot.manifest_sha256
+        ),
+        predecessor_project_head_id=predecessor.project_head_id,
+        predecessor_generation=predecessor.generation,
+        predecessor_manifest_sha256=predecessor.manifest_sha256,
+        successor_project_head_id=successor.project_head_id,
+        successor_generation=successor.generation,
+        successor_manifest_sha256=successor.manifest_sha256,
+        workspace_snapshot_id=successor.workspace_snapshot.workspace_snapshot_id,
+        workspace_manifest_sha256=successor.workspace_snapshot.manifest_sha256,
+        evolution_revision_id=successor.evolution_revision.evolution_revision_id,
+        evolution_revision_manifest_sha256=(
+            successor.evolution_revision.manifest_sha256
+        ),
+        runtime_context_snapshot_id=(
+            successor.runtime_context_snapshot.runtime_context_snapshot_id
+        ),
+        runtime_context_manifest_sha256=(
+            successor.runtime_context_snapshot.manifest_sha256
+        ),
+        effective_execution_snapshot_id=(
+            execution.effective_execution_snapshot_id
+        ),
+        effective_execution_snapshot_sha256=execution.snapshot_sha256,
+        registry_sha256=successor.registry_sha256,
+        materialized_source_successor_transition_id=source_transition_id,
+        materialized_source_predecessor_project_head_id=source_predecessor_id,
+        materialized_context_id=source_manifest.materialized_context_id,
+        materialized_context_manifest_sha256=(
+            source_manifest.materialized_context_manifest_sha256
+        ),
+        method_artifact_ids=tuple(item.registry_id for item in frozen),
+        frozen_artifact_sha256=tuple(item.sha256 for item in frozen),
+        artifacts=artifacts,
+    )
+
+
+def _build_v2_historical_restore_project_head(
+    *,
+    predecessor: m2.ProjectHeadRefV2,
+    source: m2.ProjectHeadRefV2,
+    restore_transition_id: str,
+) -> m2.ProjectHeadRefV2:
+    composition = {
+        "effective_execution_snapshot": source.effective_execution_snapshot.model_dump(
+            mode="json"
+        ),
+        "evolution_revision": source.evolution_revision.model_dump(mode="json"),
+        "generation": predecessor.generation + 1,
+        "predecessor_project_head_id": predecessor.project_head_id,
+        "project_id": predecessor.project_id,
+        "registry_sha256": source.registry_sha256,
+        "restore_source_project_head_id": source.project_head_id,
+        "runtime_context_snapshot": source.runtime_context_snapshot.model_dump(mode="json"),
+        "successor_transition_id": restore_transition_id,
+        "transition_outcome": "historical_restore",
+        "workspace_snapshot": predecessor.workspace_snapshot.model_dump(mode="json"),
+    }
+    manifest_sha256 = hashlib.sha256(
+        json.dumps(
+            composition,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return m2.ProjectHeadRefV2(
+        project_head_id=f"project-head-{manifest_sha256}",
+        project_id=predecessor.project_id,
+        generation=predecessor.generation + 1,
+        predecessor_project_head_id=predecessor.project_head_id,
+        workspace_snapshot=predecessor.workspace_snapshot,
+        evolution_revision=source.evolution_revision,
+        runtime_context_snapshot=source.runtime_context_snapshot,
+        effective_execution_snapshot=source.effective_execution_snapshot,
+        registry_sha256=source.registry_sha256,
+        manifest_sha256=manifest_sha256,
+    )
+
+
+def _build_atomic_historical_restore_manifest(
+    *,
+    predecessor: m2.ProjectHeadRefV2,
+    source: m2.ProjectHeadRefV2,
+    source_commit: AtomicSuccessorCommitV2 | None,
+    successor: m2.ProjectHeadRefV2,
+    restore_transition_id: str,
+    restore_request_id: str,
+    created_at: datetime,
+) -> AtomicHistoricalRestoreManifestV2:
+    if source_commit is None:
+        if source.generation != 0 or source.evolution_revision.artifact_count != 0:
+            raise ValueError("historical restore source lacks genesis authority")
+        runtime_context_source = "empty_inherited"
+        source_transition_id = None
+        source_predecessor_id = None
+        materialized_context_id = None
+        materialized_context_sha256 = None
+        artifact_ids: tuple[str, ...] = ()
+        artifacts = ()
+    else:
+        source_manifest = source_commit.manifest
+        if type(source_manifest) is AtomicSuccessorManifestV2:
+            if source_manifest.runtime_context_source == "materialized_new":
+                runtime_context_source = "materialized_inherited"
+                source_transition_id = source_manifest.successor_transition_id
+                source_predecessor_id = source_manifest.predecessor_project_head_id
+            else:
+                runtime_context_source = source_manifest.runtime_context_source
+                source_transition_id = (
+                    source_manifest.materialized_source_successor_transition_id
+                )
+                source_predecessor_id = (
+                    source_manifest.materialized_source_predecessor_project_head_id
+                )
+        elif type(source_manifest) in {
+            AtomicEvolutionAbandonManifestV2,
+            AtomicHistoricalRestoreManifestV2,
+        }:
+            runtime_context_source = source_manifest.runtime_context_source
+            source_transition_id = (
+                source_manifest.materialized_source_successor_transition_id
+            )
+            source_predecessor_id = (
+                source_manifest.materialized_source_predecessor_project_head_id
+            )
+        else:  # pragma: no cover - closed receipt union
+            raise ValueError("historical restore source receipt is unsupported")
+        materialized_context_id = source_manifest.materialized_context_id
+        materialized_context_sha256 = (
+            source_manifest.materialized_context_manifest_sha256
+        )
+        artifact_ids = source_manifest.method_artifact_ids
+        artifacts = tuple(
+            _as_inherited_successor_contribution(item)
+            for item in source_manifest.artifacts
+        )
+    execution = successor.effective_execution_snapshot
+    return AtomicHistoricalRestoreManifestV2(
+        project_id=predecessor.project_id,
+        successor_transition_id=restore_transition_id,
+        restore_request_id=restore_request_id,
+        created_at=created_at,
+        source_project_head_id=source.project_head_id,
+        source_manifest_sha256=source.manifest_sha256,
+        predecessor_project_head_id=predecessor.project_head_id,
+        predecessor_generation=predecessor.generation,
+        predecessor_manifest_sha256=predecessor.manifest_sha256,
+        successor_project_head_id=successor.project_head_id,
+        successor_generation=successor.generation,
+        successor_manifest_sha256=successor.manifest_sha256,
+        workspace_snapshot_id=successor.workspace_snapshot.workspace_snapshot_id,
+        workspace_manifest_sha256=successor.workspace_snapshot.manifest_sha256,
+        evolution_revision_id=successor.evolution_revision.evolution_revision_id,
+        evolution_revision_manifest_sha256=successor.evolution_revision.manifest_sha256,
+        runtime_context_snapshot_id=(
+            successor.runtime_context_snapshot.runtime_context_snapshot_id
+        ),
+        runtime_context_manifest_sha256=successor.runtime_context_snapshot.manifest_sha256,
+        effective_execution_snapshot_id=execution.effective_execution_snapshot_id,
+        effective_execution_snapshot_sha256=execution.snapshot_sha256,
+        registry_sha256=successor.registry_sha256,
+        runtime_context_source=runtime_context_source,
+        materialized_source_successor_transition_id=source_transition_id,
+        materialized_source_predecessor_project_head_id=source_predecessor_id,
+        materialized_context_id=materialized_context_id,
+        materialized_context_manifest_sha256=materialized_context_sha256,
+        method_artifact_ids=artifact_ids,
+        artifacts=artifacts,
+    )
+
+
 def _build_atomic_evolution_abandon_manifest(
     *,
     context: ScienceSuccessorPreparationContextV2,
@@ -1591,9 +2646,13 @@ def _build_atomic_evolution_abandon_manifest(
                 )
             method_artifact_ids = inherited.method_artifact_ids
             artifacts = tuple(
-                item.model_copy(update={"origin": "inherited"}) for item in inherited.artifacts
+                _as_inherited_successor_contribution(item)
+                for item in inherited.artifacts
             )
-        elif type(inherited) is AtomicEvolutionAbandonManifestV2:
+        elif type(inherited) in {
+            AtomicEvolutionAbandonManifestV2,
+            AtomicHistoricalRestoreManifestV2,
+        }:
             runtime_context_source = inherited.runtime_context_source
             materialized_source_successor_transition_id = (
                 inherited.materialized_source_successor_transition_id
@@ -1605,7 +2664,8 @@ def _build_atomic_evolution_abandon_manifest(
             materialized_context_manifest_sha256 = inherited.materialized_context_manifest_sha256
             method_artifact_ids = inherited.method_artifact_ids
             artifacts = tuple(
-                item.model_copy(update={"origin": "inherited"}) for item in inherited.artifacts
+                _as_inherited_successor_contribution(item)
+                for item in inherited.artifacts
             )
         else:
             raise ValueError("predecessor has an unsupported publication receipt")
@@ -3964,6 +5024,13 @@ def _raise_v2_owner_error(exc: Exception, *, operation_id: str) -> None:
             http_status=412,
             retryable=True,
         ) from exc
+    if isinstance(exc, ScienceProjectFrozenV2):
+        raise CoreTaskControlError(
+            "project_frozen",
+            "The frozen project rejects further mutations.",
+            http_status=409,
+            retryable=False,
+        ) from exc
     if isinstance(exc, ScienceTaskTerminalV2):
         raise CoreTaskControlError(
             "task_terminal",
@@ -4096,6 +5163,22 @@ def _canonical_bytes(value: object) -> bytes:
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
+
+
+def _successor_recovery_seed_authority_from_wire(
+    payload: Mapping[str, object],
+) -> ScienceSuccessorRecoveryProjectSeedAuthorityV1:
+    """Parse a canonical JSON-mode recovery seed authority.
+
+    Strict nested contracts intentionally distinguish Python tuples/datetimes
+    from their JSON array/string representation.  Recovery seed construction
+    starts from the canonical wire representation used for its digest, so it
+    must use JSON-mode validation just like durable store readback.
+    """
+
+    return ScienceSuccessorRecoveryProjectSeedAuthorityV1.model_validate_json(
+        _canonical_bytes(dict(payload))
+    )
 
 
 def _sha256(value: object) -> bool:

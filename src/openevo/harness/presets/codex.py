@@ -22,11 +22,11 @@ from openevo.runtime.base import (
 )
 from openevo.runtime.codex_isolation import (
     CODEX_SUBSCRIPTION_CANARY_CWD,
-    CODEX_SUBSCRIPTION_CANARY_OK,
     codex_subscription_cli_flags,
-    codex_subscription_exec_canary_command,
+    codex_subscription_isolation_probe_command,
     codex_subscription_readiness_receipt,
     validate_codex_subscription_surface,
+    validate_codex_subscription_isolation_result,
 )
 from openevo.runtime.managed import (
     MANAGED_CODEX_BINARY,
@@ -249,17 +249,16 @@ class CodexHarness(BaseHarness):
 
         if auth_mode == AUTH_MODE_SUBSCRIPTION:
             result = await runtime.exec(
-                codex_subscription_exec_canary_command(
-                    model=_validated_cli_model_name(self.model_name),
+                codex_subscription_isolation_probe_command(
                     allow_internet=self._subscription_allow_internet,
                 ),
                 cwd=CODEX_SUBSCRIPTION_CANARY_CWD,
             )
-            if (
-                result.return_code != 0
-                or (result.stdout or "").strip() != CODEX_SUBSCRIPTION_CANARY_OK
-            ):
-                raise RuntimeError("Codex subscription credential isolation could not be proven")
+            validate_codex_subscription_isolation_result(
+                return_code=result.return_code,
+                stdout=result.stdout,
+                stderr=result.stderr,
+            )
 
         # Runtime-provided skills are untrusted task context. Subscription
         # readiness must be proven before Codex can discover them.

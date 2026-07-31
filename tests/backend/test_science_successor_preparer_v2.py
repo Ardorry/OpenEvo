@@ -21,14 +21,20 @@ from openevo.backend.science_execution_v2 import (
 )
 from openevo.backend.science_run_owner import CoreScienceTaskOwnerV2
 from openevo.backend.science_run_store import ScienceProjectAdmissionAuthorityV2
+from openevo.backend.science_successor import SealedTranscriptDatasetV2
 from openevo.backend.science_successor_preparer_v2 import (
     ProductionScienceSuccessorPreparerV2,
     ScienceSuccessorPreparationV2Error,
+    _materialized_context_from_wire,
     _project_requires_training_feedback,
 )
-from openevo.backend.science_successor import SealedTranscriptDatasetV2
 from openevo.backend.workspace_handoff_v2 import WorkspaceHandoffStoreV2
 from openevo.backend.workspace_store_v2 import WorkspaceStoreV2
+from openevo.evolution.admission import (
+    ArtifactProposalDecisionRequest,
+    ProposalAction,
+    artifact_content_admission_receipt,
+)
 from openevo.evolution.context_materialization import MaterializedContext
 from openevo.evolution.context_projection import ContextProjectionResolveRequest
 from openevo.evolution.framework import canonical_digest
@@ -36,6 +42,7 @@ from openevo.evolution.models import (
     ArtifactResponse,
     DatasetCreateRequest,
 )
+from openevo.evolution.planned_jobs import PlanBoundJobCreateRequest
 from openevo.evolution.training_feedback import (
     EvolutionDatasetViewReceipt,
     FeedbackAuthority,
@@ -44,15 +51,14 @@ from openevo.evolution.training_feedback import (
     TrainingFeedbackAttachment,
     TrainingFeedbackAttachmentCreateRequest,
 )
-from openevo.evolution.planned_jobs import PlanBoundJobCreateRequest
 from tests.backend.test_science_execution_v2 import (
     _Catalog,
     _Clock,
-    _Rollout,
-    _Services,
     _head,
     _project_config,
+    _Rollout,
     _service_binding,
+    _Services,
     _wait_task_state,
 )
 from tests.framework_testkit import verified_builtin_registry
@@ -278,6 +284,8 @@ class _Evolution:
         self.datasets: dict[str, dict] = {}
         self.dataset_requests: list[DatasetCreateRequest] = []
         self.jobs: dict[str, dict] = {}
+        self.job_requests: dict[str, PlanBoundJobCreateRequest] = {}
+        self.admission_receipts: dict[str, dict] = {}
         self.artifact_owners: dict[str, str] = {}
         self.target_run_counts: dict[str, int] = {}
         self.materialized: MaterializedContext | None = None
@@ -377,7 +385,7 @@ class _Evolution:
 
     def create_plan_bound_job(self, payload: dict) -> dict:
         request = PlanBoundJobCreateRequest.model_validate(payload)
-        assert request.core_config["promoted"] is True
+        assert request.core_config["promoted"] is False
         assert request.successor_transition_id is not None
         selection = request.selection()
         ordinal = self.target_run_counts.get(request.target_id, 0) + 1
@@ -401,7 +409,7 @@ class _Evolution:
             compatibility={"agent_harness": ["codex"]},
             scores={"quality": 1.0},
             tags=[],
-            promoted=True,
+            promoted=False,
         ).model_dump(mode="json")
         self.artifacts[artifact_id] = artifact
         self.artifact_owners[artifact_id] = (
@@ -416,25 +424,105 @@ class _Evolution:
             "lineage": {"plan_id": request.plan.plan_id},
             "compatibility": artifact["compatibility"],
             "scores": artifact["scores"],
-            "promoted": True,
+            "promoted": False,
             "created_at": "2026-07-23T03:00:00Z",
             "payload_manifest_digest": canonical_digest({"memory.md": "Use the accepted result."}),
             "payload_byte_size": len("Use the accepted result.".encode()),
             "payload_file_count": 1,
         }
+        outputs = [output]
+        artifact_ids = [artifact_id]
+        if selection.method_id == "agent_system_gepa_reflector":
+            artifact["scores"] = {"static_guardrail_score": 0.5}
+            output["scores"] = artifact["scores"]
+            for candidate_index, score in ((2, 0.9), (3, 0.7)):
+                candidate_id = f"{artifact_id}-candidate-{candidate_index}"
+                candidate = ArtifactResponse(
+                    artifact_id=candidate_id,
+                    type=request.target_id,
+                    name=f"GEPA candidate {candidate_index}",
+                    version=1,
+                    state="sealed",
+                    uri=f"file:///opaque/{request.target_id}/{candidate_index}",
+                    manifest={
+                        "content_path": "AGENTS.md",
+                        "candidate_index": candidate_index,
+                    },
+                    compatibility={"agent_harness": ["codex"]},
+                    scores={"static_guardrail_score": score},
+                    tags=[],
+                    promoted=False,
+                ).model_dump(mode="json")
+                self.artifacts[candidate_id] = candidate
+                self.artifact_owners[candidate_id] = request.successor_transition_id
+                artifact_ids.append(candidate_id)
+                outputs.append(
+                    {
+                        "artifact_id": candidate_id,
+                        "type": request.target_id,
+                        "name": candidate["name"],
+                        "manifest": candidate["manifest"],
+                        "lineage": {"plan_id": request.plan.plan_id},
+                        "compatibility": candidate["compatibility"],
+                        "scores": candidate["scores"],
+                        "promoted": False,
+                        "created_at": "2026-07-23T03:00:00Z",
+                        "payload_manifest_digest": canonical_digest(
+                            {"AGENTS.md": f"Generic candidate {candidate_index}."}
+                        ),
+                        "payload_byte_size": len(
+                            f"Generic candidate {candidate_index}.".encode()
+                        ),
+                        "payload_file_count": 1,
+                    }
+                )
+            report_id = f"{artifact_id}-report"
+            report = ArtifactResponse(
+                artifact_id=report_id,
+                type="report",
+                name="GEPA candidate archive",
+                version=1,
+                state="sealed",
+                uri="file:///opaque/gepa-report",
+                manifest={"content_path": "candidate_archive.json"},
+                promoted=False,
+            ).model_dump(mode="json")
+            self.artifacts[report_id] = report
+            self.artifact_owners[report_id] = request.successor_transition_id
+            artifact_ids.append(report_id)
+            outputs.append(
+                {
+                    "artifact_id": report_id,
+                    "type": "report",
+                    "name": report["name"],
+                    "manifest": report["manifest"],
+                    "lineage": {"plan_id": request.plan.plan_id},
+                    "compatibility": {},
+                    "scores": {},
+                    "promoted": False,
+                    "created_at": "2026-07-23T03:00:00Z",
+                    "payload_manifest_digest": canonical_digest(
+                        {"candidate_archive.json": "{}"}
+                    ),
+                    "payload_byte_size": 2,
+                    "payload_file_count": 1,
+                }
+            )
         self.jobs[job_id] = {
-            "artifact_ids": [artifact_id],
+            "artifact_ids": artifact_ids,
             "error": None,
             "job_id": job_id,
             "retryable": None,
             "state": "succeeded",
             "successor_transition_id": request.successor_transition_id,
-            "outputs": [output],
+            "outputs": outputs,
         }
+        self.job_requests[job_id] = request
         expected_methods = {
             "agent_system": {
                 "agent_system_reflector",
                 "agent_system_history_reflector",
+                "agent_system_gepa_reflector",
             },
             "skill_bundle": {"skill_bundle_reflector"},
             "text_memory": {
@@ -462,6 +550,108 @@ class _Evolution:
             successor_transition_id
         )
         return self.artifacts[artifact_id]
+
+    def apply_internal_artifact_admission(self, payload: dict) -> dict:
+        request = ArtifactProposalDecisionRequest.model_validate(payload)
+        job = self.jobs[request.job_id]
+        proposal_ids = tuple(
+            sorted(
+                artifact_id
+                for artifact_id in job["artifact_ids"]
+                if self.artifacts[artifact_id]["type"]
+                == request.artifact_type.value
+            )
+        )
+        assert proposal_ids
+        if request.action is ProposalAction.UPDATE:
+            assert request.selected_artifact_id in proposal_ids
+            active_artifact_id = request.selected_artifact_id
+        else:
+            assert request.selected_artifact_id is None
+            assert request.parent_artifact_id is not None
+            assert self.artifacts[request.parent_artifact_id]["promoted"] is True
+            active_artifact_id = request.parent_artifact_id
+        for proposal_id in proposal_ids:
+            self.artifacts[proposal_id]["promoted"] = (
+                proposal_id == active_artifact_id
+            )
+        if request.parent_artifact_id is not None:
+            self.artifacts[request.parent_artifact_id]["promoted"] = (
+                True
+            )
+        content_admission = artifact_content_admission_receipt(
+            basis=request.content_admission_basis,
+            payloads={
+                proposal_id: {"memory.md": "Use a generic validation workflow."}
+                for proposal_id in proposal_ids
+            },
+            source_payloads={
+                artifact_id: {
+                    "records.jsonl": '{"response":"A generic completed trace."}'
+                }
+                for binding in self.job_requests[request.job_id].input_bindings
+                if binding.binding_id in {"current_dataset", "dataset_inputs"}
+                for artifact_id in binding.artifact_ids
+            },
+        )
+        body = {
+            "schema_version": "openevo.artifact_proposal_decision.v1",
+            "decision_id": request.decision_id,
+            "job_id": request.job_id,
+            "artifact_type": request.artifact_type.value,
+            "action": request.action.value,
+            "parent_artifact_id": request.parent_artifact_id,
+            "genesis": request.genesis,
+            "proposal_artifact_ids": list(proposal_ids),
+            "selected_artifact_id": request.selected_artifact_id,
+            "rejected_artifact_ids": [
+                item for item in proposal_ids if item != request.selected_artifact_id
+            ],
+            "active_artifact_id": active_artifact_id,
+            "reason": request.reason,
+            "admission": request.admission.model_dump(mode="json"),
+            "content_admission": content_admission.model_dump(mode="json"),
+            "created_at": "2026-07-23T03:00:00Z",
+        }
+        body["content_sha256"] = canonical_digest(body)
+        self.admission_receipts[request.job_id] = body
+        return body
+
+    def get_internal_successor_artifact_authority(
+        self,
+        successor_transition_id: str,
+        artifact_id: str,
+    ) -> dict:
+        assert self.artifact_owners[artifact_id] == successor_transition_id
+        job_id = next(
+            job_id
+            for job_id, job in self.jobs.items()
+            if artifact_id in job["artifact_ids"]
+        )
+        request = self.job_requests[job_id]
+        receipt = self.admission_receipts[job_id]
+        output = next(
+            item
+            for item in self.jobs[job_id]["outputs"]
+            if item["artifact_id"] == artifact_id
+        )
+        return {
+            "successor_transition_id": successor_transition_id,
+            "job_id": job_id,
+            "input_artifact_ids": [
+                artifact_id
+                for binding in request.input_bindings
+                for artifact_id in binding.artifact_ids
+            ],
+            "artifact": self.artifacts[artifact_id],
+            "payload_manifest_sha256": output["payload_manifest_digest"],
+            "payload_byte_size": output["payload_byte_size"],
+            "proposal_artifact_ids": receipt["proposal_artifact_ids"],
+            "admission_decision_id": receipt["decision_id"],
+            "admission_decision_sha256": receipt["content_sha256"],
+            "content_admission": receipt["content_admission"],
+            "promotion_status": "promoted",
+        }
 
     def discard_successor_transition_outputs(
         self,
@@ -619,7 +809,7 @@ def test_production_preparer_commits_complete_workspace_and_context_successor(
     config_json["evolution"]["targets"] = {
         "agent_system": {
             "enabled": True,
-            "method": "auto",
+            "method": "agent_system_gepa_reflector",
             "config": {},
         },
         "skill_bundle": {
@@ -714,6 +904,7 @@ def test_production_preparer_commits_complete_workspace_and_context_successor(
             services=services,
             executable_registry=registry,
             evolution_factory=lambda _binding: evolution,
+            artifact_admission_root=tmp_path / "artifact-admission",
             clock=clock,
             poll_interval_seconds=0,
             max_poll_attempts=2,
@@ -766,10 +957,21 @@ def test_production_preparer_commits_complete_workspace_and_context_successor(
             "artifact-dataset-successor-1"
         )
         assert commit.manifest.method_artifact_ids == (
-            "artifact-agent_system-successor",
+            "artifact-agent_system-successor-candidate-2",
             "artifact-skill_bundle-successor",
             "artifact-text_memory-successor",
         )
+        agent_admission = evolution.admission_receipts[
+            "job-agent_system-successor"
+        ]
+        assert len(agent_admission["proposal_artifact_ids"]) == 3
+        assert agent_admission["active_artifact_id"] == (
+            "artifact-agent_system-successor-candidate-2"
+        )
+        assert sum(
+            bool(evolution.artifacts[item]["promoted"])
+            for item in agent_admission["proposal_artifact_ids"]
+        ) == 1
         assert commit.manifest.materialized_context_id == "ctx-successor-v2"
 
         next_authority = owner.project_admission_authority(project_id)
@@ -859,7 +1061,7 @@ def test_production_preparer_commits_complete_workspace_and_context_successor(
         )
         assert second_commit is not None
         assert second_commit.manifest.method_artifact_ids == (
-            "artifact-agent_system-successor",
+            "artifact-agent_system-successor-candidate-2",
             "artifact-skill_bundle-successor",
             "artifact-text_memory-successor-2",
         )
@@ -982,3 +1184,34 @@ def test_internal_materialized_context_transport_has_no_host_path(tmp_path) -> N
     encoded = str(materialized.model_dump(mode="json"))
     assert str(tmp_path) not in encoded
     assert "file://" not in encoded
+
+
+def test_recovery_seed_decodes_materialized_context_from_json_wire() -> None:
+    materialized = MaterializedContext(
+        context_id="ctx-recovery-seed-wire",
+        request_digest="1" * 64,
+        registry_digest="2" * 64,
+        successor_transition_id="recovery-seed-wire",
+        predecessor_project_head_id="project-head-genesis",
+        projections=(),
+        selection={
+            "artifact_ids": ("artifact-agent", "artifact-memory"),
+            "skipped_artifacts": (),
+            "reasons": ("explicit_artifact_ids",),
+        },
+        blobs=(),
+        environment=(),
+        instruction="Use the admitted recovery artifacts.",
+        adapter_merge_spec={"merge_mode": "reference_only", "adapters": ()},
+    )
+    wire = materialized.model_dump(mode="json")
+    assert isinstance(wire["selection"]["artifact_ids"], list)
+    assert isinstance(wire["selection"]["skipped_artifacts"], list)
+    assert isinstance(wire["selection"]["reasons"], list)
+
+    restored = _materialized_context_from_wire(wire)
+
+    assert restored == materialized
+    assert isinstance(restored.selection.artifact_ids, tuple)
+    assert isinstance(restored.selection.skipped_artifacts, tuple)
+    assert isinstance(restored.selection.reasons, tuple)

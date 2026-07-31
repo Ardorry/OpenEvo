@@ -7,6 +7,7 @@ from openevo.backend.training_feedback_control import (
     install_core_training_feedback_endpoint,
 )
 from openevo.evolution.framework import canonical_digest
+from openevo.experiments.clients import EvolutionHttpStatusError
 
 
 class _Provider:
@@ -41,6 +42,19 @@ class _Evolution:
     def create_training_feedback_attachment(self, payload: dict) -> dict:
         self.payloads.append(payload)
         return self.body
+
+    def get_completed_dataset_authority(self, dataset_id: str) -> dict:
+        assert dataset_id == "dataset-1"
+        return {
+            "completed_dataset_id": dataset_id,
+            "completed_dataset_revision": "artifact-dataset-1.v1",
+            "dataset_artifact_id": "artifact-dataset-1",
+            "dataset_manifest_sha256": "b" * 64,
+            "task_id": "rollout-task-1",
+            "session_id": "session-1",
+            "source_event_id": "session:session-1",
+            "source_session_result_sha256": "a" * 64,
+        }
 
     def get_training_feedback_attachment(self, attachment_id: str) -> dict:
         assert attachment_id == self.body["attachment_id"]
@@ -100,6 +114,11 @@ class _Evolution:
 
     def close(self) -> None:
         self.closed = True
+
+
+class _MissingEvolution(_Evolution):
+    def get_training_feedback_attachment(self, attachment_id: str) -> dict:
+        raise EvolutionHttpStatusError(status_code=404, detail_code="not_found")
 
 
 def _request() -> dict:
@@ -212,6 +231,10 @@ def test_core_control_get_list_and_resolve_are_private_durable_transports() -> N
             "/v2/internal/training-feedback/attachments/tfa-control-test",
             headers=headers,
         )
+        dataset_authority = client.get(
+            "/v2/internal/training-feedback/datasets/dataset-1",
+            headers=headers,
+        )
         listed = client.get(
             "/v2/internal/training-feedback/sessions/session-1/attachments",
             headers=headers,
@@ -230,7 +253,29 @@ def test_core_control_get_list_and_resolve_are_private_durable_transports() -> N
             headers=headers,
         )
         public_paths = app.openapi()["paths"]
-    assert fetched.status_code == listed.status_code == resolved.status_code == 200
+    assert fetched.status_code == listed.status_code == resolved.status_code == dataset_authority.status_code == 200
+    assert dataset_authority.json()["completed_dataset_revision"] == "artifact-dataset-1.v1"
     assert listed.json()["attachments"] == [fetched.json()]
     assert resolved.json()["attachments"] == [fetched.json()]
     assert not any("training-feedback" in path for path in public_paths)
+
+
+def test_core_control_preserves_missing_feedback_authority_semantics() -> None:
+    request = _request()
+    evolution = _MissingEvolution(_attachment(request))
+    app = create_core_control_v2_contract_app(_Provider())
+    install_core_training_feedback_endpoint(
+        app,
+        _ServiceControl(),
+        evolution_factory=lambda _binding: evolution,
+    )
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/v2/internal/training-feedback/attachments/tfa-missing",
+            headers={"Authorization": "Bearer feedback-control-test"},
+        )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "training feedback authority was not found"}
+    assert evolution.closed is True

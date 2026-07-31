@@ -1,20 +1,155 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
+import hashlib
 import inspect
 import json
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
-from fastapi.testclient import TestClient
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 
 from openevo.evolution.client import EvolutionClient
 from openevo.evolution.server import create_app
 from openevo.evolution.worker import EvolutionWorkerClient
 from openevo.internal_auth import InternalServiceIdentity
 from openevo.runtime.base import RUNTIME_READBACK_MAX_BYTES
+from openevo.runtime.managed_reflector_mount import (
+    ManagedReflectorMountRegistrationExpectation,
+)
+
+
+def _managed_reflector_mount_readiness(
+    *,
+    generation_digest: str = "1" * 64,
+    registry_digest: str = "2" * 64,
+) -> dict[str, object]:
+    receipt: dict[str, object] = {
+        "schema_version": "openevo.managed_reflector_credential_mount_readiness.v1",
+        "authority_id": "4" * 64,
+        "container_authority_id": "a" * 64,
+        "worker_launch_id": f"mrl-{'5' * 32}",
+        "container_launch_id": "openevo_reflector_mount_probe",
+        "adoption_nonce_sha256": "b" * 64,
+        "service_identity_digest": "c" * 64,
+        "runtime_profile": "managed_science",
+        "runtime_digest": f"sha256:{'6' * 64}",
+        "docker_host_path_identity": "7" * 64,
+        "generation_digest": generation_digest,
+        "daemon_release_identity": "d" * 64,
+        "release_install_digest": "8" * 64,
+        "release_registry_digest": registry_digest,
+        "credential_target": "/openevo/credentials/codex",
+        "container_uid": 1000,
+        "container_gid": 1000,
+        "authority_issued": True,
+        "docker_mount_created": True,
+        "container_path_visible": True,
+        "container_user_can_read": True,
+        "auth_file_read_only": True,
+        "generation_matches": True,
+        "release_identity_matches": True,
+        "adoption_receipt_valid": True,
+        "container_authority_verified": True,
+        "cleanup_verified": True,
+        "codex_cli_started": False,
+        "model_started": False,
+        "created_at": "2026-07-29T00:00:00+00:00",
+    }
+    receipt["content_sha256"] = hashlib.sha256(
+        json.dumps(
+            receipt,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return receipt
+
+
+def _managed_reflector_mount_expectation(
+    receipt: dict[str, object],
+) -> ManagedReflectorMountRegistrationExpectation:
+    payload = {
+        "schema_version": (
+            "openevo.managed_reflector_mount_registration_expectation.v1"
+        ),
+        **{
+            key: receipt[key]
+            for key in (
+                "authority_id",
+                "service_identity_digest",
+                "worker_launch_id",
+                "runtime_profile",
+                "runtime_digest",
+                "docker_host_path_identity",
+                "generation_digest",
+                "daemon_release_identity",
+                "release_install_digest",
+                "release_registry_digest",
+                "container_uid",
+            )
+        },
+    }
+    payload["content_sha256"] = hashlib.sha256(
+        json.dumps(
+            payload,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return ManagedReflectorMountRegistrationExpectation.model_validate(payload)
+
+
+def _managed_reflector_runtime_readiness(
+    mount: dict[str, object],
+) -> dict[str, object]:
+    receipt: dict[str, object] = {
+        "schema_version": "openevo.managed_reflector_readiness.v1",
+        "authority_id": mount["authority_id"],
+        "container_authority_id": "e" * 64,
+        "worker_launch_id": mount["worker_launch_id"],
+        "container_launch_id": "openevo_reflector_runtime_probe",
+        "adoption_nonce_sha256": "f" * 64,
+        "service_identity_digest": mount["service_identity_digest"],
+        "generation_digest": mount["generation_digest"],
+        "daemon_release_identity": mount["daemon_release_identity"],
+        "release_install_digest": mount["release_install_digest"],
+        "release_registry_digest": mount["release_registry_digest"],
+        "runtime_profile": mount["runtime_profile"],
+        "runtime_digest": mount["runtime_digest"],
+        "docker_host_path_identity": mount["docker_host_path_identity"],
+        "credential_mount_content_sha256": mount["content_sha256"],
+        "codex_binary": "/opt/codex/bin/codex",
+        "expected_cli_version": "0.144.1",
+        "actual_cli_version": "0.144.1",
+        "model": "readiness-only",
+        "auth_mode": "subscription",
+        "capture_mode": "transcript",
+        "path_fallback_allowed": False,
+        "exit_status": 0,
+        "container_authority_verified": True,
+        "adoption_receipt_valid": True,
+        "cleanup_verified": True,
+        "codex_cli_started": True,
+        "model_started": False,
+        "created_at": "2026-07-29T00:00:01+00:00",
+    }
+    receipt["content_sha256"] = hashlib.sha256(
+        json.dumps(
+            receipt,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return receipt
 
 
 def test_health_reports_artifact_root(tmp_path):
@@ -28,6 +163,316 @@ def test_health_reports_artifact_root(tmp_path):
         "db": "ok",
         "artifact_root": str(tmp_path / "artifacts"),
     }
+
+
+def test_release_worker_registration_requires_untampered_mount_readiness(
+    tmp_path: Path,
+) -> None:
+    credential = "mount-registration-test-credential-0123456789"
+    server_identity = InternalServiceIdentity(
+        service_id="evolution-backend",
+        generation_digest="1" * 64,
+        registry_digest="2" * 64,
+        framework_lock_digest="3" * 64,
+        credential=credential,
+    )
+    worker_identity = InternalServiceIdentity(
+        service_id="evolution-worker",
+        generation_digest=server_identity.generation_digest,
+        registry_digest=server_identity.registry_digest,
+        framework_lock_digest=server_identity.framework_lock_digest,
+        credential=credential,
+    )
+    receipt = _managed_reflector_mount_readiness()
+    app = create_app(
+        db_path=tmp_path / "evolution.db",
+        artifact_root=tmp_path / "artifacts",
+        internal_identity=server_identity,
+        managed_reflector_mount_expectation=(
+            _managed_reflector_mount_expectation(receipt)
+        ),
+    )
+    base = {
+        "framework_lock_digest": worker_identity.framework_lock_digest,
+        "generation_digest": worker_identity.generation_digest,
+        "managed_reflector_runtime_readiness": (
+            _managed_reflector_runtime_readiness(receipt)
+        ),
+        "registry_digest": worker_identity.registry_digest,
+        "worker_id": "core-reference-worker",
+    }
+    tampered = dict(receipt)
+    tampered["authority_id"] = "9" * 64
+    drifted = dict(tampered)
+    drifted["content_sha256"] = hashlib.sha256(
+        json.dumps(
+            {key: value for key, value in drifted.items() if key != "content_sha256"},
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    daemon_release_drift = dict(receipt)
+    daemon_release_drift["daemon_release_identity"] = "e" * 64
+    daemon_release_drift["content_sha256"] = hashlib.sha256(
+        json.dumps(
+            {
+                key: value
+                for key, value in daemon_release_drift.items()
+                if key != "content_sha256"
+            },
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    version_drift = _managed_reflector_runtime_readiness(receipt)
+    version_drift["actual_cli_version"] = "0.145.0"
+    version_drift["content_sha256"] = hashlib.sha256(
+        json.dumps(
+            {
+                key: value
+                for key, value in version_drift.items()
+                if key != "content_sha256"
+            },
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    unbound_runtime = _managed_reflector_runtime_readiness(receipt)
+    unbound_runtime["credential_mount_content_sha256"] = "0" * 64
+    unbound_runtime["content_sha256"] = hashlib.sha256(
+        json.dumps(
+            {
+                key: value
+                for key, value in unbound_runtime.items()
+                if key != "content_sha256"
+            },
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+    with TestClient(app) as client:
+        missing = client.post(
+            "/v1/internal/workers/register",
+            headers=worker_identity.request_headers(),
+            json={**base, "managed_reflector_credential_mount": None},
+        )
+        invalid = client.post(
+            "/v1/internal/workers/register",
+            headers=worker_identity.request_headers(),
+            json={**base, "managed_reflector_credential_mount": tampered},
+        )
+        identity_mismatch = client.post(
+            "/v1/internal/workers/register",
+            headers=worker_identity.request_headers(),
+            json={**base, "managed_reflector_credential_mount": drifted},
+        )
+        daemon_release_mismatch = client.post(
+            "/v1/internal/workers/register",
+            headers=worker_identity.request_headers(),
+            json={
+                **base,
+                "managed_reflector_credential_mount": daemon_release_drift,
+            },
+        )
+        missing_runtime = client.post(
+            "/v1/internal/workers/register",
+            headers=worker_identity.request_headers(),
+            json={
+                **base,
+                "managed_reflector_credential_mount": receipt,
+                "managed_reflector_runtime_readiness": None,
+            },
+        )
+        cli_version_mismatch = client.post(
+            "/v1/internal/workers/register",
+            headers=worker_identity.request_headers(),
+            json={
+                **base,
+                "managed_reflector_credential_mount": receipt,
+                "managed_reflector_runtime_readiness": version_drift,
+            },
+        )
+        mount_binding_mismatch = client.post(
+            "/v1/internal/workers/register",
+            headers=worker_identity.request_headers(),
+            json={
+                **base,
+                "managed_reflector_credential_mount": receipt,
+                "managed_reflector_runtime_readiness": unbound_runtime,
+            },
+        )
+        accepted = client.post(
+            "/v1/internal/workers/register",
+            headers=worker_identity.request_headers(),
+            json={**base, "managed_reflector_credential_mount": receipt},
+        )
+
+    assert missing.status_code == 422
+    assert missing.json()["detail"] == (
+        "managed reflector credential mount readiness is required"
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()["detail"] == (
+        "managed reflector credential mount readiness is invalid"
+    )
+    assert identity_mismatch.status_code == 409
+    assert identity_mismatch.json()["detail"] == (
+        "managed reflector credential mount identity mismatch"
+    )
+    assert daemon_release_mismatch.status_code == 409
+    assert daemon_release_mismatch.json()["detail"] == (
+        "managed reflector credential mount identity mismatch"
+    )
+    assert missing_runtime.status_code == 422
+    assert missing_runtime.json()["detail"] == (
+        "managed reflector runtime readiness is required"
+    )
+    assert cli_version_mismatch.status_code == 422
+    assert cli_version_mismatch.json()["detail"] == (
+        "managed reflector runtime readiness is invalid"
+    )
+    assert mount_binding_mismatch.status_code == 409
+    assert mount_binding_mismatch.json()["detail"] == (
+        "managed reflector credential mount identity mismatch"
+    )
+    assert accepted.status_code == 200
+    assert accepted.json()["managed_reflector_credential_mount"] == receipt
+    assert accepted.json()["managed_reflector_runtime_readiness"] == (
+        _managed_reflector_runtime_readiness(receipt)
+    )
+
+
+def test_release_worker_cannot_claim_job_before_mount_readiness_registration(
+    tmp_path: Path,
+) -> None:
+    credential = "mount-claim-fence-test-credential-0123456789"
+    server_identity = InternalServiceIdentity(
+        service_id="evolution-backend",
+        generation_digest="1" * 64,
+        registry_digest="2" * 64,
+        framework_lock_digest="3" * 64,
+        credential=credential,
+    )
+    worker_identity = InternalServiceIdentity(
+        service_id="evolution-worker",
+        generation_digest=server_identity.generation_digest,
+        registry_digest=server_identity.registry_digest,
+        framework_lock_digest=server_identity.framework_lock_digest,
+        credential=credential,
+    )
+    receipt = _managed_reflector_mount_readiness()
+    app = create_app(
+        db_path=tmp_path / "evolution.db",
+        artifact_root=tmp_path / "artifacts",
+        internal_identity=server_identity,
+        managed_reflector_mount_expectation=(
+            _managed_reflector_mount_expectation(receipt)
+        ),
+    )
+    registration = {
+        "framework_lock_digest": worker_identity.framework_lock_digest,
+        "generation_digest": worker_identity.generation_digest,
+        "managed_reflector_credential_mount": receipt,
+        "managed_reflector_runtime_readiness": (
+            _managed_reflector_runtime_readiness(receipt)
+        ),
+        "registry_digest": worker_identity.registry_digest,
+        "worker_id": "core-reference-worker",
+    }
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/v1/jobs",
+            headers=worker_identity.request_headers(),
+            json={"method": "mock", "job_type": "text_memory_mining"},
+        )
+        assert created.status_code == 200
+        rejected = client.post(
+            "/v1/jobs/claim",
+            headers=worker_identity.request_headers(),
+            json={
+                "worker_id": "core-reference-worker",
+                "capabilities": ["text_memory_mining"],
+            },
+        )
+        registered = client.post(
+            "/v1/internal/workers/register",
+            headers=worker_identity.request_headers(),
+            json=registration,
+        )
+        accepted = client.post(
+            "/v1/jobs/claim",
+            headers=worker_identity.request_headers(),
+            json={
+                "worker_id": "core-reference-worker",
+                "capabilities": ["text_memory_mining"],
+            },
+        )
+
+    assert rejected.status_code == 409
+    assert rejected.json()["detail"] == (
+        "worker credential mount readiness is not registered"
+    )
+    assert registered.status_code == 200
+    assert accepted.status_code == 200
+    assert accepted.json()["job"] is not None
+
+
+def test_release_worker_registration_requires_core_issued_expectation(
+    tmp_path: Path,
+) -> None:
+    credential = "mount-expectation-test-credential-0123456789"
+    server_identity = InternalServiceIdentity(
+        service_id="evolution-backend",
+        generation_digest="1" * 64,
+        registry_digest="2" * 64,
+        framework_lock_digest="3" * 64,
+        credential=credential,
+    )
+    worker_identity = InternalServiceIdentity(
+        service_id="evolution-worker",
+        generation_digest=server_identity.generation_digest,
+        registry_digest=server_identity.registry_digest,
+        framework_lock_digest=server_identity.framework_lock_digest,
+        credential=credential,
+    )
+    app = create_app(
+        db_path=tmp_path / "evolution.db",
+        artifact_root=tmp_path / "artifacts",
+        internal_identity=server_identity,
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/internal/workers/register",
+            headers=worker_identity.request_headers(),
+            json={
+                "framework_lock_digest": worker_identity.framework_lock_digest,
+                "generation_digest": worker_identity.generation_digest,
+                "managed_reflector_credential_mount": (
+                    _managed_reflector_mount_readiness()
+                ),
+                "managed_reflector_runtime_readiness": (
+                    _managed_reflector_runtime_readiness(
+                        _managed_reflector_mount_readiness()
+                    )
+                ),
+                "registry_digest": worker_identity.registry_digest,
+                "worker_id": "core-reference-worker",
+            },
+        )
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "managed reflector mount registration expectation is unavailable"
+    )
 
 
 def test_materialized_blob_transport_rejects_oversize_before_read(

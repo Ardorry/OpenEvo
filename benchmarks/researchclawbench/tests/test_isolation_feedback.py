@@ -3,10 +3,16 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
-from openevo_researchclawbench.feedback_filter import FeedbackPolicyError, validate_feedback
+from openevo_researchclawbench.feedback_filter import (
+    COST_UNAVAILABLE,
+    FeedbackPolicyError,
+    validate_feedback,
+)
 from openevo_researchclawbench.hashing import UnsafePathError
-from openevo_researchclawbench.isolation import reject_forbidden_prepare_sources, validate_candidate_view
+from openevo_researchclawbench.isolation import (
+    reject_forbidden_prepare_sources,
+    validate_candidate_view,
+)
 
 
 def _feedback() -> dict:
@@ -28,7 +34,21 @@ def test_feedback_accepts_only_scalar_total() -> None:
     assert validate_feedback(_feedback(), allowed_tasks={"Life_005"})["total_score"] == 31.5
 
 
-@pytest.mark.parametrize("field", ["items", "per_item_score", "judge_reasoning", "rubric_mode", "checklist"])
+def test_feedback_cost_can_be_explicitly_unavailable_but_not_faked() -> None:
+    payload = _feedback()
+    payload["cost_total_usd"] = COST_UNAVAILABLE
+    assert (
+        validate_feedback(payload, allowed_tasks={"Life_005"})["cost_total_usd"]
+        == COST_UNAVAILABLE
+    )
+    payload["cost_total_usd"] = None
+    with pytest.raises(FeedbackPolicyError, match="invalid cost"):
+        validate_feedback(payload, allowed_tasks={"Life_005"})
+
+
+@pytest.mark.parametrize(
+    "field", ["items", "per_item_score", "judge_reasoning", "rubric_mode", "checklist"]
+)
 def test_feedback_rejects_private_fields(field: str) -> None:
     payload = _feedback()
     payload[field] = "private"

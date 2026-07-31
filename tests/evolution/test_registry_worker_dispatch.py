@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import time
+from pathlib import Path
 
 import pytest
 
@@ -23,13 +23,23 @@ from openevo.evolution.framework.builtins import (
     ImplementationDistributionIdentity,
     build_builtin_registry,
 )
+from openevo.evolution.framework.execution import (
+    ReflectorInferenceRequest,
+    ReflectorInferenceResponse,
+    ReflectorRuntimeReceipt,
+)
+from openevo.evolution.managed_reflector import default_managed_reflector_runtime
 from openevo.evolution.models import (
     ArtifactRegisterRequest,
     ArtifactType,
+    DatasetCreateRequest,
+    EventIngestRequest,
     WorkerClaimRequest,
     WorkerCompleteRequest,
     WorkerFailRequest,
     WorkerHeartbeatRequest,
+    WorkerReflectorInferenceCompleteRequest,
+    WorkerReflectorInferenceReserveRequest,
 )
 from openevo.evolution.planned_jobs import (
     PlanBoundJobCreateRequest,
@@ -254,6 +264,39 @@ class _StoreWorkerClient:
         self.failed.append(result)
         return result
 
+    def reserve_reflector_inference(
+        self,
+        job_id: str,
+        lease_id: str,
+        request_id: str,
+    ):
+        response = self.store.reserve_reflector_inference(
+            job_id,
+            WorkerReflectorInferenceReserveRequest(
+                lease_id=lease_id,
+                request_id=request_id,
+                max_model_calls=1,
+            ),
+        )
+        return response.model_dump(mode="json")
+
+    def complete_reflector_inference(
+        self,
+        job_id: str,
+        lease_id: str,
+        request_id: str,
+        runtime_receipt_sha256: str,
+    ):
+        response = self.store.complete_reflector_inference(
+            job_id,
+            WorkerReflectorInferenceCompleteRequest(
+                lease_id=lease_id,
+                request_id=request_id,
+                runtime_receipt_sha256=runtime_receipt_sha256,
+            ),
+        )
+        return response.model_dump(mode="json")
+
 
 def test_plan_bound_worker_dispatches_verified_handle_not_legacy_global(
     tmp_path: Path,
@@ -433,6 +476,197 @@ def test_protected_methods_cross_plan_store_verified_worker_and_publication(
         assert execution["target_id"] == target_id
         assert execution["method_id"] == method_id
         assert execution["method_identity_digest"] == request.selection().method_identity_digest
+
+
+class _LeakingManagedReflector:
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.calls = 0
+
+    def infer(
+        self,
+        request: ReflectorInferenceRequest,
+    ) -> ReflectorInferenceResponse:
+        self.calls += 1
+        return ReflectorInferenceResponse(
+            request_id=request.request_id,
+            text=self.text,
+            receipt=ReflectorRuntimeReceipt(
+                request_id=request.request_id,
+                session_id="managed-reflector-leakage-test",
+                runtime_profile="managed_science",
+                runtime_digest=request.runtime.image_digest.removeprefix("sha256:"),
+                codex_binary="/opt/codex/bin/codex",
+                actual_cli_version="0.144.1",
+                model_name=request.model_name,
+                reasoning_effort=request.reasoning_effort,
+                auth_mode="subscription",
+                capture_mode="transcript",
+                path_fallback_allowed=False,
+                exit_status=0,
+                transcript_sha256="d" * 64,
+            ),
+        )
+
+
+def test_gepa_worker_reserves_once_then_rejects_source_overlap_without_publication(
+    tmp_path: Path,
+) -> None:
+    report_sentence = (
+        "The task-specific analysis concluded that the QZO.csv observation with "
+        "identifier 242,478, calibrated value 0.123456789, and uncertainty "
+        "6.02214076e23 supported the result and must be preserved exactly."
+    )
+    source_title = "Luminosity Calibration of QZO Survey"
+    leaked_slogan = "Be careful with Astronomy_004 and QZO.csv to avoid mistakes."
+    registry = _registry()
+    store = _store(tmp_path)
+    store.ingest_event(
+        EventIngestRequest(
+            source="openevo",
+            event_type="openevo.session_completed",
+            source_event_id="session:gepa-leakage",
+            task_id="task-gepa-internal",
+            session_id="session-gepa-leakage",
+            status="COMPLETED",
+            payload={
+                "task_local_feedback": {
+                    "benchmark_task_scope_id": "Astronomy_004",
+                    "report_headings": [source_title, "Methods"],
+                },
+                "session_result": {
+                    "trajectory": {
+                        "traces": [
+                            {
+                                "prompt_messages": [
+                                    {"role": "user", "content": "Analyze QZO.csv."}
+                                ],
+                                "response_messages": [
+                                    {
+                                        "role": "assistant",
+                                        "content": (
+                                            f"{report_sentence} The DOI was "
+                                            "10.1234/private.study."
+                                        ),
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            },
+        )
+    )
+    dataset = store.create_dataset(
+        DatasetCreateRequest(
+            idempotency_key="gepa-leakage-sealed-dataset",
+            name="GEPA leakage dataset",
+            purpose="agent_system_evolution",
+            query={
+                "event_types": ["openevo.session_completed"],
+                "status": ["COMPLETED"],
+            },
+            limits={"max_events": 1, "max_traces": 1},
+        )
+    )
+    runtime = default_managed_reflector_runtime()
+    plan = registry.snapshot.compile_plan(
+        plan_id="plan-gepa-source-overlap",
+        selections=(
+            EvolutionTargetSelection(
+                target_id="agent_system",
+                enabled=True,
+                method_id="agent_system_gepa_reflector",
+                config={
+                    "candidate_count": 1,
+                    "mutation_strategies": ["source_overlap"],
+                    "reflector_llm": {
+                        "provider": "codex_cli",
+                        "model": "gpt-5.5",
+                        "reasoning_effort": "high",
+                        "timeout_seconds": 30,
+                        "runtime": runtime.model_dump(mode="json"),
+                    },
+                },
+            ),
+        ),
+        profile=EvolutionExecutionProfile(
+            execution_mode="self_deployed",
+            capture_mode="transcript",
+            harness_id="codex",
+        ),
+    )
+    request = PlanBoundJobCreateRequest(
+        plan=plan,
+        target_id="agent_system",
+        job_type="openevo:test:gepa-source-overlap",
+        input_bindings=(
+            PlannedInputBinding(
+                binding_id="dataset_inputs",
+                artifact_ids=(dataset.artifact_id,),
+            ),
+            PlannedInputBinding(
+                binding_id="prior_target_artifacts",
+                artifact_ids=(),
+            ),
+        ),
+        core_config={
+            "name": "GEPA source-overlap candidate",
+            "promoted": True,
+            "max_reflector_model_calls": 1,
+            "agent_system_audit": {
+                "enabled": True,
+                "max_repair_attempts": 0,
+            },
+            "lineage": {"input_artifact_ids": [dataset.artifact_id]},
+        },
+    )
+    created = store.create_plan_bound_job(request, snapshot=registry.snapshot)
+    leaked_output = (
+        "# Unsafe Candidate\n\n"
+        f"{leaked_slogan}\n"
+        "For Astronomy_004, reuse QZO.csv value 242478, calibrated value "
+        "0.123456789, uncertainty 6.02214076e23, and DOI "
+        f"10.1234/private.study. Preserve {source_title}. {report_sentence}"
+    )
+    reflector = _LeakingManagedReflector(leaked_output)
+    client = _StoreWorkerClient(store)
+
+    assert run_once(
+        client,
+        worker_id="managed-gepa-worker",
+        capabilities=[request.job_type],
+        artifact_root=tmp_path / "artifacts",
+        executable_registry=registry,
+        method_services=MethodExecutionServices(harness=object(), reflector=reflector),
+    )
+
+    terminal = store.get_internal_job_result(created.job_id)
+    reservation = store.get_reflector_inference_reservation(created.job_id)
+    assert reflector.calls == 1
+    assert reservation.state == "completed"
+    assert reservation.model_calls_started == 1
+    assert terminal["state"] == "failed"
+    assert terminal["retryable"] is False
+    assert terminal["error"] == "evolution_job_failed"
+    for protected in (
+        "Astronomy_004",
+        "QZO.csv",
+        "242,478",
+        "242478",
+        "0.123456789",
+        "6.02214076e23",
+        "10.1234/private.study",
+        source_title,
+        report_sentence,
+        leaked_slogan,
+    ):
+        assert protected not in terminal["error"]
+    with store.connect() as connection:
+        published = connection.execute(
+            "SELECT artifact_id FROM artifacts WHERE type = 'agent_system'"
+        ).fetchall()
+    assert published == []
 
 
 def test_plan_identity_tamper_fails_before_verified_method_is_called(tmp_path: Path) -> None:

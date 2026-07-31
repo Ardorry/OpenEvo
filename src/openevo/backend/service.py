@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import argparse
 import ctypes
-from dataclasses import dataclass, field
-from enum import StrEnum
 import errno
 import fcntl
 import hashlib
@@ -11,7 +9,6 @@ import hmac
 import http.client
 import json
 import os
-from pathlib import Path
 import re
 import select
 import signal
@@ -21,6 +18,9 @@ import subprocess
 import sys
 import threading
 import time
+from dataclasses import dataclass, field
+from enum import StrEnum
+from pathlib import Path
 from typing import Any, Callable, Protocol, Sequence
 
 from pydantic import SecretStr, ValidationError
@@ -30,9 +30,10 @@ from openevo.backend.contracts.v2 import models as core_v2_models
 from openevo.backend.contracts.v2.provider import RELEASE_DAEMON_FEATURE_FLAGS_V2
 from openevo.backend.contracts.v2.snapshots import (
     events_schema_sha256 as core_v2_events_schema_sha256,
+)
+from openevo.backend.contracts.v2.snapshots import (
     openapi_sha256 as core_v2_openapi_sha256,
 )
-
 from openevo.backend.runtime_identity import (
     CoreReleaseIdentity,
     HostServiceRoot,
@@ -51,7 +52,6 @@ from openevo.evolution.framework import (
     load_verified_framework_registry,
 )
 
-
 _BOOT_ID_PATH = Path("/proc/sys/kernel/random/boot_id")
 _BOOT_ID_PATTERN = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 _MAX_READY_BYTES = 4096
@@ -66,7 +66,10 @@ _SERVICE_GENERATION_HEADER = "X-OpenEvo-Core-Generation"
 _RELEASE_IDENTITY_HEADER = "X-OpenEvo-Core-Release-Identity"
 _PROCESS_GROUP_LIFECYCLE_COMPATIBILITY = 3
 _PRODUCTION_V2_LIFECYCLE_COMPATIBILITY = 10
-V2_DAEMON_LIFECYCLE_COMPATIBILITY = 16
+# Lifecycle 85 preserves the original promotion payload authority when the
+# final project head inherits artifacts through best-of-three restoration.
+# The no-downgrade floor must distinguish this runtime behavior from lifecycle 84.
+V2_DAEMON_LIFECYCLE_COMPATIBILITY = 85
 _ONEFILE_LAUNCHER_CLEANUP_SECONDS = 10.0
 _ORPHANED_SERVICE_CHILDREN_GUARD = threading.Lock()
 _ORPHANED_SERVICE_CHILDREN: dict[int, subprocess.Popen[bytes]] = {}

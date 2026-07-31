@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from openevo.evolution.models import (
     ArtifactRegisterRequest,
     ArtifactResponse,
+    ArtifactState,
     ArtifactType,
     DatasetCreateResponse,
 )
@@ -213,6 +214,15 @@ class TrainingFeedbackAttachmentList(BaseModel):
     attachments: tuple[TrainingFeedbackAttachment, ...]
 
 
+def training_feedback_attachment_id_for_idempotency_key(
+    idempotency_key: str,
+) -> str:
+    """Return the durable attachment identity used for idempotent recovery."""
+
+    key = _bounded_id(idempotency_key)
+    return f"tfa_{hashlib.sha256(key.encode()).hexdigest()[:32]}"
+
+
 class EvolutionDatasetViewResolveRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -287,6 +297,38 @@ class RegisteredTrainingFeedbackView(BaseModel):
         ):
             raise ValueError("registered feedback dataset authority is inconsistent")
         return self
+
+
+class CompletedDatasetAuthority(BaseModel):
+    """Read-only durable identity of one sealed completed-task dataset."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["openevo.completed_dataset_authority.v1"] = (
+        "openevo.completed_dataset_authority.v1"
+    )
+    completed_dataset_id: str
+    completed_dataset_revision: str
+    dataset_artifact_id: str
+    dataset_manifest_sha256: str
+    task_id: str
+    session_id: str
+    source_event_id: str
+    source_session_result_sha256: str
+
+    _ids = field_validator(
+        "completed_dataset_id",
+        "completed_dataset_revision",
+        "dataset_artifact_id",
+        "task_id",
+        "session_id",
+    )(lambda value: _bounded_id(value))
+    _source_event = field_validator("source_event_id")(
+        lambda value: _bounded_event_id(value)
+    )
+    _hashes = field_validator(
+        "dataset_manifest_sha256", "source_session_result_sha256"
+    )(lambda value: _sha256(value))
 
 
 class ResolvedEvolutionDatasetView(BaseModel):
@@ -460,7 +502,9 @@ class TrainingFeedbackAttachmentStore:
                     (session.session_id,),
                 ).fetchone()[0]
             )
-            attachment_id = f"tfa_{hashlib.sha256(idempotency_key.encode()).hexdigest()[:32]}"
+            attachment_id = training_feedback_attachment_id_for_idempotency_key(
+                idempotency_key
+            )
             mirror_path = self._attachment_path(attachment_id)
             mirror_exists = mirror_path.exists()
             if mirror_exists:
@@ -854,6 +898,39 @@ class TrainingFeedbackEvolutionService:
         self, attachment_id: str
     ) -> TrainingFeedbackAttachment:
         return self._attachments.get(attachment_id)
+
+    def get_completed_dataset_authority(
+        self, dataset_id: str
+    ) -> CompletedDatasetAuthority:
+        """Resolve a dataset revision without trusting an adapter guess."""
+
+        dataset = self._registry.get_dataset(_bounded_id(dataset_id))
+        artifact = self._registry.get_artifact(dataset.artifact_id)
+        manifest = artifact.manifest
+        source = manifest.get("source_event_evidence")
+        if (
+            artifact.type is not ArtifactType.DATASET
+            or artifact.state is not ArtifactState.ACTIVE
+            or artifact.promoted is not True
+            or manifest.get("dataset_id") != dataset.dataset_id
+            or not isinstance(source, dict)
+            or source.get("event_type") != "openevo.session_completed"
+            or not isinstance(source.get("source_event_id"), str)
+            or not isinstance(source.get("task_id"), str)
+            or not isinstance(source.get("session_id"), str)
+            or not isinstance(source.get("session_result_sha256"), str)
+        ):
+            raise ValueError("completed dataset authority is not sealed")
+        return CompletedDatasetAuthority(
+            completed_dataset_id=dataset.dataset_id,
+            completed_dataset_revision=f"{artifact.artifact_id}.v{artifact.version}",
+            dataset_artifact_id=artifact.artifact_id,
+            dataset_manifest_sha256=_canonical_sha256(manifest),
+            task_id=source["task_id"],
+            session_id=source["session_id"],
+            source_event_id=source["source_event_id"],
+            source_session_result_sha256=source["session_result_sha256"],
+        )
 
     def list_training_feedback_attachments_for_session(
         self, session_id: str
@@ -1382,6 +1459,17 @@ def _bounded_id(value: str) -> str:
     return value.strip()
 
 
+def _bounded_event_id(value: str) -> str:
+    """Event source identities may use the Core ``namespace:id`` form."""
+
+    if (
+        not isinstance(value, str)
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}", value.strip()) is None
+    ):
+        raise ValueError("event identifier is invalid")
+    return value.strip()
+
+
 def _sha256(value: str) -> str:
     if not isinstance(value, str) or _SHA256_RE.fullmatch(value) is None:
         raise ValueError("sha256 is invalid")
@@ -1472,6 +1560,7 @@ def _fsync_directory(path: Path) -> None:
 
 
 __all__ = [
+    "CompletedDatasetAuthority",
     "EvolutionDatasetViewReceipt",
     "EvolutionDatasetViewResolveRequest",
     "FeedbackAuthority",

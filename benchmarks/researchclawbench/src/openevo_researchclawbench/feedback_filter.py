@@ -5,21 +5,37 @@ from __future__ import annotations
 import re
 from typing import Any
 
-
 ALLOWED_KEYS = {
-    "task_id", "attempt_id", "completed", "exit_code", "artifact_valid",
-    "total_score", "generic_failure_tags", "runtime_bucket_seconds",
-    "cost_total_usd", "artifact_root_sha256",
+    "task_id",
+    "attempt_id",
+    "completed",
+    "exit_code",
+    "artifact_valid",
+    "total_score",
+    "generic_failure_tags",
+    "runtime_bucket_seconds",
+    "cost_total_usd",
+    "artifact_root_sha256",
 }
 GENERIC_FAILURE_TAGS = {
-    "DATA_LOAD_ERROR", "DEPENDENCY_ERROR", "EXECUTION_ERROR", "TIMEOUT",
-    "REPORT_MISSING", "REPORT_INVALID", "IMAGE_MISSING", "IMAGE_INVALID",
-    "PATH_POLICY_VIOLATION", "TRACEABILITY_MISSING", "RESOURCE_LIMIT",
-    "NETWORK_POLICY_VIOLATION", "UNKNOWN_OPERATIONAL_FAILURE",
+    "DATA_LOAD_ERROR",
+    "DEPENDENCY_ERROR",
+    "EXECUTION_ERROR",
+    "TIMEOUT",
+    "REPORT_MISSING",
+    "REPORT_INVALID",
+    "IMAGE_MISSING",
+    "IMAGE_INVALID",
+    "PATH_POLICY_VIOLATION",
+    "TRACEABILITY_MISSING",
+    "RESOURCE_LIMIT",
+    "NETWORK_POLICY_VIOLATION",
+    "UNKNOWN_OPERATIONAL_FAILURE",
 }
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 TASK_RE = re.compile(r"^[A-Za-z]+_[0-9]{3}$")
 ATTEMPT_RE = re.compile(r"^[A-Za-z]+_[0-9]{3}_a[0-2](?:_[A-Za-z0-9-]+)?$")
+COST_UNAVAILABLE = "unavailable"
 
 
 class FeedbackPolicyError(ValueError):
@@ -32,23 +48,41 @@ def validate_feedback(payload: dict[str, Any], *, allowed_tasks: set[str]) -> di
         raise FeedbackPolicyError(f"feedback fields are not closed; rejected={extra}")
     if payload["task_id"] not in allowed_tasks or not TASK_RE.fullmatch(payload["task_id"]):
         raise FeedbackPolicyError("task is outside Community Dev experiment")
-    if not isinstance(payload["attempt_id"], str) or not ATTEMPT_RE.fullmatch(payload["attempt_id"]):
+    if not isinstance(payload["attempt_id"], str) or not ATTEMPT_RE.fullmatch(
+        payload["attempt_id"]
+    ):
         raise FeedbackPolicyError("invalid attempt_id")
     for name in ("completed", "artifact_valid"):
         if type(payload[name]) is not bool:
             raise FeedbackPolicyError(f"{name} must be boolean")
     if type(payload["exit_code"]) is not int or not -255 <= payload["exit_code"] <= 255:
         raise FeedbackPolicyError("invalid exit_code")
-    if type(payload["total_score"]) not in {int, float} or not 0 <= float(payload["total_score"]) <= 100:
+    if (
+        type(payload["total_score"]) not in {int, float}
+        or not 0 <= float(payload["total_score"]) <= 100
+    ):
         raise FeedbackPolicyError("invalid total_score")
     tags = payload["generic_failure_tags"]
-    if not isinstance(tags, list) or len(tags) > 16 or len(tags) != len(set(tags)) or not set(tags) <= GENERIC_FAILURE_TAGS:
+    if (
+        not isinstance(tags, list)
+        or len(tags) > 16
+        or len(tags) != len(set(tags))
+        or not set(tags) <= GENERIC_FAILURE_TAGS
+    ):
         raise FeedbackPolicyError("invalid generic_failure_tags")
-    if type(payload["runtime_bucket_seconds"]) is not int or not 0 <= payload["runtime_bucket_seconds"] <= 604800:
+    if (
+        type(payload["runtime_bucket_seconds"]) is not int
+        or not 0 <= payload["runtime_bucket_seconds"] <= 604800
+    ):
         raise FeedbackPolicyError("invalid runtime bucket")
-    if type(payload["cost_total_usd"]) not in {int, float} or not 0 <= float(payload["cost_total_usd"]) <= 100000:
+    cost = payload["cost_total_usd"]
+    if not (
+        (type(cost) in {int, float} and 0 <= float(cost) <= 100000) or cost == COST_UNAVAILABLE
+    ):
         raise FeedbackPolicyError("invalid cost")
-    if not isinstance(payload["artifact_root_sha256"], str) or not SHA256_RE.fullmatch(payload["artifact_root_sha256"]):
+    if not isinstance(payload["artifact_root_sha256"], str) or not SHA256_RE.fullmatch(
+        payload["artifact_root_sha256"]
+    ):
         raise FeedbackPolicyError("invalid artifact hash")
     return dict(payload)
 
@@ -63,7 +97,7 @@ def filter_private_score(
     artifact_valid: bool,
     generic_failure_tags: list[str],
     runtime_seconds: int,
-    cost_total_usd: float,
+    cost_total_usd: float | str,
     artifact_root_sha256: str,
     allowed_tasks: set[str],
 ) -> dict[str, Any]:
@@ -79,7 +113,9 @@ def filter_private_score(
         "total_score": float(raw_score["total_score"]),
         "generic_failure_tags": generic_failure_tags,
         "runtime_bucket_seconds": bucket,
-        "cost_total_usd": float(cost_total_usd),
+        "cost_total_usd": (
+            COST_UNAVAILABLE if cost_total_usd == COST_UNAVAILABLE else float(cost_total_usd)
+        ),
         "artifact_root_sha256": artifact_root_sha256,
     }
     return validate_feedback(released, allowed_tasks=allowed_tasks)

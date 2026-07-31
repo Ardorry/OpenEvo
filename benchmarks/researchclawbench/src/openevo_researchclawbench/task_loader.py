@@ -9,8 +9,13 @@ from pathlib import Path
 from typing import Any
 
 from .config import FROZEN_TASKS
-from .hashing import UnsafePathError, ensure_within, safe_relative_path, sha256_file
-
+from .hashing import (
+    UnsafePathError,
+    ensure_within,
+    iter_regular_files,
+    safe_relative_path,
+    sha256_file,
+)
 
 TASK_ID_RE = re.compile(r"^[A-Za-z]+_[0-9]{3}$")
 
@@ -24,25 +29,54 @@ class PublicTask:
     declared_data_files: tuple[Path, ...]
 
 
-def load_public_task(root: str | Path, task_id: str) -> PublicTask:
-    if task_id not in FROZEN_TASKS or not TASK_ID_RE.fullmatch(task_id):
-        raise ValueError(f"task is not in the frozen Community Dev sequence: {task_id}")
+def load_public_task(
+    root: str | Path,
+    task_id: str,
+    *,
+    allowed_task_ids: tuple[str, ...] = FROZEN_TASKS,
+) -> PublicTask:
+    if (
+        not allowed_task_ids
+        or len(set(allowed_task_ids)) != len(allowed_task_ids)
+        or any(TASK_ID_RE.fullmatch(item) is None for item in allowed_task_ids)
+        or task_id not in allowed_task_ids
+        or TASK_ID_RE.fullmatch(task_id) is None
+    ):
+        raise ValueError(f"task is not in the exact public-task allowlist: {task_id}")
     repo_root = Path(root).resolve(strict=True)
     task_dir = ensure_within(repo_root / "tasks" / task_id, repo_root)
     info_path = task_dir / "task_info.json"
     info = json.loads(info_path.read_text(encoding="utf-8"))
     if not isinstance(info, dict) or not isinstance(info.get("task"), str):
-        raise ValueError("invalid public task_info.json")
+        raise TypeError("invalid public task_info.json")
     declared: list[Path] = []
     for item in info.get("data", []):
         if not isinstance(item, dict) or not isinstance(item.get("path"), str):
-            raise ValueError("invalid data declaration")
+            raise TypeError("invalid data declaration")
         raw = item["path"].removeprefix("./")
         rel = safe_relative_path(raw)
         if rel.parts[0] != "data" or "target_study" in rel.parts:
             raise UnsafePathError(f"data path is outside public data/: {raw}")
-        path = ensure_within(task_dir / rel, task_dir)
-        if not path.is_file() or path.is_symlink():
-            raise UnsafePathError(f"declared data file is unavailable or unsafe: {raw}")
-        declared.append(path)
+        unresolved = task_dir / rel
+        cursor = unresolved
+        while cursor != task_dir:
+            if cursor.is_symlink():
+                raise UnsafePathError(
+                    f"declared data path is unavailable or unsafe: {raw}"
+                )
+            cursor = cursor.parent
+        path = ensure_within(unresolved, task_dir)
+        if path.is_file():
+            declared.append(path)
+        elif path.is_dir():
+            declared.extend(
+                sorted(
+                    iter_regular_files(path),
+                    key=lambda item: item.relative_to(task_dir).as_posix(),
+                )
+            )
+        else:
+            raise UnsafePathError(
+                f"declared data path is unavailable or unsafe: {raw}"
+            )
     return PublicTask(task_id, task_dir, info, sha256_file(info_path), tuple(declared))

@@ -9,19 +9,23 @@ authority capability and immutable store.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Protocol
+from collections.abc import Callable
+from typing import Any, Protocol
 
 from fastapi import FastAPI, HTTPException
 
 from openevo.evolution.training_feedback import (
+    CompletedDatasetAuthority,
     EvolutionDatasetViewResolveRequest,
     ResolvedEvolutionDatasetView,
     TrainingFeedbackAttachment,
     TrainingFeedbackAttachmentCreateRequest,
     TrainingFeedbackAttachmentList,
 )
-from openevo.experiments.clients import EvolutionHttpClient
-
+from openevo.experiments.clients import (
+    EvolutionHttpClient,
+    EvolutionHttpStatusError,
+)
 
 _PATH = "/v2/internal/training-feedback/attachments"
 
@@ -37,6 +41,8 @@ class TrainingFeedbackServiceControl(Protocol):
 
 
 class TrainingFeedbackEvolutionClient(Protocol):
+    def get_completed_dataset_authority(self, dataset_id: str) -> dict[str, Any]: ...
+
     def create_training_feedback_attachment(
         self, payload: dict[str, Any]
     ) -> dict[str, Any]: ...
@@ -92,6 +98,21 @@ def install_core_training_feedback_endpoint(
         except ValueError as exc:
             status = 409 if "conflict" in str(exc) else 422
             raise HTTPException(status_code=status, detail=str(exc)) from exc
+        except EvolutionHttpStatusError as exc:
+            if exc.status_code == 404:
+                raise HTTPException(
+                    status_code=404,
+                    detail="training feedback authority was not found",
+                ) from exc
+            if exc.status_code in {409, 422}:
+                raise HTTPException(
+                    status_code=exc.status_code,
+                    detail="training feedback request was rejected",
+                ) from exc
+            raise HTTPException(
+                status_code=503,
+                detail="trusted evaluator feedback transport is unavailable",
+            ) from exc
         except (OSError, RuntimeError) as exc:
             raise HTTPException(
                 status_code=503,
@@ -130,6 +151,18 @@ def install_core_training_feedback_endpoint(
                 detail="Evolution returned mismatched feedback authority",
             )
         return attachment
+
+    @app.get(
+        "/v2/internal/training-feedback/datasets/{dataset_id}",
+        response_model=CompletedDatasetAuthority,
+        include_in_schema=False,
+    )
+    async def get_completed_dataset_authority(
+        dataset_id: str,
+    ) -> CompletedDatasetAuthority:
+        return CompletedDatasetAuthority.model_validate(
+            invoke(lambda client: client.get_completed_dataset_authority(dataset_id))
+        )
 
     @app.get(
         _PATH + "/{attachment_id}",

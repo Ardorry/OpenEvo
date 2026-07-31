@@ -7228,6 +7228,12 @@ class CoreControlStoreV1:
                     raise _DatabaseAttachRaceError(
                         "Core Control SQLite connection path changed during attach"
                     )
+                # Opening SQLite may recover and unlink a pre-existing hot
+                # rollback journal before the first schema query.  Reconcile
+                # that held inode before applying the generic nlink==1 check;
+                # the consumed inode remains pinned and every later check also
+                # proves that no replacement appeared at its path.
+                self._reconcile_rollback_journal_authority()
                 self._verify_database_authority()
                 schema_row = connection.execute("SELECT 1 FROM sqlite_schema LIMIT 1").fetchone()
                 _after_sqlite_recovery()

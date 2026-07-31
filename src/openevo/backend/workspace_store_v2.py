@@ -1135,14 +1135,14 @@ class WorkspaceStoreV2:
                     "workspace identity marker exceeds its bound"
                 )
             payload = _read_exact(descriptor, metadata.st_size)
-            expected = _marker_bytes(
+            if not _marker_matches(
+                payload,
                 store_id,
                 root=os.fstat(self._root_fd),
                 database=self.database.stat(follow_symlinks=False),
                 uploads=os.fstat(self._uploads_fd),
                 snapshots=os.fstat(self._snapshots_fd),
-            )
-            if payload != expected:
+            ):
                 raise WorkspaceIntegrityErrorV2(
                     "workspace identity marker is inconsistent"
                 )
@@ -2122,6 +2122,88 @@ def _marker_bytes(
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
+
+
+def _marker_matches(
+    payload: bytes,
+    store_id: str,
+    *,
+    root: os.stat_result,
+    database: os.stat_result,
+    uploads: os.stat_result,
+    snapshots: os.stat_result,
+) -> bool:
+    """Verify a durable store binding across container mount renumbering.
+
+    Linux mount namespace recreation may assign a different ``st_dev`` to the
+    same persistent volume after a container restart.  The directory and file
+    inodes, the private marker, and the database-owned random ``store_id`` stay
+    stable.  Accept only that closed device-number renumbering case; inode
+    replacement, split mounts, non-canonical marker bytes, or any identity
+    field drift still fails closed.  Live descriptor checks continue to bind
+    both device and inode for the lifetime of the opened store.
+    """
+
+    expected = _marker_bytes(
+        store_id,
+        root=root,
+        database=database,
+        uploads=uploads,
+        snapshots=snapshots,
+    )
+    if payload == expected:
+        return True
+    try:
+        value = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    if (
+        not isinstance(value, dict)
+        or set(value)
+        != {
+            "binding_version",
+            "database",
+            "root",
+            "schema_version",
+            "snapshots",
+            "store_id",
+            "uploads",
+        }
+        or value.get("binding_version") != "1"
+        or value.get("schema_version") != _SCHEMA_VERSION
+        or value.get("store_id") != store_id
+        or json.dumps(
+            value,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        != payload
+    ):
+        return False
+    current = {
+        "root": root,
+        "database": database,
+        "uploads": uploads,
+        "snapshots": snapshots,
+    }
+    stored_devices: set[int] = set()
+    current_devices: set[int] = set()
+    for name, metadata in current.items():
+        identity = value.get(name)
+        if (
+            not isinstance(identity, list)
+            or len(identity) != 2
+            or any(type(item) is not int for item in identity)
+            or identity[0] < 0
+            or identity[1] <= 0
+            or identity[1] != metadata.st_ino
+        ):
+            return False
+        stored_devices.add(identity[0])
+        current_devices.add(metadata.st_dev)
+    return len(stored_devices) == 1 and len(current_devices) == 1
 
 
 def _schema_rows(connection: sqlite3.Connection) -> tuple[tuple[object, ...], ...]:

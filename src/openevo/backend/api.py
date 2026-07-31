@@ -56,6 +56,7 @@ from openevo.evolution.framework.builtins import (
     require_verified_executable_registry,
 )
 from openevo.evolution.models import ArtifactResponse
+from openevo.evolution.managed_reflector import default_managed_reflector_runtime
 from openevo.evolution.store import EvolutionStore
 from openevo.experiments import (
     ProjectEvolutionValidationError,
@@ -636,6 +637,9 @@ def create_backend_app(
                 reflector_llm={
                     "provider": "codex_cli",
                     "model": request.agent_model,
+                    "runtime": default_managed_reflector_runtime().model_dump(
+                        mode="json"
+                    ),
                 },
                 registry_snapshot=evolution_registry.snapshot,
                 execution_profile=execution_profile_for_release_mode(

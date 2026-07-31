@@ -410,19 +410,25 @@ class _FakeDockerHost:
         return SimpleNamespace(returncode=0, stdout=output, stderr=b"")
 
 
+@pytest.mark.parametrize("version", ["29.3.0", "29.5.2"])
 def test_docker_server_identity_is_closed_and_recorded(
     monkeypatch: pytest.MonkeyPatch,
+    version: str,
 ) -> None:
     monkeypatch.delenv("DOCKER_HOST", raising=False)
 
-    identity = fixture._verify_docker_host(_FakeDockerHost())
+    identity = fixture._verify_docker_host(_FakeDockerHost(version=version))
 
-    assert identity == DOCKER_SERVER
+    assert identity.version == version
+    assert identity.api_version == DOCKER_SERVER.api_version
+    assert identity.os == DOCKER_SERVER.os
+    assert identity.architecture == DOCKER_SERVER.architecture
+    assert identity.evidence()["observed"]["version"] == version
     assert identity.evidence()["supported"] == {
         "api_versions": ["1.54"],
         "architecture": ["amd64"],
         "os": ["linux"],
-        "versions": ["29.3.0"],
+        "versions": ["29.3.0", "29.5.2"],
     }
 
 
@@ -448,6 +454,49 @@ def test_docker_server_identity_fails_closed_outside_profile(
 
     with pytest.raises(fixture.FixtureError, match=code):
         fixture._verify_docker_host(_FakeDockerHost(**overrides))
+
+
+def test_unsupported_server_version_fails_before_fixture_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = io.BytesIO()
+    host = _FakeDockerHost(version="29.5.1")
+    mutation_called = False
+
+    def reject_mutation(*_args, **_kwargs):
+        nonlocal mutation_called
+        mutation_called = True
+        raise AssertionError("fixture mutation occurred before Docker host admission")
+
+    monkeypatch.setattr(sys, "stdout", SimpleNamespace(buffer=output))
+    monkeypatch.setattr(fixture.shutil, "which", lambda _name: "/usr/bin/docker")
+    monkeypatch.setattr(fixture, "_require_local_linux_host", lambda: 999)
+    monkeypatch.setattr(fixture, "DockerCLI", lambda *_args: host)
+    monkeypatch.setattr(fixture, "_prepare_data_root", reject_mutation)
+    monkeypatch.setattr(fixture, "create_fixture", reject_mutation)
+
+    result = fixture.main(
+        [
+            "create",
+            "--public-key",
+            str(tmp_path / "unused.pub"),
+            "--data-root",
+            str(tmp_path / "unused-data"),
+        ]
+    )
+
+    assert result == 1
+    assert mutation_called is False
+    assert json.loads(output.getvalue()) == {
+        "action": "create",
+        "failure": {
+            "code": "unsupported_server_version",
+            "stage": "docker_host",
+        },
+        "outcome": "failed",
+        "schema_version": 2,
+    }
 
 
 def test_repeated_create_reuses_the_exact_running_fixture(

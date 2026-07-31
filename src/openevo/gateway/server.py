@@ -516,6 +516,9 @@ async def health():
             "status": "ok" if rollout_ready else "not_ready",
             "capture_mode": "transcript",
             "direct_model_api": False,
+            "managed_candidate_runtime_readiness": (
+                state.node_manager.managed_candidate_runtime_readiness()
+            ),
             "rollout_connected": rollout_ready,
             "rollout_message": rollout_message,
             "token_level_metrics_available": False,

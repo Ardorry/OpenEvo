@@ -2533,7 +2533,11 @@ def test_internal_job_result_reads_job_and_outputs_from_one_sqlite_snapshot(
         def execute(self, sql, parameters=()):
             statements.append(sql)
             cursor = self._connection.execute(sql, parameters)
-            if "SELECT job_id, state, error FROM jobs" in sql:
+            # Trigger on the authoritative job-row read, independent of the
+            # selected column projection.  The production query intentionally
+            # grew to ``SELECT *`` when plan-bound job authority was added;
+            # this test is about the transaction snapshot, not that projection.
+            if "SELECT * FROM jobs WHERE job_id = ?" in sql:
                 return CursorAfterJobRead(cursor)
             return cursor
 

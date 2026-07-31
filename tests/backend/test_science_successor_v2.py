@@ -3,9 +3,11 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import hashlib
+import json
 from pathlib import Path
 import sqlite3
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -22,6 +24,10 @@ from openevo.backend.contracts.v2.models import (
     project_config_sha256_for,
 )
 from openevo.backend.run_control import CoreTaskControlError
+from openevo.backend.project_freeze_control import (
+    FrozenProjectArtifactV1,
+    ProjectFreezeRequestV1,
+)
 from openevo.backend.runtime_context_binding_v2 import (
     runtime_context_binding_for_head,
 )
@@ -44,6 +50,7 @@ import openevo.backend.science_run_store as task_store_module
 from openevo.backend.science_run_owner import (
     CoreScienceTaskOwnerV2,
     ScienceSuccessorPreparerV2,
+    _as_inherited_successor_contribution,
     _successor_transition_failure_is_retryable,
 )
 from openevo.backend.science_run_store import (
@@ -53,6 +60,7 @@ from openevo.backend.science_run_store import (
     ScienceTaskStoreV2Error,
 )
 from openevo.evolution.revisions import (
+    AtomicHistoricalRestoreManifestV2,
     AtomicSuccessorCommitV2,
     SuccessorArtifactContributionV2,
     atomic_successor_manifest_sha256,
@@ -61,6 +69,7 @@ from openevo.evolution.framework.handlers import (
     PayloadManifestEntry,
     payload_tree_digest,
 )
+from openevo.evolution.models import ArtifactContentAdmissionReceipt
 from openevo.evolution.runtime_injection import build_runtime_injection_plan
 from openevo.experiments.clients import EvolutionHttpStatusError
 
@@ -95,6 +104,56 @@ def test_successor_http_failure_retryability_uses_closed_status_classification()
     assert (
         _successor_transition_failure_is_retryable(EvolutionHttpStatusError(status_code=422))
         is False
+    )
+
+
+def test_inherited_successor_contribution_does_not_replay_admission_evidence() -> None:
+    proposal_id = "artifact-native-update-1"
+    content_payload = {
+        "schema_version": "openevo.artifact_content_admission.v1",
+        "basis_sha256": "1" * 64,
+        "proposal_artifact_ids": [proposal_id],
+        "source_artifact_ids": ["dataset-native-update-1"],
+        "source_payload_sha256": "2" * 64,
+        "scanned_file_count": 1,
+        "scanned_byte_count": 32,
+        "finding_count": 0,
+        "finding_categories": [],
+        "passed": True,
+    }
+    content_sha256 = hashlib.sha256(
+        json.dumps(
+            content_payload,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    produced = SuccessorArtifactContributionV2(
+        target_id="agent_system",
+        artifact_id=proposal_id,
+        artifact_type="agent_system",
+        owner_successor_transition_id="successor-native-update-1",
+        origin="produced",
+        evolution_job_id="job-native-update-1",
+        admission_action="update",
+        admission_decision_id="decision-native-update-1",
+        admission_decision_sha256="3" * 64,
+        content_admission=ArtifactContentAdmissionReceipt.model_validate(
+            {**content_payload, "content_sha256": content_sha256}
+        ),
+        proposal_artifact_ids=(proposal_id,),
+    )
+
+    inherited = _as_inherited_successor_contribution(produced)
+
+    assert inherited == SuccessorArtifactContributionV2(
+        target_id=produced.target_id,
+        artifact_id=produced.artifact_id,
+        artifact_type=produced.artifact_type,
+        owner_successor_transition_id=produced.owner_successor_transition_id,
+        origin="inherited",
     )
     assert (
         _successor_transition_failure_is_retryable(EvolutionHttpStatusError(status_code=409))
@@ -764,6 +823,471 @@ def test_completed_attempt_commits_one_complete_adjacent_successor(
         owner.close()
 
 
+class _TripleArtifactFreezePreparer(_Preparer):
+    _targets = ("agent_system", "skill_bundle", "text_memory")
+
+    def run_methods(
+        self,
+        context: ScienceSuccessorPreparationContextV2,
+        dataset: SealedTranscriptDatasetV2,
+    ) -> tuple[ScienceMethodOutputV2, ...]:
+        self._enter("running_methods")
+        return tuple(
+            ScienceMethodOutputV2(
+                target_id=target,
+                method_id=f"openevo.test.{target}.v1",
+                artifact_id=f"artifact-{target}-1",
+                artifact_type=target,
+                manifest_sha256=hashlib.sha256(target.encode()).hexdigest(),
+                byte_size=128,
+                execution_boundary="outside_inference",
+            )
+            for target in self._targets
+        )
+
+    def validate_outputs(
+        self,
+        context: ScienceSuccessorPreparationContextV2,
+        dataset: SealedTranscriptDatasetV2,
+        outputs: tuple[ScienceMethodOutputV2, ...],
+    ) -> ValidatedScienceOutputsV2:
+        self._enter("validating")
+        return ValidatedScienceOutputsV2(
+            project_id=context.task.project_id,
+            successor_transition_id=(
+                context.transition.transition.successor_transition_id
+            ),
+            predecessor_project_head_id=(
+                context.task.admission.predecessor_project_head.project_head_id
+            ),
+            dataset=dataset,
+            outputs=outputs,
+            composition=tuple(
+                SuccessorArtifactContributionV2(
+                    target_id=item.target_id,
+                    artifact_id=item.artifact_id,
+                    artifact_type=item.artifact_type,
+                    owner_successor_transition_id=(
+                        context.transition.transition.successor_transition_id
+                    ),
+                    origin="produced",
+                )
+                for item in outputs
+            ),
+            evolution_revision=EvolutionRevisionRefV2(
+                evolution_revision_id="evolution-freeze-1",
+                project_id=context.task.project_id,
+                manifest_sha256="d" * 64,
+                artifact_count=3,
+            ),
+        )
+
+
+def test_project_freeze_is_durable_idempotent_and_blocks_mutations(
+    tmp_path: Path,
+) -> None:
+    preparer = _TripleArtifactFreezePreparer()
+    owner = _owner(tmp_path, preparer)
+    authority, task = _admit(owner)
+    plan = ScienceSuccessorPlanV2(
+        project_id=task.project_id,
+        task_id=task.task_id,
+        task_admission_id=task.admission.task_admission_id,
+        admission_sha256=task.admission.admission_sha256,
+        accepted_attempt_id=task.attempts[0].attempt_id,
+        predecessor_project_head_id=(
+            task.admission.predecessor_project_head.project_head_id
+        ),
+        normalized_evolution_intent_sha256=(
+            task.admission.normalized_evolution_intent_sha256
+        ),
+        enabled_methods=tuple(
+            ScienceSuccessorMethodPlanV2(
+                target_id=target,
+                method_id=f"openevo.test.{target}.v1",
+                output_artifact_type=target,
+            )
+            for target in _TripleArtifactFreezePreparer._targets
+        ),
+    )
+    transition = owner.run_successor_transition(
+        task.task_id,
+        accepted_attempt_id=task.attempts[0].attempt_id,
+        plan=plan,
+    )
+    assert transition.state == "committed"
+    head = owner.active_project_head(task.project_id)
+    artifacts = tuple(
+        FrozenProjectArtifactV1(
+            artifact_type=target,
+            registry_id=f"artifact-{target}-1",
+            sha256=hashlib.sha256(f"payload:{target}".encode()).hexdigest(),
+        )
+        for target in _TripleArtifactFreezePreparer._targets
+    )
+    request = ProjectFreezeRequestV1(
+        project_id=task.project_id,
+        expected_project_head_id=head.project_head_id,
+        expected_project_head_manifest_sha256=head.manifest_sha256,
+        composite_id="composite-final",
+        composite_sha256="1" * 64,
+        artifacts=artifacts,
+        protocol_sha256="2" * 64,
+        core_identity_sha256="3" * 64,
+        adapter_identity_sha256="4" * 64,
+        runtime_digest="sha256:" + "5" * 64,
+        codex_cli_version="0.144.1",
+        model="gpt-5.5",
+        reasoning_effort="high",
+        training_manifest_sha256="6" * 64,
+        budget_policy_sha256="7" * 64,
+        tool_policy_sha256="8" * 64,
+        idempotency_key="freeze-final",
+    )
+    frozen = owner.freeze_project(request, verified_artifacts=artifacts)
+    assert frozen.core_authoritative is True
+    assert frozen.frozen is True
+    assert frozen.evolution_enabled is False
+    assert owner.freeze_project(request, verified_artifacts=artifacts) == frozen
+    assert owner.project_freeze(task.project_id) == frozen
+    frozen_authority = owner.project_admission_authority(task.project_id)
+    with pytest.raises(CoreTaskControlError, match="frozen project"):
+        owner.invoke(
+            "submitCoreTaskV2",
+            {
+                "request": _request(frozen_authority),
+                "idempotency_key": "submit-after-freeze",
+            },
+        )
+    owner.close()
+
+    recovered = _owner(tmp_path, _TripleArtifactFreezePreparer())
+    try:
+        assert recovered.project_freeze(task.project_id) == frozen
+        with pytest.raises(CoreTaskControlError, match="frozen project"):
+            recovered.restore_historical_project_head(
+                project_id=task.project_id,
+                expected_project_head_id=head.project_head_id,
+                source_project_head_id=(
+                    authority.active_project_head.project_head_id
+                ),
+                restore_request_id="restore-after-freeze",
+            )
+    finally:
+        recovered.close()
+
+
+def test_project_freeze_accepts_historical_restore_of_native_artifacts(
+    tmp_path: Path,
+) -> None:
+    """Best-of-three restores a prior head before the final project freeze."""
+
+    owner = _owner(tmp_path, _TripleArtifactFreezePreparer())
+    _authority, task = _admit(owner)
+    plan = ScienceSuccessorPlanV2(
+        project_id=task.project_id,
+        task_id=task.task_id,
+        task_admission_id=task.admission.task_admission_id,
+        admission_sha256=task.admission.admission_sha256,
+        accepted_attempt_id=task.attempts[0].attempt_id,
+        predecessor_project_head_id=(
+            task.admission.predecessor_project_head.project_head_id
+        ),
+        normalized_evolution_intent_sha256=(
+            task.admission.normalized_evolution_intent_sha256
+        ),
+        enabled_methods=tuple(
+            ScienceSuccessorMethodPlanV2(
+                target_id=target,
+                method_id=f"openevo.test.{target}.v1",
+                output_artifact_type=target,
+            )
+            for target in _TripleArtifactFreezePreparer._targets
+        ),
+    )
+    transition = owner.run_successor_transition(
+        task.task_id,
+        accepted_attempt_id=task.attempts[0].attempt_id,
+        plan=plan,
+    )
+    evolved = transition.transition.successor_project_head
+    assert evolved is not None
+    restored, restore_commit = owner.restore_historical_project_head(
+        project_id=task.project_id,
+        expected_project_head_id=evolved.project_head_id,
+        source_project_head_id=evolved.project_head_id,
+        restore_request_id="restore-best-before-freeze",
+    )
+    assert type(restore_commit.manifest) is AtomicHistoricalRestoreManifestV2
+    artifacts = tuple(
+        FrozenProjectArtifactV1(
+            artifact_type=target,
+            registry_id=f"artifact-{target}-1",
+            sha256=hashlib.sha256(f"payload:{target}".encode()).hexdigest(),
+        )
+        for target in _TripleArtifactFreezePreparer._targets
+    )
+    request = ProjectFreezeRequestV1(
+        project_id=task.project_id,
+        expected_project_head_id=restored.project_head_id,
+        expected_project_head_manifest_sha256=restored.manifest_sha256,
+        composite_id="composite-restored-best",
+        composite_sha256="1" * 64,
+        artifacts=artifacts,
+        protocol_sha256="2" * 64,
+        core_identity_sha256="3" * 64,
+        adapter_identity_sha256="4" * 64,
+        runtime_digest="sha256:" + "5" * 64,
+        codex_cli_version="0.144.1",
+        model="gpt-5.5",
+        reasoning_effort="high",
+        training_manifest_sha256="6" * 64,
+        budget_policy_sha256="7" * 64,
+        tool_policy_sha256="8" * 64,
+        idempotency_key="freeze-restored-best",
+    )
+
+    frozen = owner.freeze_project(request, verified_artifacts=artifacts)
+
+    assert frozen.project_head_id == restored.project_head_id
+    assert frozen.artifacts == artifacts
+    assert owner.project_freeze(task.project_id) == frozen
+
+
+def test_historical_restore_publishes_linear_durable_runtime_authority(
+    tmp_path: Path,
+) -> None:
+    preparer = _Preparer()
+    owner = _owner(tmp_path, preparer)
+    predecessor, task = _admit(owner)
+    transition = owner.run_successor_transition(
+        task.task_id,
+        accepted_attempt_id=task.attempts[0].attempt_id,
+        plan=_plan(task),
+    )
+    evolved = transition.transition.successor_project_head
+    assert evolved is not None
+
+    restored, receipt = owner.restore_historical_project_head(
+        project_id=task.project_id,
+        expected_project_head_id=evolved.project_head_id,
+        source_project_head_id=evolved.project_head_id,
+        restore_request_id="restore-best-1",
+    )
+    assert restored.generation == evolved.generation + 1
+    assert restored.predecessor_project_head_id == evolved.project_head_id
+    assert restored.workspace_snapshot == evolved.workspace_snapshot
+    assert restored.evolution_revision == evolved.evolution_revision
+    assert restored.runtime_context_snapshot == evolved.runtime_context_snapshot
+    assert type(receipt.manifest) is AtomicHistoricalRestoreManifestV2
+    assert receipt.manifest.source_project_head_id == evolved.project_head_id
+    assert owner.active_project_head(task.project_id) == restored
+    assert runtime_context_binding_for_head(
+        project_head=restored,
+        service_generation_sha256="a" * 64,
+        framework_lock_sha256="b" * 64,
+        successor_commit=receipt,
+    ).source == "materialized_inherited"
+
+    replay_head, replay_receipt = owner.restore_historical_project_head(
+        project_id=task.project_id,
+        expected_project_head_id=evolved.project_head_id,
+        source_project_head_id=evolved.project_head_id,
+        restore_request_id="restore-best-1",
+    )
+    assert replay_head == restored
+    assert replay_receipt == receipt
+    restore_id = receipt.manifest.successor_transition_id
+
+    rolled_back, rollback_receipt = owner.restore_historical_project_head(
+        project_id=task.project_id,
+        expected_project_head_id=restored.project_head_id,
+        source_project_head_id=predecessor.active_project_head.project_head_id,
+        restore_request_id="restore-genesis-2",
+    )
+    assert rolled_back.generation == restored.generation + 1
+    assert rolled_back.evolution_revision.artifact_count == 0
+    assert runtime_context_binding_for_head(
+        project_head=rolled_back,
+        service_generation_sha256="a" * 64,
+        framework_lock_sha256="b" * 64,
+        successor_commit=rollback_receipt,
+    ).source == "empty_inherited"
+    owner.close()
+
+    restarted = _owner(tmp_path, _Preparer())
+    try:
+        assert restarted.active_project_head(task.project_id) == rolled_back
+        assert restarted.historical_restore_commit(restore_id) == receipt
+        assert restarted._ledger.prior_dataset_artifact_ids_for_head(
+            rolled_back.project_head_id
+        ) == ("artifact-dataset-1",)
+    finally:
+        restarted.close()
+
+
+def test_cross_project_restore_rebinds_source_artifacts_to_fresh_workspace(
+    tmp_path: Path,
+) -> None:
+    owner = _owner(tmp_path, _Preparer())
+    _source_authority, task = _admit(owner)
+    transition = owner.run_successor_transition(
+        task.task_id,
+        accepted_attempt_id=task.attempts[0].attempt_id,
+        plan=_plan(task),
+    )
+    source = transition.transition.successor_project_head
+    assert source is not None
+
+    destination_evolution = EvolutionRevisionRefV2(
+        evolution_revision_id="destination-evolution-0",
+        project_id="project-2",
+        manifest_sha256="6" * 64,
+        artifact_count=0,
+    )
+    destination_runtime = RuntimeContextSnapshotRefV2(
+        runtime_context_snapshot_id="destination-runtime-0",
+        project_id="project-2",
+        evolution_revision_id=destination_evolution.evolution_revision_id,
+        evolution_revision_manifest_sha256=destination_evolution.manifest_sha256,
+        registry_sha256=source.registry_sha256,
+        runtime_contract_sha256="b" * 64,
+        manifest_sha256="7" * 64,
+    )
+    destination_execution = EffectiveExecutionSnapshotRefV2(
+        effective_execution_snapshot_id="destination-execution-0",
+        project_id="project-2",
+        execution_mode="codex_subscription_transcript",
+        capture_mode="transcript",
+        token_level_metrics_available=False,
+        producer_id="subscription-snapshot-issuer-v1",
+        snapshot_sha256="8" * 64,
+    )
+    destination = ProjectHeadRefV2(
+        project_head_id="destination-project-head-0",
+        project_id="project-2",
+        generation=0,
+        predecessor_project_head_id=None,
+        workspace_snapshot=_workspace("project-2", "9"),
+        evolution_revision=destination_evolution,
+        runtime_context_snapshot=destination_runtime,
+        effective_execution_snapshot=destination_execution,
+        registry_sha256=source.registry_sha256,
+        manifest_sha256="0" * 64,
+    )
+    owner.publish_project_admission_authority(_authority(destination))
+
+    transferred, receipt = owner.restore_historical_project_head(
+        project_id="project-2",
+        expected_project_head_id=destination.project_head_id,
+        source_project_head_id=source.project_head_id,
+        restore_request_id="cross-task-restore-1",
+        cross_project=True,
+    )
+    assert transferred.project_id == "project-2"
+    assert transferred.workspace_snapshot == destination.workspace_snapshot
+    assert (
+        transferred.effective_execution_snapshot
+        == destination.effective_execution_snapshot
+    )
+    assert transferred.evolution_revision.project_id == "project-2"
+    assert transferred.runtime_context_snapshot.project_id == "project-2"
+    assert (
+        transferred.evolution_revision.artifact_count
+        == source.evolution_revision.artifact_count
+    )
+    assert receipt.manifest.source_project_head_id == source.project_head_id
+    assert owner.active_project_head(task.project_id) == source
+    assert owner.active_project_head("project-2") == transferred
+    assert owner._ledger.prior_dataset_artifact_ids_for_head(
+        transferred.project_head_id
+    ) == ("artifact-dataset-1",)
+
+    replay_head, replay_receipt = owner.restore_historical_project_head(
+        project_id="project-2",
+        expected_project_head_id=destination.project_head_id,
+        source_project_head_id=source.project_head_id,
+        restore_request_id="cross-task-restore-1",
+        cross_project=True,
+    )
+    assert replay_head == transferred
+    assert replay_receipt == receipt
+    with pytest.raises(
+        CoreTaskControlError,
+        match="immutable Task ownership precondition changed",
+    ):
+        owner.restore_historical_project_head(
+            project_id="project-2",
+            expected_project_head_id=transferred.project_head_id,
+            source_project_head_id=source.project_head_id,
+            restore_request_id="cross-task-restore-without-mode",
+        )
+    owner._successor_preparer = _LegacyMigrationChainPreparer(
+        "text_memory",
+        ordinal=2,
+    )
+    destination_authority = owner.project_admission_authority("project-2")
+    destination_task = owner.invoke(
+        "submitCoreTaskV2",
+        {
+            "request": _request(destination_authority),
+            "idempotency_key": "submit-after-cross-task-restore",
+        },
+    )
+    destination_transition = owner.run_successor_transition(
+        destination_task.task_id,
+        accepted_attempt_id=destination_task.attempts[0].attempt_id,
+        plan=_legacy_chain_plan(destination_task, "text_memory"),
+    )
+    destination_successor = destination_transition.transition.successor_project_head
+    assert destination_successor is not None
+    assert destination_successor.predecessor_project_head_id == transferred.project_head_id
+    owner.close()
+    restarted = _owner(tmp_path, _Preparer())
+    try:
+        assert restarted.active_project_head("project-2") == destination_successor
+        assert restarted.active_project_head(task.project_id) == source
+        assert restarted._ledger.prior_dataset_artifact_ids_for_head(
+            transferred.project_head_id
+        ) == ("artifact-dataset-1",)
+    finally:
+        restarted.close()
+
+
+def test_historical_restore_receipt_tamper_fails_store_restart(
+    tmp_path: Path,
+) -> None:
+    owner = _owner(tmp_path, _Preparer())
+    _predecessor, task = _admit(owner)
+    transition = owner.run_successor_transition(
+        task.task_id,
+        accepted_attempt_id=task.attempts[0].attempt_id,
+        plan=_plan(task),
+    )
+    evolved = transition.transition.successor_project_head
+    assert evolved is not None
+    owner.restore_historical_project_head(
+        project_id=task.project_id,
+        expected_project_head_id=evolved.project_head_id,
+        source_project_head_id=evolved.project_head_id,
+        restore_request_id="restore-tamper-1",
+    )
+    owner.close()
+
+    database = tmp_path / "science-tasks-v2" / "science-tasks-v2.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "UPDATE historical_restore_commits SET manifest_sha256 = ?",
+            ("6" * 64,),
+        )
+        connection.commit()
+    with pytest.raises(
+        ScienceTaskStoreV2Error,
+        match="historical restore receipt row",
+    ):
+        _owner(tmp_path, _Preparer())
+
+
 @pytest.mark.parametrize(
     "phase",
     [
@@ -810,6 +1334,46 @@ def test_preparation_failure_keeps_predecessor_active_and_next_task_not_ready(
             )
         assert not_ready.value.code == "project_not_ready"
         assert owner.ownership_counts() == (1, 1, 1)
+    finally:
+        owner.close()
+
+
+def test_failed_successor_recovery_context_reads_task_from_admission(
+    tmp_path: Path,
+) -> None:
+    owner = _owner(tmp_path, _Preparer(fail_phase="workspace"))
+    predecessor, task = _admit(owner)
+    plan = _plan(task)
+    try:
+        with pytest.raises(CoreTaskControlError):
+            owner.run_successor_transition(
+                task.task_id,
+                accepted_attempt_id=task.attempts[0].attempt_id,
+                plan=plan,
+            )
+        transition = owner.get_successor_transition_for_task(task.task_id)
+        attempts = owner.successor_transition_attempts(
+            transition.transition.successor_transition_id
+        )
+        source = SimpleNamespace(
+            successor_transition_id=transition.transition.successor_transition_id,
+            project_id=task.project_id,
+            task_id=task.task_id,
+            accepted_attempt_id=task.attempts[0].attempt_id,
+            predecessor_project_head_id=(
+                predecessor.active_project_head.project_head_id
+            ),
+            transition_attempt_count=len(attempts),
+            transition_attempt_capacity=len(attempts),
+            active_project_head_id=predecessor.active_project_head.project_head_id,
+            active_project_head_sha256=predecessor.active_project_head.manifest_sha256,
+        )
+
+        context = owner.recovery_successor_context(source, plan)
+
+        assert context.task.task_id == task.task_id
+        assert context.transition.transition.task_admission is not None
+        assert context.transition.transition.task_admission.task_id == task.task_id
     finally:
         owner.close()
 

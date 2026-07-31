@@ -3,11 +3,13 @@ from __future__ import annotations
 import hashlib
 import os
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock
 
 import pytest
 
 from openevo.backend.contracts.v2.models import WorkspaceSnapshotRefV2
 from openevo.backend.workspace_handoff_v2 import (
+    WorkspaceHandoffResultValidationErrorV2,
     WorkspaceHandoffRequestV2,
     WorkspaceHandoffStoreV2,
 )
@@ -22,6 +24,52 @@ from openevo.rollout.timer import StageTimer
 from openevo.trajectory.models import Trace, Trajectory
 from openevo.trajectory.registry import default_builder_registry, default_evaluator_registry
 from openevo.workspace_archive import write_workspace_archive
+
+
+@pytest.mark.asyncio
+async def test_permanent_workspace_validation_failure_delivers_terminal_error(
+    tmp_path,
+) -> None:
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    managed = ManagedSession(
+        request=SessionDispatchRequest(
+            session_id="sk-openevo-invalid-workspace",
+            task_id="task-invalid-workspace",
+            instruction="Produce a result.",
+            remaining_timeout_seconds=30,
+            agent=AgentSpec(
+                harness="codex",
+                settings={"auth_mode": "subscription", "capture_mode": "transcript"},
+            ),
+        ),
+        timer=StageTimer(),
+        session_dir=session_dir,
+        artifacts_dir=session_dir / "artifacts",
+    )
+    result = SessionResult(
+        session_id=managed.session_id,
+        task_id=managed.request.task_id,
+        status=SessionStatus.COMPLETED,
+        trajectory=Trajectory(status=SessionStatus.COMPLETED, traces=[]),
+    )
+    manager = GatewayNodeManager.__new__(GatewayNodeManager)
+    manager._redact_core_capture_authority = lambda _managed: None
+    manager._attach_workspace_result_after_runtime_absence = AsyncMock(
+        side_effect=WorkspaceHandoffResultValidationErrorV2(
+            "workspace result failed closed archive validation"
+        )
+    )
+    manager._deliver_terminal_result = AsyncMock(return_value=False)
+
+    await manager._finalize_subscription_after_runtime_absence(
+        managed,
+        result=result,
+    )
+
+    delivered = manager._deliver_terminal_result.await_args.args[1]
+    assert delivered.status is SessionStatus.ERROR
+    assert delivered.error == "workspace result failed closed archive validation"
 
 
 @pytest.mark.asyncio

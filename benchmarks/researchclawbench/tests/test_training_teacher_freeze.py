@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from openevo_researchclawbench.config import (
     ARTIFACT_TYPES,
     EXPECTED_ARTIFACT_EVOLUTION_REQUESTS,

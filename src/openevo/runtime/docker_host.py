@@ -5,16 +5,17 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath
 import re
 import secrets
 import socket
 import stat
 from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from openevo.internal_auth import INTERNAL_OWNERSHIP_ENV
 
 DOCKER_SELF_INSPECT_FORMAT: Final[str] = (
     '{"id":{{json .Id}},"hostname":{{json .Config.Hostname}},'
@@ -156,13 +157,27 @@ class DockerEngineAuthority:
 def docker_cli_environment() -> dict[str, str]:
     """Return the complete, non-inheriting environment for release Docker CLI calls."""
 
-    return {
+    environment = {
         "DOCKER_CONFIG": _DOCKER_CONFIG_PATH,
         "DOCKER_HOST": DOCKER_HOST_ENDPOINT,
         "HOME": "/proc/self",
         "LC_ALL": "C",
         "PATH": "/usr/bin:/bin",
     }
+    # A Core-supervised worker and every host child in its process group must
+    # carry the same non-secret ownership digest.  DockerRuntime intentionally
+    # uses this closed environment, so preserve only that validated marker;
+    # user Docker configuration and all credentials remain excluded.  The
+    # marker is consumed by the host process-group verifier and is not passed
+    # into the launched container.
+    ownership_digest = os.environ.get(INTERNAL_OWNERSHIP_ENV)
+    if ownership_digest is not None:
+        if _DIGEST_RE.fullmatch(ownership_digest) is None:
+            raise DockerHostPathError(
+                "managed Docker child process ownership identity is invalid"
+            )
+        environment[INTERNAL_OWNERSHIP_ENV] = ownership_digest
+    return environment
 
 
 class DockerHostPathSpec(BaseModel):

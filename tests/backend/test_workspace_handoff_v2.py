@@ -10,17 +10,42 @@ import threading
 
 import pytest
 
+from openevo.backend import workspace_handoff_v2 as handoff_module
 from openevo.backend.contracts.v2.models import WorkspaceSnapshotRefV2
 from openevo.backend.workspace_handoff_v2 import (
     WorkspaceHandoffConflictV2,
     WorkspaceHandoffIntegrityErrorV2,
     WorkspaceHandoffRequestV2,
+    WorkspaceHandoffResultValidationErrorV2,
     WorkspaceHandoffStoreV2,
 )
 from openevo.workspace_archive import WorkspaceArchiveBuildError, write_workspace_archive
 
 
 NOW = datetime(2026, 7, 23, 4, tzinfo=timezone.utc)
+
+
+def test_marker_accepts_container_mount_device_renumbering_only() -> None:
+    class Identity:
+        def __init__(self, device: int, inode: int) -> None:
+            self.st_dev = device
+            self.st_ino = inode
+
+    store_id = "a" * 64
+    original = {
+        "root": Identity(2096, 937187),
+        "database": Identity(2096, 937213),
+        "inputs": Identity(2096, 926058),
+        "results": Identity(2096, 928638),
+    }
+    payload = handoff_module._marker_bytes(store_id, **original)
+    restarted = {
+        key: Identity(2128, value.st_ino) for key, value in original.items()
+    }
+    assert handoff_module._marker_matches(payload, store_id, **restarted)
+
+    restarted["database"] = Identity(2128, 937214)
+    assert not handoff_module._marker_matches(payload, store_id, **restarted)
 
 
 def test_workspace_archive_rejects_a_nonzero_output_cursor(tmp_path) -> None:
@@ -239,11 +264,36 @@ def test_workspace_result_rejects_symlink_and_retains_no_receipt(tmp_path) -> No
     workspace.mkdir()
     (workspace / "outside").symlink_to(tmp_path / "outside")
 
-    with pytest.raises(WorkspaceHandoffConflictV2):
+    with pytest.raises(WorkspaceHandoffResultValidationErrorV2):
         store.publish_result(
             binding,
             session_id="sk-openevo-session-1",
             workspace_root=workspace,
+            now=NOW,
+        )
+    assert store.get_result(binding.handoff_id) is None
+    store.close()
+
+
+def test_workspace_result_unavailable_root_remains_a_retryable_conflict(tmp_path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    store = WorkspaceHandoffStoreV2(tmp_path / "handoffs")
+    request = _request(source, tmp_path)
+    binding = store.reserve(request, source, now=NOW)
+    store.claim(
+        binding,
+        session_id="sk-openevo-session-1",
+        generation_sha256=request.service_generation_sha256,
+        registry_sha256=request.registry_sha256,
+        framework_lock_sha256=request.framework_lock_sha256,
+    )
+
+    with pytest.raises(WorkspaceHandoffConflictV2):
+        store.publish_result(
+            binding,
+            session_id="sk-openevo-session-1",
+            workspace_root=tmp_path / "missing-workspace",
             now=NOW,
         )
     assert store.get_result(binding.handoff_id) is None

@@ -300,6 +300,12 @@ idempotent compare-and-set actions. The renderer may initially expose only the
 actions supported by the negotiated Subscription profile, but the provider
 state model remains closed.
 
+When abandon, historical restore, or frozen-project fork carries an existing
+artifact into a later Project Head, the new receipt retains the artifact's
+original owner and content identity but does not replay the source transition's
+proposal or admission-decision fields. Those fields remain authoritative only
+in the immutable receipt that originally admitted the artifact.
+
 ## Daemon And SSH Boundary
 
 Before compatibility, SSH may inspect the host, stage/verify/activate or roll

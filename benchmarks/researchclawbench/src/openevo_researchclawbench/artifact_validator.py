@@ -11,13 +11,44 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from .hashing import UnsafePathError, iter_regular_files, tree_sha256, write_sha256_manifest
+from .hashing import (
+    UnsafePathError,
+    canonical_json_sha256,
+    iter_regular_files,
+    tree_entries,
+    write_sha256_manifest,
+)
 
 
 ABSOLUTE_REFERENCE = re.compile(r"(?:!\[[^\]]*\]|\[[^\]]*\])\((/[^)]+|[A-Za-z]:\\[^)]+)\)")
 IMAGE_REFERENCE = re.compile(r"!\[[^\]]*\]\(([^)]+\.png)\)", re.I)
 UNFINISHED = re.compile(r"\b(?:TODO|TBD|FIXME|PLACEHOLDER|INSERT (?:RESULT|FIGURE)|NOT YET IMPLEMENTED)\b", re.I)
 NUMBER = re.compile(r"(?<![A-Za-z])[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?")
+MARKDOWN_HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$", re.MULTILINE)
+
+
+def _has_required_report_sections(report_text: str) -> bool:
+    """Recognize standard scientific heading variants without inspecting prose.
+
+    ResearchClawBench tasks require the semantic method/results/discussion
+    structure, but do not prescribe one exact Markdown title.  In particular,
+    a report may close its analysis under ``Limitations`` and ``Conclusion``.
+    Requiring the literal word ``discussion`` incorrectly rejects that standard
+    form before the trusted Judge can evaluate it.
+    """
+
+    headings = [match.casefold() for match in MARKDOWN_HEADING.findall(report_text)]
+    required = (
+        re.compile(
+            r"\b(?:methods?|methodology|approach|study design|experimental design|"
+            r"experimental setup|experiments?|pipeline|workflow|procedure|implementation)\b"
+        ),
+        re.compile(r"\b(?:results?|findings?|analysis)\b"),
+        re.compile(
+            r"\b(?:discussion|limitations?|conclusions?|implications?|interpretation)\b"
+        ),
+    )
+    return all(any(pattern.search(heading) for heading in headings) for pattern in required)
 
 
 @dataclass(frozen=True)
@@ -31,6 +62,22 @@ class ValidationResult:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def candidate_artifact_root_sha256(workspace: str | Path) -> str:
+    """Hash candidate-owned content, excluding the adapter-owned receipt.
+
+    ``LocalValidationPort`` publishes the root ``validator.json`` only after
+    validation has bound the candidate artifact.  Later evaluator checks must
+    therefore ignore exactly that control-plane file while continuing to bind
+    every candidate deliverable and any nested file with the same basename.
+    """
+
+    root = Path(workspace).resolve(strict=True)
+    entries = [
+        entry for entry in tree_entries(root) if entry["path"] != "validator.json"
+    ]
+    return canonical_json_sha256(entries)
 
 
 def _valid_png(path: Path) -> bool:
@@ -98,8 +145,7 @@ def validate_workspace(workspace: str | Path, *, timed_out: bool = False) -> Val
     checks["report_substantive"] = len(report_text) >= 1500 and len(report_text.split()) >= 250
     if report_text and not checks["report_substantive"]:
         errors.append("REPORT_INSUFFICIENT_SUBSTANCE")
-    lower = report_text.casefold()
-    checks["report_sections"] = all(term in lower for term in ("method", "result", "discussion"))
+    checks["report_sections"] = _has_required_report_sections(report_text)
     if report_text and not checks["report_sections"]:
         errors.append("REPORT_REQUIRED_SECTIONS_MISSING")
     checks["no_unfinished_markers"] = not bool(UNFINISHED.search(report_text))
@@ -168,7 +214,7 @@ def validate_workspace(workspace: str | Path, *, timed_out: bool = False) -> Val
     digest: str | None = None
     if not errors:
         write_sha256_manifest(root, manifest_path)
-        digest = tree_sha256(root)
+        digest = candidate_artifact_root_sha256(root)
         checks["hash_manifest_written"] = True
     else:
         checks["hash_manifest_written"] = False
@@ -186,6 +232,10 @@ def freeze_candidate_outputs(workspace: str | Path) -> None:
     root = Path(workspace).resolve(strict=True)
     for name in ("code", "outputs", "report"):
         directory = root / name
+        if not directory.exists():
+            continue
+        if directory.is_symlink() or not directory.is_dir():
+            raise UnsafePathError(f"cannot freeze unsafe artifact directory: {directory}")
         for path in sorted(directory.rglob("*"), reverse=True):
             if path.is_symlink():
                 raise UnsafePathError(f"cannot freeze symlink: {path}")

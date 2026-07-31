@@ -8,7 +8,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Protocol, TypeAlias, runtime_checkable
+from typing import Any, Literal, Protocol, TypeAlias, runtime_checkable
 
 from pydantic import Field, field_validator, model_validator
 
@@ -41,10 +41,12 @@ CORE_CONFIG_RESERVED_KEYS = frozenset(
         "agent_system_audit",
         "candidate_evaluations",
         "compatibility",
+        "content_admission_basis_sha256",
         "experiment_id",
         "experiment_name",
         "forbidden_literals",
         "lineage",
+        "max_reflector_model_calls",
         "name",
         "policy_version",
         "promoted",
@@ -363,6 +365,47 @@ class CoreReflectorService(Protocol):
     def infer(self, request: ReflectorInferenceRequest) -> ReflectorInferenceResponse: ...
 
 
+class ReflectorInferenceBudgetReceipt(_Contract):
+    """Core-owned proof of the model-call budget consumed by one method job."""
+
+    schema_version: Literal["openevo.reflector_inference_budget_receipt.v1"] = (
+        "openevo.reflector_inference_budget_receipt.v1"
+    )
+    plan_id: str
+    target_id: str
+    method_id: str
+    max_reflector_model_calls: int = Field(ge=1, le=1024)
+    actual_reflector_model_calls: int = Field(ge=0, le=1024)
+    content_sha256: str
+
+    _ids = field_validator("plan_id", "target_id", "method_id")(_stable_id)
+    _digest = field_validator("content_sha256")(_digest)
+
+    @model_validator(mode="after")
+    def _bounded_calls(self) -> ReflectorInferenceBudgetReceipt:
+        if self.actual_reflector_model_calls > self.max_reflector_model_calls:
+            raise ValueError("reflector inference receipt exceeds its call budget")
+        expected = canonical_digest(
+            self.model_dump(mode="json", exclude={"content_sha256"})
+        )
+        if expected != self.content_sha256:
+            raise ValueError("reflector inference budget receipt digest is invalid")
+        return self
+
+
+class _BudgetedCoreReflectorService:
+    def __init__(self, delegate: CoreReflectorService, *, max_calls: int) -> None:
+        self._delegate = delegate
+        self.max_calls = max_calls
+        self.actual_calls = 0
+
+    def infer(self, request: ReflectorInferenceRequest) -> ReflectorInferenceResponse:
+        if self.actual_calls >= self.max_calls:
+            raise RuntimeError("reflector inference call budget exhausted")
+        self.actual_calls += 1
+        return self._delegate.infer(request)
+
+
 _ACTIVE_REFLECTOR_SERVICE: ContextVar[CoreReflectorService | None] = ContextVar(
     "openevo_active_reflector_service",
     default=None,
@@ -532,11 +575,53 @@ def invoke_legacy_method(
     payload = context.job.model_dump(mode="python")
     payload["config"] = context.envelope.legacy_flat_config()
     projected_job = WorkerClaimedJob.model_validate(payload)
-    token = _ACTIVE_REFLECTOR_SERVICE.set(context.services.reflector)
+    core_config = context.envelope.core_config()
+    raw_budget = core_config.get("max_reflector_model_calls")
+    if raw_budget is not None and (
+        type(raw_budget) is not int or not 1 <= raw_budget <= 1024
+    ):
+        raise ValueError("reflector inference call budget is invalid")
+    reflector = context.services.reflector
+    budgeted: _BudgetedCoreReflectorService | None = None
+    if raw_budget is not None:
+        if reflector is None:
+            raise ValueError("reflector inference budget requires a reflector service")
+        budgeted = _BudgetedCoreReflectorService(reflector, max_calls=raw_budget)
+        reflector = budgeted
+    token = _ACTIVE_REFLECTOR_SERVICE.set(reflector)
     try:
-        return method(projected_job, context.artifact_root)
+        artifacts = method(projected_job, context.artifact_root)
     finally:
         _ACTIVE_REFLECTOR_SERVICE.reset(token)
+    if budgeted is None:
+        return artifacts
+    receipt_payload = {
+        "schema_version": "openevo.reflector_inference_budget_receipt.v1",
+        "plan_id": context.envelope.plan_id,
+        "target_id": context.envelope.target_id,
+        "method_id": context.envelope.method_id,
+        "max_reflector_model_calls": budgeted.max_calls,
+        "actual_reflector_model_calls": budgeted.actual_calls,
+    }
+    receipt_payload["content_sha256"] = canonical_digest(receipt_payload)
+    receipt = ReflectorInferenceBudgetReceipt.model_validate(receipt_payload)
+    annotated: list[ArtifactRegisterRequest] = []
+    for artifact in artifacts:
+        if "openevo_reflector_inference_budget" in artifact.manifest:
+            raise ValueError("method artifact shadows Core reflector budget receipt")
+        annotated.append(
+            artifact.model_copy(
+                update={
+                    "manifest": {
+                        **artifact.manifest,
+                        "openevo_reflector_inference_budget": receipt.model_dump(
+                            mode="json"
+                        ),
+                    }
+                }
+            )
+        )
+    return annotated
 
 
 def build_execution_envelope(
@@ -590,6 +675,7 @@ __all__ = [
     "ResolvedMethodInputBinding",
     "ReflectorInferenceRequest",
     "ReflectorInferenceResponse",
+    "ReflectorInferenceBudgetReceipt",
     "ReflectorRuntimeReceipt",
     "build_execution_envelope",
     "invoke_legacy_method",

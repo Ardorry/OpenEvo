@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from openevo.evolution.context_materialization import MaterializedAdapter
+from openevo.evolution.models import ArtifactContentAdmissionReceipt
 from openevo.evolution.framework.contracts import (
     MAX_JAVASCRIPT_SAFE_INTEGER,
     CaptureMode,
@@ -540,12 +541,78 @@ class SuccessorArtifactContributionV2(_AtomicSuccessorContract):
     ]
     owner_successor_transition_id: str
     origin: Literal["produced", "inherited"]
+    evolution_job_id: str | None = None
+    admission_action: Literal["update", "keep", "reject"] | None = None
+    admission_decision_id: str | None = None
+    admission_decision_sha256: str | None = None
+    content_admission: ArtifactContentAdmissionReceipt | None = None
+    proposal_artifact_ids: tuple[str, ...] = Field(default=(), max_length=128)
 
     _ids = field_validator(
         "target_id",
         "artifact_id",
         "owner_successor_transition_id",
     )(_stable_id)
+
+    @field_validator("evolution_job_id")
+    @classmethod
+    def _optional_job_id(cls, value: str | None) -> str | None:
+        return None if value is None else _stable_id(value)
+
+    @field_validator("admission_decision_id")
+    @classmethod
+    def _optional_admission_id(cls, value: str | None) -> str | None:
+        return None if value is None else _stable_id(value)
+
+    @field_validator("admission_decision_sha256")
+    @classmethod
+    def _optional_admission_sha256(cls, value: str | None) -> str | None:
+        return None if value is None else _digest(value)
+
+    @field_validator("proposal_artifact_ids")
+    @classmethod
+    def _proposal_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        validated = tuple(_stable_id(item) for item in value)
+        if validated != tuple(sorted(validated)) or len(validated) != len(set(validated)):
+            raise ValueError("successor contribution proposal IDs must be unique and sorted")
+        return validated
+
+    @model_validator(mode="after")
+    def _native_admission_evidence(self) -> "SuccessorArtifactContributionV2":
+        fields = (
+            self.admission_action,
+            self.evolution_job_id,
+            self.admission_decision_id,
+            self.admission_decision_sha256,
+            self.content_admission,
+        )
+        if any(value is not None for value in fields):
+            if (
+                any(value is None for value in fields)
+                or not self.proposal_artifact_ids
+                or self.content_admission is None
+                or self.content_admission.proposal_artifact_ids
+                != self.proposal_artifact_ids
+                or (
+                    self.admission_action == "update"
+                    and (
+                        self.origin != "produced"
+                        or self.artifact_id not in self.proposal_artifact_ids
+                        or self.content_admission.passed is not True
+                    )
+                )
+                or (
+                    self.admission_action in {"keep", "reject"}
+                    and (
+                        self.origin != "inherited"
+                        or self.artifact_id in self.proposal_artifact_ids
+                    )
+                )
+            ):
+                raise ValueError("successor contribution admission evidence is invalid")
+        elif self.proposal_artifact_ids:
+            raise ValueError("legacy successor contribution has partial admission evidence")
+        return self
 
 
 class AtomicSuccessorManifestV2(_AtomicSuccessorContract):
@@ -910,8 +977,376 @@ class AtomicEvolutionAbandonManifestV2(_AtomicSuccessorContract):
         return self
 
 
+class AtomicHistoricalRestoreManifestV2(_AtomicSuccessorContract):
+    """Closed receipt for re-publishing one historical runtime context.
+
+    A restore never rewinds the project-head pointer.  It publishes an
+    adjacent head whose workspace is inherited from the current tip while its
+    evolution/runtime authority is copied from an earlier head in the same
+    immutable project history.
+    """
+
+    atomic_historical_restore_contract_version: Literal["1"] = "1"
+    project_id: str
+    successor_transition_id: str
+    restore_request_id: str
+    created_at: datetime
+    source_project_head_id: str
+    source_manifest_sha256: str
+    predecessor_project_head_id: str
+    predecessor_generation: int = Field(ge=0, le=MAX_JAVASCRIPT_SAFE_INTEGER)
+    predecessor_manifest_sha256: str
+    successor_project_head_id: str
+    successor_generation: int = Field(ge=1, le=MAX_JAVASCRIPT_SAFE_INTEGER)
+    successor_manifest_sha256: str
+    workspace_snapshot_id: str
+    workspace_manifest_sha256: str
+    evolution_revision_id: str
+    evolution_revision_manifest_sha256: str
+    runtime_context_snapshot_id: str
+    runtime_context_manifest_sha256: str
+    effective_execution_snapshot_id: str
+    effective_execution_snapshot_sha256: str
+    registry_sha256: str
+    runtime_context_source: Literal[
+        "empty_inherited",
+        "materialized_inherited",
+    ]
+    materialized_source_successor_transition_id: str | None = None
+    materialized_source_predecessor_project_head_id: str | None = None
+    materialized_context_id: str | None = None
+    materialized_context_manifest_sha256: str | None = None
+    method_artifact_ids: tuple[str, ...] = Field(default=(), max_length=128)
+    artifacts: tuple[SuccessorArtifactContributionV2, ...] = Field(
+        default=(),
+        max_length=128,
+        exclude_if=lambda value: not value,
+    )
+
+    _ids = field_validator(
+        "project_id",
+        "successor_transition_id",
+        "restore_request_id",
+        "source_project_head_id",
+        "predecessor_project_head_id",
+        "successor_project_head_id",
+        "workspace_snapshot_id",
+        "evolution_revision_id",
+        "runtime_context_snapshot_id",
+        "effective_execution_snapshot_id",
+    )(_stable_id)
+    _digests = field_validator(
+        "source_manifest_sha256",
+        "predecessor_manifest_sha256",
+        "successor_manifest_sha256",
+        "workspace_manifest_sha256",
+        "evolution_revision_manifest_sha256",
+        "runtime_context_manifest_sha256",
+        "effective_execution_snapshot_sha256",
+        "registry_sha256",
+    )(_digest)
+    _generations = field_validator(
+        "predecessor_generation",
+        "successor_generation",
+        mode="before",
+    )(_strict_integer)
+    _created = field_validator("created_at")(_canonical_utc_datetime)
+
+    @field_validator(
+        "materialized_source_successor_transition_id",
+        "materialized_source_predecessor_project_head_id",
+        "materialized_context_id",
+    )
+    @classmethod
+    def _optional_ids(cls, value: str | None) -> str | None:
+        return None if value is None else _stable_id(value)
+
+    @field_validator("materialized_context_manifest_sha256")
+    @classmethod
+    def _optional_digest(cls, value: str | None) -> str | None:
+        return None if value is None else _digest(value)
+
+    @field_validator("method_artifact_ids")
+    @classmethod
+    def _ordered_method_artifacts(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _ordered_stable_ids(value, label="method artifact IDs")
+
+    @model_validator(mode="after")
+    def _restore_closure(self) -> AtomicHistoricalRestoreManifestV2:
+        if self.successor_generation != self.predecessor_generation + 1:
+            raise ValueError("historical restore generation must be adjacent")
+        if self.successor_project_head_id in {
+            self.predecessor_project_head_id,
+            self.source_project_head_id,
+        }:
+            raise ValueError("historical restore must publish a new project head")
+        materialized_fields = (
+            self.materialized_source_successor_transition_id,
+            self.materialized_source_predecessor_project_head_id,
+            self.materialized_context_id,
+            self.materialized_context_manifest_sha256,
+        )
+        if self.runtime_context_source == "empty_inherited":
+            if any(value is not None for value in materialized_fields):
+                raise ValueError("empty restored runtime exposes materialization")
+            if self.method_artifact_ids:
+                raise ValueError("empty restored runtime exposes artifacts")
+        elif any(value is None for value in materialized_fields):
+            raise ValueError("materialized restored runtime is incomplete")
+        target_ids = tuple(item.target_id for item in self.artifacts)
+        artifact_ids = tuple(item.artifact_id for item in self.artifacts)
+        if (
+            target_ids != tuple(sorted(target_ids))
+            or len(target_ids) != len(set(target_ids))
+            or artifact_ids != self.method_artifact_ids
+            or any(
+                item.origin != "inherited"
+                or item.owner_successor_transition_id == self.successor_transition_id
+                for item in self.artifacts
+            )
+        ):
+            raise ValueError("historical restore artifact composition is invalid")
+        if len(canonical_json(self).encode("utf-8")) > MAX_REVISION_MANIFEST_BYTES:
+            raise ValueError("historical restore manifest exceeds the byte limit")
+        return self
+
+
+class AtomicFrozenProjectForkManifestV1(_AtomicSuccessorContract):
+    """Closed receipt for seeding a new project from one frozen project head.
+
+    The destination keeps its own workspace and execution snapshot.  Only the
+    source's verified artifact composition and materialized runtime context are
+    inherited, and the source freeze authority is part of the immutable hash.
+    """
+
+    atomic_frozen_project_fork_contract_version: Literal["1"] = "1"
+    project_id: str
+    fork_request_id: str
+    created_at: datetime
+    source_project_id: str
+    source_freeze_receipt_id: str
+    source_freeze_authority_sha256: str
+    source_project_head_id: str
+    source_manifest_sha256: str
+    source_evolution_revision_id: str
+    source_evolution_revision_manifest_sha256: str
+    source_runtime_context_snapshot_id: str
+    source_runtime_context_manifest_sha256: str
+    predecessor_project_head_id: str
+    predecessor_generation: int = Field(ge=0, le=MAX_JAVASCRIPT_SAFE_INTEGER)
+    predecessor_manifest_sha256: str
+    successor_project_head_id: str
+    successor_generation: int = Field(ge=1, le=MAX_JAVASCRIPT_SAFE_INTEGER)
+    successor_manifest_sha256: str
+    workspace_snapshot_id: str
+    workspace_manifest_sha256: str
+    evolution_revision_id: str
+    evolution_revision_manifest_sha256: str
+    runtime_context_snapshot_id: str
+    runtime_context_manifest_sha256: str
+    effective_execution_snapshot_id: str
+    effective_execution_snapshot_sha256: str
+    registry_sha256: str
+    runtime_context_source: Literal["materialized_inherited"] = (
+        "materialized_inherited"
+    )
+    materialized_source_successor_transition_id: str
+    materialized_source_predecessor_project_head_id: str
+    materialized_context_id: str
+    materialized_context_manifest_sha256: str
+    method_artifact_ids: tuple[str, ...] = Field(min_length=3, max_length=3)
+    frozen_artifact_sha256: tuple[str, ...] = Field(min_length=3, max_length=3)
+    artifacts: tuple[SuccessorArtifactContributionV2, ...] = Field(
+        min_length=3,
+        max_length=3,
+    )
+
+    _ids = field_validator(
+        "project_id",
+        "fork_request_id",
+        "source_project_id",
+        "source_freeze_receipt_id",
+        "source_project_head_id",
+        "source_evolution_revision_id",
+        "source_runtime_context_snapshot_id",
+        "predecessor_project_head_id",
+        "successor_project_head_id",
+        "workspace_snapshot_id",
+        "evolution_revision_id",
+        "runtime_context_snapshot_id",
+        "effective_execution_snapshot_id",
+        "materialized_source_successor_transition_id",
+        "materialized_source_predecessor_project_head_id",
+        "materialized_context_id",
+    )(_stable_id)
+    _digests = field_validator(
+        "source_freeze_authority_sha256",
+        "source_manifest_sha256",
+        "source_evolution_revision_manifest_sha256",
+        "source_runtime_context_manifest_sha256",
+        "predecessor_manifest_sha256",
+        "successor_manifest_sha256",
+        "workspace_manifest_sha256",
+        "evolution_revision_manifest_sha256",
+        "runtime_context_manifest_sha256",
+        "effective_execution_snapshot_sha256",
+        "registry_sha256",
+        "materialized_context_manifest_sha256",
+    )(_digest)
+    _generations = field_validator(
+        "predecessor_generation",
+        "successor_generation",
+        mode="before",
+    )(_strict_integer)
+    _created = field_validator("created_at")(_canonical_utc_datetime)
+
+    @field_validator("method_artifact_ids")
+    @classmethod
+    def _ordered_method_artifacts(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _ordered_stable_ids(value, label="method artifact IDs")
+
+    @field_validator("frozen_artifact_sha256")
+    @classmethod
+    def _artifact_hashes(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(_digest(item) for item in value)
+
+    @model_validator(mode="after")
+    def _fork_closure(self) -> AtomicFrozenProjectForkManifestV1:
+        targets = tuple(item.target_id for item in self.artifacts)
+        artifact_ids = tuple(item.artifact_id for item in self.artifacts)
+        if (
+            self.source_project_id == self.project_id
+            or self.successor_generation != self.predecessor_generation + 1
+            or self.successor_project_head_id
+            in {self.predecessor_project_head_id, self.source_project_head_id}
+            or targets != ("agent_system", "skill_bundle", "text_memory")
+            or artifact_ids != self.method_artifact_ids
+            or len(set(artifact_ids)) != 3
+            or any(
+                item.origin != "inherited"
+                or item.owner_successor_transition_id == self.fork_request_id
+                for item in self.artifacts
+            )
+        ):
+            raise ValueError("frozen project fork artifact closure is invalid")
+        if len(canonical_json(self).encode("utf-8")) > MAX_REVISION_MANIFEST_BYTES:
+            raise ValueError("frozen project fork manifest exceeds the byte limit")
+        return self
+
+
+class AtomicSuccessorRecoverySeedManifestV1(_AtomicSuccessorContract):
+    """Closed receipt for seeding a fresh project from recovery outputs.
+
+    The failed source transition remains unchanged.  Recovery outputs retain
+    their original recovery owner, while the destination receives an adjacent
+    project head and a newly materialized runtime context.
+    """
+
+    atomic_successor_recovery_seed_contract_version: Literal["1"] = "1"
+    project_id: str
+    seed_request_id: str
+    recovery_id: str
+    recovery_record_sha256: str
+    source_project_id: str
+    source_transition_id: str
+    source_authority_sha256: str
+    predecessor_project_head_id: str
+    predecessor_generation: int = Field(ge=0, le=MAX_JAVASCRIPT_SAFE_INTEGER)
+    predecessor_manifest_sha256: str
+    successor_project_head_id: str
+    successor_generation: int = Field(ge=1, le=MAX_JAVASCRIPT_SAFE_INTEGER)
+    successor_manifest_sha256: str
+    workspace_snapshot_id: str
+    workspace_manifest_sha256: str
+    evolution_revision_id: str
+    evolution_revision_manifest_sha256: str
+    runtime_context_snapshot_id: str
+    runtime_context_manifest_sha256: str
+    effective_execution_snapshot_id: str
+    effective_execution_snapshot_sha256: str
+    registry_sha256: str
+    materialized_context_id: str
+    materialized_context_manifest_sha256: str
+    method_artifact_ids: tuple[str, ...] = Field(min_length=3, max_length=3)
+    recovery_target_result_sha256: tuple[str, ...] = Field(min_length=3, max_length=3)
+    artifacts: tuple[SuccessorArtifactContributionV2, ...] = Field(
+        min_length=3,
+        max_length=3,
+    )
+    created_at: datetime
+
+    _ids = field_validator(
+        "project_id",
+        "seed_request_id",
+        "recovery_id",
+        "source_project_id",
+        "source_transition_id",
+        "predecessor_project_head_id",
+        "successor_project_head_id",
+        "workspace_snapshot_id",
+        "evolution_revision_id",
+        "runtime_context_snapshot_id",
+        "effective_execution_snapshot_id",
+        "materialized_context_id",
+    )(_stable_id)
+    _digests = field_validator(
+        "recovery_record_sha256",
+        "source_authority_sha256",
+        "predecessor_manifest_sha256",
+        "successor_manifest_sha256",
+        "workspace_manifest_sha256",
+        "evolution_revision_manifest_sha256",
+        "runtime_context_manifest_sha256",
+        "effective_execution_snapshot_sha256",
+        "registry_sha256",
+        "materialized_context_manifest_sha256",
+    )(_digest)
+    _generations = field_validator(
+        "predecessor_generation",
+        "successor_generation",
+        mode="before",
+    )(_strict_integer)
+    _created = field_validator("created_at")(_canonical_utc_datetime)
+
+    @field_validator("method_artifact_ids")
+    @classmethod
+    def _ordered_method_artifacts(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _ordered_stable_ids(value, label="method artifact IDs")
+
+    @field_validator("recovery_target_result_sha256")
+    @classmethod
+    def _result_hashes(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(_digest(item) for item in value)
+
+    @model_validator(mode="after")
+    def _seed_closure(self) -> AtomicSuccessorRecoverySeedManifestV1:
+        targets = tuple(item.target_id for item in self.artifacts)
+        artifact_ids = tuple(item.artifact_id for item in self.artifacts)
+        if (
+            self.source_project_id == self.project_id
+            or self.successor_generation != self.predecessor_generation + 1
+            or self.successor_project_head_id == self.predecessor_project_head_id
+            or targets != ("agent_system", "skill_bundle", "text_memory")
+            or artifact_ids != self.method_artifact_ids
+            or len(set(artifact_ids)) != 3
+            or any(
+                item.origin != "inherited"
+                or item.owner_successor_transition_id == self.seed_request_id
+                for item in self.artifacts
+            )
+        ):
+            raise ValueError("successor recovery project seed closure is invalid")
+        if len(canonical_json(self).encode("utf-8")) > MAX_REVISION_MANIFEST_BYTES:
+            raise ValueError("successor recovery seed manifest exceeds the byte limit")
+        return self
+
+
 AtomicSuccessorReceiptManifestV2 = (
-    AtomicSuccessorManifestV2 | AtomicEvolutionAbandonManifestV2
+    AtomicSuccessorManifestV2
+    | AtomicEvolutionAbandonManifestV2
+    | AtomicHistoricalRestoreManifestV2
+    | AtomicFrozenProjectForkManifestV1
+    | AtomicSuccessorRecoverySeedManifestV1
 )
 
 
@@ -921,6 +1356,9 @@ def atomic_successor_manifest_sha256(
     if type(manifest) not in {
         AtomicSuccessorManifestV2,
         AtomicEvolutionAbandonManifestV2,
+        AtomicHistoricalRestoreManifestV2,
+        AtomicFrozenProjectForkManifestV1,
+        AtomicSuccessorRecoverySeedManifestV1,
     }:
         raise TypeError("atomic successor digest requires a closed v2 receipt")
     return canonical_digest(manifest)
@@ -1154,6 +1592,9 @@ __all__ = [
     "AdmissionStatus",
     "AtomicSuccessorCommitV2",
     "AtomicEvolutionAbandonManifestV2",
+    "AtomicFrozenProjectForkManifestV1",
+    "AtomicSuccessorRecoverySeedManifestV1",
+    "AtomicHistoricalRestoreManifestV2",
     "AtomicSuccessorManifestV2",
     "AtomicSuccessorReceiptManifestV2",
     "ContentAddressedSnapshotRef",

@@ -20,6 +20,10 @@ class _Config:
         values = {
             "source_identity.openevo_core_source_tree_sha256": "2" * 64,
             "source_identity.adapter_tree_sha256": "3" * 64,
+            "budgets.max_candidate_model_calls": "51",
+            "budgets.max_reflector_model_calls": "102",
+            "budgets.cumulative_runtime_seconds": "345600",
+            "judge.runs_per_attempt": "1",
         }
         return values[key]
 
@@ -53,10 +57,10 @@ def test_control_initializes_verifies_and_refuses_unbound_mutation(
     )
     assert restarted.verify()["status"] == "PASS"
     restarted.run_next()
-    restarted.run_next()
-    with pytest.raises(TrainingOperationsUnavailable):
-        restarted.run_next()
-    assert restarted.status()["stage"] == "CANDIDATE_RUNNING"
+    blocked = restarted.run_next()
+    assert blocked["stage"] == "BLOCKED"
+    assert blocked["failure_reason"] == "CORE_CONTROL_PREFLIGHT_FAILED"
+    assert "active_candidate_intent" not in blocked
 
 
 def test_control_rejects_foreign_run_namespace(tmp_path: Path) -> None:

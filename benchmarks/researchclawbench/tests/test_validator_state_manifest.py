@@ -7,7 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from openevo_researchclawbench.artifact_validator import validate_workspace
+from openevo_researchclawbench.artifact_validator import (
+    candidate_artifact_root_sha256,
+    validate_workspace,
+)
 from openevo_researchclawbench.evolution_loop import (
     AttemptRecord,
     EvolutionState,
@@ -51,6 +54,72 @@ def test_validator_passes_complete_artifact_and_hash_is_stable(tmp_path: Path) -
     second = validate_workspace(tmp_path)
     assert first.passed and second.passed
     assert first.artifact_root_sha256 == second.artifact_root_sha256
+
+
+def test_validator_accepts_standard_discussion_equivalent_headings(
+    tmp_path: Path,
+) -> None:
+    _valid_workspace(tmp_path)
+    report = tmp_path / "report" / "report.md"
+    report.write_text(
+        report.read_text(encoding="utf-8").replace(
+            "# Discussion\nEvidence is traced to outputs.\n",
+            "# Limitations\nEvidence boundaries are explicit.\n"
+            "# Conclusion\nEvidence is traced to outputs.\n",
+        ),
+        encoding="utf-8",
+    )
+
+    result = validate_workspace(tmp_path)
+
+    assert result.passed
+    assert result.checks["report_sections"] is True
+
+
+def test_validator_accepts_experiment_and_pipeline_method_headings(
+    tmp_path: Path,
+) -> None:
+    _valid_workspace(tmp_path)
+    report = tmp_path / "report" / "report.md"
+    report.write_text(
+        report.read_text(encoding="utf-8")
+        .replace(
+            "# Method\nReproducible method ",
+            "# Hypotheses and Experiments\n# Pipeline\nReproducible analysis ",
+        )
+        .replace(
+            "# Discussion\nEvidence is traced to outputs.\n",
+            "# Limitations and Next Steps\nEvidence is traced to outputs.\n",
+        ),
+        encoding="utf-8",
+    )
+
+    result = validate_workspace(tmp_path)
+
+    assert result.passed
+    assert result.checks["report_sections"] is True
+
+
+def test_candidate_artifact_hash_excludes_only_root_validator_receipt(
+    tmp_path: Path,
+) -> None:
+    _valid_workspace(tmp_path)
+    validation = validate_workspace(tmp_path)
+    assert validation.passed
+    assert validation.artifact_root_sha256 is not None
+
+    (tmp_path / "validator.json").write_text(
+        json.dumps({"artifact_valid": True}), encoding="utf-8"
+    )
+    assert candidate_artifact_root_sha256(tmp_path) == validation.artifact_root_sha256
+
+    (tmp_path / "validator.json").write_text(
+        json.dumps({"artifact_valid": False}), encoding="utf-8"
+    )
+    assert candidate_artifact_root_sha256(tmp_path) == validation.artifact_root_sha256
+
+    (tmp_path / "report" / "validator.json").write_text("{}", encoding="utf-8")
+    assert candidate_artifact_root_sha256(tmp_path) != validation.artifact_root_sha256
 
 
 def test_validator_fails_closed_for_symlink_absolute_path_and_timeout(tmp_path: Path) -> None:

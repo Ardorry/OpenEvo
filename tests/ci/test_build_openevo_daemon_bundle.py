@@ -3,9 +3,9 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -18,7 +18,6 @@ from openevo.backend.service import (
     CoreServiceError,
     CoreServiceErrorCode,
 )
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "ci" / "build_openevo_daemon_bundle.py"
@@ -118,6 +117,64 @@ def test_build_environment_removes_python_source_fallbacks() -> None:
     assert environment == {"HOME": "/tmp/home", "PYTHONNOUSERSITE": "1"}
 
 
+def test_release_build_accepts_one_explicit_uv_executable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    uv = tmp_path / "tools" / "uv"
+    uv.parent.mkdir()
+    uv.write_bytes(b"synthetic uv")
+    uv.chmod(0o700)
+    monkeypatch.setattr(builder.shutil, "which", lambda _name: None)
+
+    assert builder._resolve_uv_executable(uv) == uv.resolve()
+
+
+def test_release_build_fails_closed_without_explicit_or_path_uv(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(builder.shutil, "which", lambda _name: None)
+    with pytest.raises(builder.BundleBuildError, match="must be supplied explicitly"):
+        builder._resolve_uv_executable(None)
+
+
+def test_build_environment_invokes_only_the_resolved_uv(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    (repository / "pyproject.toml").write_text("[project]\nname='fixture'\n", encoding="utf-8")
+    uv_lock = tmp_path / "uv.lock"
+    uv_lock.write_text("version = 1\n", encoding="utf-8")
+    wheel = tmp_path / "fixture.whl"
+    wheel.write_bytes(b"fixture")
+    uv = tmp_path / "tools" / "uv"
+    uv.parent.mkdir()
+    uv.write_bytes(b"synthetic uv")
+    uv.chmod(0o700)
+    observed: list[list[str]] = []
+    build_root = tmp_path / "build"
+    build_root.mkdir()
+    monkeypatch.setattr(builder, "REPO_ROOT", repository)
+    monkeypatch.setattr(
+        builder,
+        "_run",
+        lambda arguments, **_kwargs: observed.append(list(arguments)),
+    )
+
+    builder._prepare_build_environment(
+        build_root,
+        wheel=wheel,
+        uv_lock=uv_lock,
+        uv_executable=uv,
+    )
+
+    assert len(observed) == 2
+    assert observed[0][0] == str(uv.resolve())
+    assert observed[1][0] == str(uv.resolve())
+
+
 def test_wheel_top_level_inventory_includes_all_core_packages(tmp_path: Path) -> None:
     wheel = _wheel(tmp_path / "openevo-0.1.0-py3-none-any.whl")
     with ZipFile(wheel, "a", compression=ZIP_DEFLATED) as archive:
@@ -200,8 +257,35 @@ def test_service_invocation_rehashes_executing_inode_and_rejects_path_replacemen
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     original_stat = daemon_bundle.os.stat
+    original_fstat = daemon_bundle.os.fstat
     executing_path = tmp_path / "openevo-daemon"
     monkeypatch.setattr(daemon_bundle.sys, "executable", str(executing_path))
+    # The unit-test interpreter may be a root-owned system Python reached
+    # through a user-owned virtualenv.  Model the packaged Daemon inode as
+    # service-owned so this test isolates the path-replacement fence;
+    # production still verifies the real packaged inode and manifest owner.
+    raw_executing = original_stat("/proc/self/exe")
+    executing_stat = SimpleNamespace(
+        st_mode=raw_executing.st_mode,
+        st_uid=daemon_bundle.os.geteuid(),
+        st_dev=raw_executing.st_dev,
+        st_ino=raw_executing.st_ino,
+        st_size=raw_executing.st_size,
+        st_mtime_ns=raw_executing.st_mtime_ns,
+        st_ctime_ns=raw_executing.st_ctime_ns,
+        st_nlink=raw_executing.st_nlink,
+    )
+
+    def fstat_running_path(descriptor: int) -> object:
+        value = original_fstat(descriptor)
+        if (value.st_dev, value.st_ino) == (
+            raw_executing.st_dev,
+            raw_executing.st_ino,
+        ):
+            return executing_stat
+        return value
+
+    monkeypatch.setattr(daemon_bundle.os, "fstat", fstat_running_path)
     executable_digest = daemon_bundle._sha256(Path("/proc/self/exe"))
     manifest_payload = b"{}\n"
     manifest_digest = hashlib.sha256(manifest_payload).hexdigest()
@@ -210,7 +294,7 @@ def test_service_invocation_rehashes_executing_inode_and_rejects_path_replacemen
 
     def stat_running_path(path: object, *args: object, **kwargs: object) -> object:
         if str(path) == str(executing_path):
-            return original_stat("/proc/self/exe")
+            return executing_stat
         return original_stat(path, *args, **kwargs)
 
     monkeypatch.setattr(daemon_bundle.os, "stat", stat_running_path)
@@ -592,7 +676,7 @@ def test_service_failure_is_rendered_as_closed_json(
 
 
 def test_daemon_bundle_declares_process_group_lifecycle_compatibility() -> None:
-    assert daemon_bundle._LIFECYCLE_COMPATIBILITY == 16
+    assert daemon_bundle._LIFECYCLE_COMPATIBILITY == 85
 
 
 def test_release_daemon_launcher_contains_only_the_v2_mutation_composition() -> None:

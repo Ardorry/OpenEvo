@@ -145,6 +145,14 @@ def test_cross_process_restart_idempotency_and_resolved_view(tmp_path: Path) -> 
     )
     with TestClient(app) as client:
         dataset, revision = _sealed_dataset(client, core.request_headers())
+        authority = client.get(
+            f"/v1/internal/training-feedback/datasets/{dataset['dataset_id']}",
+            headers=core.request_headers(),
+        )
+        assert authority.status_code == 200
+        assert authority.json()["completed_dataset_revision"] == revision
+        assert authority.json()["session_id"] == "feedback_session"
+        assert authority.json()["task_id"] == "feedback_task"
         request = _request(dataset["dataset_id"], revision)
         first = client.post(
             "/v1/internal/training-feedback/attachments",

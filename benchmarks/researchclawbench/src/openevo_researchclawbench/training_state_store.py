@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import hashlib
 import json
 import os
-from pathlib import Path
 import sqlite3
 import stat
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from .transition_engine import TrainingStage, require_transition
@@ -29,7 +29,7 @@ def canonical_sha256(value: object) -> str:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class TrainingStateStore:
@@ -132,6 +132,19 @@ class TrainingStateStore:
                     active INTEGER NOT NULL CHECK(active IN (0, 1)),
                     created_at TEXT NOT NULL,
                     released_at TEXT,
+                    FOREIGN KEY(experiment_id) REFERENCES experiment_state(experiment_id)
+                );
+                CREATE TABLE IF NOT EXISTS budget_reservations (
+                    idempotency_key TEXT PRIMARY KEY,
+                    experiment_id TEXT NOT NULL,
+                    category TEXT NOT NULL CHECK(category IN (
+                        'candidate_model_calls',
+                        'reflector_model_calls',
+                        'judge_operations'
+                    )),
+                    units INTEGER NOT NULL CHECK(units > 0),
+                    limit_units INTEGER NOT NULL CHECK(limit_units > 0),
+                    created_at TEXT NOT NULL,
                     FOREIGN KEY(experiment_id) REFERENCES experiment_state(experiment_id)
                 );
                 """
@@ -386,6 +399,48 @@ class TrainingStateStore:
         self._publish_receipt(f"side-effect-{idempotency_key}", receipt)
         return receipt
 
+    def fail_side_effect(
+        self,
+        *,
+        idempotency_key: str,
+        receipt: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Seal a proven terminal side-effect failure exactly once.
+
+        This is intentionally unavailable for ambiguous transport failures.  A
+        caller must provide a typed receipt whose ``terminal_proven`` flag is
+        true; otherwise the planned intent remains recoverable and fail-closed.
+        """
+
+        if receipt.get("terminal_proven") is not True:
+            raise ValueError("side-effect failure is not proven terminal")
+        payload = canonical_bytes(receipt)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT status, receipt_json FROM side_effects "
+                "WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+            if row is None:
+                raise ValueError("side effect was not planned")
+            if row["status"] == "failed":
+                existing = json.loads(row["receipt_json"])
+                if canonical_bytes(existing) != payload:
+                    raise ValueError("failed side-effect receipt conflicts")
+                connection.commit()
+                return existing
+            if row["status"] != "planned":
+                raise ValueError("completed side effect cannot be failed")
+            connection.execute(
+                "UPDATE side_effects SET status = 'failed', receipt_json = ?, "
+                "updated_at = ? WHERE idempotency_key = ?",
+                (payload, _now(), idempotency_key),
+            )
+            connection.commit()
+        self._publish_receipt(f"side-effect-{idempotency_key}-failed", receipt)
+        return receipt
+
     def side_effect(self, idempotency_key: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(
@@ -401,6 +456,155 @@ class TrainingStateStore:
             "status": row["status"],
             "receipt": None if row["receipt_json"] is None else json.loads(row["receipt_json"]),
         }
+
+    def side_effects_for_experiment(
+        self, experiment_id: str
+    ) -> list[dict[str, Any]]:
+        """Return the closed side-effect ledger without changing its state."""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT idempotency_key, kind, request_sha256, status, receipt_json "
+                "FROM side_effects WHERE experiment_id = ? ORDER BY idempotency_key",
+                (experiment_id,),
+            ).fetchall()
+        return [
+            {
+                "idempotency_key": row["idempotency_key"],
+                "kind": row["kind"],
+                "request_sha256": row["request_sha256"],
+                "status": row["status"],
+                "receipt": (
+                    None
+                    if row["receipt_json"] is None
+                    else json.loads(row["receipt_json"])
+                ),
+            }
+            for row in rows
+        ]
+
+    def reserve_budget(
+        self,
+        *,
+        experiment_id: str,
+        idempotency_key: str,
+        category: str,
+        units: int,
+        limit_units: int,
+    ) -> dict[str, Any]:
+        """Atomically reserve a closed model-operation budget.
+
+        Reservations happen before a billed side-effect intent is persisted.
+        Replaying the same idempotency key returns the original reservation;
+        changing its category, units or limit fails closed.
+        """
+
+        if category not in {
+            "candidate_model_calls",
+            "reflector_model_calls",
+            "judge_operations",
+        }:
+            raise ValueError("unknown training budget category")
+        if type(units) is not int or type(limit_units) is not int:
+            raise TypeError("training budget units must be integers")
+        if units <= 0 or limit_units <= 0:
+            raise ValueError("training budget units must be positive")
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            state = connection.execute(
+                "SELECT 1 FROM experiment_state WHERE experiment_id = ?",
+                (experiment_id,),
+            ).fetchone()
+            if state is None:
+                raise ValueError("budget reservation has no experiment authority")
+            prior = connection.execute(
+                "SELECT experiment_id, category, units, limit_units "
+                "FROM budget_reservations WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+            if prior is not None:
+                if (
+                    prior["experiment_id"] != experiment_id
+                    or prior["category"] != category
+                    or int(prior["units"]) != units
+                    or int(prior["limit_units"]) != limit_units
+                ):
+                    raise ValueError("training budget idempotency key conflicts")
+                used = connection.execute(
+                    "SELECT COALESCE(SUM(units), 0) AS used "
+                    "FROM budget_reservations WHERE experiment_id = ? AND category = ?",
+                    (experiment_id, category),
+                ).fetchone()["used"]
+                connection.commit()
+                return {
+                    "category": category,
+                    "reserved_units": units,
+                    "used_units": int(used),
+                    "limit_units": limit_units,
+                    "idempotency_key": idempotency_key,
+                    "recovered": True,
+                }
+            used = int(
+                connection.execute(
+                    "SELECT COALESCE(SUM(units), 0) AS used "
+                    "FROM budget_reservations WHERE experiment_id = ? AND category = ?",
+                    (experiment_id, category),
+                ).fetchone()["used"]
+            )
+            if used + units > limit_units:
+                connection.commit()
+                raise ValueError(f"training budget exhausted: {category}")
+            connection.execute(
+                "INSERT INTO budget_reservations(idempotency_key, experiment_id, "
+                "category, units, limit_units, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    idempotency_key,
+                    experiment_id,
+                    category,
+                    units,
+                    limit_units,
+                    _now(),
+                ),
+            )
+            connection.commit()
+        return {
+            "category": category,
+            "reserved_units": units,
+            "used_units": used + units,
+            "limit_units": limit_units,
+            "idempotency_key": idempotency_key,
+            "recovered": False,
+        }
+
+    def budget_usage(self, experiment_id: str) -> dict[str, int]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT category, COALESCE(SUM(units), 0) AS used "
+                "FROM budget_reservations WHERE experiment_id = ? GROUP BY category",
+                (experiment_id,),
+            ).fetchall()
+        observed = {row["category"]: int(row["used"]) for row in rows}
+        return {
+            category: observed.get(category, 0)
+            for category in (
+                "candidate_model_calls",
+                "reflector_model_calls",
+                "judge_operations",
+            )
+        }
+
+    def transition_receipts_for_experiment(
+        self, experiment_id: str
+    ) -> list[dict[str, Any]]:
+        """Return immutable transition receipts in creation order."""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT receipt_json FROM transitions WHERE experiment_id = ? "
+                "ORDER BY created_at, idempotency_key",
+                (experiment_id,),
+            ).fetchall()
+        return [json.loads(row["receipt_json"]) for row in rows]
 
     def record_attempt(self, experiment_id: str, receipt: dict[str, Any]) -> None:
         task_id = str(receipt["task_id"])

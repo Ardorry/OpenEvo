@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import threading
@@ -19,8 +20,8 @@ from openevo.evolution.models import (
     ContextResolveRequest,
     DatasetCreateRequest,
     EventIngestRequest,
-    WorkerClaimInputArtifact,
     WorkerClaimedJob,
+    WorkerClaimInputArtifact,
 )
 from openevo.evolution.store import EvolutionStore
 from openevo.evolution.worker import run_once
@@ -768,9 +769,10 @@ def test_text_memory_expel_reflector_writes_structured_memory(
     assert "ExpeL" in prompt
     assert "## Existing Text Memory" in prompt
     assert "Run a broad test suite" in prompt
-    assert "tb_pass_task" in prompt
+    assert "tb_pass_task" not in prompt
+    assert "[REDACTED_TASK_IDS_" in prompt
     assert "art_dataset_expel_history" in prompt
-    assert "tb_history_task" in prompt
+    assert "tb_history_task" not in prompt
     assert "extrusion geometry" in prompt
     assert "verifier failed after missing validation" in prompt
     assert "## Do" in prompt
@@ -2896,6 +2898,251 @@ def test_agent_system_gepa_reflector_resolves_mutation_strategies(
     assert all(
         artifact.manifest["candidate_count"] == len(expected_strategies) for artifact in candidates
     )
+
+
+def test_agent_system_gepa_allows_generic_report_section_methodology(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    generic_rule = (
+        "Before finalizing, verify Methods, Results, and Discussion are present, "
+        "contain substantive evidence, and agree with generated outputs; record "
+        "the validation result before declaring completion."
+    )
+    captured = _patch_reflector_llm_sequence(
+        monkeypatch,
+        [
+            (
+                "# Report Completion Protocol\n\n"
+                f"- {generic_rule}"
+            )
+        ],
+    )
+    dataset = _history_round_dataset_artifact(
+        tmp_path,
+        round_number=1,
+        precision=0.0,
+        recall=0.0,
+        f1=0.0,
+        record={
+            "event_id": "evt_generic_sections",
+            "task_id": "task_generic_sections",
+            "session_id": "session_generic_sections",
+            "status": "COMPLETED",
+            "reward": 0.0,
+            "task_local_feedback": {
+                "report_headings": [
+                    "Summary",
+                    "Experiments",
+                    "Data and Pipeline",
+                    "Limitations and Reproducibility",
+                    "Related Work and Motivation",
+                ]
+            },
+            "traces": [
+                {
+                    "prompt_messages": [{"role": "user", "content": generic_rule}],
+                    "response_messages": [
+                        {"role": "assistant", "content": "Drafted a short report."}
+                    ],
+                    "metadata": {
+                        "transcript": (
+                            "validator instruction: " + generic_rule
+                        )
+                    },
+                }
+            ],
+        },
+    )
+
+    artifacts = run_method(
+        _job(
+            "agent_system_gepa_reflector",
+            tmp_path,
+            input_artifacts=[dataset],
+            config={
+                "candidate_count": 1,
+                "mutation_strategies": ["report_completion"],
+                "agent_system_audit": {
+                    "enabled": True,
+                    "max_repair_attempts": 0,
+                    "leakage_basis": {
+                        "task_specific_feedback": [],
+                    },
+                },
+                "reflector_llm": {
+                    "model": "reflector-model",
+                    "base_url": "http://reflector.test/v1",
+                    "api_key": "test-key",
+                },
+            },
+        ),
+        artifact_root=tmp_path / "artifacts",
+    )
+
+    assert len(captured["requests"]) == 1
+    candidate = next(item for item in artifacts if item.type == ArtifactType.AGENT_SYSTEM)
+    audit = candidate.manifest["agent_system_audit"]
+    assert audit["enabled"] is True
+    assert audit["repair_count"] == 0
+    assert audit["finding_count"] == 0
+    assert audit["forbidden_literal_count"] > 0
+    assert re.fullmatch(r"[0-9a-f]{64}", audit["leakage_basis_sha256"])
+    public_manifest = json.dumps(candidate.manifest, sort_keys=True)
+    assert "task_generic_sections" not in public_manifest
+    assert generic_rule not in public_manifest
+
+
+def test_agent_system_gepa_rejects_task_and_source_overlap_after_one_call(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report_sentence = (
+        "The task-specific analysis concluded that the QZO.csv observation with "
+        "identifier 242,478, calibrated value 0.123456789, and uncertainty "
+        "6.02214076e23 supported the reported result and must be preserved exactly."
+    )
+    source_title = "Luminosity Calibration of QZO Survey"
+    leaked_slogan = "Be careful with Astronomy_004 and QZO.csv to avoid mistakes."
+    leaked_output = (
+        "# Leaked Candidate\n\n"
+        f"- {leaked_slogan}\n"
+        "- For Astronomy_004, read QZO.csv and reuse value 242478, calibrated "
+        "value 0.123456789, and uncertainty 6.02214076e23 from "
+        "doi 10.1234/private.study before validation.\n"
+        f"- Preserve the report heading {source_title}.\n"
+        f"- {report_sentence}"
+    )
+    captured = _patch_reflector_llm_sequence(monkeypatch, [leaked_output])
+    dataset = _history_round_dataset_artifact(
+        tmp_path,
+        round_number=1,
+        precision=0.0,
+        recall=0.0,
+        f1=0.0,
+        record={
+            "event_id": "evt_task_overlap",
+            "task_id": "task_internal_a0",
+            "session_id": "session_task_overlap",
+            "status": "COMPLETED",
+            "reward": 0.0,
+            "task_local_feedback": {
+                "benchmark_task_scope_id": "Astronomy_004",
+                "report_headings": [source_title, "Methods"],
+            },
+            "traces": [
+                {
+                    "prompt_messages": [
+                        {"role": "user", "content": "Analyze QZO.csv."}
+                    ],
+                    "response_messages": [
+                        {
+                            "role": "assistant",
+                            "content": (
+                                f"{report_sentence} The DOI was "
+                                "10.1234/private.study."
+                            ),
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    job = _job(
+        "agent_system_gepa_reflector",
+        tmp_path,
+        input_artifacts=[dataset],
+        config={
+            "candidate_count": 1,
+            "mutation_strategies": ["task_overlap"],
+            "agent_system_audit": {
+                "enabled": True,
+                "max_repair_attempts": 0,
+            },
+            "reflector_llm": {
+                "model": "reflector-model",
+                "base_url": "http://reflector.test/v1",
+                "api_key": "test-key",
+            },
+        },
+    )
+
+    with pytest.raises(ValueError, match="protected evaluation data") as raised:
+        run_method(job, artifact_root=tmp_path / "artifacts")
+
+    assert len(captured["requests"]) == 1
+    public_error = str(raised.value)
+    for protected in (
+        "Astronomy_004",
+        "QZO.csv",
+        "242,478",
+        "242478",
+        "0.123456789",
+        "6.02214076e23",
+        "10.1234/private.study",
+        source_title,
+        report_sentence,
+        leaked_slogan,
+    ):
+        assert protected not in public_error
+    assert not list((tmp_path / "artifacts").rglob("AGENTS.md"))
+
+
+def test_source_record_numeric_leakage_preserves_exact_result_spellings() -> None:
+    basis = methods_module._source_record_leakage_basis(
+        [
+            {
+                "task_id": "task_numeric_scan",
+                "task_local_feedback": {
+                    "report_headings": [
+                        "Luminosity Calibration of QZO Survey",
+                        "Methods",
+                    ]
+                },
+                "traces": [
+                    {
+                        "response_messages": [
+                            {
+                                "role": "assistant",
+                                "content": (
+                                    "In 2024 the measured count was 242,478, the calibrated "
+                                    "ratio was 0.123456789, and the estimate was "
+                                    "6.02214076e23. The dedicated heading was "
+                                    "Luminosity Calibration of QZO Survey."
+                                ),
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    )
+
+    assert set(basis["result_values"]) >= {
+        "242,478",
+        "242478",
+        "0.123456789",
+        "6.02214076e23",
+    }
+    assert "2024" not in basis["result_values"]
+    assert basis["source_titles"] == ["Luminosity Calibration of QZO Survey"]
+
+    structural = methods_module._source_record_leakage_basis(
+        [
+            {
+                "task_id": "task_structural_headings",
+                "task_local_feedback": {
+                    "report_headings": [
+                        "Experiments",
+                        "Data and Pipeline",
+                        "Limitations and Reproducibility",
+                        "Related Work and Motivation",
+                    ]
+                },
+            }
+        ]
+    )
+    assert "source_titles" not in structural
 
 
 def test_agent_system_gepa_reflector_generates_mutation_pool_from_verifier_feedback(

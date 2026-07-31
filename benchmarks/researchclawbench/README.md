@@ -13,6 +13,11 @@ selects `CodexHarness`, and the managed subscription runtime executes
 no Codex subprocess, credential reader, candidate Docker runner, timeout loop,
 or transcript parser.
 
+Public `task_info.json` data declarations may name either a regular file or a
+directory below the task's `data/` root. Directory declarations are expanded
+to a deterministic regular-file inventory. Symlinks, special files, path
+escapes, and any `target_study` path fail closed before workspace creation.
+
 Reflector work is submitted as three independent native plan-bound jobs using
 `agent_system_gepa_reflector`, `text_memory_expel_reflector`, and
 `skill_bundle_reflector`. A verified OpenEvo evolution worker, not this adapter,

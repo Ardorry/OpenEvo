@@ -15,6 +15,12 @@ from typing import Any, Callable, Iterator, NotRequired, TypedDict
 from urllib.parse import urlparse, urlunparse
 
 from openevo.evolution.agent_system import normalize_agent_system_target_path
+from openevo.evolution.admission import (
+    ArtifactProposalDecisionReceipt,
+    ArtifactProposalDecisionRequest,
+    ProposalAction,
+    artifact_content_admission_receipt,
+)
 from openevo.evolution.artifact_payloads import ArtifactPayloadService
 from openevo.evolution.context import (
     artifact_manifest,
@@ -58,12 +64,16 @@ from openevo.evolution.ids import new_id
 from openevo.evolution.materialization_root_lock import get_materialization_root_lock
 from openevo.evolution.store_schema_identity import classify_store_schema
 from openevo.evolution.models import (
+    ArtifactContentAdmissionReceipt,
     ArtifactPromotionUpdateRequest,
     AdapterMergeSpec,
     ArtifactRegisterRequest,
     ArtifactResponse,
     ArtifactState,
     ArtifactType,
+    FailedPlanBoundJobAuthorityResponse,
+    SuccessorTransitionJobInventoryResponse,
+    SuccessorArtifactAuthorityResponse,
     ContextResolveRequest,
     ContextResolveResponse,
     DatasetCreateRequest,
@@ -81,6 +91,7 @@ from openevo.evolution.models import (
     JobCreateRequest,
     JobCreateResponse,
     JobState,
+    ReflectorInferenceReservationReceipt,
     ReviewAdjudicationRequest,
     ReviewClaimRequest,
     ReviewPacketResponse,
@@ -93,6 +104,9 @@ from openevo.evolution.models import (
     WorkerCompleteRequest,
     WorkerFailRequest,
     WorkerHeartbeatRequest,
+    WorkerReflectorInferenceCompleteRequest,
+    WorkerReflectorInferenceReserveRequest,
+    WorkerReflectorInferenceReserveResponse,
 )
 from openevo.evolution.planned_jobs import (
     PlanBoundJobCreateRequest,
@@ -127,6 +141,7 @@ from openevo.evolution.revisions import (
 )
 from openevo.evolution.time import utc_now_iso
 from openevo.evolution.framework.contracts import (
+    MAX_CONTRIBUTION_TEXT,
     MAX_CONTRACT_JSON_BYTES,
     MAX_HANDLER_ARTIFACTS,
     canonical_digest,
@@ -242,6 +257,28 @@ CREATE TABLE IF NOT EXISTS plan_bound_job_retry_requests (
     PRIMARY KEY(job_id, retry_request_id),
     FOREIGN KEY(job_id) REFERENCES jobs(job_id) ON DELETE RESTRICT
 );
+CREATE TABLE IF NOT EXISTS reflector_inference_reservations (
+    job_id TEXT PRIMARY KEY,
+    reservation_id TEXT NOT NULL UNIQUE,
+    request_id TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('started', 'completed')),
+    max_model_calls INTEGER NOT NULL CHECK (max_model_calls = 1),
+    model_calls_started INTEGER NOT NULL CHECK (model_calls_started = 1),
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    runtime_receipt_sha256 TEXT,
+    content_sha256 TEXT NOT NULL,
+    FOREIGN KEY(job_id) REFERENCES jobs(job_id) ON DELETE RESTRICT
+);
+CREATE TABLE IF NOT EXISTS artifact_admission_decisions (
+    decision_id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL UNIQUE,
+    request_sha256 TEXT NOT NULL CHECK(length(request_sha256) = 64),
+    receipt_sha256 TEXT NOT NULL CHECK(length(receipt_sha256) = 64),
+    receipt_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(job_id) REFERENCES jobs(job_id) ON DELETE RESTRICT
+) STRICT;
 CREATE TABLE IF NOT EXISTS plan_bound_job_transition_bindings (
     job_id TEXT PRIMARY KEY,
     successor_transition_id TEXT NOT NULL,
@@ -1146,6 +1183,37 @@ def _text_metadata(value: Any) -> str | None:
 
 def _json_dumps(value: Any, *, indent: int | None = None) -> str:
     return json.dumps(value, indent=indent, sort_keys=True, allow_nan=False)
+
+
+def _canonical_payload_sha256(value: dict[str, object]) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _admission_receipt_matches_request(
+    receipt: ArtifactProposalDecisionReceipt,
+    request: ArtifactProposalDecisionRequest,
+) -> bool:
+    return (
+        receipt.decision_id == request.decision_id
+        and receipt.job_id == request.job_id
+        and receipt.artifact_type is request.artifact_type
+        and receipt.action is request.action
+        and receipt.parent_artifact_id == request.parent_artifact_id
+        and receipt.genesis is request.genesis
+        and receipt.selected_artifact_id == request.selected_artifact_id
+        and receipt.reason == request.reason
+        and receipt.admission == request.admission
+        and receipt.content_admission.basis_sha256
+        == request.content_admission_basis.content_sha256
+    )
 
 
 def _dataset_create_request_json(request: DatasetCreateRequest) -> str:
@@ -6013,6 +6081,7 @@ class EvolutionStore:
                     self._validate_plan_bound_job_contract(
                         conn,
                         job_row,
+                        allow_historical_terminal_registry=True,
                     )
                 )
                 if (
@@ -6035,6 +6104,104 @@ class EvolutionStore:
                     pass
                 raise
         return _artifact_response_from_row(row)
+
+    def get_internal_successor_artifact_authority(
+        self,
+        successor_transition_id: str,
+        artifact_id: str,
+    ) -> SuccessorArtifactAuthorityResponse:
+        """Return immutable job, lineage, and payload identity for one output."""
+
+        artifact = self.get_internal_successor_artifact(
+            successor_transition_id,
+            artifact_id,
+        )
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT staging_job_id FROM artifacts WHERE artifact_id = ?",
+                (artifact_id,),
+            ).fetchone()
+            if row is None or not isinstance(row["staging_job_id"], str):
+                raise ValueError("successor artifact lacks job authority")
+            job_id = str(row["staging_job_id"])
+            job = conn.execute(
+                "SELECT input_artifact_ids_json FROM jobs WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()
+            if job is None:
+                raise ValueError("successor artifact job is unavailable")
+            try:
+                input_artifact_ids = tuple(
+                    json.loads(str(job["input_artifact_ids_json"]))
+                )
+            except (TypeError, ValueError) as exc:
+                raise ValueError("successor artifact input authority is invalid") from exc
+            if not all(isinstance(item, str) and item for item in input_artifact_ids):
+                raise ValueError("successor artifact input authority is invalid")
+        terminal = self.get_internal_job_result(job_id)
+        outputs = terminal.get("outputs")
+        selected = [
+            item
+            for item in outputs if isinstance(item, dict) and item.get("artifact_id") == artifact_id
+        ] if isinstance(outputs, list) else []
+        if len(selected) != 1:
+            raise ValueError("successor artifact job output authority is incomplete")
+        output = selected[0]
+        admission_decision = None
+        with self.connect() as conn:
+            decision_row = conn.execute(
+                "SELECT receipt_json, receipt_sha256 FROM "
+                "artifact_admission_decisions WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()
+            proposal_rows = conn.execute(
+                "SELECT artifact_id, promoted FROM artifacts "
+                "WHERE staging_job_id = ? AND state = ? AND type = ? "
+                "ORDER BY artifact_id",
+                (job_id, str(ArtifactState.SEALED), artifact.type.value),
+            ).fetchall()
+        proposal_ids = tuple(str(item["artifact_id"]) for item in proposal_rows)
+        if decision_row is not None:
+            admission_decision = ArtifactProposalDecisionReceipt.model_validate_json(
+                str(decision_row["receipt_json"])
+            )
+            if (
+                admission_decision.content_sha256
+                != decision_row["receipt_sha256"]
+                or admission_decision.job_id != job_id
+                or admission_decision.action is not ProposalAction.UPDATE
+                or admission_decision.active_artifact_id != artifact_id
+                or admission_decision.selected_artifact_id != artifact_id
+                or admission_decision.proposal_artifact_ids != proposal_ids
+                or sum(bool(item["promoted"]) for item in proposal_rows) != 1
+            ):
+                raise ValueError("successor artifact admission authority is invalid")
+        elif proposal_ids != (artifact_id,):
+            raise ValueError("multi-proposal successor lacks Core admission authority")
+        return SuccessorArtifactAuthorityResponse(
+            successor_transition_id=successor_transition_id,
+            job_id=job_id,
+            input_artifact_ids=input_artifact_ids,
+            artifact=artifact,
+            payload_manifest_sha256=output.get("payload_manifest_digest"),
+            payload_byte_size=output.get("payload_byte_size"),
+            proposal_artifact_ids=proposal_ids,
+            admission_decision_id=(
+                None
+                if admission_decision is None
+                else admission_decision.decision_id
+            ),
+            admission_decision_sha256=(
+                None
+                if admission_decision is None
+                else admission_decision.content_sha256
+            ),
+            content_admission=(
+                None
+                if admission_decision is None
+                else admission_decision.content_admission
+            ),
+        )
 
     def discard_successor_transition_outputs(
         self,
@@ -6526,6 +6693,384 @@ class EvolutionStore:
                     pass
                 raise
         return self.get_artifact(artifact_id)
+
+    def apply_internal_artifact_admission(
+        self,
+        request: ArtifactProposalDecisionRequest,
+    ) -> ArtifactProposalDecisionReceipt:
+        """Atomically admit and promote one sealed plan-bound proposal.
+
+        This control-plane operation is deliberately separate from the public
+        artifact promotion endpoint.  Successor outputs are immutable SEALED
+        artifacts; only their registry promotion bit and this content-addressed
+        decision authority change, in one SQLite transaction.
+        """
+
+        request = ArtifactProposalDecisionRequest.model_validate(request)
+        request_sha256 = _canonical_payload_sha256(
+            request.model_dump(mode="json")
+        )
+        with self.connect() as conn:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                existing_rows = conn.execute(
+                    "SELECT * FROM artifact_admission_decisions "
+                    "WHERE decision_id = ? OR job_id = ? ORDER BY decision_id",
+                    (request.decision_id, request.job_id),
+                ).fetchall()
+                if existing_rows:
+                    if len(existing_rows) != 1:
+                        raise ValueError("artifact admission identity is ambiguous")
+                    existing = existing_rows[0]
+                    if (
+                        existing["decision_id"] != request.decision_id
+                        or existing["job_id"] != request.job_id
+                        or existing["request_sha256"] != request_sha256
+                    ):
+                        raise ValueError("artifact admission identity was reused")
+                    receipt = ArtifactProposalDecisionReceipt.model_validate_json(
+                        str(existing["receipt_json"])
+                    )
+                    if (
+                        receipt.content_sha256 != existing["receipt_sha256"]
+                        or not _admission_receipt_matches_request(receipt, request)
+                    ):
+                        raise ValueError("artifact admission receipt is invalid")
+                    self._verify_internal_artifact_admission_state(conn, receipt)
+                    conn.commit()
+                    return receipt
+
+                job_row = conn.execute(
+                    "SELECT * FROM jobs WHERE job_id = ?",
+                    (request.job_id,),
+                ).fetchone()
+                if job_row is None or job_row["state"] != str(JobState.SUCCEEDED):
+                    raise ValueError(
+                        "proposal decision requires a succeeded native job"
+                    )
+                validated = self._validate_plan_bound_job_contract(
+                    conn,
+                    job_row,
+                    allow_historical_terminal_registry=True,
+                )
+                if (
+                    request.artifact_type.value
+                    not in validated.output_artifact_types
+                ):
+                    raise ValueError(
+                        "artifact admission type differs from the plan-bound job"
+                    )
+                binding = conn.execute(
+                    "SELECT successor_transition_id FROM "
+                    "plan_bound_job_transition_bindings WHERE job_id = ?",
+                    (request.job_id,),
+                ).fetchone()
+                if binding is None:
+                    raise ValueError(
+                        "artifact admission requires successor transition authority"
+                    )
+                _require_successor_transition_not_discarded(
+                    conn,
+                    str(binding["successor_transition_id"]),
+                )
+                proposal_rows = conn.execute(
+                    "SELECT * FROM artifacts WHERE staging_job_id = ? "
+                    "AND state = ? AND type = ? ORDER BY artifact_id",
+                    (
+                        request.job_id,
+                        str(ArtifactState.SEALED),
+                        request.artifact_type.value,
+                    ),
+                ).fetchall()
+                proposal_ids = tuple(
+                    str(row["artifact_id"]) for row in proposal_rows
+                )
+                if not proposal_ids:
+                    raise ValueError(
+                        "native evolution job has no sealed proposal of the requested type"
+                    )
+                if request.selected_artifact_id is not None and (
+                    request.selected_artifact_id not in proposal_ids
+                ):
+                    raise ValueError(
+                        "selected artifact is not a proposal from this job"
+                    )
+                if any(int(row["promoted"]) != 0 for row in proposal_rows):
+                    raise ValueError(
+                        "proposal promotion occurred before Core admission"
+                    )
+                content_admission = self._artifact_content_admission(
+                    conn,
+                    proposal_rows,
+                    request=request,
+                    source_artifact_ids=validated.envelope.input_artifact_ids(),
+                )
+                if (
+                    not content_admission.passed
+                    and (
+                        request.action is not ProposalAction.REJECT
+                        or request.admission.passed is not False
+                    )
+                ):
+                    raise ValueError(
+                        "proposal content admission failed and requires reject"
+                    )
+
+                parent_ids = self._plan_bound_parent_artifact_ids(
+                    conn,
+                    validated.envelope.input_artifact_ids(),
+                    artifact_type=request.artifact_type.value,
+                )
+                if request.genesis:
+                    if parent_ids:
+                        raise ValueError(
+                            "genesis admission found an existing parent authority"
+                        )
+                elif request.parent_artifact_id is None:
+                    if request.action is not ProposalAction.REJECT or parent_ids:
+                        raise ValueError(
+                            "parentless admission lacks genesis authority"
+                        )
+                elif parent_ids != (request.parent_artifact_id,):
+                    raise ValueError(
+                        "parent artifact differs from plan-bound input authority"
+                    )
+
+                parent_row = None
+                if request.parent_artifact_id is not None:
+                    parent_row = conn.execute(
+                        "SELECT * FROM artifacts WHERE artifact_id = ?",
+                        (request.parent_artifact_id,),
+                    ).fetchone()
+                    if (
+                        parent_row is None
+                        or parent_row["type"] != request.artifact_type.value
+                        or int(parent_row["promoted"]) != 1
+                    ):
+                        raise ValueError("parent artifact authority is not active")
+
+                active_artifact_id = (
+                    request.selected_artifact_id
+                    if request.action is ProposalAction.UPDATE
+                    else request.parent_artifact_id
+                )
+                if request.action is ProposalAction.UPDATE:
+                    conn.execute(
+                        "UPDATE artifacts SET promoted = CASE WHEN artifact_id = ? "
+                        "THEN 1 ELSE 0 END WHERE staging_job_id = ? AND type = ?",
+                        (
+                            request.selected_artifact_id,
+                            request.job_id,
+                            request.artifact_type.value,
+                        ),
+                    )
+
+                rejected = tuple(
+                    artifact_id
+                    for artifact_id in proposal_ids
+                    if artifact_id != request.selected_artifact_id
+                )
+                created_at = utc_now_iso()
+                body: dict[str, object] = {
+                    "schema_version": "openevo.artifact_proposal_decision.v1",
+                    "decision_id": request.decision_id,
+                    "job_id": request.job_id,
+                    "artifact_type": request.artifact_type.value,
+                    "action": request.action.value,
+                    "parent_artifact_id": request.parent_artifact_id,
+                    "genesis": request.genesis,
+                    "proposal_artifact_ids": list(proposal_ids),
+                    "selected_artifact_id": request.selected_artifact_id,
+                    "rejected_artifact_ids": list(rejected),
+                    "active_artifact_id": active_artifact_id,
+                    "reason": request.reason,
+                    "admission": request.admission.model_dump(mode="json"),
+                    "content_admission": content_admission.model_dump(mode="json"),
+                    "created_at": created_at,
+                }
+                body["content_sha256"] = _canonical_payload_sha256(body)
+                receipt = ArtifactProposalDecisionReceipt.model_validate(body)
+                self._verify_internal_artifact_admission_state(conn, receipt)
+                receipt_json = _json_dumps(receipt.model_dump(mode="json"))
+                conn.execute(
+                    "INSERT INTO artifact_admission_decisions("
+                    "decision_id, job_id, request_sha256, receipt_sha256, "
+                    "receipt_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        receipt.decision_id,
+                        receipt.job_id,
+                        request_sha256,
+                        receipt.content_sha256,
+                        receipt_json,
+                        created_at,
+                    ),
+                )
+                self._verify_bound_store_identity(conn)
+                conn.commit()
+                return receipt
+            except BaseException:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                raise
+
+    def _artifact_content_admission(
+        self,
+        conn: sqlite3.Connection,
+        proposal_rows: list[sqlite3.Row],
+        *,
+        request: ArtifactProposalDecisionRequest,
+        source_artifact_ids: tuple[str, ...],
+    ) -> ArtifactContentAdmissionReceipt:
+        payloads: dict[str, dict[str, str]] = {}
+        source_payloads: dict[str, dict[str, str]] = {}
+        with ArtifactPayloadService(self.files.root) as service:
+            for rank_index, row in enumerate(proposal_rows):
+                manifest = _internal_job_output_object(
+                    row,
+                    "manifest_json",
+                    "manifest",
+                )
+                scores = _internal_job_output_object(
+                    row,
+                    "scores_json",
+                    "scores",
+                )
+                snapshot = service.issue_snapshot(
+                    artifact_id=str(row["artifact_id"]),
+                    artifact_type=str(row["type"]),
+                    name=str(row["name"]),
+                    uri=str(row["uri"]),
+                    manifest=manifest,
+                    scores=scores,
+                    rank_index=rank_index,
+                )
+                verified_text: dict[str, str] = {}
+                for entry in snapshot.payload_entries:
+                    if (
+                        entry.size_bytes > MAX_CONTRIBUTION_TEXT
+                        or not (
+                            entry.media_type.startswith("text/")
+                            or entry.media_type
+                            in {
+                                "application/json",
+                                "application/toml",
+                                "application/yaml",
+                                "application/x-sh",
+                            }
+                        )
+                    ):
+                        raise ValueError(
+                            "native artifact content admission requires bounded UTF-8 payloads"
+                        )
+                    verified_text[entry.relative_path] = service.read_utf8_prefix(
+                        snapshot.payload_handle,
+                        entry.relative_path,
+                        max_chars=MAX_CONTRIBUTION_TEXT,
+                        max_bytes=entry.size_bytes,
+                    )
+                payloads[snapshot.artifact_id] = verified_text
+            source_rows: list[sqlite3.Row] = []
+            for artifact_id in source_artifact_ids:
+                source = conn.execute(
+                    "SELECT * FROM artifacts WHERE artifact_id = ? AND type = ?",
+                    (artifact_id, ArtifactType.DATASET.value),
+                ).fetchone()
+                if source is not None:
+                    source_rows.append(source)
+            for rank_index, row in enumerate(source_rows):
+                manifest = _internal_job_output_object(
+                    row,
+                    "manifest_json",
+                    "manifest",
+                )
+                scores = _internal_job_output_object(
+                    row,
+                    "scores_json",
+                    "scores",
+                )
+                snapshot = service.issue_snapshot(
+                    artifact_id=str(row["artifact_id"]),
+                    artifact_type=str(row["type"]),
+                    name=str(row["name"]),
+                    uri=str(row["uri"]),
+                    manifest=manifest,
+                    scores=scores,
+                    rank_index=rank_index,
+                )
+                verified_text: dict[str, str] = {}
+                for entry in snapshot.payload_entries:
+                    if (
+                        entry.size_bytes > MAX_CONTRIBUTION_TEXT
+                        or not (
+                            entry.media_type.startswith("text/")
+                            or entry.media_type == "application/json"
+                        )
+                    ):
+                        raise ValueError(
+                            "sealed source content admission requires bounded UTF-8 datasets"
+                        )
+                    verified_text[entry.relative_path] = service.read_utf8_prefix(
+                        snapshot.payload_handle,
+                        entry.relative_path,
+                        max_chars=MAX_CONTRIBUTION_TEXT,
+                        max_bytes=entry.size_bytes,
+                    )
+                if not verified_text:
+                    raise ValueError(
+                        "sealed source content admission requires dataset payload evidence"
+                    )
+                source_payloads[snapshot.artifact_id] = verified_text
+        return artifact_content_admission_receipt(
+            basis=request.content_admission_basis,
+            payloads=payloads,
+            source_payloads=source_payloads,
+        )
+
+    @staticmethod
+    def _plan_bound_parent_artifact_ids(
+        conn: sqlite3.Connection,
+        input_artifact_ids: tuple[str, ...],
+        *,
+        artifact_type: str,
+    ) -> tuple[str, ...]:
+        parents: list[str] = []
+        for artifact_id in input_artifact_ids:
+            row = conn.execute(
+                "SELECT artifact_id, type FROM artifacts WHERE artifact_id = ?",
+                (artifact_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError("plan-bound input artifact authority is missing")
+            if row["type"] == artifact_type:
+                parents.append(str(row["artifact_id"]))
+        if len(parents) > 1 or len(parents) != len(set(parents)):
+            raise ValueError("plan-bound target has ambiguous parent authority")
+        return tuple(parents)
+
+    @staticmethod
+    def _verify_internal_artifact_admission_state(
+        conn: sqlite3.Connection,
+        receipt: ArtifactProposalDecisionReceipt,
+    ) -> None:
+        for proposal_id in receipt.proposal_artifact_ids:
+            row = conn.execute(
+                "SELECT promoted FROM artifacts WHERE artifact_id = ? "
+                "AND staging_job_id = ? AND state = ?",
+                (proposal_id, receipt.job_id, str(ArtifactState.SEALED)),
+            ).fetchone()
+            if row is None or bool(row["promoted"]) is (
+                proposal_id != receipt.active_artifact_id
+            ):
+                raise ValueError("artifact admission registry state is invalid")
+        if receipt.parent_artifact_id is not None:
+            parent = conn.execute(
+                "SELECT promoted FROM artifacts WHERE artifact_id = ?",
+                (receipt.parent_artifact_id,),
+            ).fetchone()
+            if parent is None or bool(parent["promoted"]) is not True:
+                raise ValueError("artifact admission parent state is invalid")
 
     def update_artifact_promotion_from_request(
         self,
@@ -9168,6 +9713,13 @@ class EvolutionStore:
                 ).fetchone()
                 if row is None:
                     raise ValueError(f"unknown job: {job_id}")
+                if conn.execute(
+                    "SELECT 1 FROM reflector_inference_reservations WHERE job_id = ?",
+                    (job_id,),
+                ).fetchone() is not None:
+                    raise ValueError(
+                        "plan-bound job consumed its reflector inference authority"
+                    )
                 validated = self._validate_plan_bound_job_contract(
                     conn,
                     row,
@@ -9426,6 +9978,8 @@ class EvolutionStore:
         self,
         conn: sqlite3.Connection,
         row: sqlite3.Row,
+        *,
+        allow_historical_terminal_registry: bool = False,
     ) -> _ValidatedPlanBoundJobIdentity:
         plan_id = row["plan_id"]
         if not isinstance(plan_id, str) or not plan_id:
@@ -9438,9 +9992,23 @@ class EvolutionStore:
             raise ValueError(f"job references unknown plan: {plan_id}")
         plan = EvolutionPlan.model_validate_json(str(plan_row["plan_json"]))
         snapshot = self._registry_snapshot
+        historical_registry = False
         if snapshot is None:
-            raise RuntimeError("plan-bound execution requires an active registry snapshot")
-        validate_plan_against_snapshot(plan, snapshot)
+            if not allow_historical_terminal_registry:
+                raise RuntimeError(
+                    "plan-bound execution requires an active registry snapshot"
+                )
+            historical_registry = True
+        else:
+            try:
+                validate_plan_against_snapshot(plan, snapshot)
+            except ValueError as exc:
+                if (
+                    not allow_historical_terminal_registry
+                    or str(exc) != "plan does not match the active registry identity"
+                ):
+                    raise
+                historical_registry = True
         plan_digest = canonical_digest(plan)
         if (
             plan.plan_id != plan_id
@@ -9461,8 +10029,8 @@ class EvolutionStore:
             or selection.method_identity_digest != row["method_identity_digest"]
         ):
             raise ValueError("plan-bound job method identity is invalid")
-        descriptor = snapshot.methods[selection.method_id]
-        if (
+        descriptor = None if historical_registry else snapshot.methods[selection.method_id]
+        if not historical_registry and (
             snapshot.identity_digest_for("method", selection.method_id)
             != selection.method_identity_digest
         ):
@@ -9520,9 +10088,19 @@ class EvolutionStore:
             not isinstance(output_types, list)
             or any(not isinstance(value, str) or not value for value in output_types)
             or tuple(output_types) != envelope.output_artifact_types
-            or tuple(output_types) != descriptor.output_artifact_types
+            or (
+                descriptor is not None
+                and tuple(output_types) != descriptor.output_artifact_types
+            )
         ):
             raise ValueError("plan-bound job output artifact types are invalid")
+        if historical_registry and (
+            row["state"] != str(JobState.SUCCEEDED)
+            or successor_transition_id is None
+        ):
+            raise ValueError(
+                "historical registry readback requires a sealed terminal successor job"
+            )
         return _ValidatedPlanBoundJobIdentity(
             plan=plan,
             selection=selection,
@@ -9539,10 +10117,15 @@ class EvolutionStore:
         self,
         conn: sqlite3.Connection,
         row: sqlite3.Row,
+        *,
+        allow_historical_terminal_registry: bool = False,
     ) -> _ValidatedPlanBoundJob:
         identity = self._validate_plan_bound_job_identity(
             conn,
             row,
+            allow_historical_terminal_registry=(
+                allow_historical_terminal_registry
+            ),
         )
         input_artifacts = tuple(
             WorkerClaimInputArtifact.model_validate(artifact)
@@ -10005,6 +10588,20 @@ class EvolutionStore:
                         str(row["job_id"]),
                     )
                 )
+                inference_started = conn.execute(
+                    "SELECT 1 FROM reflector_inference_reservations WHERE job_id = ?",
+                    (row["job_id"],),
+                ).fetchone()
+                next_state = (
+                    JobState.FAILED
+                    if inference_started is not None
+                    else JobState.PENDING
+                )
+                error = (
+                    "reflector inference outcome is not safely replayable"
+                    if inference_started is not None
+                    else f"lease expired at {_utc_dt_to_iso(lease_expires_at)}"
+                )
                 conn.execute(
                     """
                     UPDATE jobs
@@ -10015,9 +10612,9 @@ class EvolutionStore:
                     WHERE job_id = ?
                     """,
                     (
-                        str(JobState.PENDING),
+                        str(next_state),
                         utc_now_iso(),
-                        f"lease expired at {_utc_dt_to_iso(lease_expires_at)}",
+                        error,
                         row["job_id"],
                     ),
                 )
@@ -10454,7 +11051,7 @@ class EvolutionStore:
             try:
                 conn.execute("BEGIN")
                 row = conn.execute(
-                    "SELECT job_id, state, error FROM jobs WHERE job_id = ?",
+                    "SELECT * FROM jobs WHERE job_id = ?",
                     (job_id,),
                 ).fetchone()
                 if row is None:
@@ -10508,11 +11105,10 @@ class EvolutionStore:
                             raise ValueError(
                                 "sealed transition artifact authority is invalid"
                             )
-                        validated = (
-                            self._validate_plan_bound_job_contract(
-                                conn,
-                                job_authority,
-                            )
+                        validated = self._validate_plan_bound_job_contract(
+                            conn,
+                            job_authority,
+                            allow_historical_terminal_registry=True,
                         )
                         candidates = conn.execute(
                             """
@@ -10629,6 +11225,100 @@ class EvolutionStore:
             raise ValueError("job result exceeds the internal serialized byte bound")
         return result
 
+    def get_internal_failed_plan_bound_job_authority(
+        self,
+        job_id: str,
+    ) -> FailedPlanBoundJobAuthorityResponse:
+        """Return immutable identity for one failed non-retryable planned job.
+
+        This is a read-only projection over the existing job, plan, envelope,
+        and transition binding.  Its result digest intentionally covers the
+        unchanged legacy internal job result so historical recovery evidence
+        remains stable.
+        """
+
+        terminal = self.get_internal_job_result(job_id)
+        if (
+            terminal.get("state") != str(JobState.FAILED)
+            or terminal.get("retryable") is not False
+            or terminal.get("artifact_ids") != []
+            or terminal.get("successor_transition_id") is None
+        ):
+            raise ValueError("job is not a failed non-retryable successor job")
+        with self.connect() as conn:
+            try:
+                conn.execute("BEGIN")
+                row = conn.execute(
+                    "SELECT * FROM jobs WHERE job_id = ?",
+                    (job_id,),
+                ).fetchone()
+                if row is None:
+                    raise ValueError(f"unknown job: {job_id}")
+                validated = self._validate_plan_bound_job_contract(conn, row)
+                if (
+                    validated.successor_transition_id
+                    != terminal["successor_transition_id"]
+                ):
+                    raise ValueError("failed job transition authority is invalid")
+                conn.commit()
+            except BaseException:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                raise
+        return FailedPlanBoundJobAuthorityResponse(
+            job_id=job_id,
+            state="failed",
+            retryable=False,
+            successor_transition_id=str(terminal["successor_transition_id"]),
+            plan_id=validated.plan.plan_id,
+            plan_digest=validated.envelope.plan_digest,
+            target_id=validated.selection.target_id,
+            method_id=validated.selection.method_id,
+            method_identity_digest=validated.selection.method_identity_digest,
+            execution_envelope_digest=canonical_digest(validated.envelope),
+            declared_output_artifact_types=validated.output_artifact_types,
+            output_artifact_ids=(),
+            job_result_sha256=canonical_digest(terminal),
+        )
+
+    def get_internal_successor_transition_job_inventory(
+        self,
+        successor_transition_id: str,
+    ) -> SuccessorTransitionJobInventoryResponse:
+        """Return the closed read-only job inventory for one transition.
+
+        An empty inventory is meaningful authority: it proves that a Core
+        successor attempt failed before Evolution durably accepted any job.
+        The projection is bounded, sorted, and content addressed so callers
+        cannot mistake a partial query for absence.
+        """
+
+        if (
+            not isinstance(successor_transition_id, str)
+            or not 1 <= len(successor_transition_id) <= 256
+        ):
+            raise ValueError("successor transition identity is invalid")
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT job_id FROM plan_bound_job_transition_bindings "
+                "WHERE successor_transition_id = ? ORDER BY job_id LIMIT 129",
+                (successor_transition_id,),
+            ).fetchall()
+        if len(rows) > 128:
+            raise ValueError("successor transition job inventory exceeds its bound")
+        job_ids = tuple(str(row["job_id"]) for row in rows)
+        payload = {
+            "job_ids": list(job_ids),
+            "successor_transition_id": successor_transition_id,
+        }
+        return SuccessorTransitionJobInventoryResponse(
+            successor_transition_id=successor_transition_id,
+            job_ids=job_ids,
+            content_sha256=canonical_digest(payload),
+        )
+
     def _materialize_feedback_applications_for_artifact(
         self,
         conn: sqlite3.Connection,
@@ -10726,13 +11416,21 @@ class EvolutionStore:
                 )
 
     def fail_job(self, job_id: str, request: WorkerFailRequest) -> dict[str, object]:
-        next_state = JobState.PENDING if request.retryable else JobState.FAILED
         error = request.error
         manifest_paths: list[Path] = []
         with self.connect() as conn:
             try:
                 conn.execute("BEGIN IMMEDIATE")
                 self._assert_job_lease(conn, job_id, request.lease_id)
+                inference_started = conn.execute(
+                    "SELECT 1 FROM reflector_inference_reservations WHERE job_id = ?",
+                    (job_id,),
+                ).fetchone()
+                next_state = (
+                    JobState.PENDING
+                    if request.retryable and inference_started is None
+                    else JobState.FAILED
+                )
                 manifest_paths = self._delete_staged_artifacts_for_job(conn, job_id)
                 conn.execute(
                     """
@@ -10753,6 +11451,193 @@ class EvolutionStore:
                 raise
         self._unlink_artifact_manifests(manifest_paths)
         return {"job_id": job_id, "state": str(next_state), "error": error}
+
+    def reserve_reflector_inference(
+        self,
+        job_id: str,
+        request: WorkerReflectorInferenceReserveRequest,
+    ) -> WorkerReflectorInferenceReserveResponse:
+        """Atomically reserve the sole paid reflector call for a leased native job."""
+
+        with self.connect() as conn:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                job = self._assert_job_lease(conn, job_id, request.lease_id)
+                validated = self._validate_plan_bound_job_contract(conn, job)
+                if validated.envelope.core_config().get(
+                    "max_reflector_model_calls"
+                ) != 1:
+                    raise ValueError(
+                        "durable reflector inference requires an exact one-call budget"
+                    )
+                existing = conn.execute(
+                    "SELECT * FROM reflector_inference_reservations WHERE job_id = ?",
+                    (job_id,),
+                ).fetchone()
+                if existing is not None:
+                    receipt = self._reflector_inference_receipt(existing)
+                    if (
+                        receipt.request_id != request.request_id
+                        or receipt.max_model_calls != request.max_model_calls
+                    ):
+                        raise ValueError(
+                            "reflector inference was already started for this job"
+                        )
+                    conn.commit()
+                    return WorkerReflectorInferenceReserveResponse(
+                        receipt=receipt,
+                        execute_allowed=False,
+                    )
+                now = utc_now_iso()
+                payload: dict[str, object] = {
+                    "schema_version": "openevo.reflector_inference_reservation.v1",
+                    "reservation_id": new_id("reflector-reservation"),
+                    "job_id": job_id,
+                    "request_id": request.request_id,
+                    "state": "started",
+                    "max_model_calls": 1,
+                    "model_calls_started": 1,
+                    "started_at": now,
+                    "completed_at": None,
+                    "runtime_receipt_sha256": None,
+                }
+                payload["content_sha256"] = _canonical_payload_sha256(payload)
+                receipt = ReflectorInferenceReservationReceipt.model_validate(payload)
+                conn.execute(
+                    """
+                    INSERT INTO reflector_inference_reservations(
+                        job_id, reservation_id, request_id, state,
+                        max_model_calls, model_calls_started, started_at,
+                        completed_at, runtime_receipt_sha256, content_sha256
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        receipt.job_id,
+                        receipt.reservation_id,
+                        receipt.request_id,
+                        receipt.state,
+                        receipt.max_model_calls,
+                        receipt.model_calls_started,
+                        receipt.started_at,
+                        receipt.completed_at,
+                        receipt.runtime_receipt_sha256,
+                        receipt.content_sha256,
+                    ),
+                )
+                conn.commit()
+                return WorkerReflectorInferenceReserveResponse(
+                    receipt=receipt,
+                    execute_allowed=True,
+                )
+            except Exception:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                raise
+
+    def complete_reflector_inference(
+        self,
+        job_id: str,
+        request: WorkerReflectorInferenceCompleteRequest,
+    ) -> ReflectorInferenceReservationReceipt:
+        """Seal a reservation after one managed reflector response is durable."""
+
+        with self.connect() as conn:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                self._assert_job_lease(conn, job_id, request.lease_id)
+                row = conn.execute(
+                    "SELECT * FROM reflector_inference_reservations WHERE job_id = ?",
+                    (job_id,),
+                ).fetchone()
+                if row is None:
+                    raise ValueError("reflector inference reservation does not exist")
+                observed = self._reflector_inference_receipt(row)
+                if observed.request_id != request.request_id:
+                    raise ValueError("reflector inference completion request changed")
+                if observed.state == "completed":
+                    if (
+                        observed.runtime_receipt_sha256
+                        != request.runtime_receipt_sha256
+                    ):
+                        raise ValueError("reflector inference completion hash changed")
+                    conn.commit()
+                    return observed
+                payload = observed.model_dump(
+                    mode="json",
+                    exclude={"content_sha256"},
+                )
+                payload.update(
+                    {
+                        "state": "completed",
+                        "completed_at": utc_now_iso(),
+                        "runtime_receipt_sha256": request.runtime_receipt_sha256,
+                    }
+                )
+                payload["content_sha256"] = _canonical_payload_sha256(payload)
+                receipt = ReflectorInferenceReservationReceipt.model_validate(payload)
+                cursor = conn.execute(
+                    """
+                    UPDATE reflector_inference_reservations
+                    SET state = ?, completed_at = ?, runtime_receipt_sha256 = ?,
+                        content_sha256 = ?
+                    WHERE job_id = ? AND state = 'started'
+                    """,
+                    (
+                        receipt.state,
+                        receipt.completed_at,
+                        receipt.runtime_receipt_sha256,
+                        receipt.content_sha256,
+                        job_id,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError("reflector inference reservation changed")
+                conn.commit()
+                return receipt
+            except Exception:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                raise
+
+    def get_reflector_inference_reservation(
+        self,
+        job_id: str,
+    ) -> ReflectorInferenceReservationReceipt:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM reflector_inference_reservations WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError("reflector inference reservation does not exist")
+            return self._reflector_inference_receipt(row)
+
+    @staticmethod
+    def _reflector_inference_receipt(
+        row: sqlite3.Row,
+    ) -> ReflectorInferenceReservationReceipt:
+        return ReflectorInferenceReservationReceipt(
+            reservation_id=str(row["reservation_id"]),
+            job_id=str(row["job_id"]),
+            request_id=str(row["request_id"]),
+            state=str(row["state"]),
+            max_model_calls=int(row["max_model_calls"]),
+            model_calls_started=int(row["model_calls_started"]),
+            started_at=str(row["started_at"]),
+            completed_at=(
+                None if row["completed_at"] is None else str(row["completed_at"])
+            ),
+            runtime_receipt_sha256=(
+                None
+                if row["runtime_receipt_sha256"] is None
+                else str(row["runtime_receipt_sha256"])
+            ),
+            content_sha256=str(row["content_sha256"]),
+        )
 
     def _cleanup_registered_artifacts(self, artifact_ids: list[str]) -> None:
         for artifact_id in artifact_ids:

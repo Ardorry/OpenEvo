@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -64,7 +64,10 @@ from openevo.rollout.models import (
 )
 from openevo.runtime.codex_isolation import (
     CODEX_SUBSCRIPTION_CONTRACT_KEY,
+    CODEX_SUBSCRIPTION_READINESS_KEY,
     codex_subscription_contract,
+    codex_subscription_readiness_receipt,
+    is_historical_codex_subscription_authority,
 )
 from openevo.runtime.managed import (
     MANAGED_HOME,
@@ -87,7 +90,13 @@ _MAX_CAPTURED_RESULT_DEPTH = 64
 
 
 class ScienceAttemptExecutionV2Error(RuntimeError):
-    def __init__(self, code: str, *, retryable: bool) -> None:
+    def __init__(
+        self,
+        code: str,
+        *,
+        retryable: bool,
+        failure_authority: Mapping[str, object] | None = None,
+    ) -> None:
         if (
             not isinstance(code, str)
             or not code
@@ -98,6 +107,9 @@ class ScienceAttemptExecutionV2Error(RuntimeError):
         super().__init__(code)
         self.code = code
         self.retryable = retryable
+        self.failure_authority = (
+            None if failure_authority is None else dict(failure_authority)
+        )
 
 
 class ScienceAttemptCancelledV2(ScienceAttemptExecutionV2Error):
@@ -768,17 +780,78 @@ class ScienceAttemptExecutorV2:
                 )
             if status.status == "running":
                 continue
-            if (
-                status.status != "completed"
-                or status.total_sessions != 1
-                or status.completed_sessions != 1
-                or len(status.results) != 1
-            ):
+            if status.status != "completed":
                 raise ScienceAttemptExecutionV2Error(
                     "rollout_task_failed",
                     retryable=True,
                 )
-            result = canonical_subscription_session_result(status.results[0])
+            if (
+                status.total_sessions != 1
+                or status.completed_sessions != 1
+                or len(status.results) != 1
+            ):
+                raise ScienceAttemptExecutionV2Error(
+                    "rollout_terminal_evidence_changed",
+                    retryable=False,
+                )
+            raw_result = SessionResult.model_validate(
+                status.results[0].model_dump(mode="python")
+            )
+            if (
+                raw_result.task_id != task_id
+                or raw_result.metadata.get("policy_version")
+                != compiled.policy_version
+            ):
+                raise ScienceAttemptExecutionV2Error(
+                    "rollout_terminal_evidence_changed",
+                    retryable=False,
+                )
+            if raw_result.status != "COMPLETED":
+                execution = (
+                    raw_result.metadata.get("openevo", {}).get(
+                        "candidate_execution_status", {}
+                    )
+                    if isinstance(raw_result.metadata.get("openevo"), dict)
+                    else {}
+                )
+                model_started = execution.get("model_started")
+                benchmark_started = execution.get("benchmark_started")
+                closed_failure = execution.get("failure_code")
+                if type(model_started) is not bool:
+                    model_started = None
+                if type(benchmark_started) is not bool:
+                    benchmark_started = None
+                if closed_failure == "candidate_subscription_isolation_not_ready":
+                    code = "candidate_subscription_isolation_not_ready"
+                    retryable = False
+                elif raw_result.status == "TIMEOUT":
+                    code = "rollout_session_timeout"
+                    retryable = True
+                else:
+                    code = "rollout_session_error"
+                    retryable = True
+                failure = {
+                    "schema_version": "openevo.science_attempt_failure_authority.v1",
+                    "task_id": compiled.task.task_id,
+                    "attempt_id": compiled.attempt.attempt_id,
+                    "failure_code": code,
+                    "retryable": retryable,
+                    "rollout_task_id": task_id,
+                    "session_id": raw_result.session_id,
+                    "session_status": str(raw_result.status),
+                    "model_started": model_started,
+                    "benchmark_started": benchmark_started,
+                    "benchmark_trace_count": len(raw_result.trajectory.traces),
+                }
+                failure["content_sha256"] = hashlib.sha256(
+                    _canonical_json_bytes(failure)
+                ).hexdigest()
+                raise ScienceAttemptExecutionV2Error(
+                    code,
+                    retryable=retryable,
+                    failure_authority=failure,
+                )
+            result = canonical_subscription_session_result(raw_result)
             if (
                 result.task_id != task_id
                 or result.metadata.get("policy_version") != compiled.policy_version
@@ -1083,6 +1156,35 @@ ScienceAttemptExecutionStateV2 = Literal[
 ]
 
 
+class ScienceAttemptFailureAuthorityV1(_ScienceExecutionModel):
+    """Closed, immutable and credential-free terminal failure evidence."""
+
+    schema_version: Literal["openevo.science_attempt_failure_authority.v1"] = (
+        "openevo.science_attempt_failure_authority.v1"
+    )
+    task_id: str = Field(pattern=_ID_PATTERN)
+    attempt_id: str = Field(pattern=_ID_PATTERN)
+    failure_code: str = Field(pattern=_ERROR_CODE_PATTERN)
+    retryable: bool
+    rollout_task_id: str = Field(pattern=_ID_PATTERN)
+    session_id: str = Field(pattern=_ID_PATTERN)
+    session_status: Literal["ERROR", "TIMEOUT"]
+    model_started: bool | None
+    benchmark_started: bool | None
+    benchmark_trace_count: int = Field(ge=0)
+    content_sha256: str = Field(pattern=_SHA256_PATTERN)
+
+    @model_validator(mode="after")
+    def _content_addressed(self) -> ScienceAttemptFailureAuthorityV1:
+        payload = self.model_dump(mode="json", exclude={"content_sha256"})
+        expected = hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
+        if self.content_sha256 != expected:
+            raise ValueError("science Attempt failure authority digest is invalid")
+        if self.benchmark_started is True and self.model_started is not True:
+            raise ValueError("benchmark start requires model start")
+        return self
+
+
 class ScienceAttemptExecutionRecordV2(_ScienceExecutionModel):
     """Durable private lifecycle for one immutable public Attempt reference."""
 
@@ -1094,6 +1196,14 @@ class ScienceAttemptExecutionRecordV2(_ScienceExecutionModel):
     evidence: ScienceAttemptExecutionEvidenceV2 | None = None
     successor_plan: ScienceSuccessorPlanV2 | None = None
     error_code: str | None = Field(default=None, pattern=_ERROR_CODE_PATTERN)
+    # Keep the v2 execution document byte-compatible with lifecycle-28 rows.
+    # A structured authority is append-only evidence for new failed records;
+    # its absence must not materialize a new JSON ``null`` field while reading
+    # an immutable predecessor database.
+    failure_authority: ScienceAttemptFailureAuthorityV1 | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     created_at: m2.UtcTimestamp
     updated_at: m2.UtcTimestamp
 
@@ -1128,7 +1238,13 @@ class ScienceAttemptExecutionRecordV2(_ScienceExecutionModel):
         if self.state == "failed":
             if self.error_code is None:
                 raise ValueError("failed Attempt execution requires an error code")
-        elif self.error_code is not None:
+            if self.failure_authority is not None and (
+                self.failure_authority.task_id != self.task_id
+                or self.failure_authority.attempt_id != self.attempt_id
+                or self.failure_authority.failure_code != self.error_code
+            ):
+                raise ValueError("failed Attempt authority ownership is inconsistent")
+        elif self.error_code is not None or self.failure_authority is not None:
             raise ValueError("only failed Attempt execution may contain an error code")
         return self
 
@@ -1150,7 +1266,11 @@ def science_attempt_execution_receipt_sha256(
     return hashlib.sha256(payload).hexdigest()
 
 
-def canonical_subscription_session_result(result: SessionResult) -> SessionResult:
+def canonical_subscription_session_result(
+    result: SessionResult,
+    *,
+    allow_historical_isolation_authority: bool = False,
+) -> SessionResult:
     """Validate the one terminal transcript result accepted by the v2 run owner."""
 
     if type(result) is not SessionResult:
@@ -1175,6 +1295,33 @@ def canonical_subscription_session_result(result: SessionResult) -> SessionResul
         or trajectory.metadata.get("token_level_metrics_available") is not False
     ):
         raise ValueError("subscription trajectory lacks exact transcript capture authority")
+    openevo_metadata = result.metadata.get("openevo")
+    if not isinstance(openevo_metadata, dict):
+        raise ValueError("subscription result lacks Core isolation authority")
+    isolation_contract = openevo_metadata.get(CODEX_SUBSCRIPTION_CONTRACT_KEY)
+    isolation_receipt = openevo_metadata.get(CODEX_SUBSCRIPTION_READINESS_KEY)
+    current_isolation = (
+        isolation_contract == codex_subscription_contract()
+        and isolation_receipt == codex_subscription_readiness_receipt()
+    )
+    historical_isolation = (
+        allow_historical_isolation_authority
+        and is_historical_codex_subscription_authority(
+            isolation_contract,
+            isolation_receipt,
+        )
+    )
+    if not current_isolation and not historical_isolation:
+        raise ValueError("subscription result isolation authority drifted")
+    execution_status = openevo_metadata.get("candidate_execution_status")
+    if current_isolation and (
+        not isinstance(execution_status, dict)
+        or execution_status.get("phase") != "benchmark_execution"
+        or execution_status.get("model_started") is not True
+        or execution_status.get("benchmark_started") is not True
+        or execution_status.get("failure_code") is not None
+    ):
+        raise ValueError("subscription result execution-stage authority is invalid")
     for trace in trajectory.traces:
         if (
             not trace.prompt_messages
@@ -1200,8 +1347,15 @@ def canonical_subscription_session_result(result: SessionResult) -> SessionResul
     return result
 
 
-def science_session_result_bytes(result: SessionResult) -> bytes:
-    result = canonical_subscription_session_result(result)
+def science_session_result_bytes(
+    result: SessionResult,
+    *,
+    allow_historical_isolation_authority: bool = False,
+) -> bytes:
+    result = canonical_subscription_session_result(
+        result,
+        allow_historical_isolation_authority=allow_historical_isolation_authority,
+    )
     return _canonical_json_bytes(
         result.model_dump(
             mode="json",
@@ -1212,8 +1366,17 @@ def science_session_result_bytes(result: SessionResult) -> bytes:
     )
 
 
-def science_session_result_sha256(result: SessionResult) -> str:
-    return hashlib.sha256(science_session_result_bytes(result)).hexdigest()
+def science_session_result_sha256(
+    result: SessionResult,
+    *,
+    allow_historical_isolation_authority: bool = False,
+) -> str:
+    return hashlib.sha256(
+        science_session_result_bytes(
+            result,
+            allow_historical_isolation_authority=allow_historical_isolation_authority,
+        )
+    ).hexdigest()
 
 
 def _canonical_json_bytes(value: object) -> bytes:
@@ -1260,6 +1423,7 @@ __all__ = [
     "ScienceAttemptCancelledV2",
     "ScienceAttemptExecutionV2Error",
     "ScienceAttemptExecutionEvidenceV2",
+    "ScienceAttemptFailureAuthorityV1",
     "ScienceAttemptExecutorV2",
     "ScienceAttemptExecutionReceiptV2",
     "ScienceAttemptExecutionRecordV2",
