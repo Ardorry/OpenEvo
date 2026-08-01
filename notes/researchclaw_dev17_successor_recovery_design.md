@@ -275,6 +275,16 @@ create, workspace upload is idempotent, and atomic commit remains the sole head
 advance. Ordinary successor attempts and different reconciliation identities
 are ineligible.
 
+### Historical materialization replay (lifecycle 92)
+
+A reconciliation may publish its context and fail before Core commit, then be
+retried after a second repair release changes the registry again. The Core-
+only Evolution readback requires a unique row matching the exact successor
+transition and canonical request digest. Lifecycle 92 treats that closed row's
+registry as durable publication authority; it does not create another context.
+Fresh publications still require the admission or active release registry,
+and ordinary successor execution retains its original strict registry fence.
+
 ### Regression obligations
 
 - reconciliation after all method jobs succeeded does not call job create or

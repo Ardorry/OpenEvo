@@ -1231,6 +1231,27 @@ def test_production_preparer_commits_complete_workspace_and_context_successor(
                 validated=validated,
             )
 
+        newer_binding = _service_binding("7" * 64)
+        newer_binding = replace(
+            newer_binding,
+            framework_lock_digest="6" * 64,
+            _identity=replace(
+                newer_binding._identity,
+                framework_lock_digest="6" * 64,
+            ),
+        )
+        services.binding = newer_binding
+        evolution.registry_sha256 = newer_binding.registry_digest
+        historical_materialized = owner._successor_preparer.materialize_context(
+            reconciliation_context,
+            validated,
+        )
+        assert historical_materialized == first_materialized
+        assert evolution.materialized_count == materialized_before + 1
+
+        services.binding = later_binding
+        evolution.registry_sha256 = later_binding.registry_digest
+
         services.binding = replace(
             later_binding,
             runtime_identity_digest="0" * 64,

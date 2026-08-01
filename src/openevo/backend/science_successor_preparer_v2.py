@@ -2549,6 +2549,7 @@ class ProductionScienceSuccessorPreparerV2:
             item.owner_successor_transition_id
             for item in validated.composition
         )
+        replayed_materialization = False
         with self._evolution(context, record, project) as (binding, client):
             request = ContextProjectionResolveRequest(
                 task_id=context.task.task_id,
@@ -2592,6 +2593,7 @@ class ProductionScienceSuccessorPreparerV2:
                             request_digest,
                         )
                     )
+                    replayed_materialization = True
                 except EvolutionHttpStatusError as lookup_error:
                     if lookup_error.status_code != 404:
                         raise
@@ -2611,6 +2613,7 @@ class ProductionScienceSuccessorPreparerV2:
                                     request_digest,
                                 )
                             )
+                            replayed_materialization = True
                         except (
                             EvolutionHttpStatusError,
                             ValueError,
@@ -2636,6 +2639,12 @@ class ProductionScienceSuccessorPreparerV2:
         }
         if context.transition_attempt.reconciliation_only is True:
             allowed_registry_digests.add(binding.registry_digest)
+            if replayed_materialization:
+                # The Core-only readback endpoint already proved a unique,
+                # canonical request digest for this exact transition. Its
+                # registry is durable publication authority even if another
+                # repair release is now active.
+                allowed_registry_digests.add(materialized.registry_digest)
         if (
             materialized.registry_digest not in allowed_registry_digests
             or materialized.successor_transition_id
