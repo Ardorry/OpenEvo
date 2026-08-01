@@ -35,8 +35,8 @@ from openevo_researchclawbench.production_operation_ports import (
     CoreV2CandidatePort,
     LocalCompositePort,
     LocalSanitizerPort,
-    _candidate_workspace_binding_receipt,
     _candidate_runtime_injection_authority,
+    _candidate_workspace_binding_receipt,
     _closed_core_control_error_code,
     _closed_task_local_overlay,
     _compose_candidate_objective,
@@ -54,9 +54,12 @@ from openevo_researchclawbench.production_operation_ports import (
     require_nonterminal_candidate_lifecycle,
 )
 from openevo_researchclawbench.production_training_operations import (
+    FailureClass,
     JudgeCredentialsRequired,
     OperationStatus,
+    ProductionPorts,
     ProductionTrainingOperations,
+    SuccessorRecoveryRequired,
     judge_identity_preflight,
 )
 from openevo_researchclawbench.synthetic_training_fixture import (
@@ -73,7 +76,6 @@ from openevo_researchclawbench.transition_engine import TrainingStage
 from pydantic import SecretStr
 
 from openevo.backend.contracts.v2.models import WorkspaceArchiveDeclarationV2
-from openevo.workspace_archive import write_workspace_archive
 from openevo.evolution.framework.builtins import (
     ImplementationDistributionIdentity,
     build_builtin_registry,
@@ -83,9 +85,15 @@ from openevo.evolution.framework.capabilities import (
     build_evolution_capabilities,
 )
 from openevo.evolution.framework.profiles import execution_profile_for_release_mode
+from openevo.workspace_archive import write_workspace_archive
 
 ROOT = Path(__file__).resolve().parents[4]
-PROTOCOL = ROOT / "experiments/sequential_task_reflector_evolution_v0/protocol/protocol.yaml"
+PROTOCOL = Path(
+    os.environ.get(
+        "OPENEVORESEARCHCLAWBENCH_TEST_PROTOCOL",
+        ROOT / "experiments/sequential_task_reflector_evolution_v0/protocol/protocol.yaml",
+    )
+)
 
 
 def _content_admission(
@@ -2122,6 +2130,56 @@ def test_soft_judge_attachment_projects_out_verified_routing_metadata() -> None:
     assert len(calls) == 3
 
 
+class _SuccessorCoreAuthority:
+    generation = "1" * 32
+    release_identity = "2" * 64
+
+
+def _successor_request() -> dict[str, Any]:
+    return {
+        "attachment": {
+            "successor_transition_id": "transition-failed",
+            "attachment_id": "attachment-1",
+            "resolved_view_sha256": "a" * 64,
+        }
+    }
+
+
+def _failed_successor_authority(
+    *,
+    retryable: bool,
+    commit: dict[str, Any] | None = None,
+    artifacts: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    error = {
+        "code": "successor_transition_failed",
+        "retryable": retryable,
+    }
+    return {
+        "transition": {
+            "state": "failed",
+            "error": error,
+            "transition": {
+                "successor_transition_id": "transition-failed",
+                "predecessor_project_head": {
+                    "project_head_id": "head-0",
+                    "manifest_sha256": "b" * 64,
+                },
+            },
+        },
+        "attempts": [
+            {
+                "transition_attempt_id": "transition-attempt-1",
+                "successor_transition_id": "transition-failed",
+                "state": "failed",
+                "error": error,
+            }
+        ],
+        "commit": commit,
+        "artifacts": [] if artifacts is None else artifacts,
+    }
+
+
 def test_successor_nonretryable_failure_is_never_resubmitted(monkeypatch) -> None:
     calls = []
 
@@ -2134,32 +2192,16 @@ def test_successor_nonretryable_failure_is_never_resubmitted(monkeypatch) -> Non
 
         def json(self, method, path, *, payload=None, headers=None):
             calls.append((method, path, payload, headers))
-            return {
-                "transition": {
-                    "state": "failed",
-                    "error": {"retryable": False},
-                    "transition": {
-                        "predecessor_project_head": {
-                            "project_head_id": "head-0"
-                        }
-                    },
-                },
-                "artifacts": [],
-            }
+            return _failed_successor_authority(retryable=False)
 
     monkeypatch.setattr(ports_module, "CoreControlV2Client", Client)
-    port = CoreSuccessorPort(object(), core_authority=object())
-    with pytest.raises(CoreControlError, match="no retryable authority"):
-        port.execute(
-            {
-                "attachment": {
-                    "successor_transition_id": "transition-failed",
-                    "resolved_view_sha256": "a" * 64,
-                }
-            },
-            "retry-key",
-        )
+    port = CoreSuccessorPort(object(), core_authority=_SuccessorCoreAuthority())
+    with pytest.raises(SuccessorRecoveryRequired) as raised:
+        port.execute(_successor_request(), "retry-key")
     assert [call[0] for call in calls] == ["GET"]
+    assert raised.value.checkpoint["commit_absent"] is True
+    assert raised.value.checkpoint["successor_artifact_count"] == 0
+    assert raised.value.checkpoint["supervisor_idempotency_key"] == "retry-key"
 
 
 def test_successor_retryable_failure_submits_one_retry_then_fails_closed(
@@ -2178,32 +2220,165 @@ def test_successor_retryable_failure_submits_one_retry_then_fails_closed(
             calls.append((method, path, payload, headers))
             if method == "POST":
                 return {"operation_id": "retry-1"}
-            return {
-                "transition": {
-                    "state": "failed",
-                    "error": {"retryable": True},
-                    "transition": {
-                        "predecessor_project_head": {
-                            "project_head_id": "head-0"
-                        }
-                    },
-                },
-                "artifacts": [],
-            }
+            get_count = sum(call[0] == "GET" for call in calls)
+            return _failed_successor_authority(retryable=get_count == 1)
 
     monkeypatch.setattr(ports_module, "CoreControlV2Client", Client)
-    port = CoreSuccessorPort(object(), core_authority=object())
-    with pytest.raises(CoreControlError, match="retry failed"):
-        port.execute(
-            {
-                "attachment": {
-                    "successor_transition_id": "transition-failed",
-                    "resolved_view_sha256": "a" * 64,
-                }
-            },
-            "retry-key",
-        )
+    port = CoreSuccessorPort(object(), core_authority=_SuccessorCoreAuthority())
+    with pytest.raises(SuccessorRecoveryRequired):
+        port.execute(_successor_request(), "retry-key")
     assert [call[0] for call in calls] == ["GET", "POST", "GET"]
+    assert calls[1][3] == {"Idempotency-Key": "retry-key"}
+
+
+@pytest.mark.parametrize(
+    ("commit", "artifacts"),
+    [
+        ({"commit_id": "commit-1"}, []),
+        (None, [{"artifact_id": "artifact-1"}]),
+    ],
+)
+def test_successor_terminal_checkpoint_rejects_commit_or_artifact_conflict(
+    commit,
+    artifacts,
+) -> None:
+    port = CoreSuccessorPort(object(), core_authority=_SuccessorCoreAuthority())
+    with pytest.raises(CoreControlError, match="conflicts"):
+        port._recovery_checkpoint(
+            _failed_successor_authority(
+                retryable=False,
+                commit=commit,
+                artifacts=artifacts,
+            ),
+            request=_successor_request(),
+            idempotency_key="retry-key",
+        )
+
+
+def test_successor_lost_retry_response_reconciles_commit_without_second_post(
+    monkeypatch,
+) -> None:
+    calls = []
+
+    class Client:
+        committed = False
+
+        def __init__(self, _authority):
+            pass
+
+        def close(self):
+            pass
+
+        def json(self, method, path, *, payload=None, headers=None):
+            calls.append((method, path, payload, headers))
+            if method == "POST":
+                type(self).committed = True
+                raise ports_module.httpx.ReadError("lost retry response")
+            if type(self).committed:
+                return {"transition": {"state": "committed"}}
+            return _failed_successor_authority(retryable=True)
+
+    monkeypatch.setattr(ports_module, "CoreControlV2Client", Client)
+    monkeypatch.setattr(
+        CoreSuccessorPort,
+        "_result",
+        staticmethod(
+            lambda _authority, _request, _client: {
+                "successor_commit_id": "commit-1"
+            }
+        ),
+    )
+    port = CoreSuccessorPort(object(), core_authority=_SuccessorCoreAuthority())
+    with pytest.raises(ports_module.httpx.ReadError, match="lost retry response"):
+        port.execute(_successor_request(), "retry-key")
+    recovered = port.recover(_successor_request(), "retry-key")
+    assert recovered == {"successor_commit_id": "commit-1"}
+    assert [call[0] for call in calls] == ["GET", "POST", "GET"]
+
+
+def test_runner_restart_replays_terminal_successor_checkpoint_without_side_effect(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    del monkeypatch
+    checkpoint = CoreSuccessorPort(
+        object(), core_authority=_SuccessorCoreAuthority()
+    )._recovery_checkpoint(
+        _failed_successor_authority(retryable=False),
+        request=_successor_request(),
+        idempotency_key="checkpoint-key",
+    )
+
+    class FailingPort:
+        recover_calls = 0
+        execute_calls = 0
+
+        def recover(self, request, idempotency_key):
+            type(self).recover_calls += 1
+
+        def execute(self, request, idempotency_key):
+            type(self).execute_calls += 1
+            raise SuccessorRecoveryRequired(checkpoint)
+
+    first_port = FailingPort()
+    base_ports = ProductionPorts(
+        candidate=first_port,
+        validation=first_port,
+        evaluation=first_port,
+        attachment=first_port,
+        evolution=first_port,
+        composite=first_port,
+        task_local=first_port,
+        sanitizer=first_port,
+        freeze=first_port,
+    )
+    receipt_root = tmp_path / "checkpoint-operations"
+    operations = ProductionTrainingOperations(
+        config=object(),
+        experiment_run_id="rcb_oe_v0_checkpoint_test",
+        receipt_root=receipt_root,
+        ports=base_ports,
+    )
+    request = {"task_id": CANARY_TASK, **_successor_request()}
+    with pytest.raises(SuccessorRecoveryRequired) as first:
+        operations.collect_artifact_jobs(request, "checkpoint-key")
+    receipt = operations.receipts.get("checkpoint-key")
+    assert receipt is not None
+    assert receipt["status"] == OperationStatus.FAILED_TERMINAL.value
+    assert receipt["failure_class"] == FailureClass.AUTHORITY.value
+
+    class BombPort:
+        calls = 0
+
+        def recover(self, request, idempotency_key):
+            type(self).calls += 1
+            raise AssertionError("external recovery was replayed")
+
+        execute = recover
+
+    restarted = ProductionTrainingOperations(
+        config=object(),
+        experiment_run_id="rcb_oe_v0_checkpoint_test",
+        receipt_root=receipt_root,
+        ports=ProductionPorts(
+            candidate=BombPort(),
+            validation=BombPort(),
+            evaluation=BombPort(),
+            attachment=BombPort(),
+            evolution=BombPort(),
+            composite=BombPort(),
+            task_local=BombPort(),
+            sanitizer=BombPort(),
+            freeze=BombPort(),
+        ),
+    )
+    with pytest.raises(SuccessorRecoveryRequired) as second:
+        restarted.collect_artifact_jobs(request, "checkpoint-key")
+    assert first.value.checkpoint == second.value.checkpoint
+    assert first.value.checkpoint["core_generation"] == "1" * 32
+    assert FailingPort.recover_calls == 1
+    assert FailingPort.execute_calls == 1
+    assert BombPort.calls == 0
 
 
 def test_feedback_rejects_completed_dataset_authority_drift() -> None:

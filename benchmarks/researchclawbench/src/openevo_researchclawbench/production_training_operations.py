@@ -68,6 +68,34 @@ class ProductionOperationError(RuntimeError):
     """A formal operation failed closed before a valid receipt existed."""
 
 
+class SuccessorRecoveryRequired(ProductionOperationError):
+    """Core proved that a source successor needs append-only recovery."""
+
+    _SCHEMA_VERSION = "openevo.researchclawbench.successor_recovery_checkpoint.v1"
+
+    def __init__(self, checkpoint: dict[str, Any]) -> None:
+        if not isinstance(checkpoint, dict):
+            raise TypeError("successor recovery checkpoint must be an object")
+        closed = json.loads(canonical_bytes(checkpoint))
+        content = closed.get("content_sha256")
+        body = {key: value for key, value in closed.items() if key != "content_sha256"}
+        if (
+            closed.get("schema_version") != self._SCHEMA_VERSION
+            or not isinstance(content, str)
+            or _SHA256.fullmatch(content) is None
+            or canonical_sha256(body) != content
+            or closed.get("commit_absent") is not True
+            or closed.get("successor_artifact_count") != 0
+            or closed.get("source_mutation_allowed") is not False
+            or closed.get("candidate_reexecution_allowed") is not False
+            or closed.get("judge_reexecution_allowed") is not False
+            or closed.get("reflector_reexecution_allowed") is not False
+        ):
+            raise ValueError("successor recovery checkpoint is invalid")
+        self.checkpoint = closed
+        super().__init__("SUCCESSOR_RECOVERY_REQUIRED")
+
+
 @dataclass(frozen=True)
 class OperationResult:
     operation_id: str
@@ -416,17 +444,52 @@ class ProductionTrainingOperations:
         if existing is not None:
             if existing.get("input_identity") != input_identity:
                 raise ValueError("operation receipt request drifted")
+            if existing.get("status") == OperationStatus.FAILED_TERMINAL.value:
+                checkpoint = existing.get("successor_recovery_checkpoint")
+                if checkpoint is None:
+                    raise ProductionOperationError(
+                        "terminal operation receipt cannot prove recovery authority"
+                    )
+                raise SuccessorRecoveryRequired(checkpoint)
             return _operation_result_from_dict(existing)
         started = _utc_now()
-        recovered = port.recover(request, idempotency_key)
-        if recovered is None:
-            if recover_only:
-                raise ProductionOperationError("external authority cannot prove operation completion")
-            output = port.execute(request, idempotency_key)
-            status = OperationStatus.SUCCEEDED
-        else:
-            output = recovered
-            status = OperationStatus.RECOVERED
+        try:
+            recovered = port.recover(request, idempotency_key)
+            if recovered is None:
+                if recover_only:
+                    raise ProductionOperationError("external authority cannot prove operation completion")
+                output = port.execute(request, idempotency_key)
+                status = OperationStatus.SUCCEEDED
+            else:
+                output = recovered
+                status = OperationStatus.RECOVERED
+        except SuccessorRecoveryRequired as exc:
+            operation_id = (
+                "op-"
+                + hashlib.sha256(
+                    (kind + ":" + idempotency_key).encode()
+                ).hexdigest()[:24]
+            )
+            closed = self.receipts.put(
+                {
+                    "operation_id": operation_id,
+                    "operation_kind": kind,
+                    "idempotency_key": idempotency_key,
+                    "status": OperationStatus.FAILED_TERMINAL.value,
+                    "started_at": started,
+                    "completed_at": _utc_now(),
+                    "input_identity": input_identity,
+                    "output_identity": None,
+                    "receipt_path": os.fspath(self.receipts._path(idempotency_key)),
+                    "owned_resource_ids": [],
+                    "retryable": False,
+                    "failure_class": FailureClass.AUTHORITY.value,
+                    "successor_recovery_checkpoint": exc.checkpoint,
+                }
+            )
+            raise SuccessorRecoveryRequired(
+                closed["successor_recovery_checkpoint"]
+            ) from None
         if not isinstance(output, dict):
             raise ProductionOperationError(f"{kind} authority returned a non-object receipt")
         output = json.loads(canonical_bytes(output))
@@ -722,6 +785,7 @@ __all__ = [
     "ProductionOperationPort",
     "ProductionPorts",
     "ProductionTrainingOperations",
+    "SuccessorRecoveryRequired",
     "TrainingOperations",
     "judge_credential_readiness",
     "judge_identity_preflight",

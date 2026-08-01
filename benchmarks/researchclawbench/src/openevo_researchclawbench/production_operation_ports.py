@@ -59,6 +59,7 @@ from .managed_core_control import ManagedCoreControlAuthority
 from .production_training_operations import (
     ProductionOperationPort,
     ProductionPorts,
+    SuccessorRecoveryRequired,
 )
 from .prompt_composer import compose_native_instruction
 from .reflector_runner import NATIVE_METHODS
@@ -72,6 +73,7 @@ from .workspace import (
     build_official_workspace,
 )
 
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _VALIDATOR_FAILURE_TAGS = frozenset(
     {
         "UNSAFE_FILESYSTEM_ENTRY",
@@ -3387,7 +3389,23 @@ class CoreSuccessorPort(ProductionOperationPort):
         client = CoreControlV2Client(self.core_authority)
         try:
             authority = client.json("GET", f"/v2/internal/training-successors/{transition_id}")
-            return self._result(authority, request, client) if authority["transition"]["state"] == "committed" else None
+            transition = authority["transition"]
+            if transition["state"] == "committed":
+                return self._result(authority, request, client)
+            failure = transition.get("error")
+            if (
+                transition["state"] == "failed"
+                and isinstance(failure, dict)
+                and failure.get("retryable") is False
+            ):
+                raise SuccessorRecoveryRequired(
+                    self._recovery_checkpoint(
+                        authority,
+                        request=request,
+                        idempotency_key=idempotency_key,
+                    )
+                )
+            return None
         finally:
             client.close()
 
@@ -3402,8 +3420,12 @@ class CoreSuccessorPort(ProductionOperationPort):
             if transition["state"] == "failed":
                 failure = transition.get("error")
                 if not isinstance(failure, dict) or failure.get("retryable") is not True:
-                    raise CoreControlError(
-                        "Core successor failed with no retryable authority"
+                    raise SuccessorRecoveryRequired(
+                        self._recovery_checkpoint(
+                            authority,
+                            request=request,
+                            idempotency_key=idempotency_key,
+                        )
                     )
                 predecessor = transition["transition"]["predecessor_project_head"]
                 client.json(
@@ -3417,8 +3439,12 @@ class CoreSuccessorPort(ProductionOperationPort):
                 if authority["transition"]["state"] == "committed":
                     return self._result(authority, request, client)
                 if authority["transition"]["state"] == "failed":
-                    raise CoreControlError(
-                        "Core successor retry failed before producing a commit"
+                    raise SuccessorRecoveryRequired(
+                        self._recovery_checkpoint(
+                            authority,
+                            request=request,
+                            idempotency_key=idempotency_key,
+                        )
                     )
                 if authority["transition"]["state"] in {"cancelled", "superseded"}:
                     raise CoreControlError("Core successor terminated without a commit")
@@ -3426,6 +3452,106 @@ class CoreSuccessorPort(ProductionOperationPort):
             raise TimeoutError("Core successor evolution exceeded protocol timeout")
         finally:
             client.close()
+
+    def _recovery_checkpoint(
+        self,
+        authority: dict[str, Any],
+        *,
+        request: dict[str, Any],
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        """Close only an uncommitted, artifact-free terminal Core authority."""
+
+        transition = authority.get("transition")
+        transition_ref = (
+            transition.get("transition") if isinstance(transition, dict) else None
+        )
+        attempts = authority.get("attempts")
+        artifacts = authority.get("artifacts")
+        attachment = request.get("attachment")
+        latest = attempts[-1] if isinstance(attempts, list) and attempts else None
+        failure = latest.get("error") if isinstance(latest, dict) else None
+        transition_failure = (
+            transition.get("error") if isinstance(transition, dict) else None
+        )
+        commit_absent = "commit" in authority and authority.get("commit") is None
+        artifact_free = isinstance(artifacts, list) and not artifacts
+        if not commit_absent or not artifact_free:
+            raise CoreControlError(
+                "Core successor terminal authority conflicts with commit or artifact evidence"
+            )
+        if (
+            not isinstance(transition, dict)
+            or transition.get("state") != "failed"
+            or not isinstance(transition_failure, dict)
+            or transition_failure.get("retryable") is not False
+            or not isinstance(transition_ref, dict)
+            or not isinstance(attempts, list)
+            or not attempts
+            or not isinstance(latest, dict)
+            or latest.get("state") != "failed"
+            or not isinstance(failure, dict)
+            or failure.get("retryable") is not False
+            or not isinstance(attachment, dict)
+        ):
+            raise CoreControlError(
+                "Core successor terminal authority is incomplete or retryable"
+            )
+        transition_id = transition_ref.get("successor_transition_id")
+        latest_transition_id = latest.get("successor_transition_id")
+        request_transition_id = attachment.get("successor_transition_id")
+        predecessor = transition_ref.get("predecessor_project_head")
+        if (
+            not isinstance(transition_id, str)
+            or transition_id != latest_transition_id
+            or transition_id != request_transition_id
+            or not isinstance(predecessor, dict)
+            or not isinstance(predecessor.get("project_head_id"), str)
+            or not isinstance(predecessor.get("manifest_sha256"), str)
+            or _SHA256.fullmatch(predecessor["manifest_sha256"]) is None
+            or not isinstance(attachment.get("attachment_id"), str)
+            or not isinstance(attachment.get("resolved_view_sha256"), str)
+            or _SHA256.fullmatch(attachment["resolved_view_sha256"]) is None
+            or not isinstance(latest.get("transition_attempt_id"), str)
+            or not isinstance(failure.get("code"), str)
+        ):
+            raise CoreControlError(
+                "Core successor recovery identity is incomplete or drifted"
+            )
+        checkpoint = {
+            "schema_version": (
+                "openevo.researchclawbench.successor_recovery_checkpoint.v1"
+            ),
+            "successor_transition_id": transition_id,
+            "transition_attempt_count": len(attempts),
+            "latest_transition_attempt_id": latest.get("transition_attempt_id"),
+            "terminal_error_code": failure.get("code"),
+            "predecessor_project_head_id": predecessor["project_head_id"],
+            "predecessor_project_head_sha256": predecessor["manifest_sha256"],
+            "attachment_id": attachment["attachment_id"],
+            "resolved_view_sha256": attachment["resolved_view_sha256"],
+            "core_generation": self.core_authority.generation,
+            "core_release_identity": self.core_authority.release_identity,
+            "supervisor_idempotency_key": idempotency_key,
+            "terminal_authority_sha256": canonical_sha256(
+                {
+                    "transition": transition,
+                    "attempts": attempts,
+                    "commit": None,
+                    "artifacts": [],
+                }
+            ),
+            "commit_absent": True,
+            "successor_artifact_count": 0,
+            "recovery_mode": "core_append_only_new_generation",
+            "model_side_effect_state": "REQUIRES_CORE_RECOVERY_RESOLUTION",
+            "source_mutation_allowed": False,
+            "candidate_reexecution_allowed": False,
+            "judge_reexecution_allowed": False,
+            "reflector_reexecution_allowed": False,
+        }
+        checkpoint["content_sha256"] = canonical_sha256(checkpoint)
+        return checkpoint
 
     @staticmethod
     def _result(authority: dict[str, Any], request: dict[str, Any], client: CoreControlV2Client) -> dict[str, Any]:
