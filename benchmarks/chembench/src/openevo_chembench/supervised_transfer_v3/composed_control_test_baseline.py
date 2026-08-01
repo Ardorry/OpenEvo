@@ -76,6 +76,16 @@ _EVOLVED_EXECUTOR_SHA256 = (
 _NETWORK_RECOVERY_EXECUTOR_SHA256 = (
     "eb5d6309cc47285c3af56ef3ab9ce0853cad06894fa7f7d1cf518cd2b32598bc"
 )
+_RUNTIME_SERVICES_SOURCE = (
+    "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/"
+    "runtime_services.py"
+)
+_PRE_DOCKER_INSPECT_RECOVERY_RUNTIME_SERVICES_SHA256 = (
+    "be52736a684360e53c1ae1fc7db8184f5029da2c769a0b32a7f19a9be54c99e9"
+)
+_DOCKER_INSPECT_RECOVERY_RUNTIME_SERVICES_SHA256 = (
+    "afdcb4fee4d219ea2bbbe418a7a083ac49b6977987d0343b50b346bfaf3f015e"
+)
 _ALLOWED_BASELINE_SOURCE_CHANGES = {
     (
         "benchmarks/chembench/configs/supervised_transfer_v3/"
@@ -84,10 +94,7 @@ _ALLOWED_BASELINE_SOURCE_CHANGES = {
     "benchmarks/chembench/manifests/supervised_transfer_v3/source_manifest_v3.json",
     "benchmarks/chembench/scripts/supervised_transfer_v3/main.py",
     _EXECUTOR_SOURCE,
-    (
-        "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/"
-        "runtime_services.py"
-    ),
+    _RUNTIME_SERVICES_SOURCE,
     (
         "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v3/"
         "composed_control_test_baseline.py"
@@ -99,6 +106,10 @@ _ALLOWED_BASELINE_SOURCE_CHANGES = {
     (
         "benchmarks/chembench/tests/supervised_transfer_v2/"
         "test_executor_v2.py"
+    ),
+    (
+        "benchmarks/chembench/tests/supervised_transfer_v2/"
+        "test_runtime_services_v2.py"
     ),
 }
 
@@ -369,6 +380,16 @@ def build_control_baseline_source_compatibility_receipt_v3(
     )
     if not set(changed).issubset(_ALLOWED_BASELINE_SOURCE_CHANGES):
         raise ControlFinalTestBaselineV3Error("BASELINE_SOURCE_SCOPE_INVALID")
+    current_runtime_services_sha256 = sha256_bytes(
+        (inputs.repository_root / _RUNTIME_SERVICES_SOURCE).read_bytes()
+    )
+    if (
+        current_runtime_services_sha256
+        != _DOCKER_INSPECT_RECOVERY_RUNTIME_SERVICES_SHA256
+    ):
+        raise ControlFinalTestBaselineV3Error(
+            "BASELINE_RUNTIME_SERVICES_RECOVERY_DRIFT"
+        )
     diff = subprocess.run(
         (
             "git",
@@ -402,6 +423,14 @@ def build_control_baseline_source_compatibility_receipt_v3(
             "baseline_sha256": _NETWORK_RECOVERY_EXECUTOR_SHA256,
             "change_class": "runtime_health_recovery_only",
         },
+        "reviewed_runtime_services_transition": {
+            "path": _RUNTIME_SERVICES_SOURCE,
+            "prior_sha256": (
+                _PRE_DOCKER_INSPECT_RECOVERY_RUNTIME_SERVICES_SHA256
+            ),
+            "baseline_sha256": current_runtime_services_sha256,
+            "change_class": "docker_identity_read_timeout_recovery_only",
+        },
         "candidate_prompt_unchanged": True,
         "candidate_model_unchanged": True,
         "reasoning_effort_unchanged": True,
@@ -412,6 +441,7 @@ def build_control_baseline_source_compatibility_receipt_v3(
         "test_single_pass_unchanged": True,
         "terminal_completion_semantics_unchanged": True,
         "runtime_health_recovery_reviewed": True,
+        "docker_identity_read_timeout_recovery_reviewed": True,
         "baseline_change_limited_to_no_context_control_orchestration": True,
         "semantically_compatible": True,
     }

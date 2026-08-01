@@ -47,6 +47,10 @@ the candidate completion has been sealed in the append-only Test ledger.
   candidate submission.  Once Rollout has sealed a terminal result, postflight
   checks verify the exact process and managed-container identity without using
   transient free-capacity or heartbeat state to discard that completion.
+- A Docker identity-read timeout provides no identity observation and is
+  therefore retried as unavailable infrastructure.  Any observed container,
+  image, label, source, or executable identity mismatch remains a hard
+  fail-closed condition.
 - A bounded preflight health outage is converted to an auditable
   no-completion infrastructure retry.  Source, process, container, image, or
   executable identity drift remains a hard fail-closed condition.

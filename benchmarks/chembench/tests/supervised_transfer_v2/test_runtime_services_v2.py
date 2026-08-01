@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import signal
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -89,6 +90,27 @@ def test_gateway_container_receipt_is_closed_and_digest_bound() -> None:
     assert not any(value.startswith("/") for value in identity.payload.values())
     with pytest.raises(RuntimeServicesV2Error, match="RUNTIME_SERVICE_RECEIPT_INVALID"):
         GatewayContainerIdentityV2.from_payload({**payload, "host_path": "/forbidden"})
+
+
+def test_gateway_container_inspect_timeout_is_retryable_infrastructure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(services, "_resolve_docker_launcher", lambda: Path("/docker"))
+
+    def timeout(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        del args, kwargs
+        raise subprocess.TimeoutExpired(("/docker", "container", "inspect"), 10)
+
+    monkeypatch.setattr(services.subprocess, "run", timeout)
+
+    with pytest.raises(RuntimeServicesV2Error) as raised:
+        services._inspect_gateway_container(
+            container_name="openevo-stv2-gateway-" + "a" * 24,
+            source_commit="b" * 40,
+            service_run_id="stv2-services-20990101T000000Z-deadbeef",
+        )
+
+    assert raised.value.finding_code == "RUNTIME_SERVICE_UNAVAILABLE"
 
 
 def test_stop_cleans_exact_stale_source_receipt_without_reusing_it(

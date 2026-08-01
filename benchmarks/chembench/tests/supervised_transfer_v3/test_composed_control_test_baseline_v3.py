@@ -102,7 +102,13 @@ def test_runtime_health_fix_has_exact_source_compatibility_receipt(
     )
     transition = receipt["reviewed_executor_transition"]
     assert transition["change_class"] == "runtime_health_recovery_only"
+    runtime_transition = receipt["reviewed_runtime_services_transition"]
+    assert (
+        runtime_transition["change_class"]
+        == "docker_identity_read_timeout_recovery_only"
+    )
     assert receipt["runtime_health_recovery_reviewed"] is True
+    assert receipt["docker_identity_read_timeout_recovery_reviewed"] is True
     assert receipt["terminal_completion_semantics_unchanged"] is True
     assert receipt["semantically_compatible"] is True
 

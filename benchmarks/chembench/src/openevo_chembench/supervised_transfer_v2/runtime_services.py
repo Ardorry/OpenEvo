@@ -855,15 +855,28 @@ def _inspect_gateway_container(
     service_run_id: str,
 ) -> dict[str, str]:
     docker = _resolve_docker_launcher()
-    completed = subprocess.run(
-        (os.fspath(docker), "container", "inspect", container_name),
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=10,
-        env={"PATH": _SAFE_PATH, "HOME": "/proc/self", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"},
-        cwd="/",
-    )
+    try:
+        completed = subprocess.run(
+            (os.fspath(docker), "container", "inspect", container_name),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env={
+                "PATH": _SAFE_PATH,
+                "HOME": "/proc/self",
+                "LANG": "C.UTF-8",
+                "LC_ALL": "C.UTF-8",
+            },
+            cwd="/",
+        )
+    except subprocess.TimeoutExpired as exc:
+        # Docker Desktop/WSL can transiently stall an identity read even while
+        # the already-bound container remains healthy.  Preserve fail-closed
+        # identity checks, but surface the absence of an observation as the
+        # existing retryable infrastructure finding rather than an untyped
+        # exception that terminates the experiment.
+        raise RuntimeServicesV2Error("RUNTIME_SERVICE_UNAVAILABLE") from exc
     try:
         rows = json.loads(completed.stdout)
         row = rows[0]
