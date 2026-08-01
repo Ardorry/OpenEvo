@@ -96,3 +96,22 @@ and a fresh continuation namespace.
 - Real validation: a fresh isolated `Energy_004` gate using the formal model,
   reasoning, adapter, and protocol, followed by formal Dev17 continuation only
   after the gate passes.
+
+## Exact formal Core predecessor admission
+
+The first repaired release could not reach the mutation path. The host service
+observer rejected the still-healthy formal Core before `ensure_core_service`
+because v0.1.10 recognized only one published v0.1.9 daemon profile at
+lifecycle 16. The v38 service is a second, independently frozen v0.1.9 release
+at lifecycle 85. Its running ledger, authenticated `/version` response, and
+`/v2/system/status` response agree, but none matched the single hard-coded
+profile.
+
+The deployment repair adds the v38 predecessor as a second exact profile. It
+does not admit v0.1.9 generically. Observation and equal-lifecycle replacement
+require every frozen release, registry, framework-lock, source, daemon bundle,
+canonical manifest, build, OpenAPI, event-schema, feature-set, and runtime
+contract digest to match the profile. Any drift remains fail-closed. The
+existing lifecycle-16 profile continues to use ordinary monotonic 16-to-85
+replacement; only the exact lifecycle-85 formal profile receives the bounded
+v0.1.10 equal-lifecycle replacement authority.

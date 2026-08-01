@@ -66,6 +66,17 @@ PUBLISHED_V019_DAEMON = CoreDaemonBundleIdentity(
     canonical_manifest_sha256=("ec9a11829eadd298adcbf2c7d467b426a38ad62d5ce283d7068a0b78dfdc4287"),
     lifecycle_compatibility=16,
 )
+FORMAL_LIFECYCLE85_V019_RELEASE = CoreReleaseIdentity(
+    digest="a56fab869104c239bedb4d081571d2629f8cb8647f87140523413ed3617e1539",
+    registry_digest="c6afb6bf47047f6197c295b40d17a911e8061296de78ece672d8b3769b3484cd",
+    framework_lock_sha256="1c1429a12929d72e921d9fd228fe77d39d926cf17108f6b62fb6504109583482",
+    source_commit="3a7ee037b4106451aa47d1fcdedb148b2bc19160",
+)
+FORMAL_LIFECYCLE85_V019_DAEMON = CoreDaemonBundleIdentity(
+    bundle_sha256="9fa5983b2ed4fb1eb5d8ea8b9ed9c0dbf3390b2a4b1e2b52dd4bd4e5f2aabb36",
+    canonical_manifest_sha256=("ae6bcd30a11526a0cbd4922c0a4b03532b5f94a08a2c70c591daa48add578ebb"),
+    lifecycle_compatibility=85,
+)
 DAEMON_A = CoreDaemonBundleIdentity(
     bundle_sha256="2" * 64,
     canonical_manifest_sha256="3" * 64,
@@ -145,6 +156,11 @@ DAEMON_V16 = CoreDaemonBundleIdentity(
     bundle_sha256="5" * 64,
     canonical_manifest_sha256="b" * 64,
     lifecycle_compatibility=16,
+)
+DAEMON_V85 = CoreDaemonBundleIdentity(
+    bundle_sha256="0" * 64,
+    canonical_manifest_sha256="1" * 64,
+    lifecycle_compatibility=85,
 )
 DAEMON_V17 = CoreDaemonBundleIdentity(
     bundle_sha256="4" * 64,
@@ -1341,7 +1357,7 @@ def test_observation_accepts_exact_published_v019_daemon_predecessor(
     ):
         changed_ledger = {**ledger, field: drifted}
         assert not service._is_exact_published_v019_predecessor_ledger(changed_ledger)
-    assert service._is_v0110_published_v019_upgrade(
+    assert not service._is_v0110_published_v019_upgrade(
         ledger,
         release=RELEASE_A,
         candidate=DAEMON_V16,
@@ -1363,15 +1379,14 @@ def test_observation_accepts_exact_published_v019_daemon_predecessor(
     )
     floor = service._floor_from_ledger(ledger)
     assert service._is_exact_published_v019_predecessor_floor(floor)
-    assert service._is_v0110_published_v019_upgrade(
+    assert not service._is_v0110_published_v019_upgrade(
         floor,
         release=RELEASE_A,
         candidate=DAEMON_V16,
     )
     service._require_floor_compatibility(
         floor,
-        DAEMON_V16,
-        allow_equal_replacement=True,
+        DAEMON_V85,
     )
     with pytest.raises(CoreServiceError) as floor_exc:
         service._require_floor_compatibility(floor, DAEMON_V16)
@@ -1469,15 +1484,109 @@ def test_observation_accepts_exact_published_v019_daemon_predecessor(
         port=port,
         replace_mismatched=True,
         expected_predecessor=predecessor,
-        daemon_bundle_identity=DAEMON_V16,
+        daemon_bundle_identity=DAEMON_V85,
         process_controller=controller,
     )
 
     assert replacement.release_identity == RELEASE_A.digest
     assert replacement.generation != generation
-    assert replacement.bundle_sha256 == DAEMON_V16.bundle_sha256
-    assert replacement.lifecycle_compatibility == DAEMON_V16.lifecycle_compatibility
+    assert replacement.bundle_sha256 == DAEMON_V85.bundle_sha256
+    assert replacement.lifecycle_compatibility == DAEMON_V85.lifecycle_compatibility
     assert controller.terminated == [application_process, launcher_process]
+
+
+def test_formal_lifecycle85_v019_predecessor_requires_exact_profile() -> None:
+    ledger = {
+        "schema_version": 5,
+        "state": "running",
+        "release_identity": FORMAL_LIFECYCLE85_V019_RELEASE.digest,
+        "registry_digest": FORMAL_LIFECYCLE85_V019_RELEASE.registry_digest,
+        "framework_lock_sha256": FORMAL_LIFECYCLE85_V019_RELEASE.framework_lock_sha256,
+        "source_commit": FORMAL_LIFECYCLE85_V019_RELEASE.source_commit,
+        "bundle_sha256": FORMAL_LIFECYCLE85_V019_DAEMON.bundle_sha256,
+        "canonical_manifest_sha256": (
+            FORMAL_LIFECYCLE85_V019_DAEMON.canonical_manifest_sha256
+        ),
+        "lifecycle_compatibility": FORMAL_LIFECYCLE85_V019_DAEMON.lifecycle_compatibility,
+    }
+    assert service._is_exact_published_v019_predecessor_ledger(ledger)
+    assert service._is_v0110_published_v019_upgrade(
+        ledger,
+        release=RELEASE_A,
+        candidate=DAEMON_V85,
+    )
+    for field, drifted in (
+        ("release_identity", "0" * 64),
+        ("registry_digest", "0" * 64),
+        ("framework_lock_sha256", "0" * 64),
+        ("source_commit", "0" * 40),
+        ("bundle_sha256", "0" * 64),
+        ("canonical_manifest_sha256", "0" * 64),
+        ("lifecycle_compatibility", 84),
+    ):
+        assert not service._is_exact_published_v019_predecessor_ledger(
+            {**ledger, field: drifted}
+        )
+
+    floor = service._floor_from_ledger(ledger)
+    assert service._is_exact_published_v019_predecessor_floor(floor)
+    assert service._is_v0110_published_v019_upgrade(
+        floor,
+        release=RELEASE_A,
+        candidate=DAEMON_V85,
+    )
+    service._require_floor_compatibility(
+        floor,
+        DAEMON_V85,
+        allow_equal_replacement=True,
+    )
+    with pytest.raises(CoreServiceError) as floor_exc:
+        service._require_floor_compatibility(floor, DAEMON_V85)
+    assert floor_exc.value.code is CoreServiceErrorCode.UPDATE_REQUIRED
+
+    discovery = service.core_v2_models.VersionResponseV2.model_validate(
+        {
+            "api_name": "openevo-core-control-api",
+            "build_channel": "release",
+            "build_id": (
+                "ab72f274a89f1d8553689a9d6b6a0a8782012b4140d08ae6a7dbc0f1f392e799"
+            ),
+            "contracts": [
+                {
+                    "access": "mutation",
+                    "api_major": 2,
+                    "event_schema_sha256": (
+                        "464a52685dacaedc391fb17bb27516e64842e23d89d12d475679d7a41a0668df"
+                    ),
+                    "mutation_compatible": True,
+                    "openapi_sha256": (
+                        "f007726d8b092463a2515500e3cc0c496b52b45e9f24d1fc495b11df9a9a837b"
+                    ),
+                    "schema_version": "2",
+                }
+            ],
+            "feature_flags": list(RELEASE_DAEMON_FEATURE_FLAGS_V2),
+            "feature_set_sha256": (
+                "ba514a0165727757d147ab09d9ee934a0c0eab2411ec5e2244d49237146d3f56"
+            ),
+            "mutation_compatible": True,
+            "mutation_major": 2,
+            "preferred_major": 2,
+            "provider_kind": "openevo_daemon",
+            "registry_sha256": FORMAL_LIFECYCLE85_V019_RELEASE.registry_digest,
+            "release_version": "0.1.9",
+            "runtime_contract_sha256": (
+                "9993f8646120c7da84f27fc938791ee1651e79cedd81e2db95d510c7f56ab9cc"
+            ),
+            "schema_version": "2",
+            "source_commit": FORMAL_LIFECYCLE85_V019_RELEASE.source_commit,
+            "supported_majors": [2],
+        }
+    )
+    assert service._is_exact_published_v019_predecessor_discovery(discovery)
+    assert not service._is_exact_published_v019_predecessor_discovery(
+        discovery.model_copy(update={"build_id": "0" * 64})
+    )
 
 
 def test_release_launcher_ready_payload_binds_v2_contract_and_runtime() -> None:

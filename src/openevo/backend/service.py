@@ -319,6 +319,44 @@ _PUBLISHED_V019_PREDECESSOR = _PublishedDaemonPredecessorProfile(
     runtime_contract_sha256=("535e3a05645590c90956769d960884fbbd818280b7517582a72e0b4fb41987f0"),
 )
 
+_FORMAL_LIFECYCLE85_V019_PREDECESSOR = _PublishedDaemonPredecessorProfile(
+    release_version="0.1.9",
+    release=CoreReleaseIdentity(
+        digest="a56fab869104c239bedb4d081571d2629f8cb8647f87140523413ed3617e1539",
+        registry_digest=("c6afb6bf47047f6197c295b40d17a911e8061296de78ece672d8b3769b3484cd"),
+        framework_lock_sha256=("1c1429a12929d72e921d9fd228fe77d39d926cf17108f6b62fb6504109583482"),
+        source_commit="3a7ee037b4106451aa47d1fcdedb148b2bc19160",
+    ),
+    daemon=CoreDaemonBundleIdentity(
+        bundle_sha256=("9fa5983b2ed4fb1eb5d8ea8b9ed9c0dbf3390b2a4b1e2b52dd4bd4e5f2aabb36"),
+        canonical_manifest_sha256=(
+            "ae6bcd30a11526a0cbd4922c0a4b03532b5f94a08a2c70c591daa48add578ebb"
+        ),
+        lifecycle_compatibility=85,
+    ),
+    build_id="ab72f274a89f1d8553689a9d6b6a0a8782012b4140d08ae6a7dbc0f1f392e799",
+    openapi_sha256="f007726d8b092463a2515500e3cc0c496b52b45e9f24d1fc495b11df9a9a837b",
+    event_schema_sha256=("464a52685dacaedc391fb17bb27516e64842e23d89d12d475679d7a41a0668df"),
+    feature_flags=(
+        "atomic_successor_v2",
+        "event_replay_v2",
+        "project_genesis_v2",
+        "project_heads_v2",
+        "task_admission_v2",
+        "task_execution_v2",
+        "verified_capabilities",
+        "verified_registry",
+        "workspace_snapshots_v2",
+    ),
+    feature_set_sha256=("ba514a0165727757d147ab09d9ee934a0c0eab2411ec5e2244d49237146d3f56"),
+    runtime_contract_sha256=("9993f8646120c7da84f27fc938791ee1651e79cedd81e2db95d510c7f56ab9cc"),
+)
+
+_PUBLISHED_V019_PREDECESSORS = (
+    _PUBLISHED_V019_PREDECESSOR,
+    _FORMAL_LIFECYCLE85_V019_PREDECESSOR,
+)
+
 
 class CoreServiceEndpoint(Protocol):
     def open_verified_socket(self, *, timeout_seconds: float) -> socket.socket: ...
@@ -1616,28 +1654,54 @@ def _is_exact_production_v2_discovery(
 
 
 def _is_exact_published_v019_predecessor_ledger(ledger: dict[str, Any]) -> bool:
-    profile = _PUBLISHED_V019_PREDECESSOR
-    return bool(
-        _is_exact_daemon_ledger(ledger)
-        and ledger.get("release_identity") == profile.release.digest
-        and ledger.get("registry_digest") == profile.release.registry_digest
-        and ledger.get("framework_lock_sha256") == profile.release.framework_lock_sha256
-        and ledger.get("source_commit") == profile.release.source_commit
-        and ledger.get("bundle_sha256") == profile.daemon.bundle_sha256
-        and ledger.get("canonical_manifest_sha256") == profile.daemon.canonical_manifest_sha256
-        and ledger.get("lifecycle_compatibility") == profile.daemon.lifecycle_compatibility
+    return _published_v019_predecessor_ledger_profile(ledger) is not None
+
+
+def _published_v019_predecessor_ledger_profile(
+    ledger: dict[str, Any],
+) -> _PublishedDaemonPredecessorProfile | None:
+    if not _is_exact_daemon_ledger(ledger):
+        return None
+    return next(
+        (
+            profile
+            for profile in _PUBLISHED_V019_PREDECESSORS
+            if ledger.get("release_identity") == profile.release.digest
+            and ledger.get("registry_digest") == profile.release.registry_digest
+            and ledger.get("framework_lock_sha256")
+            == profile.release.framework_lock_sha256
+            and ledger.get("source_commit") == profile.release.source_commit
+            and ledger.get("bundle_sha256") == profile.daemon.bundle_sha256
+            and ledger.get("canonical_manifest_sha256")
+            == profile.daemon.canonical_manifest_sha256
+            and ledger.get("lifecycle_compatibility")
+            == profile.daemon.lifecycle_compatibility
+        ),
+        None,
     )
 
 
 def _is_exact_published_v019_predecessor_floor(value: dict[str, Any]) -> bool:
-    profile = _PUBLISHED_V019_PREDECESSOR
-    return bool(
-        value.get("schema_version") == 3
-        and value.get("state") == "stopped"
-        and value.get("release_identity") == profile.release.digest
-        and value.get("bundle_sha256") == profile.daemon.bundle_sha256
-        and value.get("canonical_manifest_sha256") == profile.daemon.canonical_manifest_sha256
-        and value.get("lifecycle_compatibility") == profile.daemon.lifecycle_compatibility
+    return _published_v019_predecessor_floor_profile(value) is not None
+
+
+def _published_v019_predecessor_floor_profile(
+    value: dict[str, Any],
+) -> _PublishedDaemonPredecessorProfile | None:
+    if value.get("schema_version") != 3 or value.get("state") != "stopped":
+        return None
+    return next(
+        (
+            profile
+            for profile in _PUBLISHED_V019_PREDECESSORS
+            if value.get("release_identity") == profile.release.digest
+            and value.get("bundle_sha256") == profile.daemon.bundle_sha256
+            and value.get("canonical_manifest_sha256")
+            == profile.daemon.canonical_manifest_sha256
+            and value.get("lifecycle_compatibility")
+            == profile.daemon.lifecycle_compatibility
+        ),
+        None,
     )
 
 
@@ -1647,14 +1711,13 @@ def _is_v0110_published_v019_upgrade(
     release: CoreReleaseIdentity,
     candidate: CoreDaemonBundleIdentity | None,
 ) -> bool:
-    profile = _PUBLISHED_V019_PREDECESSOR
+    profile = _published_v019_predecessor_ledger_profile(predecessor)
+    if profile is None:
+        profile = _published_v019_predecessor_floor_profile(predecessor)
     return bool(
         __version__ == "0.1.10"
+        and profile is not None
         and candidate is not None
-        and (
-            _is_exact_published_v019_predecessor_ledger(predecessor)
-            or _is_exact_published_v019_predecessor_floor(predecessor)
-        )
         and release.digest != profile.release.digest
         and release.source_commit != profile.release.source_commit
         and candidate.lifecycle_compatibility == V2_DAEMON_LIFECYCLE_COMPATIBILITY
@@ -1667,7 +1730,16 @@ def _is_v0110_published_v019_upgrade(
 def _is_exact_published_v019_predecessor_discovery(
     version: core_v2_models.VersionResponseV2,
 ) -> bool:
-    profile = _PUBLISHED_V019_PREDECESSOR
+    return any(
+        _matches_published_v019_predecessor_discovery(version, profile)
+        for profile in _PUBLISHED_V019_PREDECESSORS
+    )
+
+
+def _matches_published_v019_predecessor_discovery(
+    version: core_v2_models.VersionResponseV2,
+    profile: _PublishedDaemonPredecessorProfile,
+) -> bool:
     if (
         version.preferred_major != 2
         or version.supported_majors != [2]
