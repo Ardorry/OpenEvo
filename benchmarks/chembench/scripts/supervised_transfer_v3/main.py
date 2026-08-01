@@ -39,6 +39,13 @@ from openevo_chembench.supervised_transfer_v3.composed_final_test import (
     build_composed_final_test_dry_run_v3,
     build_composed_source_compatibility_receipt_v3,
 )
+from openevo_chembench.supervised_transfer_v3.composed_final_test_recovery import (
+    DEFAULT_PARENT_FINAL_TEST_RUN_ID,
+    ComposedFinalTestSuffixRecoveryV3,
+    audit_failed_final_test_prefix_v3,
+    build_final_test_recovery_dry_run_v3,
+    build_final_test_recovery_source_compatibility_receipt_v3,
+)
 from openevo_chembench.supervised_transfer_v3.config import load_config_v3
 from openevo_chembench.supervised_transfer_v3.continued_category_shard_recovery import (
     CONTINUED_PARENT_RUN_ID,
@@ -109,6 +116,9 @@ def main() -> int:
             "composed-final-test-verify",
             "composed-final-test-dry-run",
             "composed-final-test",
+            "composed-final-test-recovery-verify",
+            "composed-final-test-recovery-dry-run",
+            "composed-final-test-recover",
         ),
     )
     arguments = parser.parse_args()
@@ -446,6 +456,95 @@ def main() -> int:
                 audit=audit,
                 run_id=arguments.run_id,
             )
+    elif arguments.command in {
+        "composed-final-test-recovery-verify",
+        "composed-final-test-recovery-dry-run",
+    }:
+        audit = audit_composed_train_shards_v3(
+            repository_root=REPOSITORY_ROOT,
+            composition_run_id=arguments.composition_run_id or COMPOSITION_RUN_ID,
+        )
+        inputs = load_experiment_inputs_v3(
+            REPOSITORY_ROOT,
+            config,
+            require_runtime=False,
+        )
+        prefix = audit_failed_final_test_prefix_v3(
+            repository_root=REPOSITORY_ROOT,
+            inputs=inputs,
+            composition_audit=audit,
+            parent_run_id=(
+                arguments.parent_run_id or DEFAULT_PARENT_FINAL_TEST_RUN_ID
+            ),
+        )
+        if arguments.command == "composed-final-test-recovery-verify":
+            payload = {
+                "status": "PASS",
+                "parent_run_id": prefix.parent_run_id,
+                "parent_prefix_receipt_sha256": prefix.accepted.digest,
+                "discarded_incomplete_task_receipt_sha256": prefix.discarded.digest,
+                "accepted_completion_count": prefix.accepted.completion_count,
+                "start_task_ordinal": prefix.start_task_ordinal,
+                "first_category": prefix.discarded.category,
+                "first_category_task_ordinal": prefix.start_task_ordinal % 50,
+                "parent_results_or_state_modified": False,
+                "parent_ledger_modified": False,
+                "model_calls": 0,
+            }
+        else:
+            if not arguments.run_id:
+                parser.error("composed-final-test-recovery-dry-run requires --run-id")
+            payload = build_final_test_recovery_dry_run_v3(
+                inputs=inputs,
+                composition_audit=audit,
+                prefix_audit=prefix,
+                recovery_run_id=arguments.run_id,
+            )
+    elif arguments.command == "composed-final-test-recover":
+        if not arguments.allow_paid:
+            parser.error("composed-final-test-recover requires --allow-paid")
+        if not arguments.run_id:
+            parser.error("composed-final-test-recover requires --run-id")
+        if not arguments.smoke_run_id:
+            parser.error("composed-final-test-recover requires --smoke-run-id")
+        require_paid_runtime_python_v2(repository_root=REPOSITORY_ROOT)
+        audit = audit_composed_train_shards_v3(
+            repository_root=REPOSITORY_ROOT,
+            composition_run_id=arguments.composition_run_id or COMPOSITION_RUN_ID,
+        )
+        inputs = load_experiment_inputs_v3(
+            REPOSITORY_ROOT,
+            config,
+            require_runtime=True,
+        )
+        prefix = audit_failed_final_test_prefix_v3(
+            repository_root=REPOSITORY_ROOT,
+            inputs=inputs,
+            composition_audit=audit,
+            parent_run_id=(
+                arguments.parent_run_id or DEFAULT_PARENT_FINAL_TEST_RUN_ID
+            ),
+        )
+        compatibility = build_final_test_recovery_source_compatibility_receipt_v3(
+            inputs=inputs,
+            composition_audit=audit,
+            prefix_audit=prefix,
+        )
+        if compatibility["semantically_compatible"] is not True:
+            raise RuntimeError("FINAL_TEST_RECOVERY_SOURCE_NOT_SEMANTICALLY_COMPATIBLE")
+        experiment = ComposedFinalTestSuffixRecoveryV3(
+            inputs=inputs,
+            run_id=arguments.run_id,
+            composition_audit=audit,
+            prefix_audit=prefix,
+            runtime_smoke_run_id=arguments.smoke_run_id,
+        )
+        write_public_file(
+            experiment.result_root
+            / "public/final_test_recovery_source_compatibility_receipt_v3.json",
+            canonical_pretty_json_bytes(compatibility),
+        )
+        payload = experiment.run_final_test_recovery()
     else:
         if not arguments.allow_paid:
             parser.error("composed-final-test requires --allow-paid")

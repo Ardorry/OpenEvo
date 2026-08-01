@@ -588,6 +588,36 @@ def test_v3_ledger_allows_retry_only_before_completion(tmp_path: Path) -> None:
     assert ledger.summary()["attempt_count"] == 2
 
 
+def test_v3_ledger_reopens_new_and_historical_blank_separated_rows(
+    tmp_path: Path,
+) -> None:
+    path = (tmp_path / "ledger.jsonl").resolve()
+    identity = {
+        "path": path,
+        "source_commit": "1" * 40,
+        "artifact_set_digest": "2" * 64,
+        "config_digest": "3" * 64,
+        "model_digest": "4" * 64,
+    }
+    ledger = FinalTestConsumptionLedgerV3(**identity)
+    uid = "7" * 64
+    ledger.claim(task_uid=uid, attempt_id="stv3-attempt-0001", timestamp="time-1")
+    ledger.complete(
+        task_uid=uid,
+        attempt_id="stv3-attempt-0001",
+        completion="C",
+        timestamp="time-2",
+    )
+    assert "\n\n" not in path.read_text(encoding="utf-8")
+    assert FinalTestConsumptionLedgerV3(**identity).summary()["completion_count"] == 1
+
+    historical = path.read_text(encoding="utf-8").replace("\n", "\n\n")
+    path.write_text(historical, encoding="utf-8")
+    path.chmod(0o600)
+    reopened = FinalTestConsumptionLedgerV3(**identity)
+    assert reopened.summary()["completion_count"] == 1
+
+
 def test_v3_report_source_forbids_paired_causal_claims() -> None:
     source = (REPOSITORY / "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v3/reporting.py").read_text()
     assert "mcnemar_exact_p" not in source.lower()

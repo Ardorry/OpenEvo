@@ -170,6 +170,11 @@ class FinalTestConsumptionLedgerV3:
     def _load(self) -> dict[str, list[FinalTestAttemptV3]]:
         result: dict[str, list[FinalTestAttemptV3]] = {}
         for raw in self.path.read_text(encoding="utf-8").splitlines():
+            # Historical v3 writers appended a newline to canonical_json_bytes(),
+            # which already ends in a newline.  Accept only the resulting empty
+            # separator lines so an immutable historical ledger can be reopened.
+            if raw == "":
+                continue
             try:
                 payload = json.loads(raw)
             except json.JSONDecodeError as exc:
@@ -204,7 +209,7 @@ class FinalTestConsumptionLedgerV3:
         return result
 
     def _append(self, entry: FinalTestAttemptV3) -> None:
-        encoded = canonical_json_bytes(entry.to_payload()) + b"\n"
+        encoded = canonical_json_bytes(entry.to_payload())
         descriptor = os.open(self.path, os.O_WRONLY | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0))
         with os.fdopen(descriptor, "ab", closefd=True) as stream:
             stream.write(encoded)
