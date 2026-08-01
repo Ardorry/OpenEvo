@@ -1957,7 +1957,7 @@ class SshRemoteExecutorTransport:
         deadline = time.monotonic() + float(timeout_seconds)
         identity = self.daemon_bundle_identity(
             bundle,
-            timeout_seconds=_stage_remaining(deadline),
+            timeout_seconds=min(300.0, _stage_remaining(deadline)),
             cancel_event=cancel_event,
         )
         try:

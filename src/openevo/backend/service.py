@@ -66,11 +66,11 @@ _SERVICE_GENERATION_HEADER = "X-OpenEvo-Core-Generation"
 _RELEASE_IDENTITY_HEADER = "X-OpenEvo-Core-Release-Identity"
 _PROCESS_GROUP_LIFECYCLE_COMPATIBILITY = 3
 _PRODUCTION_V2_LIFECYCLE_COMPATIBILITY = 10
-# Lifecycle 97 gives an explicitly requested Daemon startup enough bounded
-# time to verify large durable workspace stores. Lifecycle 96's recovered
-# Codex terminal authority and lifecycle 95's terminal Science Attempt failure
-# authority remain unchanged.
-V2_DAEMON_LIFECYCLE_COMPATIBILITY = 97
+# Lifecycle 98 keeps short identity probing inside the 300-second control bound
+# while allowing an explicitly longer Daemon ensure. Lifecycle 97's bounded
+# large-store verification, lifecycle 96's recovered Codex terminal authority,
+# and lifecycle 95's terminal Science Attempt failure authority remain intact.
+V2_DAEMON_LIFECYCLE_COMPATIBILITY = 98
 _MAX_CORE_SERVICE_ENSURE_DEADLINE_SECONDS = 1800.0
 _ONEFILE_LAUNCHER_CLEANUP_SECONDS = 10.0
 _ORPHANED_SERVICE_CHILDREN_GUARD = threading.Lock()

@@ -834,6 +834,63 @@ def test_ssh_ensure_returns_existing_remote_attachment_model(tmp_path: Path) -> 
     assert "openevo.backend.service" not in commands[2]
 
 
+def test_ssh_ensure_keeps_identity_probe_inside_short_control_bound(
+    tmp_path: Path,
+) -> None:
+    digest = "a" * 64
+    bundle = _staged(digest=digest, size=12)
+    commands: list[str] = []
+    timeouts: list[float] = []
+
+    def runner(
+        argv: list[str],
+        timeout_seconds: float,
+    ) -> subprocess.CompletedProcess[str]:
+        command = argv[-1]
+        commands.append(command)
+        timeouts.append(timeout_seconds)
+        stdout = (
+            _identity(digest=digest, size=12)
+            if " identity" in command
+            else _attachment()
+        )
+        return subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout=stdout,
+            stderr=_completion_stderr(command),
+        )
+
+    profile = _profile()
+    transport = SshRemoteExecutorTransport(
+        profile,
+        trusted_host=_trusted_binding(tmp_path, profile),
+        runner=runner,
+    )
+
+    _attachment_value, status = transport.ensure_daemon_bundle(
+        bundle,
+        expected_predecessor=DaemonBundleServicePredecessor(state="absent"),
+        canonical_manifest_sha256=_MANIFEST_DIGEST,
+        timeout_seconds=1200,
+    )
+
+    assert status.release_identity == "5" * 64
+    assert len(commands) == 2
+    assert " identity" in commands[0]
+    assert " service ensure " in commands[1]
+    assert 0 < timeouts[0] <= 300
+    assert timeouts[1] > 300
+    with pytest.raises(SshTransportError) as raised:
+        transport.ensure_daemon_bundle(
+            bundle,
+            expected_predecessor=DaemonBundleServicePredecessor(state="absent"),
+            canonical_manifest_sha256=_MANIFEST_DIGEST,
+            timeout_seconds=1800.001,
+        )
+    assert raised.value.code is SshTransportErrorCode.INVALID_REQUEST
+
+
 def test_ssh_ensure_preserves_predecessor_conflict_without_remote_message(
     tmp_path: Path,
 ) -> None:

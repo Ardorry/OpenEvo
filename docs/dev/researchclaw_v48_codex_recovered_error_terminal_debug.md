@@ -74,3 +74,11 @@ timeouts. It only raises the maximum for an explicitly requested Daemon
 stop operations keep their 300-second ceiling. This makes startup cost scale
 with the already bounded durable workspace inventory without weakening file,
 chunk, database, snapshot, release, predecessor, or host-key verification.
+
+The first lifecycle-97 deployment attempt then failed locally before remote
+startup: the transport forwarded the 1200-second overall ensure budget to its
+short identity-probe substep, whose independent ceiling correctly remained 300
+seconds. Lifecycle 98 caps that internal identity probe at 300 seconds while
+passing the remaining long budget only to `service ensure`. A transport test
+covers both the accepted 1200-second composition and rejection above the
+1800-second overall bound.
