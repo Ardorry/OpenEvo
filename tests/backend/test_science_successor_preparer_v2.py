@@ -21,7 +21,10 @@ from openevo.backend.science_execution_v2 import (
     ScienceAttemptExecutorV2,
     science_session_result_sha256,
 )
-from openevo.backend.science_run_owner import CoreScienceTaskOwnerV2
+from openevo.backend.science_run_owner import (
+    CoreScienceTaskOwnerV2,
+    _validate_successor_materialization_receipt,
+)
 from openevo.backend.science_run_store import ScienceProjectAdmissionAuthorityV2
 from openevo.backend.science_successor import (
     ScienceSuccessorPreparationContextV2,
@@ -1197,6 +1200,36 @@ def test_production_preparer_commits_complete_workspace_and_context_successor(
             first_materialized.runtime_context_snapshot.registry_sha256
             == later_binding.registry_digest
         )
+        assert (
+            _validate_successor_materialization_receipt(
+                first_materialized,
+                context=reconciliation_context,
+                validated=validated,
+            )
+            == first_materialized
+        )
+        strict_context = reconciliation_context.model_copy(
+            update={
+                "transition_attempt": (
+                    reconciliation_context.transition_attempt.model_copy(
+                        update={
+                            "reconciliation_only": False,
+                            "reconciliation_source_attempt_id": None,
+                            "reconciliation_source_authority_sha256": None,
+                        }
+                    )
+                )
+            }
+        )
+        with pytest.raises(
+            ValueError,
+            match="successor materialization does not bind validated outputs",
+        ):
+            _validate_successor_materialization_receipt(
+                first_materialized,
+                context=strict_context,
+                validated=validated,
+            )
 
         services.binding = replace(
             later_binding,

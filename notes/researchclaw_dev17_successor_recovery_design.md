@@ -251,6 +251,17 @@ all nonterminal reads continue to require the active registry. This repairs
 read-only cross-release closure without making historical artifacts eligible
 for new execution.
 
+### Replacement-registry materialization validation (lifecycle 90)
+
+Completed-method reconciliation may run under a repaired release after the
+captured Attempt. The production preparer first requires the captured runtime
+identity, then validates the materialized context against the replacement
+release registry. The owner-level receipt validator accepts that preparer-
+fenced registry only for `reconciliation_only`; ordinary successor attempts
+remain exact to the Task admission registry. This closes the response-loss
+window in which Evolution durably published one context but Core rejected its
+otherwise valid receipt before workspace capture and atomic commit.
+
 ### Regression obligations
 
 - reconciliation after all method jobs succeeded does not call job create or

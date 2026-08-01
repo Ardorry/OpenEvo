@@ -2295,13 +2295,23 @@ def _validate_successor_materialization_receipt(
     materialized = SuccessorMaterializationV2.model_validate(value.model_dump(mode="python"))
     runtime = materialized.runtime_context_snapshot
     evolution = validated.evolution_revision
+    registry_changed = (
+        runtime.registry_sha256 != context.task.admission.registry_sha256
+    )
+    if context.transition_attempt.reconciliation_only is True:
+        # The production preparer has already fenced the replacement release
+        # by the captured runtime identity and validated the returned context
+        # against that release's registry. A completed-method reconciliation
+        # accepts that exact replacement registry here; ordinary successor
+        # execution remains bound to the admission registry.
+        registry_changed = False
     common_invalid = (
         materialized.project_id != context.task.project_id
         or materialized.successor_transition_id
         != context.transition.transition.successor_transition_id
         or materialized.predecessor_project_head_id
         != context.task.admission.predecessor_project_head.project_head_id
-        or runtime.registry_sha256 != context.task.admission.registry_sha256
+        or registry_changed
     )
     predecessor = context.task.admission.predecessor_project_head
     if not context.plan.enabled_methods:
