@@ -233,6 +233,24 @@ it can append the durable reconciliation attempt. A mismatched request may
 perform read-only validation but cannot change transition, task, or project
 state.
 
+### Chained historical input readback (lifecycle 89)
+
+Lifecycle 88 authorized the outer succeeded job against its persisted registry,
+but the job-contract verifier then revalidated a sealed predecessor artifact
+through the ordinary current-registry path. A successor whose input was itself
+produced by an earlier transition therefore became unreadable after a repair
+release changed the registry identity, even though both jobs, their bindings,
+and their sealed artifacts remained intact.
+
+Lifecycle 89 propagates historical-terminal permission only while validating
+the sealed inputs of an already succeeded, transition-bound historical job.
+The predecessor job must still be succeeded, bound to the exact predecessor
+transition, internally consistent with its persisted plan and envelope, and
+the artifact must retain exact sealed lineage. Job creation, claim, retry, and
+all nonterminal reads continue to require the active registry. This repairs
+read-only cross-release closure without making historical artifacts eligible
+for new execution.
+
 ### Regression obligations
 
 - reconciliation after all method jobs succeeded does not call job create or
@@ -245,6 +263,8 @@ state.
 - missing/failed/extra jobs, generation drift, receipt drift, and contradictory
   commit evidence are rejected;
 - model/job/reservation counters remain unchanged across reconciliation.
+- chained sealed predecessor artifacts remain readable after registry drift,
+  while nonterminal jobs remain rejected.
 
 ## Dev17 completed-prefix continuation
 

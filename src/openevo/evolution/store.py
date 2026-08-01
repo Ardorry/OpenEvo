@@ -9883,6 +9883,7 @@ class EvolutionStore:
         artifact: sqlite3.Row,
         *,
         successor_transition_id: str | None,
+        allow_historical_terminal_registry: bool = False,
     ) -> None:
         if artifact["state"] != str(ArtifactState.SEALED):
             return
@@ -9917,6 +9918,9 @@ class EvolutionStore:
         validated = self._validate_plan_bound_job_identity(
             conn,
             job_row,
+            allow_historical_terminal_registry=(
+                allow_historical_terminal_registry
+            ),
         )
         if (
             validated.successor_transition_id
@@ -10135,6 +10139,9 @@ class EvolutionStore:
                 list(identity.input_artifact_ids),
                 sealed_successor_transition_id=(
                     identity.predecessor_successor_transition_id
+                ),
+                allow_historical_terminal_registry=(
+                    allow_historical_terminal_registry
                 ),
             )
         )
@@ -10634,6 +10641,7 @@ class EvolutionStore:
         artifact_ids: list[str],
         *,
         sealed_successor_transition_id: str | None = None,
+        allow_historical_terminal_registry: bool = False,
     ) -> list[dict[str, Any]]:
         artifacts: list[dict[str, Any]] = []
         for artifact_id in artifact_ids:
@@ -10656,6 +10664,9 @@ class EvolutionStore:
                         artifact,
                         successor_transition_id=(
                             sealed_successor_transition_id
+                        ),
+                        allow_historical_terminal_registry=(
+                            allow_historical_terminal_registry
                         ),
                     )
                 except ValueError as exc:

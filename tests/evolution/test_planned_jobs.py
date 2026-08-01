@@ -988,6 +988,64 @@ def test_sealed_terminal_job_readback_survives_registry_generation_drift(
     assert artifact.promoted is False
 
 
+def test_chained_sealed_terminal_job_readback_survives_registry_generation_drift(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    predecessor_transition_id = "successor-transition-historical-predecessor"
+    predecessor_request = _request(store).model_copy(
+        update={"successor_transition_id": predecessor_transition_id}
+    )
+    _predecessor_job_id, predecessor_artifact_id = (
+        _complete_transition_bound_skill_job(
+            store,
+            predecessor_request,
+            payload_name="historical-predecessor",
+        )
+    )
+    successor_transition_id = "successor-transition-historical-successor"
+    successor_request = _request_using_sealed_artifact(
+        _request(store),
+        artifact_id=predecessor_artifact_id,
+        predecessor_transition_id=predecessor_transition_id,
+        suffix="historical-successor",
+    ).model_copy(
+        update={"successor_transition_id": successor_transition_id}
+    )
+    successor_job_id, successor_artifact_id = (
+        _complete_transition_bound_skill_job(
+            store,
+            successor_request,
+            payload_name="historical-successor",
+        )
+    )
+    original = store.get_internal_job_result(successor_job_id)
+
+    drifted_snapshot = build_builtin_registry(
+        ImplementationDistributionIdentity(
+            distribution="openevo-test",
+            distribution_version="2.0.0",
+            distribution_digest="e" * 64,
+        )
+    )
+    restarted = EvolutionStore(
+        db_path=tmp_path / "evolution.db",
+        artifact_root=tmp_path / "artifacts",
+        registry_snapshot=drifted_snapshot,
+    )
+    restarted.initialize()
+
+    observed = restarted.get_internal_job_result(successor_job_id)
+    assert observed == original
+    artifact = restarted.get_internal_successor_artifact(
+        successor_transition_id,
+        successor_artifact_id,
+    )
+    assert artifact.artifact_id == successor_artifact_id
+    assert artifact.state.value == "sealed"
+    assert artifact.promoted is True
+
+
 def test_sealed_terminal_job_admission_survives_registry_generation_drift(
     tmp_path: Path,
 ) -> None:
