@@ -368,3 +368,32 @@ allowance is the original Dev17 allowance minus the exact source prefix. Final
 verification still requires all 51 attempts, 34 evolution cycles, 102 native
 jobs, 17 task selections, zero active resources, and zero pending or failed
 side effects across the combined referenced prefix and new suffix.
+
+### Cross-release registry closure
+
+A committed reconciliation can be internally consistent yet unusable for a
+later Task when its materialized runtime context is bound to a historical
+executable registry. Core exposes that condition as project `not_ready`; the
+workspace snapshot may still match exactly. A completed-prefix continuation
+must therefore require both the exact workspace authority and a `ready`
+project whose active-head registry equals the active Daemon registry. It must
+not weaken Candidate preflight, rewrite the committed head, or treat workspace
+equality as registry compatibility. When that closure cannot be proven, the
+prefix namespace remains failed-closed and the formal fallback is a new clean
+run without imported model artifacts.
+
+## Cross-process managed Core attachment serialization
+
+Formal transition commands intentionally acquire a fresh generation-bound
+Daemon attachment for each state-machine step. A read-only monitor uses the
+same observe/ensure path. Starting both processes at the same instant can race
+two Daemon control transactions before either has returned an authority.
+
+The adapter serializes only release staging, identity validation, service
+observe/ensure, tunnel creation, and endpoint authentication with an
+owner-private lock under the experiment runtime directory. The lock is never
+held during Candidate, Judge, Reflector, or successor execution. Contenders
+wait within their existing attachment deadline and fail closed on timeout.
+The lock file is non-secret, non-symlink, owner-controlled, mode-restricted,
+and does not carry the Core bearer. This preserves independent monitoring
+while preventing it from racing runner attachment.

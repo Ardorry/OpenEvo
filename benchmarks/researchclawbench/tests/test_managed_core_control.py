@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import threading
+import time
 from types import SimpleNamespace
 
 from pydantic import SecretStr
@@ -9,7 +11,9 @@ from pydantic import SecretStr
 from openevo.backend.service import CoreServiceAttachment
 from openevo_researchclawbench.managed_core_control import (
     ManagedCoreControlAuthority,
+    ManagedCoreControlUnavailable,
     _acquire_isolated_core_service_attachment,
+    _managed_core_attach_lock,
     _remote_fixture_host_profile,
     acquire_managed_core_control,
 )
@@ -111,6 +115,63 @@ def test_managed_remote_mode_dispatches_to_formal_daemon_transport(monkeypatch) 
         lambda config, deadline_seconds: expected,
     )
     assert acquire_managed_core_control(RemoteConfig()) is expected
+
+
+def test_remote_daemon_attach_lock_serializes_runner_and_monitor(
+    tmp_path: Path,
+) -> None:
+    experiment = tmp_path / "experiment"
+    runtime = experiment / "runtime"
+    runtime.mkdir(parents=True, mode=0o700)
+    waiting = threading.Event()
+    acquired = threading.Event()
+    failures: list[BaseException] = []
+
+    def attach_monitor() -> None:
+        waiting.set()
+        try:
+            with _managed_core_attach_lock(experiment, deadline_seconds=1.0):
+                acquired.set()
+        except BaseException as exc:  # pragma: no cover - assertion transport
+            failures.append(exc)
+
+    with _managed_core_attach_lock(experiment, deadline_seconds=1.0):
+        monitor = threading.Thread(target=attach_monitor)
+        monitor.start()
+        assert waiting.wait(timeout=1.0)
+        time.sleep(0.1)
+        assert acquired.is_set() is False
+    monitor.join(timeout=1.0)
+
+    assert monitor.is_alive() is False
+    assert failures == []
+    assert acquired.is_set() is True
+    lock = runtime / ".managed-core-attach.lock"
+    assert lock.is_file()
+    assert lock.stat().st_mode & 0o077 == 0
+
+
+def test_remote_daemon_attach_lock_times_out_closed(tmp_path: Path) -> None:
+    experiment = tmp_path / "experiment"
+    (experiment / "runtime").mkdir(parents=True, mode=0o700)
+    observed: list[BaseException] = []
+
+    def blocked_monitor() -> None:
+        try:
+            with _managed_core_attach_lock(experiment, deadline_seconds=0.05):
+                raise AssertionError("contending attach unexpectedly acquired the lock")
+        except BaseException as exc:
+            observed.append(exc)
+
+    with _managed_core_attach_lock(experiment, deadline_seconds=1.0):
+        monitor = threading.Thread(target=blocked_monitor)
+        monitor.start()
+        monitor.join(timeout=1.0)
+
+    assert monitor.is_alive() is False
+    assert len(observed) == 1
+    assert isinstance(observed[0], ManagedCoreControlUnavailable)
+    assert str(observed[0]) == "managed Core attach lock timed out"
 
 
 def test_remote_fixture_host_profile_accepts_only_exact_closed_docker_set(

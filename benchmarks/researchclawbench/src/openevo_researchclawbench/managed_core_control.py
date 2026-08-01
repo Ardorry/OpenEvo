@@ -8,7 +8,9 @@ copied into the process environment, protocol, supervisor state, or receipts.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field
+import fcntl
 import hashlib
 import json
 import os
@@ -18,7 +20,7 @@ import secrets
 import subprocess
 import sys
 import time
-from typing import Any
+from typing import Any, Iterator
 
 from pydantic import SecretStr
 
@@ -47,6 +49,56 @@ _GENERATION = re.compile(r"[0-9a-f]{32}\Z")
 
 class ManagedCoreControlUnavailable(RuntimeError):
     """The exact managed Core authority could not be acquired or verified."""
+
+
+@contextmanager
+def _managed_core_attach_lock(
+    experiment_root: Path,
+    *,
+    deadline_seconds: float,
+) -> Iterator[None]:
+    """Serialize Daemon observe/ensure across formal runner and monitor processes."""
+
+    runtime_root = experiment_root / "runtime"
+    if (
+        deadline_seconds <= 0
+        or runtime_root.is_symlink()
+        or not runtime_root.is_dir()
+        or runtime_root.stat().st_uid != os.getuid()
+    ):
+        raise ManagedCoreControlUnavailable("managed Core attach lock root is unsafe")
+    path = runtime_root / ".managed-core-attach.lock"
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW,
+            0o600,
+        )
+    except OSError as exc:
+        raise ManagedCoreControlUnavailable(
+            "managed Core attach lock is unavailable"
+        ) from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if metadata.st_uid != os.getuid() or metadata.st_mode & 0o077:
+            raise ManagedCoreControlUnavailable("managed Core attach lock is unsafe")
+        deadline = time.monotonic() + deadline_seconds
+        while True:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise ManagedCoreControlUnavailable(
+                        "managed Core attach lock timed out"
+                    ) from None
+                time.sleep(0.05)
+        try:
+            yield
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+    finally:
+        os.close(descriptor)
 
 
 @dataclass(frozen=True, slots=True)
@@ -386,50 +438,62 @@ def _acquire_remote_daemon_core_control(
     transport = SshRemoteExecutorTransport(profile, trusted_host=binding)
     tunnel = None
     try:
-        staged = transport.stage_daemon_bundle(
-            bundle_path=str(bundle),
-            bundle_sha256=bundle_sha,
-            bundle_size=bundle.stat().st_size,
-            manifest_path=str(manifest),
-            manifest_sha256=manifest_sha,
-            manifest_size=manifest.stat().st_size,
-            timeout_seconds=min(300.0, max(60.0, deadline_seconds * 4)),
-        )
-        identity = transport.daemon_bundle_identity(staged, timeout_seconds=30)
-        if (
-            identity.source_commit != config.require("source_identity.openevo_commit")
-            or identity.framework_lock_sha256 != _sha256_file(framework_lock)
+        with _managed_core_attach_lock(
+            config.experiment_root,
+            deadline_seconds=deadline_seconds,
         ):
-            raise ManagedCoreControlUnavailable("remote Core release identity drifted")
-        predecessor = transport.observe_daemon_bundle_service(
-            staged,
-            canonical_manifest_sha256=manifest_sha,
-            timeout_seconds=30,
-        )
-        attachment, service = transport.ensure_daemon_bundle(
-            staged,
-            expected_predecessor=predecessor,
-            canonical_manifest_sha256=manifest_sha,
-            timeout_seconds=min(180.0, max(60.0, deadline_seconds * 3)),
-        )
-        tunnel = transport.open_tunnel(
-            remote_port=attachment.remote_port,
-            timeout_seconds=30,
-        )
-        port = int(tunnel.base_url.rsplit(":", 1)[1])
-        proof = authenticate_core_service_endpoint(
-            host="127.0.0.1",
-            port=port,
-            bearer=attachment.bearer_token,
-            release_identity=attachment.release_identity,
-            registry_digest=attachment.registry_digest,
-            source_commit=attachment.source_commit,
-            generation=attachment.generation,
-            deadline=time.monotonic() + 10,
-            require_production_v2=True,
-        )
-        if proof != attachment.status_proof or service.generation != attachment.generation:
-            raise ManagedCoreControlUnavailable("remote Core tunnel identity drifted")
+            staged = transport.stage_daemon_bundle(
+                bundle_path=str(bundle),
+                bundle_sha256=bundle_sha,
+                bundle_size=bundle.stat().st_size,
+                manifest_path=str(manifest),
+                manifest_sha256=manifest_sha,
+                manifest_size=manifest.stat().st_size,
+                timeout_seconds=min(300.0, max(60.0, deadline_seconds * 4)),
+            )
+            identity = transport.daemon_bundle_identity(staged, timeout_seconds=30)
+            if (
+                identity.source_commit
+                != config.require("source_identity.openevo_commit")
+                or identity.framework_lock_sha256 != _sha256_file(framework_lock)
+            ):
+                raise ManagedCoreControlUnavailable(
+                    "remote Core release identity drifted"
+                )
+            predecessor = transport.observe_daemon_bundle_service(
+                staged,
+                canonical_manifest_sha256=manifest_sha,
+                timeout_seconds=30,
+            )
+            attachment, service = transport.ensure_daemon_bundle(
+                staged,
+                expected_predecessor=predecessor,
+                canonical_manifest_sha256=manifest_sha,
+                timeout_seconds=min(180.0, max(60.0, deadline_seconds * 3)),
+            )
+            tunnel = transport.open_tunnel(
+                remote_port=attachment.remote_port,
+                timeout_seconds=30,
+            )
+            port = int(tunnel.base_url.rsplit(":", 1)[1])
+            proof = authenticate_core_service_endpoint(
+                host="127.0.0.1",
+                port=port,
+                bearer=attachment.bearer_token,
+                release_identity=attachment.release_identity,
+                registry_digest=attachment.registry_digest,
+                source_commit=attachment.source_commit,
+                generation=attachment.generation,
+                deadline=time.monotonic() + 10,
+                require_production_v2=True,
+            )
+            if (
+                proof != attachment.status_proof
+                or service.generation != attachment.generation
+            ):
+                raise ManagedCoreControlUnavailable(
+                    "remote Core tunnel identity drifted"
+                )
         material = json.dumps(
             {
                 "generation": attachment.generation,
