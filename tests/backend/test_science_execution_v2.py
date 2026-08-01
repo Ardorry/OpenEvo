@@ -1226,6 +1226,39 @@ class _SetupErrorRollout(_Rollout):
         )
         return task_id
 
+    def cancel_task(self, task_id: str):
+        raise AssertionError(
+            f"terminal rollout {task_id} must not be cancelled after its "
+            "failure authority was observed"
+        )
+
+
+class _RuntimeErrorRollout(_SetupErrorRollout):
+    """Return the retained terminal execution shape observed in V42."""
+
+    def submit_task(self, payload):
+        task_id = super().submit_task(payload)
+        assert self.result is not None
+        metadata = dict(self.result.metadata)
+        metadata["openevo"] = {
+            "candidate_execution_status": {
+                "schema_version": "openevo.candidate_execution_status.v1",
+                "phase": "benchmark_execution",
+                "model_started": True,
+                "benchmark_started": True,
+                "failure_code": None,
+            }
+        }
+        self.result = SessionResult(
+            session_id=self.result.session_id,
+            task_id=self.result.task_id,
+            status="ERROR",
+            trajectory=self.result.trajectory,
+            metadata=metadata,
+            workspace_result=None,
+        )
+        return task_id
+
 
 class _NotifyingExecutor:
     def __init__(self, delegate, completed: threading.Event) -> None:
@@ -1406,8 +1439,33 @@ def test_executor_captures_one_real_workspace_result_and_releases_generation(
     workspaces.close()
 
 
-def test_executor_surfaces_pre_model_terminal_error_without_seal_timeout(
+@pytest.mark.parametrize(
+    (
+        "rollout_type",
+        "expected_code",
+        "expected_retryable",
+        "model_started",
+        "benchmark_started",
+    ),
+    [
+        (
+            _SetupErrorRollout,
+            "candidate_subscription_isolation_not_ready",
+            False,
+            False,
+            False,
+        ),
+        (_RuntimeErrorRollout, "rollout_session_error", True, True, True),
+    ],
+    ids=("pre-model-setup", "runtime-error"),
+)
+def test_executor_surfaces_terminal_error_without_seal_timeout(
     tmp_path,
+    rollout_type,
+    expected_code,
+    expected_retryable,
+    model_started,
+    benchmark_started,
 ) -> None:
     clock = _Clock()
     registry = verified_builtin_registry(tmp_path / "registry")
@@ -1472,7 +1530,7 @@ def test_executor_surfaces_pre_model_terminal_error_without_seal_timeout(
     services = _Services(binding)
     session_root = tmp_path / "gateway-sessions"
     session_root.mkdir(mode=0o700)
-    rollout = _SetupErrorRollout(handoffs, binding, session_root)
+    rollout = rollout_type(handoffs, binding, session_root)
     executor = ScienceAttemptExecutorV2(
         catalog=_Catalog(project),
         workspaces=workspaces,
@@ -1494,12 +1552,12 @@ def test_executor_surfaces_pre_model_terminal_error_without_seal_timeout(
             cancellation=threading.Event(),
         )
     assert time.monotonic() - started < 1.0
-    assert observed.value.code == "candidate_subscription_isolation_not_ready"
-    assert observed.value.retryable is False
+    assert observed.value.code == expected_code
+    assert observed.value.retryable is expected_retryable
     assert observed.value.failure_authority is not None
     assert observed.value.failure_authority["session_status"] == "ERROR"
-    assert observed.value.failure_authority["model_started"] is False
-    assert observed.value.failure_authority["benchmark_started"] is False
+    assert observed.value.failure_authority["model_started"] is model_started
+    assert observed.value.failure_authority["benchmark_started"] is benchmark_started
     assert observed.value.failure_authority["benchmark_trace_count"] == 0
     assert services.released is True
     assert rollout.closed is True

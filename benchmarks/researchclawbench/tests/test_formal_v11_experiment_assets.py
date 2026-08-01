@@ -43,7 +43,7 @@ def test_formal_v11_deployer_pins_source_lifecycle_and_runtime_boundary() -> Non
     deployer = _load("deploy_formal_v11_core")
     source = (SCRIPTS / "deploy_formal_v11_core.py").read_text(encoding="utf-8")
 
-    assert deployer.V2_DAEMON_LIFECYCLE_COMPATIBILITY == 94
+    assert deployer.V2_DAEMON_LIFECYCLE_COMPATIBILITY == 95
     assert "args.expected_lifecycle != V2_DAEMON_LIFECYCLE_COMPATIBILITY" in source
     assert "_require_new_receipt_path(args.receipt)" in source
     assert "candidate_started" in source

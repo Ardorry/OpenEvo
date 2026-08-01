@@ -701,8 +701,21 @@ class ScienceAttemptExecutorV2:
                 receipt=receipt,
                 record=record,
             )
-        except Exception:
-            if submitted and not terminal_received and rollout is not None:
+        except Exception as exc:
+            terminal_failure_received = (
+                isinstance(exc, ScienceAttemptExecutionV2Error)
+                and _matches_terminal_failure_authority(
+                    exc,
+                    task=task,
+                    attempt=attempt,
+                )
+            )
+            if (
+                submitted
+                and not terminal_received
+                and not terminal_failure_received
+                and rollout is not None
+            ):
                 _cancel_rollout_task(rollout, _rollout_task_id(attempt))
             raise
         finally:
@@ -1045,6 +1058,29 @@ def _is_sha256(value: object) -> bool:
         isinstance(value, str)
         and len(value) == 64
         and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _matches_terminal_failure_authority(
+    error: ScienceAttemptExecutionV2Error,
+    *,
+    task: m2.TaskV2,
+    attempt: m2.AttemptRefV2,
+) -> bool:
+    if error.failure_authority is None:
+        return False
+    try:
+        authority = ScienceAttemptFailureAuthorityV1.model_validate(
+            error.failure_authority
+        )
+    except (TypeError, ValueError):
+        return False
+    return (
+        authority.task_id == task.task_id
+        and authority.attempt_id == attempt.attempt_id
+        and authority.rollout_task_id == _rollout_task_id(attempt)
+        and authority.failure_code == error.code
+        and authority.retryable == error.retryable
     )
 
 
