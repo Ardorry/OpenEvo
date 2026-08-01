@@ -229,6 +229,27 @@ class OpenEvoRuntimeServicesIdentityV2:
         return sha256_bytes(canonical_pretty_json_bytes(self.public_identity))
 
     def require_current(self) -> dict[str, object]:
+        self.require_identity_current()
+        health = _require_service_health()
+        return {
+            "runtime_services_identity_sha256": self.digest,
+            "rollout_health_sha256": sha256_bytes(
+                canonical_pretty_json_bytes(health["rollout"])
+            ),
+            "gateway_health_sha256": sha256_bytes(
+                canonical_pretty_json_bytes(health["gateway"])
+            ),
+        }
+
+    def require_identity_current(self) -> None:
+        """Verify the immutable service identity without requiring free capacity.
+
+        A terminal task result remains bound to the same service processes and
+        managed Gateway container even when a transient host-network change makes
+        the Gateway temporarily unschedulable.  Full health and schedulability are
+        still required before every new submission by :meth:`require_current`.
+        """
+
         _require_process_identity(self.rollout)
         _require_process_identity(
             self.gateway,
@@ -240,16 +261,6 @@ class OpenEvoRuntimeServicesIdentityV2:
             source_commit=self.source_commit,
             service_run_id=self.service_run_id,
         )
-        health = _require_service_health()
-        return {
-            "runtime_services_identity_sha256": self.digest,
-            "rollout_health_sha256": sha256_bytes(
-                canonical_pretty_json_bytes(health["rollout"])
-            ),
-            "gateway_health_sha256": sha256_bytes(
-                canonical_pretty_json_bytes(health["gateway"])
-            ),
-        }
 
 
 def start_runtime_services_v2(

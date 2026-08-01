@@ -1,5 +1,5 @@
 {
-  "combined_sha256": "ab58031fcdb21da14f64e5dcc057445a3ae967f61828440b94c2e4fadf867acd",
+  "combined_sha256": "d9cec42473d59337bd7bd13f8bb4706fd5dea735a09be151dd02a027ecbbd7c5",
   "private_manifests_excluded": [
     "train_private_manifest.jsonl",
     "test_private_manifest.jsonl"
@@ -37,8 +37,8 @@
     {
       "executable": false,
       "path": "benchmarks/chembench/configs/supervised_transfer_v3/composed_control_test_baseline.md",
-      "sha256": "5ebd5c45cf63946cf8144077f29fbbc3a611f8501aae35ed4fa57bf96f77e579",
-      "size_bytes": 3135
+      "sha256": "4919d595bc42727cc1686599be2db1127968f84cc671d9d31910bd5196d39c31",
+      "size_bytes": 3649
     },
     {
       "executable": false,
@@ -181,8 +181,8 @@
     {
       "executable": false,
       "path": "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/executor.py",
-      "sha256": "0230a650f5a5f0854d113626574cefcf8c66fba87e3f3b60d6a51d5c825aa798",
-      "size_bytes": 27598
+      "sha256": "eb5d6309cc47285c3af56ef3ab9ce0853cad06894fa7f7d1cf518cd2b32598bc",
+      "size_bytes": 28115
     },
     {
       "executable": false,
@@ -235,8 +235,8 @@
     {
       "executable": false,
       "path": "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/runtime_services.py",
-      "sha256": "6866086ebab9cd81018d50e61ea926d81725f314bf94a3b4f6b1c87ed2bf1fd6",
-      "size_bytes": 46995
+      "sha256": "be52736a684360e53c1ae1fc7db8184f5029da2c769a0b32a7f19a9be54c99e9",
+      "size_bytes": 47503
     },
     {
       "executable": false,
@@ -277,8 +277,8 @@
     {
       "executable": false,
       "path": "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v3/composed_control_test_baseline.py",
-      "sha256": "f8b6c0d2b8a46f79a3bed9f885be0da71124fb313dd3e841210ed972dfb66b3c",
-      "size_bytes": 36816
+      "sha256": "b050ea0a8b0de690eb6550b6bc71cc242ed72e3c091087b574845b99be32f7e2",
+      "size_bytes": 38150
     },
     {
       "executable": false,
@@ -355,8 +355,8 @@
     {
       "executable": false,
       "path": "benchmarks/chembench/tests/supervised_transfer_v3/test_composed_control_test_baseline_v3.py",
-      "sha256": "2c4f314994b52d7d33f0e71a5f77950556042ff81daf0540ad0b03eb876d8288",
-      "size_bytes": 6806
+      "sha256": "086b258eaae96a7ad19f9f7349c786082bd9e7592f7bbdbe3bf123c39cdcd43e",
+      "size_bytes": 7421
     },
     {
       "executable": false,

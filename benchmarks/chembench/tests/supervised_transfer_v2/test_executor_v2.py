@@ -297,6 +297,7 @@ def test_real_online_context_stages_inside_gateway_visible_private_service_root(
         receipt_path=receipt_path,
         repository_root=tmp_path,
         require_current=dict,
+        require_identity_current=lambda: None,
     )
     executor = SupervisedManagedCodexExecutorV2(
         arm="online",
@@ -321,20 +322,26 @@ def test_transient_runtime_health_is_rechecked_without_repeating_model_completio
 ) -> None:
     receipt_path = tmp_path / "state/runtime-services/run/receipt.json"
     receipt_path.parent.mkdir(mode=0o700, parents=True)
-    calls = 0
+    health_calls = 0
+    identity_calls = 0
 
     def require_current() -> dict[str, object]:
-        nonlocal calls
-        calls += 1
-        if calls <= 2:
+        nonlocal health_calls
+        health_calls += 1
+        if health_calls <= 2:
             raise RuntimeServicesV2Error("RUNTIME_SERVICE_HEALTH_INVALID")
         return {}
+
+    def require_identity_current() -> None:
+        nonlocal identity_calls
+        identity_calls += 1
 
     runtime_services = SimpleNamespace(
         digest="f" * 64,
         receipt_path=receipt_path,
         repository_root=tmp_path,
         require_current=require_current,
+        require_identity_current=require_identity_current,
     )
     client = _CompletedClient()
     executor = SupervisedManagedCodexExecutorV2(
@@ -351,7 +358,87 @@ def test_transient_runtime_health_is_rechecked_without_repeating_model_completio
     attempt = executor.execute(_request(arm="online", context=_context()))
 
     assert attempt.response == "A"
-    assert calls == 4
+    assert health_calls == 3
+    assert identity_calls == 1
+
+
+def test_terminal_completion_does_not_require_gateway_to_remain_schedulable(
+    tmp_path: Path,
+) -> None:
+    health_calls = 0
+    identity_calls = 0
+
+    def require_current() -> dict[str, object]:
+        nonlocal health_calls
+        health_calls += 1
+        if health_calls > 1:
+            raise RuntimeServicesV2Error("RUNTIME_SERVICE_HEALTH_INVALID")
+        return {}
+
+    def require_identity_current() -> None:
+        nonlocal identity_calls
+        identity_calls += 1
+
+    runtime_services = SimpleNamespace(
+        digest="f" * 64,
+        receipt_path=tmp_path / "receipt.json",
+        repository_root=tmp_path,
+        require_current=require_current,
+        require_identity_current=require_identity_current,
+    )
+    executor = SupervisedManagedCodexExecutorV2(
+        arm="online",
+        timeout_seconds=1200,
+        rollout_client=_CompletedClient(),
+        runtime_services=runtime_services,
+    )
+
+    attempt = executor.execute(_request(arm="online", context=_context()))
+
+    assert attempt.response == "A"
+    assert health_calls == 1
+    assert identity_calls == 1
+
+
+def test_exhausted_transient_preflight_becomes_retryable_without_completion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def require_current() -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        raise RuntimeServicesV2Error("RUNTIME_SERVICE_UNAVAILABLE")
+
+    runtime_services = SimpleNamespace(
+        digest="f" * 64,
+        receipt_path=tmp_path / "receipt.json",
+        repository_root=tmp_path,
+        require_current=require_current,
+        require_identity_current=lambda: None,
+    )
+    monkeypatch.setattr(
+        "openevo_chembench.supervised_transfer_v2.executor._RUNTIME_HEALTH_RETRY_LIMIT",
+        3,
+    )
+    monkeypatch.setattr(
+        "openevo_chembench.supervised_transfer_v2.executor.time.sleep",
+        lambda _seconds: None,
+    )
+    executor = SupervisedManagedCodexExecutorV2(
+        arm="control",
+        timeout_seconds=1200,
+        rollout_client=_NoopClient(),
+        runtime_services=runtime_services,
+    )
+
+    with pytest.raises(SupervisedTaskExecutionErrorV2) as raised:
+        executor.execute(_request())
+
+    assert raised.value.code is SupervisedTaskExecutionCodeV2.TASK_FAILED
+    assert raised.value.completion_exists is False
+    assert calls == 3
 
 
 def test_runtime_identity_failure_is_not_retried(tmp_path: Path) -> None:
@@ -367,6 +454,7 @@ def test_runtime_identity_failure_is_not_retried(tmp_path: Path) -> None:
         receipt_path=tmp_path / "receipt.json",
         repository_root=tmp_path,
         require_current=require_current,
+        require_identity_current=lambda: None,
     )
     executor = SupervisedManagedCodexExecutorV2(
         arm="online",

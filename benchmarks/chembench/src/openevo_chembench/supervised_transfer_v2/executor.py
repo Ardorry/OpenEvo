@@ -309,7 +309,15 @@ class SupervisedManagedCodexExecutorV2:
         self._validate_request(request)
         if self._closed:
             raise RuntimeError("v2 executor is closed")
-        self._require_runtime_services()
+        try:
+            self._require_runtime_services()
+        except RuntimeServicesV2Error as exc:
+            if exc.finding_code in _TRANSIENT_RUNTIME_HEALTH_FINDINGS:
+                raise SupervisedTaskExecutionErrorV2(
+                    SupervisedTaskExecutionCodeV2.TASK_FAILED,
+                    completion_exists=False,
+                ) from None
+            raise
         if request.session_id in self._sessions:
             raise SupervisedTaskExecutionErrorV2(SupervisedTaskExecutionCodeV2.INVALID_REQUEST)
         self._sessions.add(request.session_id)
@@ -344,7 +352,7 @@ class SupervisedManagedCodexExecutorV2:
                     SupervisedTaskExecutionCodeV2.TASK_ID_MISMATCH
                 )
             status = self._wait_for_terminal(task_request.task_id)
-            self._require_runtime_services()
+            self._require_runtime_service_identity()
             attempt = _raw_attempt_from_task_status(status, task_id=task_request.task_id)
             self._receipts[request.session_id] = receipt
             return attempt
@@ -363,6 +371,10 @@ class SupervisedManagedCodexExecutorV2:
                 ):
                     raise
                 time.sleep(_RUNTIME_HEALTH_RETRY_SECONDS)
+
+    def _require_runtime_service_identity(self) -> None:
+        if self._runtime_services is not None:
+            self._runtime_services.require_identity_current()
 
     def consume_context_receipt(
         self,

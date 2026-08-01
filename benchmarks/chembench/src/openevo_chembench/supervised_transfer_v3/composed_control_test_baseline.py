@@ -67,6 +67,15 @@ _FINAL_COMPATIBILITY_RECEIPT = (
 _FINAL_COMPOSITION_RECEIPT = (
     "public/final_test_prefix_suffix_composition_receipt_v3.json"
 )
+_EXECUTOR_SOURCE = (
+    "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/executor.py"
+)
+_EVOLVED_EXECUTOR_SHA256 = (
+    "0230a650f5a5f0854d113626574cefcf8c66fba87e3f3b60d6a51d5c825aa798"
+)
+_NETWORK_RECOVERY_EXECUTOR_SHA256 = (
+    "eb5d6309cc47285c3af56ef3ab9ce0853cad06894fa7f7d1cf518cd2b32598bc"
+)
 _ALLOWED_BASELINE_SOURCE_CHANGES = {
     (
         "benchmarks/chembench/configs/supervised_transfer_v3/"
@@ -74,6 +83,11 @@ _ALLOWED_BASELINE_SOURCE_CHANGES = {
     ),
     "benchmarks/chembench/manifests/supervised_transfer_v3/source_manifest_v3.json",
     "benchmarks/chembench/scripts/supervised_transfer_v3/main.py",
+    _EXECUTOR_SOURCE,
+    (
+        "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v2/"
+        "runtime_services.py"
+    ),
     (
         "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v3/"
         "composed_control_test_baseline.py"
@@ -81,6 +95,10 @@ _ALLOWED_BASELINE_SOURCE_CHANGES = {
     (
         "benchmarks/chembench/tests/supervised_transfer_v3/"
         "test_composed_control_test_baseline_v3.py"
+    ),
+    (
+        "benchmarks/chembench/tests/supervised_transfer_v2/"
+        "test_executor_v2.py"
     ),
 }
 
@@ -325,8 +343,18 @@ def build_control_baseline_source_compatibility_receipt_v3(
         relative: sha256_bytes((inputs.repository_root / relative).read_bytes())
         for relative in critical
     }
-    if current != critical:
+    drifted = {
+        relative
+        for relative, expected in critical.items()
+        if current.get(relative) != expected
+    }
+    if drifted != {_EXECUTOR_SOURCE}:
         raise ControlFinalTestBaselineV3Error("BASELINE_EXECUTION_SEMANTICS_DRIFT")
+    if (
+        critical.get(_EXECUTOR_SOURCE) != _EVOLVED_EXECUTOR_SHA256
+        or current.get(_EXECUTOR_SOURCE) != _NETWORK_RECOVERY_EXECUTOR_SHA256
+    ):
+        raise ControlFinalTestBaselineV3Error("BASELINE_EXECUTOR_RECOVERY_DRIFT")
     changed = tuple(
         line
         for line in _git_output(
@@ -368,6 +396,12 @@ def build_control_baseline_source_compatibility_receipt_v3(
         "split_digest": inputs.split_receipt_sha256,
         "model_digest": audit.model_digest,
         "managed_codex_digest": audit.managed_codex_digest,
+        "reviewed_executor_transition": {
+            "path": _EXECUTOR_SOURCE,
+            "evolved_sha256": _EVOLVED_EXECUTOR_SHA256,
+            "baseline_sha256": _NETWORK_RECOVERY_EXECUTOR_SHA256,
+            "change_class": "runtime_health_recovery_only",
+        },
         "candidate_prompt_unchanged": True,
         "candidate_model_unchanged": True,
         "reasoning_effort_unchanged": True,
@@ -376,6 +410,8 @@ def build_control_baseline_source_compatibility_receipt_v3(
         "strict_parser_unchanged": True,
         "test_order_unchanged": True,
         "test_single_pass_unchanged": True,
+        "terminal_completion_semantics_unchanged": True,
+        "runtime_health_recovery_reviewed": True,
         "baseline_change_limited_to_no_context_control_orchestration": True,
         "semantically_compatible": True,
     }

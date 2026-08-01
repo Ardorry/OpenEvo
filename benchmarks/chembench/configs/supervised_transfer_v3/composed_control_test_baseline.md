@@ -43,6 +43,13 @@ the candidate completion has been sealed in the append-only Test ledger.
 - Test UID order must equal the completed evolved Final Test receipt.
 - Each task admits at most one valid control completion.  Infrastructure
   attempts with no completion may be retried and remain auditable.
+- Full Rollout/Gateway health and schedulability are required before a new
+  candidate submission.  Once Rollout has sealed a terminal result, postflight
+  checks verify the exact process and managed-container identity without using
+  transient free-capacity or heartbeat state to discard that completion.
+- A bounded preflight health outage is converted to an auditable
+  no-completion infrastructure retry.  Source, process, container, image, or
+  executable identity drift remains a hard fail-closed condition.
 - `reflector_calls`, Core evolution jobs, context resolutions, and all three
   artifact counts remain zero.
 - The control context binding contains no target or artifact IDs.
