@@ -32,6 +32,13 @@ from openevo_chembench.supervised_transfer_v3.category_shard_recovery import (
     build_category_shard_recovery_dry_run_v3,
     build_source_compatibility_receipt_v3,
 )
+from openevo_chembench.supervised_transfer_v3.composed_control_test_baseline import (
+    EVOLVED_FINAL_TEST_RUN_ID,
+    ComposedControlFinalTestBaselineV3,
+    audit_completed_evolved_final_test_v3,
+    build_control_baseline_dry_run_v3,
+    build_control_baseline_source_compatibility_receipt_v3,
+)
 from openevo_chembench.supervised_transfer_v3.composed_final_test import (
     COMPOSITION_RUN_ID,
     ComposedFinalTestExperimentV3,
@@ -90,6 +97,7 @@ def main() -> int:
     parser.add_argument("--service-run-id")
     parser.add_argument("--parent-run-id")
     parser.add_argument("--composition-run-id")
+    parser.add_argument("--paired-evolved-run-id")
     parser.add_argument("--start-category-index", type=int)
     parser.add_argument("--allow-paid", action="store_true")
     parser.add_argument(
@@ -119,6 +127,9 @@ def main() -> int:
             "composed-final-test-recovery-verify",
             "composed-final-test-recovery-dry-run",
             "composed-final-test-recover",
+            "composed-control-baseline-verify",
+            "composed-control-baseline-dry-run",
+            "composed-control-baseline-run",
         ),
     )
     arguments = parser.parse_args()
@@ -422,6 +433,80 @@ def main() -> int:
         )
         write_public_file(write_path, canonical_pretty_json_bytes(compatibility))
         payload = experiment.run_category_shard_recovery()
+    elif arguments.command in {
+        "composed-control-baseline-verify",
+        "composed-control-baseline-dry-run",
+    }:
+        inputs = load_experiment_inputs_v3(
+            REPOSITORY_ROOT,
+            config,
+            require_runtime=False,
+        )
+        audit = audit_completed_evolved_final_test_v3(
+            repository_root=REPOSITORY_ROOT,
+            inputs=inputs,
+            run_id=(
+                arguments.paired_evolved_run_id or EVOLVED_FINAL_TEST_RUN_ID
+            ),
+        )
+        if arguments.command == "composed-control-baseline-verify":
+            payload = {
+                "status": "PASS",
+                "paired_evolved_run_id": audit.run_id,
+                "paired_evolved_audit_sha256": audit.digest,
+                "test_task_count": 450,
+                "test_order_sha256": audit.test_order_sha256,
+                "evolved_correct_count": audit.correct_count,
+                "context_mode": "generation_zero",
+                "context_target_ids": [],
+                "context_artifact_ids": [],
+                "parent_artifacts_imported": False,
+                "parent_databases_imported": False,
+                "model_calls": 0,
+            }
+        else:
+            if not arguments.run_id:
+                parser.error("composed-control-baseline-dry-run requires --run-id")
+            payload = build_control_baseline_dry_run_v3(
+                inputs=inputs,
+                audit=audit,
+                run_id=arguments.run_id,
+            )
+    elif arguments.command == "composed-control-baseline-run":
+        if not arguments.allow_paid:
+            parser.error("composed-control-baseline-run requires --allow-paid")
+        if not arguments.run_id:
+            parser.error("composed-control-baseline-run requires --run-id")
+        require_paid_runtime_python_v2(repository_root=REPOSITORY_ROOT)
+        inputs = load_experiment_inputs_v3(
+            REPOSITORY_ROOT,
+            config,
+            require_runtime=True,
+        )
+        audit = audit_completed_evolved_final_test_v3(
+            repository_root=REPOSITORY_ROOT,
+            inputs=inputs,
+            run_id=(
+                arguments.paired_evolved_run_id or EVOLVED_FINAL_TEST_RUN_ID
+            ),
+        )
+        compatibility = build_control_baseline_source_compatibility_receipt_v3(
+            inputs=inputs,
+            audit=audit,
+        )
+        if compatibility["semantically_compatible"] is not True:
+            raise RuntimeError("BASELINE_SOURCE_NOT_SEMANTICALLY_COMPATIBLE")
+        experiment = ComposedControlFinalTestBaselineV3(
+            inputs=inputs,
+            run_id=arguments.run_id,
+            evolved_audit=audit,
+        )
+        write_public_file(
+            experiment.result_root
+            / "public/control_final_test_baseline_source_compatibility_receipt_v3.json",
+            canonical_pretty_json_bytes(compatibility),
+        )
+        payload = experiment.run_control_baseline()
     elif arguments.command in {
         "composed-final-test-verify",
         "composed-final-test-dry-run",
