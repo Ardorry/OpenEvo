@@ -66,11 +66,11 @@ _SERVICE_GENERATION_HEADER = "X-OpenEvo-Core-Generation"
 _RELEASE_IDENTITY_HEADER = "X-OpenEvo-Core-Release-Identity"
 _PROCESS_GROUP_LIFECYCLE_COMPATIBILITY = 3
 _PRODUCTION_V2_LIFECYCLE_COMPATIBILITY = 10
-# Lifecycle 90 accepts the replacement release registry in the final owner
-# validation of a reconciliation-only materialization. The preparer still
-# fences that registry by the captured runtime identity; ordinary successor
-# execution remains admission-registry exact.
-V2_DAEMON_LIFECYCLE_COMPATIBILITY = 90
+# Lifecycle 91 re-arms the same failed reconciliation attempt after a repaired
+# release, preserving its request and terminal-source authority. The commit
+# tail remains no-model and idempotent; ordinary successor attempts are not
+# eligible for this recovery.
+V2_DAEMON_LIFECYCLE_COMPATIBILITY = 91
 _ONEFILE_LAUNCHER_CLEANUP_SECONDS = 10.0
 _ORPHANED_SERVICE_CHILDREN_GUARD = threading.Lock()
 _ORPHANED_SERVICE_CHILDREN: dict[int, subprocess.Popen[bytes]] = {}

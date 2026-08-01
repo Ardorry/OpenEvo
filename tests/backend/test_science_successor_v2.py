@@ -1785,6 +1785,82 @@ def test_completed_methods_reconciliation_resumes_after_owner_exit(
         restarted.close()
 
 
+def test_completed_methods_reconciliation_resumes_repaired_commit_tail(
+    tmp_path: Path,
+) -> None:
+    preparer = _CompletedMethodsReconciliationPreparer()
+    owner = _owner(tmp_path, preparer)
+    predecessor, task = _admit(owner)
+    try:
+        with pytest.raises(CoreTaskControlError):
+            owner.run_successor_transition(
+                task.task_id,
+                accepted_attempt_id=task.attempts[0].attempt_id,
+                plan=_plan(task),
+            )
+        failed = owner.get_successor_transition_for_task(task.task_id)
+        transition_id = failed.transition.successor_transition_id
+        source_attempt = owner.successor_transition_attempts(transition_id)[-1]
+        terminal_sha256 = _terminal_successor_authority_sha256(
+            owner,
+            transition_id,
+        )
+
+        with pytest.raises(CoreTaskControlError) as first_reconciliation:
+            owner.reconcile_completed_successor_methods(
+                transition_id,
+                expected_project_head_id=(
+                    predecessor.active_project_head.project_head_id
+                ),
+                expected_terminal_attempt_id=(
+                    source_attempt.transition_attempt_id
+                ),
+                expected_terminal_authority_sha256=terminal_sha256,
+                reconciliation_request_id="reconcile-repaired-tail-1",
+            )
+        assert first_reconciliation.value.code == (
+            "successor_reconciliation_failed"
+        )
+        failed_attempts = owner.successor_transition_attempts(transition_id)
+        assert len(failed_attempts) == 2
+        assert failed_attempts[-1].reconciliation_only is True
+        assert failed_attempts[-1].state == "failed"
+
+        preparer.reject_materialization = False
+        calls_before_repair = tuple(preparer.calls)
+        committed = owner.reconcile_completed_successor_methods(
+            transition_id,
+            expected_project_head_id=(
+                predecessor.active_project_head.project_head_id
+            ),
+            expected_terminal_attempt_id=source_attempt.transition_attempt_id,
+            expected_terminal_authority_sha256=terminal_sha256,
+            reconciliation_request_id="reconcile-repaired-tail-1",
+        )
+        calls_after_repair = tuple(preparer.calls)
+
+        assert committed.state == "committed"
+        assert len(owner.successor_transition_attempts(transition_id)) == 2
+        assert preparer.calls.count("running_methods") == 1
+        assert preparer.calls.count("reconciling_methods") == 3
+        assert calls_after_repair != calls_before_repair
+
+        replay = owner.reconcile_completed_successor_methods(
+            transition_id,
+            expected_project_head_id=(
+                predecessor.active_project_head.project_head_id
+            ),
+            expected_terminal_attempt_id=source_attempt.transition_attempt_id,
+            expected_terminal_authority_sha256=terminal_sha256,
+            reconciliation_request_id="reconcile-repaired-tail-1",
+        )
+        assert replay == committed
+        assert tuple(preparer.calls) == calls_after_repair
+        assert len(owner.successor_transition_attempts(transition_id)) == 2
+    finally:
+        owner.close()
+
+
 def test_stale_successor_attempt_cannot_mutate_a_new_retry(
     tmp_path: Path,
 ) -> None:

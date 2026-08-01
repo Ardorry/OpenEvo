@@ -3563,13 +3563,23 @@ class ScienceTaskStoreV2:
                             "v2 successor reconciliation completion authority changed"
                         )
                     return transition
+                interrupted = (
+                    transition.error is not None
+                    and transition.error.code
+                    == "successor_transition_interrupted"
+                    and transition.error.retryable is True
+                )
+                repaired_commit_tail = (
+                    transition.error is not None
+                    and transition.error.code
+                    == "successor_reconciliation_failed"
+                    and transition.error.retryable is False
+                )
                 if (
                     transition.state == "failed"
                     and current.state == "failed"
                     and current.error == transition.error
-                    and transition.error is not None
-                    and transition.error.code == "successor_transition_interrupted"
-                    and transition.error.retryable is True
+                    and (interrupted or repaired_commit_tail)
                 ):
                     dataset_event = _load_v2_dataset_event_for_task(
                         connection,

@@ -262,6 +262,19 @@ remain exact to the Task admission registry. This closes the response-loss
 window in which Evolution durably published one context but Core rejected its
 otherwise valid receipt before workspace capture and atomic commit.
 
+### Repaired commit-tail resumption (lifecycle 91)
+
+If a reconciliation-only attempt fails after its authority has been appended,
+reusing the same reconciliation identity must not append another attempt or
+silently return the old failure forever. Lifecycle 91 re-arms that exact
+attempt only when its failed transition, failed attempt, sealed dataset,
+predecessor head, Task blocker, source attempt ID, and terminal-source digest
+remain mutually consistent. It then reruns only the reconciliation commit
+tail. Completed method jobs remain read-only, materialization is query-before-
+create, workspace upload is idempotent, and atomic commit remains the sole head
+advance. Ordinary successor attempts and different reconciliation identities
+are ineligible.
+
 ### Regression obligations
 
 - reconciliation after all method jobs succeeded does not call job create or
