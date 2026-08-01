@@ -55,6 +55,22 @@ purpose is to prove an exact, side-effect-bounded readiness transcript.
   events, unknown events, invalid usage, and `turn.failed`.
 - Run the focused harness tests, adjacent subscription/isolation tests, the
   broader test suite, compilation, lint, and `git diff --check`.
-- Build and deploy lifecycle 96 (the first replaceable identity above deployed
-  lifecycle 95), prove managed readiness without a model call, and use a fresh
-  run namespace for paid validation.
+- Build and deploy a new lifecycle release, prove managed readiness without a
+  model call, and use a fresh run namespace for paid validation.
+
+## Lifecycle 96 deployment follow-up
+
+Lifecycle 96 preserved the recovered Codex terminal rule, but its first remote
+deployment could not finish Core startup inside the existing 300-second hard
+limit. Read-only process sampling proved that startup was making continuous
+CPU-bound progress through 170 owned workspace uploads totaling about 12.8 GB.
+The process did not deadlock, write an invalid ledger, or start a model. Both
+the initial 240-second attempt and one 300-second recovery attempt cleaned up
+to the prior lifecycle-95 stopped floor with no live Daemon.
+
+Lifecycle 97 retains the complete startup integrity scan and all default
+timeouts. It only raises the maximum for an explicitly requested Daemon
+`ensure` operation from 300 to 1800 seconds. Daemon staging, observation, and
+stop operations keep their 300-second ceiling. This makes startup cost scale
+with the already bounded durable workspace inventory without weakening file,
+chunk, database, snapshot, release, predecessor, or host-key verification.

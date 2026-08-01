@@ -14,6 +14,7 @@ from pydantic import SecretStr
 
 
 DAEMON_BUNDLE_HOST_PROFILE_ID = "docker_user_container_v1"
+DAEMON_BUNDLE_ENSURE_MAX_SECONDS = 1800.0
 _MAX_BUNDLE_BYTES = 4 * 1024 * 1024 * 1024
 _MAX_JSON_BYTES = 16 * 1024
 _DIGEST_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
@@ -402,7 +403,7 @@ def build_daemon_bundle_ensure_command(
         or not 0 <= port <= 65535
         or isinstance(deadline_seconds, bool)
         or not isinstance(deadline_seconds, (int, float))
-        or not 0 < deadline_seconds <= 300
+        or not 0 < deadline_seconds <= DAEMON_BUNDLE_ENSURE_MAX_SECONDS
         or not isinstance(expected_predecessor, DaemonBundleServicePredecessor)
         or not _valid_digest(canonical_manifest_sha256)
     ):

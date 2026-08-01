@@ -339,6 +339,35 @@ def _root(tmp_path: Path) -> Path:
     return value
 
 
+def test_explicit_large_store_startup_deadline_is_bounded(
+    tmp_path: Path,
+    service_fakes: tuple[FakeController, list[FakeChild]],
+) -> None:
+    controller, _children = service_fakes
+    root = _root(tmp_path)
+    lock = tmp_path / "framework-lock.json"
+    lock.write_text("{}", encoding="ascii")
+
+    attachment = ensure_core_service(
+        service_root=root,
+        framework_lock=lock,
+        source_commit=SOURCE_COMMIT,
+        deadline_seconds=1800,
+        process_controller=controller,
+    )
+
+    assert attachment.release_identity == RELEASE_A.digest
+    with pytest.raises(CoreServiceError) as raised:
+        ensure_core_service(
+            service_root=root,
+            framework_lock=lock,
+            source_commit=SOURCE_COMMIT,
+            deadline_seconds=1800.001,
+            process_controller=controller,
+        )
+    assert raised.value.code is CoreServiceErrorCode.START_FAILED
+
+
 def test_second_project_and_concurrent_bootstrap_attach_one_daemon(
     tmp_path: Path,
     service_fakes: tuple[FakeController, list[FakeChild]],

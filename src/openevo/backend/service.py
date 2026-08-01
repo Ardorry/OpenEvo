@@ -66,10 +66,12 @@ _SERVICE_GENERATION_HEADER = "X-OpenEvo-Core-Generation"
 _RELEASE_IDENTITY_HEADER = "X-OpenEvo-Core-Release-Identity"
 _PROCESS_GROUP_LIFECYCLE_COMPATIBILITY = 3
 _PRODUCTION_V2_LIFECYCLE_COMPATIBILITY = 10
-# Lifecycle 96 preserves a final successful Codex terminal after recoverable
-# in-turn transport errors. Lifecycle 95's terminal Science Attempt failure
-# authority remains unchanged.
-V2_DAEMON_LIFECYCLE_COMPATIBILITY = 96
+# Lifecycle 97 gives an explicitly requested Daemon startup enough bounded
+# time to verify large durable workspace stores. Lifecycle 96's recovered
+# Codex terminal authority and lifecycle 95's terminal Science Attempt failure
+# authority remain unchanged.
+V2_DAEMON_LIFECYCLE_COMPATIBILITY = 97
+_MAX_CORE_SERVICE_ENSURE_DEADLINE_SECONDS = 1800.0
 _ONEFILE_LAUNCHER_CLEANUP_SECONDS = 10.0
 _ORPHANED_SERVICE_CHILDREN_GUARD = threading.Lock()
 _ORPHANED_SERVICE_CHILDREN: dict[int, subprocess.Popen[bytes]] = {}
@@ -687,7 +689,7 @@ def ensure_core_service(
     if (
         not 0 <= port <= 65535
         or deadline_seconds <= 0
-        or deadline_seconds > 300
+        or deadline_seconds > _MAX_CORE_SERVICE_ENSURE_DEADLINE_SECONDS
         or (
             expected_predecessor is not None
             and not isinstance(expected_predecessor, CoreServicePredecessor)

@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, BinaryIO, NoReturn, Protocol
 from pydantic import SecretStr
 
 from openevo.deployment.daemon_bundle_transport import (
+    DAEMON_BUNDLE_ENSURE_MAX_SECONDS,
     DOCKER_USER_CONTAINER_V1,
     DaemonBundleIdentity,
     DaemonBundleServicePredecessor,
@@ -1940,6 +1941,7 @@ class SshRemoteExecutorTransport:
             bundle,
             timeout_seconds=timeout_seconds,
             cancel_event=cancel_event,
+            maximum_timeout_seconds=DAEMON_BUNDLE_ENSURE_MAX_SECONDS,
         )
         if (
             type(port) is not int
@@ -2346,6 +2348,7 @@ class SshRemoteExecutorTransport:
         *,
         timeout_seconds: float,
         cancel_event: threading.Event | None,
+        maximum_timeout_seconds: float = 300.0,
     ) -> None:
         try:
             if not isinstance(bundle, StagedDaemonBundle):
@@ -2356,7 +2359,7 @@ class SshRemoteExecutorTransport:
                 or bundle._service_root != self._daemon_bundle_service_root
                 or isinstance(timeout_seconds, bool)
                 or not isinstance(timeout_seconds, (int, float))
-                or not 0 < timeout_seconds <= 300
+                or not 0 < timeout_seconds <= maximum_timeout_seconds
                 or (cancel_event is not None and not isinstance(cancel_event, threading.Event))
             ):
                 raise DaemonBundleTransportContractError(

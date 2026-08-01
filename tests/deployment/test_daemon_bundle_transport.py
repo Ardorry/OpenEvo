@@ -430,6 +430,28 @@ def test_ensure_command_uses_public_bundle_command() -> None:
     assert "/home/alice" not in repr(bundle)
 
 
+def test_ensure_command_allows_bounded_large_store_verification_deadline() -> None:
+    bundle = _staged(digest="a" * 64, size=12)
+
+    command = build_daemon_bundle_ensure_command(
+        bundle,
+        port=0,
+        deadline_seconds=1800,
+        expected_predecessor=DaemonBundleServicePredecessor(state="absent"),
+        canonical_manifest_sha256=_MANIFEST_DIGEST,
+    )
+
+    assert "--deadline-seconds 1800.000000" in command
+    with pytest.raises(DaemonBundleTransportContractError):
+        build_daemon_bundle_ensure_command(
+            bundle,
+            port=0,
+            deadline_seconds=1800.001,
+            expected_predecessor=DaemonBundleServicePredecessor(state="absent"),
+            canonical_manifest_sha256=_MANIFEST_DIGEST,
+        )
+
+
 def test_observe_command_and_predecessor_parser_are_closed() -> None:
     bundle = _staged(digest="a" * 64, size=12)
 
