@@ -118,6 +118,15 @@ v0.1.10 equal-lifecycle replacement authority.
 
 ## Dev17 v40 post-method reconciliation
 
+### Release lifecycle boundary
+
+Completed-method reconciliation and verified completed-prefix continuation
+change the durable Core recovery contract. They therefore ship at daemon
+lifecycle 86. A lifecycle-85 service or stopped floor cannot admit a different
+lifecycle-85 bundle; the replacement must be monotonic. This keeps the
+no-downgrade fence effective after a deployment stops its exact predecessor
+but loses the replacement before startup.
+
 ### New durable evidence
 
 The isolated Energy gate passed, but formal v40 failed later at

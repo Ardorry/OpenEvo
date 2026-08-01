@@ -162,6 +162,11 @@ DAEMON_V85 = CoreDaemonBundleIdentity(
     canonical_manifest_sha256="1" * 64,
     lifecycle_compatibility=85,
 )
+DAEMON_V86 = CoreDaemonBundleIdentity(
+    bundle_sha256="2" * 64,
+    canonical_manifest_sha256="3" * 64,
+    lifecycle_compatibility=86,
+)
 DAEMON_V17 = CoreDaemonBundleIdentity(
     bundle_sha256="4" * 64,
     canonical_manifest_sha256="c" * 64,
@@ -1510,7 +1515,7 @@ def test_formal_lifecycle85_v019_predecessor_requires_exact_profile() -> None:
         "lifecycle_compatibility": FORMAL_LIFECYCLE85_V019_DAEMON.lifecycle_compatibility,
     }
     assert service._is_exact_published_v019_predecessor_ledger(ledger)
-    assert service._is_v0110_published_v019_upgrade(
+    assert not service._is_v0110_published_v019_upgrade(
         ledger,
         release=RELEASE_A,
         candidate=DAEMON_V85,
@@ -1530,15 +1535,14 @@ def test_formal_lifecycle85_v019_predecessor_requires_exact_profile() -> None:
 
     floor = service._floor_from_ledger(ledger)
     assert service._is_exact_published_v019_predecessor_floor(floor)
-    assert service._is_v0110_published_v019_upgrade(
+    assert not service._is_v0110_published_v019_upgrade(
         floor,
         release=RELEASE_A,
         candidate=DAEMON_V85,
     )
     service._require_floor_compatibility(
         floor,
-        DAEMON_V85,
-        allow_equal_replacement=True,
+        DAEMON_V86,
     )
     with pytest.raises(CoreServiceError) as floor_exc:
         service._require_floor_compatibility(floor, DAEMON_V85)
