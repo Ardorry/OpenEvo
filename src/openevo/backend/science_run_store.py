@@ -3959,6 +3959,7 @@ class ScienceTaskStoreV2:
                 connection=connection,
                 task=task,
                 transition=transition,
+                transition_attempt=failed_attempt,
                 successor=successor,
                 commit=commit,
             )
@@ -4310,6 +4311,7 @@ class ScienceTaskStoreV2:
                 connection=connection,
                 task=task,
                 transition=transition,
+                transition_attempt=active_attempt,
                 successor=successor,
                 commit=commit,
             )
@@ -7462,6 +7464,11 @@ def _load_v2_successor_transition(
         "WHERE successor_transition_id = ?",
         (successor_transition_id,),
     ).fetchone()
+    attempts = _load_v2_successor_transition_attempts(
+        connection,
+        successor_transition_id,
+    )
+    latest = attempts[-1]
     if transition.state in {"committed", "cancelled"}:
         if commit_row is None or reference.successor_project_head is None:
             raise ScienceTaskStoreV2Error("published v2 successor transition is incomplete")
@@ -7485,16 +7492,12 @@ def _load_v2_successor_transition(
             connection=connection,
             task=task,
             transition=transition,
+            transition_attempt=latest,
             successor=reference.successor_project_head,
             commit=commit,
         )
     elif commit_row is not None or reference.successor_project_head is not None:
         raise ScienceTaskStoreV2Error("noncommitted v2 successor transition exposes a successor")
-    attempts = _load_v2_successor_transition_attempts(
-        connection,
-        successor_transition_id,
-    )
-    latest = attempts[-1]
     if any(attempt.state != "failed" for attempt in attempts[:-1]):
         raise ScienceTaskStoreV2Error("v2 successor transition has a non-final terminal attempt")
     if transition.state == "failed":
@@ -8286,6 +8289,7 @@ def _validate_v2_successor_commit_closure(
     connection: sqlite3.Connection,
     task: m2.TaskV2,
     transition: m2.SuccessorTransitionV2,
+    transition_attempt: ScienceSuccessorTransitionAttemptV2,
     successor: m2.ProjectHeadRefV2,
     commit: AtomicSuccessorCommitV2,
 ) -> None:
@@ -8424,6 +8428,15 @@ def _validate_v2_successor_commit_closure(
                 )
             return
         if plan.enabled_methods:
+            registry_changed = (
+                successor.registry_sha256 != predecessor.registry_sha256
+            )
+            if transition_attempt.reconciliation_only is True:
+                # The owner and production preparer already verified the
+                # replacement materialization under this exact commit-tail
+                # attempt. Ordinary successor commits remain predecessor-
+                # registry exact.
+                registry_changed = False
             enabled_targets = frozenset(item.target_id for item in plan.enabled_methods)
             expected_produced = tuple(
                 (
@@ -8452,7 +8465,7 @@ def _validate_v2_successor_commit_closure(
             )
             if (
                 manifest.runtime_context_source != "materialized_new"
-                or successor.registry_sha256 != predecessor.registry_sha256
+                or registry_changed
                 or successor.runtime_context_snapshot.runtime_contract_sha256
                 != predecessor.runtime_context_snapshot.runtime_contract_sha256
                 or successor.evolution_revision.evolution_revision_id

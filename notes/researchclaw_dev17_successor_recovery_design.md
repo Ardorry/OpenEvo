@@ -285,6 +285,15 @@ registry as durable publication authority; it does not create another context.
 Fresh publications still require the admission or active release registry,
 and ordinary successor execution retains its original strict registry fence.
 
+### Atomic activation of a reconciled registry (lifecycle 93)
+
+The final atomic commit closure receives the exact active transition attempt.
+For an ordinary attempt it still requires the successor registry to equal the
+predecessor registry. For `reconciliation_only`, it may activate the registry
+already verified by the production preparer and bound into the materialized
+runtime snapshot and successor manifest. All other plan, dataset, artifact,
+workspace, runtime, head, and transaction checks remain unchanged.
+
 ### Regression obligations
 
 - reconciliation after all method jobs succeeded does not call job create or

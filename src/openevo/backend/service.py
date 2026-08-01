@@ -66,10 +66,10 @@ _SERVICE_GENERATION_HEADER = "X-OpenEvo-Core-Generation"
 _RELEASE_IDENTITY_HEADER = "X-OpenEvo-Core-Release-Identity"
 _PROCESS_GROUP_LIFECYCLE_COMPATIBILITY = 3
 _PRODUCTION_V2_LIFECYCLE_COMPATIBILITY = 10
-# Lifecycle 92 accepts an exact query-replayed materialization from an earlier
-# repair release. Its transition plus canonical request digest is durable
-# authority; new publications and ordinary execution remain registry-fenced.
-V2_DAEMON_LIFECYCLE_COMPATIBILITY = 92
+# Lifecycle 93 lets the atomic commit closure activate the materialization
+# registry verified by a reconciliation-only attempt. Ordinary successor
+# commits remain predecessor-registry exact.
+V2_DAEMON_LIFECYCLE_COMPATIBILITY = 93
 _ONEFILE_LAUNCHER_CLEANUP_SECONDS = 10.0
 _ORPHANED_SERVICE_CHILDREN_GUARD = threading.Lock()
 _ORPHANED_SERVICE_CHILDREN: dict[int, subprocess.Popen[bytes]] = {}

@@ -1623,6 +1623,28 @@ class _CompletedMethodsReconciliationPreparer(_Preparer):
         return super().reconcile_completed_methods(context, dataset)
 
 
+class _CrossRegistryCompletedMethodsReconciliationPreparer(
+    _CompletedMethodsReconciliationPreparer
+):
+    def materialize_context(
+        self,
+        context: ScienceSuccessorPreparationContextV2,
+        validated: ValidatedScienceOutputsV2,
+    ) -> SuccessorMaterializationV2:
+        materialized = super().materialize_context(context, validated)
+        if context.transition_attempt.reconciliation_only is not True:
+            return materialized
+        runtime = materialized.runtime_context_snapshot.model_copy(
+            update={
+                "registry_sha256": "9" * 64,
+                "manifest_sha256": "8" * 64,
+            }
+        )
+        return materialized.model_copy(
+            update={"runtime_context_snapshot": runtime}
+        )
+
+
 def test_completed_methods_reconciliation_is_no_job_and_idempotent(
     tmp_path: Path,
 ) -> None:
@@ -1857,6 +1879,53 @@ def test_completed_methods_reconciliation_resumes_repaired_commit_tail(
         assert replay == committed
         assert tuple(preparer.calls) == calls_after_repair
         assert len(owner.successor_transition_attempts(transition_id)) == 2
+    finally:
+        owner.close()
+
+
+def test_completed_methods_reconciliation_commits_verified_replacement_registry(
+    tmp_path: Path,
+) -> None:
+    preparer = _CrossRegistryCompletedMethodsReconciliationPreparer()
+    owner = _owner(tmp_path, preparer)
+    predecessor, task = _admit(owner)
+    try:
+        with pytest.raises(CoreTaskControlError):
+            owner.run_successor_transition(
+                task.task_id,
+                accepted_attempt_id=task.attempts[0].attempt_id,
+                plan=_plan(task),
+            )
+        failed = owner.get_successor_transition_for_task(task.task_id)
+        transition_id = failed.transition.successor_transition_id
+        source_attempt = owner.successor_transition_attempts(transition_id)[-1]
+        terminal_sha256 = _terminal_successor_authority_sha256(
+            owner,
+            transition_id,
+        )
+
+        preparer.reject_materialization = False
+        committed = owner.reconcile_completed_successor_methods(
+            transition_id,
+            expected_project_head_id=(
+                predecessor.active_project_head.project_head_id
+            ),
+            expected_terminal_attempt_id=source_attempt.transition_attempt_id,
+            expected_terminal_authority_sha256=terminal_sha256,
+            reconciliation_request_id="reconcile-replacement-registry-1",
+        )
+
+        assert committed.state == "committed"
+        assert committed.transition.successor_project_head is not None
+        assert committed.transition.successor_project_head.registry_sha256 == (
+            "9" * 64
+        )
+        assert predecessor.active_project_head.registry_sha256 != "9" * 64
+        attempts = owner.successor_transition_attempts(transition_id)
+        assert len(attempts) == 2
+        assert attempts[-1].reconciliation_only is True
+        assert attempts[-1].state == "committed"
+        assert preparer.calls.count("running_methods") == 1
     finally:
         owner.close()
 
@@ -3017,6 +3086,9 @@ def test_commit_closure_rejects_successor_with_forged_inherited_context(
                         {"task_id": task.task_id},
                     ),
                     transition=committed,
+                    transition_attempt=owner.successor_transition_attempts(
+                        committed.transition.successor_transition_id
+                    )[-1],
                     successor=(committed.transition.successor_project_head),
                     commit=forged,
                 )
@@ -3056,6 +3128,9 @@ def test_commit_closure_rejects_enabled_successor_without_typed_composition(
                         {"task_id": task.task_id},
                     ),
                     transition=committed,
+                    transition_attempt=owner.successor_transition_attempts(
+                        committed.transition.successor_transition_id
+                    )[-1],
                     successor=(committed.transition.successor_project_head),
                     commit=forged,
                 )
