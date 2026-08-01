@@ -53,6 +53,12 @@ class EvolutionClientProtocol(Protocol):
 
     def get_materialized_context(self, context_id: str) -> dict[str, Any]: ...
 
+    def get_internal_successor_materialized_context(
+        self,
+        successor_transition_id: str,
+        request_digest: str,
+    ) -> dict[str, Any]: ...
+
     def get_internal_job_result(self, job_id: str) -> dict[str, Any]: ...
 
     def get_internal_failed_plan_bound_job_authority(
@@ -422,6 +428,26 @@ class EvolutionHttpClient:
         result = response.json()
         if not isinstance(result, dict):
             raise ValueError("materialized context response was not a JSON object")
+        return result
+
+    def get_internal_successor_materialized_context(
+        self,
+        successor_transition_id: str,
+        request_digest: str,
+    ) -> dict[str, Any]:
+        encoded_transition = quote(successor_transition_id, safe="")
+        encoded_digest = quote(request_digest, safe="")
+        response = self._client.get(
+            f"{self.base_url}/v1/internal/successor-transitions/"
+            f"{encoded_transition}/materialized-contexts/by-request/"
+            f"{encoded_digest}"
+        )
+        self._raise_for_status(response)
+        result = response.json()
+        if not isinstance(result, dict):
+            raise ValueError(
+                "successor materialized context response was not an object"
+            )
         return result
 
     def get_internal_job_result(self, job_id: str) -> dict[str, Any]:

@@ -287,6 +287,7 @@ class SucceededPlanBoundJobAuthorityResponse(BaseModel):
     state: Literal["succeeded"]
     successor_transition_id: str = Field(min_length=1, max_length=256)
     plan_id: str = Field(min_length=1, max_length=256)
+    registry_snapshot_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     target_id: str = Field(min_length=1, max_length=256)
     method_id: str = Field(min_length=1, max_length=256)

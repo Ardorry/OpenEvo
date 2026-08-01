@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import replace
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from openevo.backend.contracts.v2.models import (
@@ -54,6 +56,7 @@ from openevo.evolution.training_feedback import (
     TrainingFeedbackAttachment,
     TrainingFeedbackAttachmentCreateRequest,
 )
+from openevo.experiments.clients import EvolutionHttpStatusError
 from tests.backend.test_science_execution_v2 import (
     _Catalog,
     _Clock,
@@ -294,6 +297,7 @@ class _Evolution:
         self.succeeded_authority_overrides: dict[str, dict] = {}
         self.materialized: MaterializedContext | None = None
         self.materialized_count = 0
+        self.materialization_response_loss_once = False
         self.discard_response: dict | None = None
         self.discarded_transition_ids: list[str] = []
         self.closed_count = 0
@@ -583,6 +587,9 @@ class _Evolution:
             "state": "succeeded",
             "successor_transition_id": successor_transition_id,
             "plan_id": request.plan.plan_id,
+            "registry_snapshot_digest": (
+                request.plan.registry_snapshot_digest
+            ),
             "plan_digest": canonical_digest(request.plan),
             "target_id": target_id,
             "method_id": request.selection().method_id,
@@ -791,6 +798,26 @@ class _Evolution:
                 "adapters": (),
             },
         )
+        if self.materialization_response_loss_once:
+            self.materialization_response_loss_once = False
+            raise httpx.ReadError("simulated materialization response loss")
+        return self.materialized.model_dump(mode="json")
+
+    def get_internal_successor_materialized_context(
+        self,
+        successor_transition_id: str,
+        request_digest: str,
+    ) -> dict:
+        if (
+            self.materialized is None
+            or self.materialized.successor_transition_id
+            != successor_transition_id
+            or self.materialized.request_digest != request_digest
+        ):
+            raise EvolutionHttpStatusError(
+                status_code=404,
+                detail_code="not_found",
+            )
         return self.materialized.model_dump(mode="json")
 
 
@@ -1093,6 +1120,11 @@ def test_production_preparer_commits_complete_workspace_and_context_successor(
                     "state": "running",
                     "error": None,
                     "commit_manifest_sha256": None,
+                    "reconciliation_only": True,
+                    "reconciliation_source_attempt_id": (
+                        committed_attempt.transition_attempt_id
+                    ),
+                    "reconciliation_source_authority_sha256": "1" * 64,
                 }
             ),
             plan=attempt_record.successor_plan,
@@ -1122,8 +1154,66 @@ def test_production_preparer_commits_complete_workspace_and_context_successor(
         assert evolution.jobs == job_inventory_before
         assert evolution.target_run_counts == target_run_counts_before
 
+        later_binding = _service_binding("9" * 64)
+        later_binding = replace(
+            later_binding,
+            framework_lock_digest="8" * 64,
+            _identity=replace(
+                later_binding._identity,
+                framework_lock_digest="8" * 64,
+            ),
+        )
+        services.binding = later_binding
+        evolution.registry_sha256 = later_binding.registry_digest
+        cross_generation_outputs = (
+            owner._successor_preparer.reconcile_completed_methods(
+                reconciliation_context,
+                reconciliation_dataset,
+            )
+        )
+        assert cross_generation_outputs == reconciled_outputs
+        assert evolution.jobs == job_inventory_before
+        assert evolution.target_run_counts == target_run_counts_before
+
+        evolution.materialized = None
+        evolution.materialization_response_loss_once = True
+        materialized_before = evolution.materialized_count
+        validated = owner._successor_preparer.validate_outputs(
+            reconciliation_context,
+            reconciliation_dataset,
+            cross_generation_outputs,
+        )
+        first_materialized = owner._successor_preparer.materialize_context(
+            reconciliation_context,
+            validated,
+        )
+        replayed_materialized = owner._successor_preparer.materialize_context(
+            reconciliation_context,
+            validated,
+        )
+        assert replayed_materialized == first_materialized
+        assert evolution.materialized_count == materialized_before + 1
+        assert (
+            first_materialized.runtime_context_snapshot.registry_sha256
+            == later_binding.registry_digest
+        )
+
+        services.binding = replace(
+            later_binding,
+            runtime_identity_digest="0" * 64,
+        )
+        with pytest.raises(
+            ScienceSuccessorPreparationV2Error,
+            match="service authority changed",
+        ):
+            owner._successor_preparer.reconcile_completed_methods(
+                reconciliation_context,
+                reconciliation_dataset,
+            )
+        services.binding = later_binding
+
         evolution.succeeded_authority_overrides["skill_bundle"] = {
-            "core_config_sha256": "0" * 64,
+            "job_type": "different-historical-method",
         }
         with pytest.raises(
             ScienceSuccessorPreparationV2Error,
@@ -1136,6 +1226,8 @@ def test_production_preparer_commits_complete_workspace_and_context_successor(
         evolution.succeeded_authority_overrides.clear()
         assert evolution.jobs == job_inventory_before
         assert evolution.target_run_counts == target_run_counts_before
+        services.binding = binding
+        evolution.registry_sha256 = binding.registry_digest
 
         next_authority = owner.project_admission_authority(project_id)
         partial_config_json = config.model_dump(mode="json")

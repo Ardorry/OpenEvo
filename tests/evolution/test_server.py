@@ -539,6 +539,12 @@ def test_materialized_blob_transport_rejects_oversize_before_read(
             404,
         ),
         (
+            "GET",
+            "/v1/internal/successor-transitions/successor-missing/"
+            "materialized-contexts/by-request/" + "0" * 64,
+            404,
+        ),
+        (
             "POST",
             "/v1/internal/successor-transitions/"
             "successor-missing/discard",

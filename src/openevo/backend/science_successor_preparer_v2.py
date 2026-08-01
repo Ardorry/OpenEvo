@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
+import httpx
+
 from openevo.backend.contracts.v2 import models as m2
 from openevo.backend.contracts.v2.store import ProjectRecordV2
 from openevo.backend.science_execution_v2 import (
@@ -92,9 +94,9 @@ from openevo.evolution.models import (
     JobCreateResponse,
     JobState,
     ReflectorInferenceReservationReceipt,
-    SuccessorTransitionJobInventoryResponse,
-    SuccessorArtifactAuthorityResponse,
     SucceededPlanBoundJobAuthorityResponse,
+    SuccessorArtifactAuthorityResponse,
+    SuccessorTransitionJobInventoryResponse,
 )
 from openevo.evolution.planned_jobs import PlanBoundJobCreateRequest
 from openevo.evolution.revisions import (
@@ -113,6 +115,7 @@ from openevo.evolution.training_feedback import (
 from openevo.experiments.clients import (
     EvolutionClientProtocol,
     EvolutionHttpClient,
+    EvolutionHttpStatusError,
 )
 from openevo.experiments.compiler import (
     CompiledEvolutionMethodSpec,
@@ -875,6 +878,220 @@ class ProductionScienceSuccessorPreparerV2:
         return outputs
 
     def reconcile_completed_methods(
+        self,
+        context: ScienceSuccessorPreparationContextV2,
+        dataset: SealedTranscriptDatasetV2,
+    ) -> tuple[ScienceMethodOutputV2, ...]:
+        """Recover the exact historical paid outputs without recompiling them.
+
+        A later release has a different executable-registry identity even when
+        it is reading the same durable Evolution store.  Recompiling under the
+        later registry would compare historical jobs to a new distribution
+        digest and make a no-model commit-tail recovery impossible.  Evolution
+        therefore closes each succeeded job against its own persisted plan and
+        envelope; this method additionally binds that authority to the exact
+        failed transition, source plan targets, prior artifact owners, terminal
+        result, and admission receipt.
+        """
+
+        self._require_running()
+        record, _result, project = self._authority(context)
+        if (
+            context.transition_attempt.reconciliation_only is not True
+            or context.transition_attempt.reconciliation_source_attempt_id
+            is None
+            or dataset.task_id != context.task.task_id
+            or dataset.accepted_attempt_id
+            != context.accepted_attempt.attempt_id
+        ):
+            raise ScienceSuccessorPreparationV2Error(
+                "completed-method reconciliation authority is invalid"
+            )
+        transition_id = context.transition.transition.successor_transition_id
+        with self._evolution(context, record, project) as (_binding, client):
+            (
+                _prior_context,
+                _prior_composition,
+                prior_owner_by_target,
+            ) = self._prior_context_artifacts(context, client)
+            inventory = SuccessorTransitionJobInventoryResponse.model_validate_json(
+                json.dumps(
+                    client.get_internal_successor_transition_job_inventory(
+                        transition_id
+                    ),
+                    ensure_ascii=True,
+                    allow_nan=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
+            content_basis = self._content_admission_basis(
+                context,
+                dataset,
+                client,
+            )
+            outputs: list[ScienceMethodOutputV2] = []
+            observed_job_ids: list[str] = []
+            observed_plan_authorities: set[tuple[str, str, str]] = set()
+            for planned in context.plan.enabled_methods:
+                job = SucceededPlanBoundJobAuthorityResponse.model_validate_json(
+                    json.dumps(
+                        client.get_internal_succeeded_plan_bound_job_authority(
+                            transition_id,
+                            planned.target_id,
+                        ),
+                        ensure_ascii=True,
+                        allow_nan=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                )
+                observed_plan_authorities.add(
+                    (
+                        job.plan_id,
+                        job.registry_snapshot_digest,
+                        job.plan_digest,
+                    )
+                )
+                terminal = client.get_internal_job_result(job.job_id)
+                raw_outputs = (
+                    terminal.get("outputs")
+                    if isinstance(terminal, Mapping)
+                    else None
+                )
+                target_outputs = (
+                    []
+                    if not isinstance(raw_outputs, list)
+                    else [
+                        item
+                        for item in raw_outputs
+                        if isinstance(item, dict)
+                        and item.get("type")
+                        == planned.output_artifact_type
+                    ]
+                )
+                selected = [
+                    item
+                    for item in target_outputs
+                    if item.get("promoted") is True
+                ]
+                if (
+                    job.successor_transition_id != transition_id
+                    or job.target_id != planned.target_id
+                    or job.method_id != planned.method_id
+                    or job.job_type != planned.method_id
+                    or job.predecessor_successor_transition_id
+                    != prior_owner_by_target.get(planned.target_id)
+                    or planned.output_artifact_type
+                    not in job.declared_output_artifact_types
+                    or job.attempt_count != 1
+                    or not isinstance(terminal, Mapping)
+                    or terminal.get("job_id") != job.job_id
+                    or terminal.get("state") != JobState.SUCCEEDED.value
+                    or terminal.get("error") is not None
+                    or terminal.get("retryable") is not None
+                    or terminal.get("successor_transition_id")
+                    != transition_id
+                    or canonical_digest(terminal) != job.job_result_sha256
+                    or terminal.get("artifact_ids")
+                    != [
+                        item.get("artifact_id")
+                        for item in raw_outputs or []
+                        if isinstance(item, dict)
+                    ]
+                    or tuple(terminal.get("artifact_ids") or ())
+                    != job.output_artifact_ids
+                    or not target_outputs
+                    or len(selected) != 1
+                ):
+                    raise ScienceSuccessorPreparationV2Error(
+                        "completed method job authority is inconsistent"
+                    )
+                raw_selected = selected[0]
+                artifact_id = raw_selected.get("artifact_id")
+                if not isinstance(artifact_id, str):
+                    raise ScienceSuccessorPreparationV2Error(
+                        "completed method selected artifact identity is invalid"
+                    )
+                artifact = SuccessorArtifactAuthorityResponse.model_validate(
+                    client.get_internal_successor_artifact_authority(
+                        transition_id,
+                        artifact_id,
+                    )
+                )
+                proposal_ids = tuple(
+                    sorted(
+                        str(item["artifact_id"])
+                        for item in target_outputs
+                        if isinstance(item.get("artifact_id"), str)
+                    )
+                )
+                if (
+                    artifact.successor_transition_id != transition_id
+                    or artifact.job_id != job.job_id
+                    or artifact.artifact.artifact_id != artifact_id
+                    or artifact.artifact.type.value
+                    != planned.output_artifact_type
+                    or artifact.artifact.state is not ArtifactState.SEALED
+                    or artifact.artifact.promoted is not True
+                    or artifact.proposal_artifact_ids != proposal_ids
+                    or artifact.admission_decision_id is None
+                    or artifact.admission_decision_sha256 is None
+                    or artifact.content_admission is None
+                    or artifact.content_admission.passed is not True
+                    or artifact.content_admission.basis_sha256
+                    != content_basis.content_sha256
+                    or raw_selected.get("payload_manifest_digest")
+                    != artifact.payload_manifest_sha256
+                    or raw_selected.get("payload_byte_size")
+                    != artifact.payload_byte_size
+                ):
+                    raise ScienceSuccessorPreparationV2Error(
+                        "completed method admission authority is inconsistent"
+                    )
+                outputs.append(
+                    ScienceMethodOutputV2(
+                        target_id=planned.target_id,
+                        method_id=planned.method_id,
+                        artifact_id=artifact_id,
+                        artifact_type=planned.output_artifact_type,
+                        manifest_sha256=artifact.payload_manifest_sha256,
+                        byte_size=artifact.payload_byte_size,
+                        execution_boundary="outside_inference",
+                        evolution_job_id=job.job_id,
+                        admission_action="update",
+                        admission_decision_id=(
+                            artifact.admission_decision_id
+                        ),
+                        admission_decision_sha256=(
+                            artifact.admission_decision_sha256
+                        ),
+                        content_admission_sha256=(
+                            artifact.content_admission.content_sha256
+                        ),
+                        content_admission=artifact.content_admission,
+                        proposal_artifact_ids=(
+                            artifact.proposal_artifact_ids
+                        ),
+                        origin="produced",
+                        owner_successor_transition_id=transition_id,
+                    )
+                )
+                observed_job_ids.append(job.job_id)
+            if (
+                inventory.successor_transition_id != transition_id
+                or tuple(sorted(observed_job_ids)) != inventory.job_ids
+                or len(observed_job_ids)
+                != len(context.plan.enabled_methods)
+                or len(observed_plan_authorities) != 1
+            ):
+                raise ScienceSuccessorPreparationV2Error(
+                    "completed method job inventory is not exact"
+                )
+        self._require_running()
+        return tuple(outputs)
+
+    def _reconcile_completed_methods_same_generation(
         self,
         context: ScienceSuccessorPreparationContextV2,
         dataset: SealedTranscriptDatasetV2,
@@ -2332,7 +2549,7 @@ class ProductionScienceSuccessorPreparerV2:
             item.owner_successor_transition_id
             for item in validated.composition
         )
-        with self._evolution(context, record, project) as (_binding, client):
+        with self._evolution(context, record, project) as (binding, client):
             request = ContextProjectionResolveRequest(
                 task_id=context.task.task_id,
                 instruction=project.config.task.objective,
@@ -2365,7 +2582,45 @@ class ProductionScienceSuccessorPreparerV2:
                     harness_instruction=MANAGED_WORKSPACE,
                 ),
             )
-            raw_materialized = client.create_materialized_context(request.model_dump(mode="json"))
+            request_payload = request.model_dump(mode="json")
+            if context.transition_attempt.reconciliation_only is True:
+                request_digest = canonical_digest(request)
+                try:
+                    raw_materialized = (
+                        client.get_internal_successor_materialized_context(
+                            context.transition.transition.successor_transition_id,
+                            request_digest,
+                        )
+                    )
+                except EvolutionHttpStatusError as lookup_error:
+                    if lookup_error.status_code != 404:
+                        raise
+                    try:
+                        raw_materialized = client.create_materialized_context(
+                            request_payload
+                        )
+                    except (
+                        EvolutionHttpStatusError,
+                        ValueError,
+                        httpx.TransportError,
+                    ) as publication_error:
+                        try:
+                            raw_materialized = (
+                                client.get_internal_successor_materialized_context(
+                                    context.transition.transition.successor_transition_id,
+                                    request_digest,
+                                )
+                            )
+                        except (
+                            EvolutionHttpStatusError,
+                            ValueError,
+                            httpx.TransportError,
+                        ):
+                            raise publication_error
+            else:
+                raw_materialized = client.create_materialized_context(
+                    request_payload
+                )
             materialized = MaterializedContext.model_validate_json(
                 json.dumps(
                     raw_materialized,
@@ -2376,8 +2631,13 @@ class ProductionScienceSuccessorPreparerV2:
                 )
             )
         self._require_running()
+        allowed_registry_digests = {
+            context.task.admission.registry_sha256,
+        }
+        if context.transition_attempt.reconciliation_only is True:
+            allowed_registry_digests.add(binding.registry_digest)
         if (
-            materialized.registry_digest != context.task.admission.registry_sha256
+            materialized.registry_digest not in allowed_registry_digests
             or materialized.successor_transition_id
             != context.transition.transition.successor_transition_id
             or materialized.predecessor_project_head_id
@@ -2812,14 +3072,26 @@ class ProductionScienceSuccessorPreparerV2:
             runtime_image=MANAGED_RUNTIME_IMAGES["managed_science"],
         )
         binding = getattr(lease, "binding", None)
+        reconciliation_only = (
+            type(context) is ScienceSuccessorPreparationContextV2
+            and context.transition_attempt.reconciliation_only is True
+        )
         if (
             lease is None
             or type(binding) is not ServiceRunBinding
             or getattr(snapshot, "run_ready", False) is not True
-            or binding.registry_digest != context.task.admission.registry_sha256
-            or binding.registry_digest != record.receipt.registry_sha256
-            or binding.framework_lock_digest != record.receipt.framework_lock_sha256
+            or context.task.admission.registry_sha256
+            != record.receipt.registry_sha256
             or binding.runtime_identity_digest != record.receipt.runtime_identity_sha256
+            or (
+                not reconciliation_only
+                and (
+                    binding.registry_digest
+                    != context.task.admission.registry_sha256
+                    or binding.framework_lock_digest
+                    != record.receipt.framework_lock_sha256
+                )
+            )
         ):
             if lease is not None:
                 close = getattr(lease, "close", None)

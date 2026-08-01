@@ -193,6 +193,32 @@ Any missing job, foreign plan/transition, non-succeeded terminal, missing
 admission, KEEP/REJECT output, receipt digest mismatch, project-head drift,
 Core generation drift, or contradictory commit evidence remains fail-closed.
 
+### Cross-release executor correction (lifecycle 87)
+
+The lifecycle-86 implementation still routed reconciliation through the
+ordinary `_evolution` binding. That binding correctly requires the live
+registry and framework lock to equal the captured Attempt, but a repair release
+necessarily has new distribution identities. The v40 Attempt and its paid jobs
+remain internally consistent while the lifecycle-86 executor therefore fails
+before it can append a reconciliation attempt.
+
+Lifecycle 87 keeps the ordinary path unchanged and permits identity handoff
+only for an already-admitted `reconciliation_only` attempt. The historical
+Attempt registry must still equal its task admission, and the managed runtime
+identity must remain exact. Each paid job is then verified against Evolution's
+persisted historical plan, registry snapshot, execution envelope, terminal
+digest, transition binding, target/method plan, and artifact-admission receipt;
+the later release never recompiles or reruns it.
+
+Materialization is also recovery-idempotent. Core first queries Evolution by
+the closed pair `(successor_transition_id, canonical_request_digest)`. It
+creates a context only when that pair is absent, and a lost creation response
+is reconciled by the same query. Multiple matches, mismatched registries, or a
+changed runtime identity fail closed. A pre-existing historical context keeps
+its historical registry; a genuinely absent context is created under the
+verified repair registry, which becomes the successor head registry. No model
+job, inference reservation, or paid counter is created in either case.
+
 ### Regression obligations
 
 - reconciliation after all method jobs succeeded does not call job create or

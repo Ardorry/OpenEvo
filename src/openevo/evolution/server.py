@@ -492,6 +492,35 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.get(
+        "/v1/internal/successor-transitions/{successor_transition_id}"
+        "/materialized-contexts/by-request/{request_digest}",
+        response_model=MaterializedContext,
+    )
+    def get_internal_successor_materialized_context(
+        successor_transition_id: str,
+        request_digest: str,
+        request: Request,
+    ) -> MaterializedContext:
+        require_materialized_context_caller(request)
+        if request.headers.get(INTERNAL_SERVICE_HEADER) != "core-control":
+            raise HTTPException(
+                status_code=403,
+                detail="only Core may reconcile a materialized context",
+            )
+        try:
+            return store.get_internal_successor_materialized_context(
+                successor_transition_id,
+                request_digest,
+            )
+        except ValueError as exc:
+            status = (
+                404
+                if str(exc) == "successor materialized context not found"
+                else 409
+            )
+            raise HTTPException(status_code=status, detail=str(exc)) from exc
+
+    @app.get(
         "/v1/internal/materialized-contexts/{context_id}/blobs/{blob_id}",
         response_class=Response,
     )

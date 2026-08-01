@@ -449,6 +449,15 @@ def test_successor_materialization_privately_consumes_only_exact_sealed_outputs(
     exact = store.resolve_materialized_context(exact_request)
     assert exact.successor_transition_id == "successor-transition-1"
     assert exact.selection.artifact_ids == (artifact_id,)
+    assert store.get_internal_successor_materialized_context(
+        "successor-transition-1",
+        exact.request_digest,
+    ) == exact
+    with pytest.raises(ValueError, match="not found"):
+        store.get_internal_successor_materialized_context(
+            "successor-transition-1",
+            "0" * 64,
+        )
 
     wrong_payload = exact_request.model_dump(mode="json")
     wrong_payload["successor_transition_id"] = (

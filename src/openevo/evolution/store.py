@@ -11358,6 +11358,9 @@ class EvolutionStore:
             state="succeeded",
             successor_transition_id=successor_transition_id,
             plan_id=validated.plan.plan_id,
+            registry_snapshot_digest=(
+                validated.plan.registry_snapshot_digest
+            ),
             plan_digest=validated.envelope.plan_digest,
             target_id=validated.selection.target_id,
             method_id=validated.selection.method_id,
@@ -11385,6 +11388,59 @@ class EvolutionStore:
             attempt_count=int(row["attempt_count"]),
             job_result_sha256=canonical_digest(terminal),
         )
+
+    def get_internal_successor_materialized_context(
+        self,
+        successor_transition_id: str,
+        request_digest: str,
+    ) -> MaterializedContext:
+        """Return one exact prior materialization without publishing another.
+
+        Completed-method reconciliation may resume under a later Core release.
+        The transition and canonical request digest form the closed replay
+        identity; absence is distinct from ambiguous or corrupt authority.
+        """
+
+        if (
+            not isinstance(successor_transition_id, str)
+            or not 1 <= len(successor_transition_id) <= 256
+            or not isinstance(request_digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", request_digest) is None
+        ):
+            raise ValueError(
+                "successor materialized context identity is invalid"
+            )
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT contexts.response_json FROM contexts JOIN "
+                "context_materializations USING(context_id) WHERE "
+                "context_materializations.request_digest = ? "
+                "ORDER BY contexts.context_id LIMIT 2",
+                (request_digest,),
+            ).fetchall()
+        matches: list[MaterializedContext] = []
+        for row in rows:
+            try:
+                materialized = MaterializedContext.model_validate_json(
+                    str(row["response_json"])
+                )
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "successor materialized context authority is invalid"
+                ) from exc
+            if (
+                materialized.request_digest == request_digest
+                and materialized.successor_transition_id
+                == successor_transition_id
+            ):
+                matches.append(materialized)
+        if not matches:
+            raise ValueError("successor materialized context not found")
+        if len(matches) != 1 or len(rows) != 1:
+            raise ValueError(
+                "successor materialized context authority is ambiguous"
+            )
+        return matches[0]
 
     def get_internal_successor_transition_job_inventory(
         self,

@@ -419,6 +419,9 @@ def test_succeeded_plan_bound_authority_closes_exact_request_and_result(
     assert authority.job_id == job_id
     assert authority.successor_transition_id == transition_id
     assert authority.plan_id == request.plan.plan_id
+    assert authority.registry_snapshot_digest == (
+        request.plan.registry_snapshot_digest
+    )
     assert authority.plan_digest == canonical_digest(request.plan)
     assert authority.target_id == request.target_id
     assert authority.method_id == request.selection().method_id
