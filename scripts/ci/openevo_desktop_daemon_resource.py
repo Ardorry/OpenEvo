@@ -599,37 +599,66 @@ def _inspect_packaged_askpass_helper(app: Path) -> dict[str, object]:
     if helper_names != [helper.name]:
         raise ResourceCompositionError("App bundle does not contain the exact SSH askpass helper")
 
+    _reject_symlink_components(helper)
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
-        before = os.stat(helper, follow_symlinks=False)
+        descriptor = os.open(helper, flags)
     except OSError as exc:
         raise ResourceCompositionError("Packaged SSH askpass helper is unavailable") from exc
-    payload = _read_controlled_file(helper, executable=True)
-    if stat.S_IMODE(before.st_mode) != 0o755:
-        raise ResourceCompositionError("Packaged SSH askpass helper mode must be exactly 0755")
-    if not 0 < len(payload) <= MAX_ASKPASS_HELPER_BYTES:
-        raise ResourceCompositionError("Packaged SSH askpass helper exceeds its byte limit")
-    architecture = _thin_mach_o_architecture(payload)
-    signature = _verify_macos_adhoc_signature(helper)
     try:
-        after = os.stat(helper, follow_symlinks=False)
-    except OSError as exc:
-        raise ResourceCompositionError(
-            "Packaged SSH askpass helper changed during verification"
-        ) from exc
-    if (
-        (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
-        != (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
-        or stat.S_IMODE(after.st_mode) != 0o755
-    ):
-        raise ResourceCompositionError("Packaged SSH askpass helper changed during verification")
-    return {
-        "architecture": architecture,
-        "byte_size": len(payload),
-        "mode": "0755",
-        "relative_path": MACOS_ASKPASS_HELPER_PATH.as_posix(),
-        "sha256": _sha256_bytes(payload),
-        "signature": signature,
-    }
+        before = os.fstat(descriptor)
+        pathname = os.stat(helper, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or before.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+            or not before.st_mode & stat.S_IXUSR
+            or (before.st_dev, before.st_ino) != (pathname.st_dev, pathname.st_ino)
+        ):
+            raise ResourceCompositionError("Packaged SSH askpass helper is not trusted")
+        if stat.S_IMODE(before.st_mode) != 0o755:
+            raise ResourceCompositionError("Packaged SSH askpass helper mode must be exactly 0755")
+        chunks: list[bytes] = []
+        while chunk := os.read(descriptor, 1024 * 1024):
+            chunks.append(chunk)
+        payload = b"".join(chunks)
+        if not 0 < len(payload) <= MAX_ASKPASS_HELPER_BYTES:
+            raise ResourceCompositionError("Packaged SSH askpass helper exceeds its byte limit")
+        architecture = _thin_mach_o_architecture(payload)
+        signature = _verify_macos_adhoc_signature(helper)
+        try:
+            held = os.fstat(descriptor)
+            current = os.stat(helper, follow_symlinks=False)
+        except OSError as exc:
+            raise ResourceCompositionError(
+                "Packaged SSH askpass helper changed during verification"
+            ) from exc
+        if (
+            (held.st_dev, held.st_ino, held.st_size, held.st_mtime_ns, held.st_nlink)
+            != (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+                before.st_mtime_ns,
+                before.st_nlink,
+            )
+            or (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino)
+            or stat.S_IMODE(current.st_mode) != 0o755
+            or len(payload) != before.st_size
+        ):
+            raise ResourceCompositionError(
+                "Packaged SSH askpass helper changed during verification"
+            )
+        return {
+            "architecture": architecture,
+            "byte_size": len(payload),
+            "mode": "0755",
+            "relative_path": MACOS_ASKPASS_HELPER_PATH.as_posix(),
+            "sha256": _sha256_bytes(payload),
+            "signature": signature,
+        }
+    finally:
+        os.close(descriptor)
 
 
 def verify_app_resource(
