@@ -92,7 +92,9 @@ from openevo.evolution.models import (
     JobCreateResponse,
     JobState,
     ReflectorInferenceReservationReceipt,
+    SuccessorTransitionJobInventoryResponse,
     SuccessorArtifactAuthorityResponse,
+    SucceededPlanBoundJobAuthorityResponse,
 )
 from openevo.evolution.planned_jobs import PlanBoundJobCreateRequest
 from openevo.evolution.revisions import (
@@ -871,6 +873,273 @@ class ProductionScienceSuccessorPreparerV2:
                 )
             )
         return outputs
+
+    def reconcile_completed_methods(
+        self,
+        context: ScienceSuccessorPreparationContextV2,
+        dataset: SealedTranscriptDatasetV2,
+    ) -> tuple[ScienceMethodOutputV2, ...]:
+        """Read already-admitted method outputs without a job mutation API.
+
+        This is intentionally separate from :meth:`run_methods`: the method
+        never calls ``create_plan_bound_job`` or ``retry_plan_bound_job``.
+        Every enabled target must already own one exact succeeded job and one
+        selected UPDATE artifact under the failed source transition.
+        """
+
+        self._require_running()
+        record, _result, project = self._authority(context)
+        if (
+            dataset.task_id != context.task.task_id
+            or dataset.accepted_attempt_id != context.accepted_attempt.attempt_id
+        ):
+            raise ScienceSuccessorPreparationV2Error(
+                "completed-method reconciliation authority is invalid"
+            )
+        transition_id = context.transition.transition.successor_transition_id
+        with self._evolution(context, record, project) as (binding, client):
+            compiled, methods = self._compile_methods(
+                context,
+                project=project,
+                binding=binding,
+                record=record,
+            )
+            (
+                prior_context,
+                _prior_composition,
+                prior_owner_by_target,
+            ) = self._prior_context_artifacts(context, client)
+            evolution_dataset_artifact_id = (
+                dataset.artifact_id
+                if dataset.training_feedback is None
+                else dataset.training_feedback.resolved_dataset_artifact_id
+            )
+            legacy_payloads = compiled.tasks[0].evolution_job_payloads_for_round(
+                0,
+                methods,
+                dataset_artifact_id=evolution_dataset_artifact_id,
+                context_artifact_ids=prior_context,
+            )
+            if dataset.training_feedback is not None:
+                feedback_lineage = {
+                    "completed_dataset_id": dataset.dataset_id,
+                    "completed_dataset_artifact_id": dataset.artifact_id,
+                    "training_feedback_attachment_ids": list(
+                        dataset.training_feedback.attachment_ids
+                    ),
+                    "training_feedback_attachment_sha256": list(
+                        dataset.training_feedback.attachment_sha256
+                    ),
+                    "resolved_view_sha256": (
+                        dataset.training_feedback.resolved_view_sha256
+                    ),
+                }
+                for payload in legacy_payloads:
+                    config = payload.get("config")
+                    if not isinstance(config, dict):
+                        raise ScienceSuccessorPreparationV2Error(
+                            "compiled evolution job payload is incomplete"
+                        )
+                    prior_lineage = config.get("lineage", {})
+                    if not isinstance(prior_lineage, dict):
+                        raise ScienceSuccessorPreparationV2Error(
+                            "compiled evolution lineage is invalid"
+                        )
+                    config["lineage"] = {
+                        **prior_lineage,
+                        "training_feedback": feedback_lineage,
+                    }
+            inventory = SuccessorTransitionJobInventoryResponse.model_validate_json(
+                json.dumps(
+                    client.get_internal_successor_transition_job_inventory(
+                        transition_id
+                    ),
+                    ensure_ascii=True,
+                    allow_nan=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
+            content_basis = self._content_admission_basis(
+                context,
+                dataset,
+                client,
+            )
+            outputs: list[ScienceMethodOutputV2] = []
+            observed_job_ids: list[str] = []
+            for spec, legacy_payload in zip(
+                methods,
+                legacy_payloads,
+                strict=True,
+            ):
+                expected_request = _plan_bound_request(
+                    spec,
+                    legacy_payload,
+                    successor_transition_id=transition_id,
+                    predecessor_successor_transition_id=(
+                        prior_owner_by_target.get(spec.target_id)
+                    ),
+                    content_admission_basis=content_basis,
+                    promoted=False,
+                )
+                job = SucceededPlanBoundJobAuthorityResponse.model_validate_json(
+                    json.dumps(
+                        client.get_internal_succeeded_plan_bound_job_authority(
+                            transition_id,
+                            spec.target_id,
+                        ),
+                        ensure_ascii=True,
+                        allow_nan=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                )
+                terminal = client.get_internal_job_result(job.job_id)
+                raw_outputs = (
+                    terminal.get("outputs")
+                    if isinstance(terminal, Mapping)
+                    else None
+                )
+                target_outputs = (
+                    []
+                    if not isinstance(raw_outputs, list)
+                    else [
+                        item
+                        for item in raw_outputs
+                        if isinstance(item, dict)
+                        and item.get("type") == spec.artifact_type
+                    ]
+                )
+                selected = [
+                    item for item in target_outputs if item.get("promoted") is True
+                ]
+                if (
+                    job.successor_transition_id != transition_id
+                    or job.plan_id != spec.plan.plan_id
+                    or job.plan_digest != canonical_digest(spec.plan)
+                    or job.target_id != spec.target_id
+                    or job.method_id != spec.method
+                    or job.method_identity_digest
+                    != spec.selection.method_identity_digest
+                    or job.job_type != expected_request.job_type
+                    or job.predecessor_successor_transition_id
+                    != expected_request.predecessor_successor_transition_id
+                    or job.core_config_sha256
+                    != canonical_digest(expected_request.core_config)
+                    or job.input_bindings_sha256
+                    != canonical_digest(
+                        {
+                            "input_bindings": [
+                                binding.model_dump(mode="json")
+                                for binding in expected_request.input_bindings
+                            ]
+                        }
+                    )
+                    or job.declared_output_artifact_types
+                    != tuple(
+                        self._registry.snapshot.methods[
+                            spec.method
+                        ].output_artifact_types
+                    )
+                    or job.priority != expected_request.priority
+                    or job.attempt_count != 1
+                    or not isinstance(terminal, Mapping)
+                    or terminal.get("job_id") != job.job_id
+                    or terminal.get("state") != JobState.SUCCEEDED.value
+                    or terminal.get("error") is not None
+                    or terminal.get("retryable") is not None
+                    or terminal.get("successor_transition_id") != transition_id
+                    or canonical_digest(terminal) != job.job_result_sha256
+                    or terminal.get("artifact_ids")
+                    != [
+                        item.get("artifact_id")
+                        for item in raw_outputs or []
+                        if isinstance(item, dict)
+                    ]
+                    or tuple(terminal.get("artifact_ids") or ())
+                    != job.output_artifact_ids
+                    or not target_outputs
+                    or len(selected) != 1
+                ):
+                    raise ScienceSuccessorPreparationV2Error(
+                        "completed method job authority is inconsistent"
+                    )
+                raw_selected = selected[0]
+                artifact_id = raw_selected.get("artifact_id")
+                if not isinstance(artifact_id, str):
+                    raise ScienceSuccessorPreparationV2Error(
+                        "completed method selected artifact identity is invalid"
+                    )
+                artifact = SuccessorArtifactAuthorityResponse.model_validate(
+                    client.get_internal_successor_artifact_authority(
+                        transition_id,
+                        artifact_id,
+                    )
+                )
+                proposal_ids = tuple(
+                    sorted(
+                        str(item["artifact_id"])
+                        for item in target_outputs
+                        if isinstance(item.get("artifact_id"), str)
+                    )
+                )
+                if (
+                    artifact.successor_transition_id != transition_id
+                    or artifact.job_id != job.job_id
+                    or artifact.artifact.artifact_id != artifact_id
+                    or artifact.artifact.type.value != spec.artifact_type
+                    or artifact.artifact.state is not ArtifactState.SEALED
+                    or artifact.artifact.promoted is not True
+                    or artifact.proposal_artifact_ids != proposal_ids
+                    or artifact.admission_decision_id is None
+                    or artifact.admission_decision_sha256 is None
+                    or artifact.content_admission is None
+                    or artifact.content_admission.passed is not True
+                    or artifact.content_admission.basis_sha256
+                    != content_basis.content_sha256
+                    or raw_selected.get("payload_manifest_digest")
+                    != artifact.payload_manifest_sha256
+                    or raw_selected.get("payload_byte_size")
+                    != artifact.payload_byte_size
+                ):
+                    raise ScienceSuccessorPreparationV2Error(
+                        "completed method admission authority is inconsistent"
+                    )
+                outputs.append(
+                    ScienceMethodOutputV2(
+                        target_id=spec.target_id,
+                        method_id=spec.method,
+                        artifact_id=artifact_id,
+                        artifact_type=spec.artifact_type,
+                        manifest_sha256=artifact.payload_manifest_sha256,
+                        byte_size=artifact.payload_byte_size,
+                        execution_boundary="outside_inference",
+                        evolution_job_id=job.job_id,
+                        admission_action="update",
+                        admission_decision_id=(artifact.admission_decision_id),
+                        admission_decision_sha256=(
+                            artifact.admission_decision_sha256
+                        ),
+                        content_admission_sha256=(
+                            artifact.content_admission.content_sha256
+                        ),
+                        content_admission=artifact.content_admission,
+                        proposal_artifact_ids=artifact.proposal_artifact_ids,
+                        origin="produced",
+                        owner_successor_transition_id=transition_id,
+                    )
+                )
+                observed_job_ids.append(job.job_id)
+            if (
+                inventory.successor_transition_id != transition_id
+                or tuple(sorted(observed_job_ids)) != inventory.job_ids
+                or len(observed_job_ids) != len(context.plan.enabled_methods)
+            ):
+                raise ScienceSuccessorPreparationV2Error(
+                    "completed method job inventory is not exact"
+                )
+        self._require_running()
+        return tuple(outputs)
 
     @staticmethod
     def _content_admission_basis(

@@ -115,3 +115,84 @@ contract digest to match the profile. Any drift remains fail-closed. The
 existing lifecycle-16 profile continues to use ordinary monotonic 16-to-85
 replacement; only the exact lifecycle-85 formal profile receives the bounded
 v0.1.10 equal-lifecycle replacement authority.
+
+## Dev17 v40 post-method reconciliation
+
+### New durable evidence
+
+The isolated Energy gate passed, but formal v40 failed later at
+`Energy_004/a0` in transition
+`successor-889c006c8e8eec11bf5653c832e07cac`. This failure is materially
+different from v38:
+
+- the sealed dataset and evaluator-only feedback are complete;
+- all three plan-bound jobs (`agent_system`, `skill_bundle`, and
+  `text_memory`) succeeded exactly once and have completed inference
+  reservations;
+- Core admission selected one sealed and promoted artifact for each target;
+- the transition reached `materializing` (`progress_completed=4/6`), but no
+  materialized-context row, successor commit, project-head activation, or
+  workspace handoff exists;
+- the predecessor remains the active project head, all leases are closed, and
+  the transition has no pending or orphan model job;
+- exact offline projection and materialization with the deployed v0.1.10 wheel,
+  framework lock, request identity, and selected payloads pass.
+
+The terminal source is therefore neither a pre-job failure nor a failed paid
+job. The existing cross-generation successor-recovery contract intentionally
+cannot encode it. A clean formal restart would replay already closed paid
+calls and is not an admissible recovery.
+
+### Narrow recovery contract
+
+Add an authenticated internal `completed-methods reconciliation` operation for
+one failed successor transition. The operation is authorized only if all of
+the following read-only checks pass before the Core ledger changes:
+
+1. the transition is failed, uncommitted, at `progress_completed=4`, and its
+   exact predecessor is still active;
+2. its latest failed attempt and transition digests match the caller's frozen
+   checkpoint;
+3. Evolution returns an exact, bounded plan-bound job for every enabled target
+   and no other transition-bound job;
+4. every job is `succeeded`, attempt count is one or otherwise unchanged, and
+   its terminal result digest matches the read-only plan authority;
+5. every target has exactly one Core-selected, sealed, promoted UPDATE output
+   with matching admission and content-admission receipts;
+6. no API in this path can create or retry an Evolution job, and the request
+   declares `model_execution_allowed=false`.
+
+After that proof, Core appends a new `reconciliation_only` transition attempt.
+It reconstructs the existing `ScienceMethodOutputV2` receipts from read-only
+Evolution authorities, then runs only the ordinary validation,
+materialization, workspace-capture, and atomic-commit tail. The failed attempt
+is never rewritten. A stable reconciliation idempotency key makes a lost HTTP
+response safe: repeated calls read the same attempt or committed successor.
+
+### Supervisor receipt reconciliation
+
+The v40 adapter operation receipt is already `FAILED_TERMINAL` and remains
+immutable. On replay, `ProductionTrainingOperations` may call the new Core
+operation only when that receipt contains the exact typed recovery checkpoint.
+The successful result is persisted under a separate, deterministic
+reconciliation receipt identity which binds the original terminal receipt,
+request identity, Core generation/release, transition, and final successor
+authority. Subsequent supervisor recovery reads that append-only receipt and
+returns `RECOVERED`; it never overwrites the failure or reissues a model call.
+
+Any missing job, foreign plan/transition, non-succeeded terminal, missing
+admission, KEEP/REJECT output, receipt digest mismatch, project-head drift,
+Core generation drift, or contradictory commit evidence remains fail-closed.
+
+### Regression obligations
+
+- reconciliation after all method jobs succeeded does not call job create or
+  job retry;
+- response loss after commit returns the same successor;
+- repeated reconciliation creates neither a new transition attempt nor a new
+  adapter side effect;
+- Core restart can resume a `reconciliation_only` attempt from its durable
+  dataset without entering normal `run_methods`;
+- missing/failed/extra jobs, generation drift, receipt drift, and contradictory
+  commit evidence are rejected;
+- model/job/reservation counters remain unchanged across reconciliation.

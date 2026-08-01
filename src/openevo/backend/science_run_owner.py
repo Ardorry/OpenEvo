@@ -192,6 +192,12 @@ class ScienceSuccessorPreparerV2(Protocol):
         dataset: SealedTranscriptDatasetV2,
     ) -> tuple[ScienceMethodOutputV2, ...]: ...
 
+    def reconcile_completed_methods(
+        self,
+        context: ScienceSuccessorPreparationContextV2,
+        dataset: SealedTranscriptDatasetV2,
+    ) -> tuple[ScienceMethodOutputV2, ...]: ...
+
     def validate_outputs(
         self,
         context: ScienceSuccessorPreparationContextV2,
@@ -1142,6 +1148,102 @@ class CoreScienceTaskOwnerV2:
             self._condition.notify_all()
         return transition
 
+    def reconcile_completed_successor_methods(
+        self,
+        successor_transition_id: str,
+        *,
+        expected_project_head_id: str,
+        expected_terminal_attempt_id: str,
+        expected_terminal_authority_sha256: str,
+        reconciliation_request_id: str,
+    ) -> m2.SuccessorTransitionV2:
+        """Finish one successor whose entire paid method inventory is closed."""
+
+        preparer = self._successor_preparer
+        if preparer is None:
+            raise CoreTaskControlError(
+                "successor_preparer_unavailable",
+                "Core has no verified science successor preparer.",
+                http_status=503,
+                retryable=False,
+            )
+        try:
+            observed = self._ledger.get_successor_transition(
+                successor_transition_id
+            )
+            source_attempt = self._ledger.current_successor_transition_attempt(
+                successor_transition_id
+            )
+            if (
+                observed.state == "failed"
+                and source_attempt.reconciliation_only is False
+            ):
+                _source, plan = self._ledger.successor_abandon_evidence(
+                    successor_transition_id
+                )
+                context = self._successor_context(
+                    successor_transition_id,
+                    transition_attempt=source_attempt,
+                    plan=plan,
+                )
+                if (
+                    source_attempt.dataset_id is None
+                    or source_attempt.dataset_sha256 is None
+                ):
+                    raise ScienceTaskStoreV2Error(
+                        "completed-method reconciliation lacks a sealed dataset"
+                    )
+                dataset = _validate_sealed_successor_dataset(
+                    preparer.recover_dataset(
+                        context,
+                        dataset_id=source_attempt.dataset_id,
+                        manifest_sha256=source_attempt.dataset_sha256,
+                    ),
+                    context=context,
+                )
+                dataset = _validate_sealed_successor_dataset(
+                    preparer.resolve_training_feedback(context, dataset),
+                    context=context,
+                )
+                _validate_successor_method_outputs(
+                    preparer.reconcile_completed_methods(context, dataset),
+                    plan=plan,
+                )
+            transition = self._ledger.begin_completed_methods_reconciliation(
+                successor_transition_id,
+                expected_project_head_id=expected_project_head_id,
+                expected_terminal_attempt_id=expected_terminal_attempt_id,
+                expected_terminal_authority_sha256=(
+                    expected_terminal_authority_sha256
+                ),
+                reconciliation_request_id=reconciliation_request_id,
+                now=self._clock(),
+            )
+        except Exception as exc:
+            _raise_v2_owner_error(
+                exc,
+                operation_id="reconcileCoreCompletedSuccessorMethodsV2",
+            )
+        if transition.state in {"committed", "failed"}:
+            return transition
+        current = self._ledger.current_successor_transition_attempt(
+            successor_transition_id
+        )
+        if current.reconciliation_only is not True:
+            raise CoreTaskControlError(
+                "successor_reconciliation_authority_changed",
+                "Core successor reconciliation attempt is not commit-tail-only.",
+                http_status=409,
+                retryable=False,
+            )
+        if self._worker is None:
+            return self._resume_completed_successor_reconciliation(
+                successor_transition_id
+            )
+        with self._condition:
+            self._condition.notify_all()
+        return transition
+
     def abandon_successor_transition(
         self,
         successor_transition_id: str,
@@ -1269,6 +1371,29 @@ class CoreScienceTaskOwnerV2:
             dataset_event=dataset_event,
         )
 
+    def _resume_completed_successor_reconciliation(
+        self,
+        successor_transition_id: str,
+    ) -> m2.SuccessorTransitionV2:
+        try:
+            _transition, plan, dataset_event = self._ledger.successor_retry_evidence(
+                successor_transition_id,
+            )
+            if dataset_event is None:
+                raise ScienceTaskStoreV2Error(
+                    "completed-method reconciliation lost its sealed dataset"
+                )
+        except Exception as exc:
+            _raise_v2_owner_error(
+                exc,
+                operation_id="reconcileCoreCompletedSuccessorMethodsV2",
+            )
+        return self._execute_completed_successor_reconciliation(
+            successor_transition_id,
+            plan=plan,
+            dataset_event=dataset_event,
+        )
+
     def _execute_successor_transition(
         self,
         successor_transition_id: str,
@@ -1349,67 +1474,12 @@ class CoreScienceTaskOwnerV2:
                 preparer.run_methods(context, dataset),
                 plan=plan,
             )
-
-            context = self._advance_successor_phase(
+            return self._commit_successor_outputs(
                 transition_id,
                 transition_attempt=transition_attempt,
-                state="validating",
                 plan=plan,
-            )
-            validated = _validate_successor_outputs_receipt(
-                preparer.validate_outputs(context, dataset, outputs),
-                context=context,
                 dataset=dataset,
                 outputs=outputs,
-            )
-
-            context = self._advance_successor_phase(
-                transition_id,
-                transition_attempt=transition_attempt,
-                state="materializing",
-                plan=plan,
-            )
-            materialized = _validate_successor_materialization_receipt(
-                preparer.materialize_context(context, validated),
-                context=context,
-                validated=validated,
-            )
-            workspace = _validate_accepted_workspace_result(
-                preparer.capture_workspace_result(context),
-                context=context,
-            )
-
-            context = self._advance_successor_phase(
-                transition_id,
-                transition_attempt=transition_attempt,
-                state="committing",
-                plan=plan,
-            )
-            successor = _build_v2_successor_project_head(
-                context=context,
-                workspace=workspace,
-                validated=validated,
-                materialized=materialized,
-            )
-            manifest = _build_atomic_successor_manifest(
-                context=context,
-                dataset=dataset,
-                outputs=outputs,
-                workspace=workspace,
-                validated=validated,
-                materialized=materialized,
-                successor=successor,
-            )
-            commit = AtomicSuccessorCommitV2(
-                manifest_sha256=atomic_successor_manifest_sha256(manifest),
-                manifest=manifest,
-            )
-            return self._ledger.commit_successor_transition(
-                transition_id,
-                expected_transition_attempt_id=(transition_attempt.transition_attempt_id),
-                successor=successor,
-                commit=commit,
-                now=self._clock(),
             )
         except Exception as exc:
             logger.error(
@@ -1443,6 +1513,175 @@ class CoreScienceTaskOwnerV2:
                 http_status=503,
                 retryable=retryable,
             ) from exc
+
+    def _execute_completed_successor_reconciliation(
+        self,
+        successor_transition_id: str,
+        *,
+        plan: ScienceSuccessorPlanV2,
+        dataset_event: m2.DatasetSealedEventV2,
+    ) -> m2.SuccessorTransitionV2:
+        preparer = self._successor_preparer
+        if preparer is None:
+            raise CoreTaskControlError(
+                "successor_preparer_unavailable",
+                "Core has no verified science successor preparer.",
+                http_status=503,
+                retryable=False,
+            )
+        transition_attempt = self._ledger.current_successor_transition_attempt(
+            successor_transition_id
+        )
+        if (
+            transition_attempt.state != "running"
+            or transition_attempt.reconciliation_only is not True
+        ):
+            raise CoreTaskControlError(
+                "successor_reconciliation_attempt_not_running",
+                "Core successor reconciliation attempt is no longer current.",
+                http_status=409,
+                retryable=False,
+            )
+        try:
+            context = self._successor_context(
+                successor_transition_id,
+                transition_attempt=transition_attempt,
+                plan=plan,
+            )
+            dataset = _validate_sealed_successor_dataset(
+                preparer.recover_dataset(
+                    context,
+                    dataset_id=dataset_event.dataset_id,
+                    manifest_sha256=dataset_event.dataset_sha256,
+                ),
+                context=context,
+            )
+            dataset = _validate_sealed_successor_dataset(
+                preparer.resolve_training_feedback(context, dataset),
+                context=context,
+            )
+            outputs = _validate_successor_method_outputs(
+                preparer.reconcile_completed_methods(context, dataset),
+                plan=plan,
+            )
+            return self._commit_successor_outputs(
+                successor_transition_id,
+                transition_attempt=transition_attempt,
+                plan=plan,
+                dataset=dataset,
+                outputs=outputs,
+            )
+        except Exception as exc:
+            logger.error(
+                "v2 science successor reconciliation %s failed [%s]",
+                successor_transition_id,
+                type(exc).__name__,
+            )
+            retryable = _successor_transition_failure_is_retryable(exc)
+            error = _successor_transition_api_error(
+                code="successor_reconciliation_failed",
+                message=(
+                    "Core could not reconcile and atomically commit the "
+                    "completed successor methods."
+                ),
+                retryable=retryable,
+            )
+            try:
+                self._ledger.fail_successor_transition(
+                    successor_transition_id,
+                    expected_transition_attempt_id=(
+                        transition_attempt.transition_attempt_id
+                    ),
+                    error=error,
+                    now=self._clock(),
+                )
+            except Exception as persistence_exc:
+                raise CoreTaskControlError(
+                    "successor_reconciliation_failed",
+                    "Core could not preserve the failed successor reconciliation.",
+                    http_status=503,
+                    retryable=False,
+                ) from persistence_exc
+            raise CoreTaskControlError(
+                "successor_reconciliation_failed",
+                "Core preserved the failed successor reconciliation without "
+                "advancing the project head.",
+                http_status=503,
+                retryable=retryable,
+            ) from exc
+
+    def _commit_successor_outputs(
+        self,
+        transition_id: str,
+        *,
+        transition_attempt: ScienceSuccessorTransitionAttemptV2,
+        plan: ScienceSuccessorPlanV2,
+        dataset: SealedTranscriptDatasetV2,
+        outputs: tuple[ScienceMethodOutputV2, ...],
+    ) -> m2.SuccessorTransitionV2:
+        preparer = self._successor_preparer
+        assert preparer is not None
+        context = self._advance_successor_phase(
+            transition_id,
+            transition_attempt=transition_attempt,
+            state="validating",
+            plan=plan,
+        )
+        validated = _validate_successor_outputs_receipt(
+            preparer.validate_outputs(context, dataset, outputs),
+            context=context,
+            dataset=dataset,
+            outputs=outputs,
+        )
+        context = self._advance_successor_phase(
+            transition_id,
+            transition_attempt=transition_attempt,
+            state="materializing",
+            plan=plan,
+        )
+        materialized = _validate_successor_materialization_receipt(
+            preparer.materialize_context(context, validated),
+            context=context,
+            validated=validated,
+        )
+        workspace = _validate_accepted_workspace_result(
+            preparer.capture_workspace_result(context),
+            context=context,
+        )
+        context = self._advance_successor_phase(
+            transition_id,
+            transition_attempt=transition_attempt,
+            state="committing",
+            plan=plan,
+        )
+        successor = _build_v2_successor_project_head(
+            context=context,
+            workspace=workspace,
+            validated=validated,
+            materialized=materialized,
+        )
+        manifest = _build_atomic_successor_manifest(
+            context=context,
+            dataset=dataset,
+            outputs=outputs,
+            workspace=workspace,
+            validated=validated,
+            materialized=materialized,
+            successor=successor,
+        )
+        commit = AtomicSuccessorCommitV2(
+            manifest_sha256=atomic_successor_manifest_sha256(manifest),
+            manifest=manifest,
+        )
+        return self._ledger.commit_successor_transition(
+            transition_id,
+            expected_transition_attempt_id=(
+                transition_attempt.transition_attempt_id
+            ),
+            successor=successor,
+            commit=commit,
+            now=self._clock(),
+        )
 
     def _successor_context(
         self,
@@ -1852,7 +2091,14 @@ class CoreScienceTaskOwnerV2:
         transition_ids = self._ledger.resumable_successor_transition_ids()
         if not transition_ids:
             return False
-        self._resume_successor_transition(transition_ids[0])
+        transition_id = transition_ids[0]
+        attempt = self._ledger.current_successor_transition_attempt(
+            transition_id
+        )
+        if attempt.reconciliation_only:
+            self._resume_completed_successor_reconciliation(transition_id)
+        else:
+            self._resume_successor_transition(transition_id)
         return True
 
     def _process_one_captured_successor(self) -> bool:

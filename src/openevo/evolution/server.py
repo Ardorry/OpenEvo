@@ -45,6 +45,7 @@ from openevo.evolution.models import (
     ReviewStatus,
     SuccessorArtifactAuthorityResponse,
     SuccessorTransitionJobInventoryResponse,
+    SucceededPlanBoundJobAuthorityResponse,
     WorkerClaimRequest,
     WorkerClaimResponse,
     WorkerCompleteRequest,
@@ -830,6 +831,28 @@ def create_app(
             raise HTTPException(
                 status_code=404,
                 detail="failed plan-bound job authority not found",
+            ) from exc
+
+    @app.get(
+        "/v1/internal/successor-transitions/{successor_transition_id}"
+        "/targets/{target_id}/succeeded-plan-authority",
+        response_model=SucceededPlanBoundJobAuthorityResponse,
+    )
+    def get_internal_succeeded_plan_bound_job_authority(
+        successor_transition_id: str,
+        target_id: str,
+        request: Request,
+    ) -> SucceededPlanBoundJobAuthorityResponse:
+        require_core_control_caller(request)
+        try:
+            return store.get_internal_succeeded_plan_bound_job_authority(
+                successor_transition_id,
+                target_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="succeeded plan-bound job authority not available",
             ) from exc
 
     @app.get(

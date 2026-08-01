@@ -180,6 +180,7 @@ class _Owner:
     def __init__(self, commit: AtomicSuccessorCommitV2) -> None:
         self.commit = commit
         self.cancelled = False
+        self.reconciliations: list[dict[str, str]] = []
         predecessor = _project_head(generation=0, artifact_count=0)
         successor = _project_head(generation=1, artifact_count=1)
         transition = SuccessorTransitionRefV2(
@@ -214,6 +215,28 @@ class _Owner:
     def successor_commit(self, successor_transition_id: str):
         assert successor_transition_id == "successor-1"
         return self.commit
+
+    def reconcile_completed_successor_methods(
+        self,
+        successor_transition_id: str,
+        *,
+        expected_project_head_id: str,
+        expected_terminal_attempt_id: str,
+        expected_terminal_authority_sha256: str,
+        reconciliation_request_id: str,
+    ):
+        assert successor_transition_id == "successor-1"
+        self.reconciliations.append(
+            {
+                "expected_project_head_id": expected_project_head_id,
+                "expected_terminal_attempt_id": expected_terminal_attempt_id,
+                "expected_terminal_authority_sha256": (
+                    expected_terminal_authority_sha256
+                ),
+                "reconciliation_request_id": reconciliation_request_id,
+            }
+        )
+        return self.transition
 
     def get_training_attempt_execution_status(self, task_id: str, attempt_id: str):
         return TrainingAttemptExecutionStatusV1(
@@ -310,6 +333,60 @@ def test_training_successor_endpoint_returns_exact_native_admission_authority() 
         mode="json"
     )
     assert evolution.closed is True
+
+
+def test_completed_method_reconciliation_endpoint_is_bearer_protected_and_typed() -> None:
+    commit = _commit()
+    evolution = _Evolution(commit)
+    app = create_core_control_v2_contract_app(_Provider())
+    owner = _Owner(commit)
+    install_core_training_attempt_endpoint(
+        app,
+        owner,
+        object(),
+        _ServiceControl(),
+        evolution_factory=lambda _binding: evolution,
+    )
+    path = (
+        "/v2/internal/training-successors/successor-1/"
+        "completed-methods-reconcile"
+    )
+    payload = {
+        "schema_version": (
+            "openevo.completed_methods_successor_reconciliation_request.v1"
+        ),
+        "expected_project_head_id": "project-head-0",
+        "expected_terminal_attempt_id": "successor-attempt-1",
+        "expected_terminal_authority_sha256": "a" * 64,
+        "idempotency_key": "successor-reconcile-request-1",
+        "model_execution_allowed": False,
+    }
+
+    with TestClient(app) as client:
+        denied = client.post(path, json=payload)
+        invalid = client.post(
+            path,
+            json={**payload, "model_execution_allowed": True},
+            headers={"Authorization": "Bearer training-attempt-control-test"},
+        )
+        accepted = client.post(
+            path,
+            json=payload,
+            headers={"Authorization": "Bearer training-attempt-control-test"},
+        )
+
+    assert denied.status_code == 401
+    assert invalid.status_code == 422
+    assert accepted.status_code == 200
+    assert accepted.json()["transition"]["state"] == "committed"
+    assert owner.reconciliations == [
+        {
+            "expected_project_head_id": "project-head-0",
+            "expected_terminal_attempt_id": "successor-attempt-1",
+            "expected_terminal_authority_sha256": "a" * 64,
+            "reconciliation_request_id": "successor-reconcile-request-1",
+        }
+    ]
 
 
 def test_project_freeze_reader_preserves_inherited_promotion_digests() -> None:

@@ -3474,6 +3474,300 @@ class ScienceTaskStoreV2:
                 successor_transition_id,
             )
 
+    def begin_completed_methods_reconciliation(
+        self,
+        successor_transition_id: str,
+        *,
+        expected_project_head_id: str,
+        expected_terminal_attempt_id: str,
+        expected_terminal_authority_sha256: str,
+        reconciliation_request_id: str,
+        now: datetime,
+    ) -> m2.SuccessorTransitionV2:
+        """Append or resume one commit-tail-only successor attempt.
+
+        Paid-job closure is proved by the owner before this ledger operation.
+        This method only admits the exact failed terminal checkpoint and marks
+        the new attempt so restart recovery cannot enter ordinary job
+        execution.
+        """
+
+        successor_transition_id = _v2_resource_id(
+            successor_transition_id,
+            label="successor transition",
+        )
+        expected_project_head_id = _v2_resource_id(
+            expected_project_head_id,
+            label="expected project head",
+        )
+        expected_terminal_attempt_id = _v2_resource_id(
+            expected_terminal_attempt_id,
+            label="expected terminal attempt",
+        )
+        reconciliation_request_id = _v2_resource_id(
+            reconciliation_request_id,
+            label="successor reconciliation request",
+        )
+        if re.fullmatch(r"[0-9a-f]{64}", expected_terminal_authority_sha256) is None:
+            raise ScienceTaskPreconditionFailedV2(
+                "v2 successor reconciliation checkpoint digest is invalid"
+            )
+        with self._lock, self._transaction() as connection:
+            transition = _load_v2_successor_transition(
+                connection,
+                successor_transition_id,
+            )
+            reference = transition.transition
+            admission = reference.task_admission
+            attempts = _load_v2_successor_transition_attempts(
+                connection,
+                successor_transition_id,
+            )
+            if (
+                admission is None
+                or not attempts
+                or expected_project_head_id
+                != reference.predecessor_project_head.project_head_id
+            ):
+                raise ScienceTaskPreconditionFailedV2(
+                    "v2 successor reconciliation no longer matches its predecessor"
+                )
+            task = _load_v2_task_closure(connection, admission.task_id)
+            authority = _load_v2_project_authority(connection, reference.project_id)
+            matching_attempts = [
+                attempt
+                for attempt in attempts
+                if attempt.retry_request_id == reconciliation_request_id
+            ]
+            if matching_attempts:
+                current = matching_attempts[0]
+                if (
+                    len(matching_attempts) != 1
+                    or current != attempts[-1]
+                    or current.reconciliation_only is not True
+                    or current.reconciliation_source_attempt_id
+                    != expected_terminal_attempt_id
+                    or current.reconciliation_source_authority_sha256
+                    != expected_terminal_authority_sha256
+                ):
+                    raise ScienceTaskPreconditionFailedV2(
+                        "v2 successor reconciliation request is no longer current"
+                    )
+                if transition.state == "committed":
+                    if (
+                        reference.successor_project_head is None
+                        or task.state != "completed"
+                        or current.state != "committed"
+                    ):
+                        raise ScienceTaskPreconditionFailedV2(
+                            "v2 successor reconciliation completion authority changed"
+                        )
+                    return transition
+                if (
+                    transition.state == "failed"
+                    and current.state == "failed"
+                    and current.error == transition.error
+                    and transition.error is not None
+                    and transition.error.code == "successor_transition_interrupted"
+                    and transition.error.retryable is True
+                ):
+                    dataset_event = _load_v2_dataset_event_for_task(
+                        connection,
+                        task.task_id,
+                    )
+                    if (
+                        dataset_event is None
+                        or current.dataset_id != dataset_event.dataset_id
+                        or current.dataset_sha256 != dataset_event.dataset_sha256
+                        or current.commit_manifest_sha256 is not None
+                        or task.successor_transition != reference
+                        or authority.active_project_head
+                        != reference.predecessor_project_head
+                        or authority.blockers
+                        != (ScienceProjectReadinessBlockerV2.SUCCESSOR_TRANSITION,)
+                    ):
+                        raise ScienceTaskPreconditionFailedV2(
+                            "v2 interrupted successor reconciliation authority changed"
+                        )
+                    timestamp = _v2_successor_timestamp(transition, now)
+                    resumed_transition = _replace_v2_successor_transition(
+                        transition,
+                        state="running_methods",
+                        progress_completed=2,
+                        error=None,
+                        updated_at=timestamp,
+                    )
+                    resumed_task = _replace_v2_task(
+                        task,
+                        state="waiting_for_successor",
+                        updated_at=timestamp,
+                    )
+                    resumed_attempt = _replace_v2_successor_transition_attempt(
+                        current,
+                        state="running",
+                        error=None,
+                        updated_at=timestamp,
+                    )
+                    connection.execute(
+                        "UPDATE successor_transitions SET transition_json = ?, "
+                        "resource_version = resource_version + 1 WHERE "
+                        "successor_transition_id = ?",
+                        (
+                            _v2_model_bytes(resumed_transition),
+                            successor_transition_id,
+                        ),
+                    )
+                    connection.execute(
+                        "UPDATE tasks SET task_json = ?, resource_version = "
+                        "resource_version + 1 WHERE task_id = ?",
+                        (_v2_model_bytes(resumed_task), task.task_id),
+                    )
+                    _store_v2_successor_transition_attempt(
+                        connection,
+                        resumed_attempt,
+                    )
+                    _append_v2_event(
+                        connection,
+                        model_type=m2.TransitionChangedEventV2,
+                        event_type="transition_changed",
+                        project_id=reference.project_id,
+                        task_id=task.task_id,
+                        occurred_at=timestamp,
+                        payload={
+                            "transition": reference,
+                            "state": resumed_transition.state,
+                            "progress_completed": (
+                                resumed_transition.progress_completed
+                            ),
+                            "progress_total": resumed_transition.progress_total,
+                        },
+                    )
+                    return _load_v2_successor_transition(
+                        connection,
+                        successor_transition_id,
+                    )
+                return transition
+
+            latest = attempts[-1]
+            terminal_payload = {
+                "transition": transition.model_dump(mode="json"),
+                "attempts": [item.model_dump(mode="json") for item in attempts],
+                "commit": None,
+                "artifacts": [],
+            }
+            terminal_sha256 = hashlib.sha256(
+                json.dumps(
+                    terminal_payload,
+                    ensure_ascii=True,
+                    allow_nan=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            dataset_event = _load_v2_dataset_event_for_task(
+                connection,
+                task.task_id,
+            )
+            if (
+                transition.state != "failed"
+                or transition.progress_completed != 4
+                or transition.error is None
+                or transition.error.retryable is not False
+                or latest.transition_attempt_id != expected_terminal_attempt_id
+                or latest.state != "failed"
+                or latest.error != transition.error
+                or latest.reconciliation_only is not False
+                or terminal_sha256 != expected_terminal_authority_sha256
+                or dataset_event is None
+                or latest.dataset_id != dataset_event.dataset_id
+                or latest.dataset_sha256 != dataset_event.dataset_sha256
+                or latest.commit_manifest_sha256 is not None
+                or task.state != "failed"
+                or task.successor_transition != reference
+                or authority.active_project_head != reference.predecessor_project_head
+                or authority.blockers
+                != (ScienceProjectReadinessBlockerV2.SUCCESSOR_TRANSITION,)
+            ):
+                raise ScienceTaskPreconditionFailedV2(
+                    "v2 completed-method reconciliation authority changed"
+                )
+            if len(attempts) >= _MAX_V2_SUCCESSOR_ATTEMPTS_PER_TRANSITION:
+                raise ScienceTaskConflictV2(
+                    "v2 successor transition attempt capacity is exhausted"
+                )
+            timestamp = _v2_successor_timestamp(transition, now)
+            reconciliation_attempt = ScienceSuccessorTransitionAttemptV2(
+                transition_attempt_id=(f"successor-attempt-{secrets.token_hex(16)}"),
+                successor_transition_id=successor_transition_id,
+                ordinal=len(attempts) + 1,
+                retry_request_id=reconciliation_request_id,
+                reconciliation_only=True,
+                reconciliation_source_attempt_id=expected_terminal_attempt_id,
+                reconciliation_source_authority_sha256=(
+                    expected_terminal_authority_sha256
+                ),
+                state="running",
+                error=None,
+                dataset_id=dataset_event.dataset_id,
+                dataset_sha256=dataset_event.dataset_sha256,
+                commit_manifest_sha256=None,
+                created_at=timestamp,
+                updated_at=timestamp,
+            )
+            resumed_transition = _replace_v2_successor_transition(
+                transition,
+                state="running_methods",
+                progress_completed=2,
+                error=None,
+                updated_at=timestamp,
+            )
+            resumed_task = _replace_v2_task(
+                task,
+                state="waiting_for_successor",
+                updated_at=timestamp,
+            )
+            connection.execute(
+                "UPDATE successor_transitions SET transition_json = ?, "
+                "resource_version = resource_version + 1 WHERE "
+                "successor_transition_id = ?",
+                (_v2_model_bytes(resumed_transition), successor_transition_id),
+            )
+            connection.execute(
+                "UPDATE tasks SET task_json = ?, resource_version = "
+                "resource_version + 1 WHERE task_id = ?",
+                (_v2_model_bytes(resumed_task), task.task_id),
+            )
+            connection.execute(
+                "INSERT INTO successor_transition_attempts("
+                "transition_attempt_id, successor_transition_id, ordinal, "
+                "retry_request_id, attempt_json) VALUES (?, ?, ?, ?, ?)",
+                (
+                    reconciliation_attempt.transition_attempt_id,
+                    successor_transition_id,
+                    reconciliation_attempt.ordinal,
+                    reconciliation_attempt.retry_request_id,
+                    _v2_model_bytes(reconciliation_attempt),
+                ),
+            )
+            _append_v2_event(
+                connection,
+                model_type=m2.TransitionChangedEventV2,
+                event_type="transition_changed",
+                project_id=reference.project_id,
+                task_id=task.task_id,
+                occurred_at=timestamp,
+                payload={
+                    "transition": reference,
+                    "state": resumed_transition.state,
+                    "progress_completed": resumed_transition.progress_completed,
+                    "progress_total": resumed_transition.progress_total,
+                },
+            )
+            return _load_v2_successor_transition(
+                connection,
+                successor_transition_id,
+            )
+
     def abandon_successor_transition(
         self,
         successor_transition_id: str,

@@ -60,6 +60,12 @@ class EvolutionClientProtocol(Protocol):
         job_id: str,
     ) -> dict[str, Any]: ...
 
+    def get_internal_succeeded_plan_bound_job_authority(
+        self,
+        successor_transition_id: str,
+        target_id: str,
+    ) -> dict[str, Any]: ...
+
     def get_internal_successor_transition_job_inventory(
         self,
         successor_transition_id: str,
@@ -439,6 +445,24 @@ class EvolutionHttpClient:
         result = response.json()
         if not isinstance(result, dict):
             raise ValueError("failed plan-bound job authority was not a JSON object")
+        return result
+
+    def get_internal_succeeded_plan_bound_job_authority(
+        self,
+        successor_transition_id: str,
+        target_id: str,
+    ) -> dict[str, Any]:
+        encoded_transition_id = quote(successor_transition_id, safe="")
+        encoded_target_id = quote(target_id, safe="")
+        response = self._client.get(
+            f"{self.base_url}/v1/internal/successor-transitions/"
+            f"{encoded_transition_id}/targets/{encoded_target_id}/"
+            "succeeded-plan-authority"
+        )
+        self._raise_for_status(response)
+        result = response.json()
+        if not isinstance(result, dict):
+            raise ValueError("succeeded plan-bound job authority was not an object")
         return result
 
     def get_internal_successor_transition_job_inventory(

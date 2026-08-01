@@ -399,6 +399,25 @@ class _Preparer(ScienceSuccessorPreparerV2):
             ),
         )
 
+    def reconcile_completed_methods(
+        self,
+        context: ScienceSuccessorPreparationContextV2,
+        dataset: SealedTranscriptDatasetV2,
+    ) -> tuple[ScienceMethodOutputV2, ...]:
+        self._enter("reconciling_methods")
+        assert dataset.accepted_attempt_id == context.accepted_attempt.attempt_id
+        return (
+            ScienceMethodOutputV2(
+                target_id="text_memory",
+                method_id="openevo.text-memory.reflect.v1",
+                artifact_id="artifact-memory-1",
+                artifact_type="text_memory",
+                manifest_sha256="c" * 64,
+                byte_size=1024,
+                execution_boundary="outside_inference",
+            ),
+        )
+
     def resolve_training_feedback(
         self,
         context: ScienceSuccessorPreparationContextV2,
@@ -1552,6 +1571,195 @@ def test_nonretryable_successor_failure_rejects_new_retry_without_an_attempt(
         assert owner.get_successor_transition(transition_id) == failed
     finally:
         owner.close()
+
+
+def _terminal_successor_authority_sha256(
+    owner: CoreScienceTaskOwnerV2,
+    successor_transition_id: str,
+) -> str:
+    payload = {
+        "transition": owner.get_successor_transition(
+            successor_transition_id
+        ).model_dump(mode="json"),
+        "attempts": [
+            attempt.model_dump(mode="json")
+            for attempt in owner.successor_transition_attempts(
+                successor_transition_id
+            )
+        ],
+        "commit": None,
+        "artifacts": [],
+    }
+    return hashlib.sha256(
+        json.dumps(
+            payload,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+class _CompletedMethodsReconciliationPreparer(_Preparer):
+    def __init__(self) -> None:
+        super().__init__()
+        self.reject_materialization = True
+
+    def _enter(self, phase: str) -> None:
+        self.calls.append(phase)
+        if phase == "materializing" and self.reject_materialization:
+            raise ValueError("historical post-method materialization failure")
+
+
+def test_completed_methods_reconciliation_is_no_job_and_idempotent(
+    tmp_path: Path,
+) -> None:
+    preparer = _CompletedMethodsReconciliationPreparer()
+    owner = _owner(tmp_path, preparer)
+    predecessor, task = _admit(owner)
+    try:
+        with pytest.raises(CoreTaskControlError):
+            owner.run_successor_transition(
+                task.task_id,
+                accepted_attempt_id=task.attempts[0].attempt_id,
+                plan=_plan(task),
+            )
+        failed = owner.get_successor_transition_for_task(task.task_id)
+        transition_id = failed.transition.successor_transition_id
+        source_attempt = owner.successor_transition_attempts(transition_id)[-1]
+        terminal_sha256 = _terminal_successor_authority_sha256(
+            owner,
+            transition_id,
+        )
+        calls_before_reconciliation = tuple(preparer.calls)
+
+        with pytest.raises(CoreTaskControlError) as drifted:
+            owner.reconcile_completed_successor_methods(
+                transition_id,
+                expected_project_head_id=(
+                    predecessor.active_project_head.project_head_id
+                ),
+                expected_terminal_attempt_id=(
+                    source_attempt.transition_attempt_id
+                ),
+                expected_terminal_authority_sha256="0" * 64,
+                reconciliation_request_id="reconcile-completed-methods-1",
+            )
+        assert drifted.value.http_status == 412
+        assert owner.successor_transition_attempts(transition_id) == [
+            source_attempt,
+        ]
+        assert preparer.calls.count("running_methods") == 1
+
+        preparer.reject_materialization = False
+        committed = owner.reconcile_completed_successor_methods(
+            transition_id,
+            expected_project_head_id=(
+                predecessor.active_project_head.project_head_id
+            ),
+            expected_terminal_attempt_id=source_attempt.transition_attempt_id,
+            expected_terminal_authority_sha256=terminal_sha256,
+            reconciliation_request_id="reconcile-completed-methods-1",
+        )
+        calls_after_commit = tuple(preparer.calls)
+        attempts_after_commit = owner.successor_transition_attempts(transition_id)
+
+        assert committed.state == "committed"
+        assert preparer.calls.count("running_methods") == 1
+        assert preparer.calls.count("reconciling_methods") == 3
+        assert calls_before_reconciliation == (
+            "sealing_dataset",
+            "resolving_training_feedback",
+            "running_methods",
+            "validating",
+            "materializing",
+        )
+        assert [
+            (
+                attempt.ordinal,
+                attempt.state,
+                attempt.reconciliation_only,
+                attempt.reconciliation_source_attempt_id,
+                attempt.reconciliation_source_authority_sha256,
+            )
+            for attempt in attempts_after_commit
+        ] == [
+            (1, "failed", False, None, None),
+            (
+                2,
+                "committed",
+                True,
+                source_attempt.transition_attempt_id,
+                terminal_sha256,
+            ),
+        ]
+
+        replay = owner.reconcile_completed_successor_methods(
+            transition_id,
+            expected_project_head_id=(
+                predecessor.active_project_head.project_head_id
+            ),
+            expected_terminal_attempt_id=source_attempt.transition_attempt_id,
+            expected_terminal_authority_sha256=terminal_sha256,
+            reconciliation_request_id="reconcile-completed-methods-1",
+        )
+        assert replay == committed
+        assert tuple(preparer.calls) == calls_after_commit
+        assert owner.successor_transition_attempts(transition_id) == (
+            attempts_after_commit
+        )
+    finally:
+        owner.close()
+
+
+def test_completed_methods_reconciliation_resumes_after_owner_exit(
+    tmp_path: Path,
+) -> None:
+    preparer = _CompletedMethodsReconciliationPreparer()
+    owner = _owner(tmp_path, preparer)
+    predecessor, task = _admit(owner)
+    with pytest.raises(CoreTaskControlError):
+        owner.run_successor_transition(
+            task.task_id,
+            accepted_attempt_id=task.attempts[0].attempt_id,
+            plan=_plan(task),
+        )
+    failed = owner.get_successor_transition_for_task(task.task_id)
+    transition_id = failed.transition.successor_transition_id
+    source_attempt = owner.successor_transition_attempts(transition_id)[-1]
+    terminal_sha256 = _terminal_successor_authority_sha256(owner, transition_id)
+    owner._ledger.begin_completed_methods_reconciliation(
+        transition_id,
+        expected_project_head_id=(
+            predecessor.active_project_head.project_head_id
+        ),
+        expected_terminal_attempt_id=source_attempt.transition_attempt_id,
+        expected_terminal_authority_sha256=terminal_sha256,
+        reconciliation_request_id="reconcile-after-owner-exit-1",
+        now=datetime(2026, 7, 23, 8, tzinfo=timezone.utc),
+    )
+    owner.close()
+
+    restarted_preparer = _CompletedMethodsReconciliationPreparer()
+    restarted_preparer.reject_materialization = False
+    restarted = _owner(tmp_path, restarted_preparer)
+    try:
+        committed = restarted.reconcile_completed_successor_methods(
+            transition_id,
+            expected_project_head_id=(
+                predecessor.active_project_head.project_head_id
+            ),
+            expected_terminal_attempt_id=source_attempt.transition_attempt_id,
+            expected_terminal_authority_sha256=terminal_sha256,
+            reconciliation_request_id="reconcile-after-owner-exit-1",
+        )
+        assert committed.state == "committed"
+        assert restarted_preparer.calls.count("running_methods") == 0
+        assert restarted_preparer.calls.count("reconciling_methods") == 1
+        assert len(restarted.successor_transition_attempts(transition_id)) == 2
+    finally:
+        restarted.close()
 
 
 def test_stale_successor_attempt_cannot_mutate_a_new_retry(

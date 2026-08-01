@@ -21,7 +21,10 @@ from openevo.backend.science_execution_v2 import (
 )
 from openevo.backend.science_run_owner import CoreScienceTaskOwnerV2
 from openevo.backend.science_run_store import ScienceProjectAdmissionAuthorityV2
-from openevo.backend.science_successor import SealedTranscriptDatasetV2
+from openevo.backend.science_successor import (
+    ScienceSuccessorPreparationContextV2,
+    SealedTranscriptDatasetV2,
+)
 from openevo.backend.science_successor_preparer_v2 import (
     ProductionScienceSuccessorPreparerV2,
     ScienceSuccessorPreparationV2Error,
@@ -288,6 +291,7 @@ class _Evolution:
         self.admission_receipts: dict[str, dict] = {}
         self.artifact_owners: dict[str, str] = {}
         self.target_run_counts: dict[str, int] = {}
+        self.succeeded_authority_overrides: dict[str, dict] = {}
         self.materialized: MaterializedContext | None = None
         self.materialized_count = 0
         self.discard_response: dict | None = None
@@ -536,6 +540,84 @@ class _Evolution:
     def get_internal_job_result(self, job_id: str) -> dict:
         return self.jobs[job_id]
 
+    def get_internal_successor_transition_job_inventory(
+        self,
+        successor_transition_id: str,
+    ) -> dict:
+        payload = {
+            "successor_transition_id": successor_transition_id,
+            "job_ids": sorted(
+                job_id
+                for job_id, job in self.jobs.items()
+                if job["successor_transition_id"]
+                == successor_transition_id
+            ),
+        }
+        payload["content_sha256"] = canonical_digest(payload)
+        return payload
+
+    def get_internal_succeeded_plan_bound_job_authority(
+        self,
+        successor_transition_id: str,
+        target_id: str,
+    ) -> dict:
+        matches = [
+            (job_id, request)
+            for job_id, request in self.job_requests.items()
+            if request.successor_transition_id == successor_transition_id
+            and request.target_id == target_id
+        ]
+        assert len(matches) == 1
+        job_id, request = matches[0]
+        terminal = self.jobs[job_id]
+        output_types = {
+            "agent_system_gepa_reflector": (
+                "agent_system",
+                "report",
+            ),
+            "skill_bundle_reflector": ("skill_bundle",),
+            "text_memory_expel_reflector": ("text_memory",),
+        }[request.selection().method_id]
+        authority = {
+            "job_id": job_id,
+            "state": "succeeded",
+            "successor_transition_id": successor_transition_id,
+            "plan_id": request.plan.plan_id,
+            "plan_digest": canonical_digest(request.plan),
+            "target_id": target_id,
+            "method_id": request.selection().method_id,
+            "method_identity_digest": (
+                request.selection().method_identity_digest
+            ),
+            "execution_envelope_digest": canonical_digest(
+                {"request": request.model_dump(mode="json")}
+            ),
+            "job_type": request.job_type,
+            "predecessor_successor_transition_id": (
+                request.predecessor_successor_transition_id
+            ),
+            "core_config_sha256": canonical_digest(
+                request.core_config
+            ),
+            "input_bindings_sha256": canonical_digest(
+                {
+                    "input_bindings": [
+                        binding.model_dump(mode="json")
+                        for binding in request.input_bindings
+                    ]
+                }
+            ),
+            "declared_output_artifact_types": list(output_types),
+            "output_artifact_ids": terminal["artifact_ids"],
+            "priority": request.priority,
+            "attempt_count": 1,
+            "job_result_sha256": canonical_digest(terminal),
+        }
+        authority.update(
+            self.succeeded_authority_overrides.get(target_id, {})
+        )
+        return authority
+
     def get_artifact(self, artifact_id: str) -> dict:
         artifact = self.artifacts[artifact_id]
         assert artifact["state"] != "sealed"
@@ -575,6 +657,11 @@ class _Evolution:
             self.artifacts[proposal_id]["promoted"] = (
                 proposal_id == active_artifact_id
             )
+            next(
+                output
+                for output in job["outputs"]
+                if output["artifact_id"] == proposal_id
+            )["promoted"] = proposal_id == active_artifact_id
         if request.parent_artifact_id is not None:
             self.artifacts[request.parent_artifact_id]["promoted"] = (
                 True
@@ -973,6 +1060,82 @@ def test_production_preparer_commits_complete_workspace_and_context_successor(
             for item in agent_admission["proposal_artifact_ids"]
         ) == 1
         assert commit.manifest.materialized_context_id == "ctx-successor-v2"
+
+        closed_task = owner.invoke(
+            "getCoreTaskV2",
+            {"task_id": task.task_id},
+        )
+        accepted_attempt = next(
+            attempt
+            for attempt in closed_task.attempts
+            if attempt.attempt_id == commit.manifest.accepted_attempt_id
+        )
+        attempt_record = owner._ledger.get_attempt_execution(
+            closed_task.task_id,
+            accepted_attempt.attempt_id,
+        )
+        assert attempt_record.successor_plan is not None
+        committed_attempt = owner.successor_transition_attempts(
+            transition.transition.successor_transition_id
+        )[-1]
+        reconciliation_context = ScienceSuccessorPreparationContextV2(
+            task=closed_task,
+            accepted_attempt=accepted_attempt,
+            transition=transition.model_copy(
+                update={
+                    "state": "running_methods",
+                    "progress_completed": 2,
+                    "error": None,
+                }
+            ),
+            transition_attempt=committed_attempt.model_copy(
+                update={
+                    "state": "running",
+                    "error": None,
+                    "commit_manifest_sha256": None,
+                }
+            ),
+            plan=attempt_record.successor_plan,
+        )
+        dataset_response = evolution.datasets[commit.manifest.dataset_id]
+        reconciliation_dataset = SealedTranscriptDatasetV2(
+            dataset_id=commit.manifest.dataset_id,
+            artifact_id=commit.manifest.dataset_artifact_id,
+            manifest_sha256=commit.manifest.dataset_manifest_sha256,
+            record_count=dataset_response["trace_count"],
+            task_id=closed_task.task_id,
+            task_admission_id=closed_task.admission.task_admission_id,
+            accepted_attempt_id=accepted_attempt.attempt_id,
+            capture_mode="transcript",
+            token_level_metrics_available=False,
+            sealed=True,
+        )
+        job_inventory_before = dict(evolution.jobs)
+        target_run_counts_before = dict(evolution.target_run_counts)
+        reconciled_outputs = owner._successor_preparer.reconcile_completed_methods(
+            reconciliation_context,
+            reconciliation_dataset,
+        )
+        assert tuple(item.artifact_id for item in reconciled_outputs) == (
+            commit.manifest.method_artifact_ids
+        )
+        assert evolution.jobs == job_inventory_before
+        assert evolution.target_run_counts == target_run_counts_before
+
+        evolution.succeeded_authority_overrides["skill_bundle"] = {
+            "core_config_sha256": "0" * 64,
+        }
+        with pytest.raises(
+            ScienceSuccessorPreparationV2Error,
+            match="job authority is inconsistent",
+        ):
+            owner._successor_preparer.reconcile_completed_methods(
+                reconciliation_context,
+                reconciliation_dataset,
+            )
+        evolution.succeeded_authority_overrides.clear()
+        assert evolution.jobs == job_inventory_before
+        assert evolution.target_run_counts == target_run_counts_before
 
         next_authority = owner.project_admission_authority(project_id)
         partial_config_json = config.model_dump(mode="json")

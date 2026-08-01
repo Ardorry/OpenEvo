@@ -23,6 +23,7 @@ from openevo.evolution.framework import (
     EvolutionPlan,
     EvolutionTargetSelection,
     MethodExecutionEnvelope,
+    canonical_digest,
 )
 from openevo.evolution.framework.builtins import (
     ImplementationDistributionIdentity,
@@ -392,6 +393,95 @@ def test_sealed_successor_admission_is_atomic_and_replayable_after_response_loss
     assert row["receipt_sha256"] == committed.content_sha256
     # Admission cannot invalidate the still-active predecessor project head.
     assert parent["promoted"] == 1
+
+
+def test_succeeded_plan_bound_authority_closes_exact_request_and_result(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    transition_id = "successor-transition-completed-method-authority"
+    base, _dataset_id = _request_with_sealed_dataset(store)
+    request = base.model_copy(
+        update={"successor_transition_id": transition_id}
+    )
+    job_id, proposal_id = _complete_transition_bound_skill_job(
+        store,
+        request,
+        payload_name="completed-method-authority",
+    )
+
+    authority = store.get_internal_succeeded_plan_bound_job_authority(
+        transition_id,
+        "skill_bundle",
+    )
+    terminal = store.get_internal_job_result(job_id)
+
+    assert authority.job_id == job_id
+    assert authority.successor_transition_id == transition_id
+    assert authority.plan_id == request.plan.plan_id
+    assert authority.plan_digest == canonical_digest(request.plan)
+    assert authority.target_id == request.target_id
+    assert authority.method_id == request.selection().method_id
+    assert authority.method_identity_digest == (
+        request.selection().method_identity_digest
+    )
+    assert authority.job_type == request.job_type
+    assert authority.predecessor_successor_transition_id is None
+    assert authority.core_config_sha256 == canonical_digest(
+        request.core_config
+    )
+    assert authority.input_bindings_sha256 == canonical_digest(
+        {
+            "input_bindings": [
+                binding.model_dump(mode="json")
+                for binding in request.input_bindings
+            ]
+        }
+    )
+    assert authority.output_artifact_ids == (proposal_id,)
+    assert authority.priority == request.priority
+    assert authority.attempt_count == 1
+    assert authority.job_result_sha256 == canonical_digest(terminal)
+
+
+def test_succeeded_plan_bound_authority_rejects_nonterminal_and_ambiguous_jobs(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    transition_id = "successor-transition-completed-method-conflict"
+    base, _dataset_id = _request_with_sealed_dataset(store)
+    request = base.model_copy(
+        update={"successor_transition_id": transition_id}
+    )
+    store.create_plan_bound_job(request, snapshot=_snapshot())
+
+    with pytest.raises(ValueError, match="not a closed succeeded job"):
+        store.get_internal_succeeded_plan_bound_job_authority(
+            transition_id,
+            request.target_id,
+        )
+
+    selection = request.plan.selections[0]
+    second_plan = _snapshot().compile_plan(
+        plan_id="plan-skill-round-0-second",
+        selections=(
+            EvolutionTargetSelection(
+                target_id=selection.target_id,
+                enabled=True,
+                method_id=selection.method_id,
+                config=selection.config(),
+            ),
+        ),
+        profile=_profile(),
+    )
+    second = request.model_copy(update={"plan": second_plan})
+    store.create_plan_bound_job(second, snapshot=_snapshot())
+
+    with pytest.raises(ValueError, match="exactly one job"):
+        store.get_internal_succeeded_plan_bound_job_authority(
+            transition_id,
+            request.target_id,
+        )
 
 
 def test_parentless_genesis_admission_requires_no_plan_bound_parent(

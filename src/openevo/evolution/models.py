@@ -273,6 +273,40 @@ class FailedPlanBoundJobAuthorityResponse(BaseModel):
     job_result_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class SucceededPlanBoundJobAuthorityResponse(BaseModel):
+    """Read-only identity of one succeeded successor plan target.
+
+    This authority is deliberately non-executable.  It lets Core prove that a
+    paid plan target is already closed before entering a commit-tail-only
+    reconciliation path.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    job_id: str = Field(min_length=1, max_length=256)
+    state: Literal["succeeded"]
+    successor_transition_id: str = Field(min_length=1, max_length=256)
+    plan_id: str = Field(min_length=1, max_length=256)
+    plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    target_id: str = Field(min_length=1, max_length=256)
+    method_id: str = Field(min_length=1, max_length=256)
+    method_identity_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    execution_envelope_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    job_type: str = Field(min_length=1, max_length=512)
+    predecessor_successor_transition_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=256,
+    )
+    core_config_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    input_bindings_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    declared_output_artifact_types: tuple[str, ...] = Field(min_length=1)
+    output_artifact_ids: tuple[str, ...] = Field(min_length=1, max_length=128)
+    priority: int
+    attempt_count: int = Field(ge=1, le=100)
+    job_result_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class SuccessorTransitionJobInventoryResponse(BaseModel):
     """Read-only closed inventory of jobs bound to one successor identity."""
 

@@ -371,6 +371,20 @@ class ScienceSuccessorTransitionAttemptV2(_ScienceSuccessorModel):
     successor_transition_id: str = Field(pattern=_SCIENCE_ID_PATTERN)
     ordinal: int = Field(ge=1, le=100)
     retry_request_id: str = Field(pattern=_SCIENCE_ID_PATTERN)
+    reconciliation_only: bool = Field(
+        default=False,
+        exclude_if=lambda value: value is False,
+    )
+    reconciliation_source_attempt_id: str | None = Field(
+        default=None,
+        pattern=_SCIENCE_ID_PATTERN,
+        exclude_if=lambda value: value is None,
+    )
+    reconciliation_source_authority_sha256: str | None = Field(
+        default=None,
+        pattern=_SCIENCE_SHA256_PATTERN,
+        exclude_if=lambda value: value is None,
+    )
     state: Literal["running", "failed", "committed"]
     error: m2.ApiErrorV2 | None
     dataset_id: str | None = Field(
@@ -387,6 +401,20 @@ class ScienceSuccessorTransitionAttemptV2(_ScienceSuccessorModel):
     )
     created_at: str = Field(pattern=_SCIENCE_TIMESTAMP_PATTERN)
     updated_at: str = Field(pattern=_SCIENCE_TIMESTAMP_PATTERN)
+
+    @model_validator(mode="after")
+    def _closed_reconciliation_identity(
+        self,
+    ) -> "ScienceSuccessorTransitionAttemptV2":
+        source_fields_present = (
+            self.reconciliation_source_attempt_id is not None,
+            self.reconciliation_source_authority_sha256 is not None,
+        )
+        if self.reconciliation_only is not all(source_fields_present):
+            raise ValueError(
+                "successor reconciliation source identity is inconsistent"
+            )
+        return self
 
     @model_validator(mode="after")
     def _terminal_error(self) -> ScienceSuccessorTransitionAttemptV2:

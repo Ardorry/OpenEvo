@@ -35,7 +35,6 @@ class DurableFakeAuthority(ProductionOperationPort):
         return self.root / f"{canonical_sha256({'key': key})}.json"
 
     def preflight(self, request: dict[str, Any]) -> dict[str, Any]:
-        del request
         if self.kind == "evolution":
             return {
                 "ready": True,
@@ -55,7 +54,7 @@ class DurableFakeAuthority(ProductionOperationPort):
             }
         if self.kind != "candidate":
             raise ValueError("synthetic Core readiness is unavailable for this port")
-        return {
+        readiness = {
             "service_reachable": True,
             "bearer_present": True,
             "bearer_valid": True,
@@ -88,6 +87,26 @@ class DurableFakeAuthority(ProductionOperationPort):
             "generation": "1" * 32,
             "release_identity": "2" * 64,
         }
+        successor = request.get("successor_workspace_authority")
+        preseeded = request.get("preseeded_workspace_authority")
+        if successor is not None or preseeded is not None:
+            snapshot = {
+                "synthetic_workspace_authority_sha256": canonical_sha256(
+                    successor if successor is not None else preseeded
+                )
+            }
+            binding = {
+                "schema_version": (
+                    "openevo.researchclawbench."
+                    "candidate_workspace_binding.v2"
+                ),
+                "expected_workspace_snapshot": snapshot,
+                "actual_workspace_snapshot": snapshot,
+                "workspace_snapshot_match": True,
+            }
+            binding["content_sha256"] = canonical_sha256(binding)
+            readiness["candidate_workspace_binding"] = binding
+        return readiness
 
     def recover(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any] | None:
         path = self._path(idempotency_key)
@@ -136,18 +155,54 @@ class DurableFakeAuthority(ProductionOperationPort):
         seed = canonical_sha256({"kind": self.kind, "key": key})
         if self.kind == "candidate":
             run_id = str(request["run_id"])
+            project_id = (
+                request.get("core_project_id")
+                or "project-synthetic-life-v2"
+            )
+            transition_id = f"transition-{task}-a{attempt}"
+            session_id = f"session-{task}-a{attempt}"
+            dataset_id = f"dataset-{task}-a{attempt}"
+            successor_workspace_body = {
+                "schema_version": (
+                    "openevo.researchclawbench."
+                    "successor_workspace_authority.v2"
+                ),
+                "task_id": task,
+                "source_attempt_index": attempt,
+                "source_run_id": run_id,
+                "project_id": project_id,
+                "input_project_head_id": f"head-input-{task}-a{attempt}",
+                "successor_transition_id": transition_id,
+                "workspace_handoff_id": f"handoff-{seed[:16]}",
+                "session_id": session_id,
+                "dataset_id": dataset_id,
+                "session_result_sha256": seed,
+                "workspace_root": f"synthetic://{task}/a{attempt}",
+                "output_archive": {"synthetic": True},
+                "core_output_archive": {"synthetic": True},
+                "workspace_projection": {"synthetic": True},
+            }
+            successor_workspace_authority = {
+                **successor_workspace_body,
+                "content_sha256": canonical_sha256(
+                    successor_workspace_body
+                ),
+            }
             return {
                 "run_id": run_id,
-                "core_project_id": request.get("core_project_id") or "project-synthetic-life-v2",
+                "core_project_id": project_id,
                 "core_task_id": f"core-{task}-a{attempt}",
                 "core_attempt_id": f"attempt-{task}-a{attempt}",
                 "workspace_binding_id": f"workspace-{seed[:16]}",
                 "task_request_id": f"request-{seed[16:32]}",
                 "session_result_id": f"session-result-{seed[32:48]}",
-                "session_id": f"session-{task}-a{attempt}",
-                "dataset_id": f"dataset-{task}-a{attempt}",
+                "session_id": session_id,
+                "dataset_id": dataset_id,
                 "dataset_revision": f"artifact-dataset-{task}-a{attempt}.v1",
-                "successor_transition_id": f"transition-{task}-a{attempt}",
+                "successor_transition_id": transition_id,
+                "successor_workspace_authority": (
+                    successor_workspace_authority
+                ),
                 "transcript_receipt": {"sha256": seed, "trace_count": 1},
                 "completed": True,
                 "runtime_seconds": float(30 - attempt * 2),

@@ -13,7 +13,7 @@ from typing import Any, Callable, Literal, Protocol
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from openevo.backend.science_execution_v2 import (
     ScienceAttemptExecutionEvidenceV2,
@@ -102,6 +102,16 @@ class CapturedTrainingAttemptOwner(Protocol):
         self, successor_transition_id: str
     ) -> AtomicSuccessorCommitV2 | None: ...
 
+    def reconcile_completed_successor_methods(
+        self,
+        successor_transition_id: str,
+        *,
+        expected_project_head_id: str,
+        expected_terminal_attempt_id: str,
+        expected_terminal_authority_sha256: str,
+        reconciliation_request_id: str,
+    ) -> SuccessorTransitionV2: ...
+
     def successor_commit_for_project_head(
         self, project_head_id: str
     ) -> AtomicSuccessorCommitV2 | None: ...
@@ -188,6 +198,21 @@ class TrainingSuccessorAuthorityV2(BaseModel):
     attempts: tuple[ScienceSuccessorTransitionAttemptV2, ...]
     commit: AtomicSuccessorCommitV2 | None
     artifacts: tuple[TrainingSuccessorArtifactAuthorityV2, ...] = ()
+
+
+class CompletedMethodsSuccessorReconciliationRequestV2(BaseModel):
+    """Closed no-model authority for one successor commit-tail recovery."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal[
+        "openevo.completed_methods_successor_reconciliation_request.v1"
+    ] = "openevo.completed_methods_successor_reconciliation_request.v1"
+    expected_project_head_id: str = Field(min_length=1, max_length=128)
+    expected_terminal_attempt_id: str = Field(min_length=1, max_length=128)
+    expected_terminal_authority_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    idempotency_key: str = Field(min_length=1, max_length=128)
+    model_execution_allowed: Literal[False]
 
 
 class HistoricalProjectHeadRestoreRequestV2(BaseModel):
@@ -582,6 +607,47 @@ def install_core_training_attempt_endpoint(
                 status_code=409,
                 detail="successor artifact authority is inconsistent",
             ) from exc
+        return TrainingSuccessorAuthorityV2(
+            transition=transition,
+            attempts=attempts,
+            commit=commit,
+            artifacts=artifacts,
+        )
+
+    @app.post(
+        "/v2/internal/training-successors/{successor_transition_id}"
+        "/completed-methods-reconcile",
+        response_model=TrainingSuccessorAuthorityV2,
+        include_in_schema=False,
+    )
+    async def reconcile_completed_training_successor_methods(
+        successor_transition_id: str,
+        request: CompletedMethodsSuccessorReconciliationRequestV2,
+    ) -> TrainingSuccessorAuthorityV2:
+        try:
+            owner.reconcile_completed_successor_methods(
+                successor_transition_id,
+                expected_project_head_id=request.expected_project_head_id,
+                expected_terminal_attempt_id=(
+                    request.expected_terminal_attempt_id
+                ),
+                expected_terminal_authority_sha256=(
+                    request.expected_terminal_authority_sha256
+                ),
+                reconciliation_request_id=request.idempotency_key,
+            )
+            transition = owner.get_successor_transition(
+                successor_transition_id
+            )
+            attempts = tuple(
+                owner.successor_transition_attempts(successor_transition_id)
+            )
+            commit = owner.successor_commit(successor_transition_id)
+            artifacts = () if commit is None else artifact_authorities(commit)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return TrainingSuccessorAuthorityV2(
             transition=transition,
             attempts=attempts,

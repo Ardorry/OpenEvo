@@ -142,6 +142,14 @@ class ProductionOperationPort(Protocol):
 
     def execute(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]: ...
 
+    def reconcile_terminal_successor(
+        self,
+        request: dict[str, Any],
+        idempotency_key: str,
+        checkpoint: dict[str, Any],
+        reconciliation_id: str,
+    ) -> dict[str, Any]: ...
+
 
 class TrainingOperations(Protocol):
     def reconcile_candidate_authority(
@@ -270,6 +278,109 @@ class OperationReceiptStore:
         finally:
             temporary.unlink(missing_ok=True)
         return self.get(key) or closed
+
+    def get_reconciliation(
+        self,
+        storage_key: str,
+        *,
+        supervisor_idempotency_key: str,
+    ) -> dict[str, Any] | None:
+        """Read one superseding receipt without touching its source receipt."""
+
+        path = self._path(storage_key)
+        if not path.exists():
+            return None
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("operation reconciliation receipt entry is unsafe")
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if (
+            not isinstance(value, dict)
+            or value.get("receipt_storage_key") != storage_key
+            or value.get("idempotency_key") != supervisor_idempotency_key
+        ):
+            raise ValueError("operation reconciliation receipt identity changed")
+        observed = value.get("content_sha256")
+        body = {key: item for key, item in value.items() if key != "content_sha256"}
+        if observed != canonical_sha256(body):
+            raise ValueError("operation reconciliation receipt hash is invalid")
+        return value
+
+    def put_reconciliation(
+        self,
+        storage_key: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Persist a distinct append-only receipt for a terminal source."""
+
+        supervisor_key = payload.get("idempotency_key")
+        if (
+            not isinstance(storage_key, str)
+            or not storage_key
+            or not isinstance(supervisor_key, str)
+            or not supervisor_key
+        ):
+            raise ValueError("operation reconciliation identity is invalid")
+        closed = dict(payload)
+        closed["receipt_storage_key"] = storage_key
+        closed.pop("content_sha256", None)
+        closed["content_sha256"] = canonical_sha256(closed)
+        path = self._path(storage_key)
+        prior = self.get_reconciliation(
+            storage_key,
+            supervisor_idempotency_key=supervisor_key,
+        )
+        if prior is not None:
+            if canonical_bytes(prior) != canonical_bytes(closed):
+                raise ValueError("operation reconciliation idempotency conflict")
+            return prior
+        temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+            0o600,
+        )
+        try:
+            data = (
+                json.dumps(closed, indent=2, sort_keys=True, allow_nan=False).encode(
+                    "utf-8"
+                )
+                + b"\n"
+            )
+            view = memoryview(data)
+            while view:
+                written = os.write(descriptor, view)
+                if written <= 0:
+                    raise OSError("short operation reconciliation receipt write")
+                view = view[written:]
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        try:
+            os.link(temporary, path, follow_symlinks=False)
+            directory = os.open(
+                self.root,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC,
+            )
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        except FileExistsError:
+            prior = self.get_reconciliation(
+                storage_key,
+                supervisor_idempotency_key=supervisor_key,
+            )
+            if prior is None or canonical_bytes(prior) != canonical_bytes(closed):
+                raise ValueError("concurrent operation reconciliation conflict")
+        finally:
+            temporary.unlink(missing_ok=True)
+        return (
+            self.get_reconciliation(
+                storage_key,
+                supervisor_idempotency_key=supervisor_key,
+            )
+            or closed
+        )
 
 
 class ProductionTrainingOperations:
@@ -450,7 +561,22 @@ class ProductionTrainingOperations:
                     raise ProductionOperationError(
                         "terminal operation receipt cannot prove recovery authority"
                     )
-                raise SuccessorRecoveryRequired(checkpoint)
+                reconcile = getattr(
+                    port,
+                    "reconcile_terminal_successor",
+                    None,
+                )
+                if not callable(reconcile):
+                    raise SuccessorRecoveryRequired(checkpoint)
+                return self._reconcile_terminal_successor_operation(
+                    kind=kind,
+                    port=port,
+                    request=request,
+                    idempotency_key=idempotency_key,
+                    input_identity=input_identity,
+                    source_receipt=existing,
+                    checkpoint=checkpoint,
+                )
             return _operation_result_from_dict(existing)
         started = _utc_now()
         try:
@@ -515,6 +641,106 @@ class ProductionTrainingOperations:
                 "failure_class": FailureClass.NONE.value,
                 **output,
             }
+        )
+        return _operation_result_from_dict(closed)
+
+    def _reconcile_terminal_successor_operation(
+        self,
+        *,
+        kind: str,
+        port: ProductionOperationPort,
+        request: dict[str, Any],
+        idempotency_key: str,
+        input_identity: str,
+        source_receipt: dict[str, Any],
+        checkpoint: dict[str, Any],
+    ) -> OperationResult:
+        """Append a recovered result while preserving the failed receipt."""
+
+        checkpoint = SuccessorRecoveryRequired(checkpoint).checkpoint
+        source_sha256 = source_receipt.get("content_sha256")
+        if not isinstance(source_sha256, str) or _SHA256.fullmatch(source_sha256) is None:
+            raise ProductionOperationError(
+                "terminal successor receipt identity is invalid"
+            )
+        seed = canonical_sha256(
+            {
+                "checkpoint_sha256": checkpoint["content_sha256"],
+                "input_identity": input_identity,
+                "source_receipt_sha256": source_sha256,
+                "supervisor_idempotency_key": idempotency_key,
+            }
+        )
+        reconciliation_id = f"successor-reconcile-{seed[:40]}"
+        prior = self.receipts.get_reconciliation(
+            reconciliation_id,
+            supervisor_idempotency_key=idempotency_key,
+        )
+        if prior is not None:
+            if (
+                prior.get("source_terminal_receipt_sha256") != source_sha256
+                or prior.get("successor_recovery_checkpoint_sha256")
+                != checkpoint["content_sha256"]
+                or prior.get("input_identity") != input_identity
+                or prior.get("status") != OperationStatus.RECOVERED.value
+            ):
+                raise ProductionOperationError(
+                    "terminal successor reconciliation receipt drifted"
+                )
+            return _operation_result_from_dict(prior)
+        reconcile = getattr(port, "reconcile_terminal_successor", None)
+        if not callable(reconcile):
+            raise SuccessorRecoveryRequired(checkpoint)
+        started = _utc_now()
+        output = reconcile(
+            request,
+            idempotency_key,
+            checkpoint,
+            reconciliation_id,
+        )
+        if not isinstance(output, dict):
+            raise ProductionOperationError(
+                "terminal successor reconciliation returned a non-object receipt"
+            )
+        output = json.loads(canonical_bytes(output))
+        owned = output.pop("owned_resource_ids", [])
+        if not isinstance(owned, list) or not all(
+            isinstance(item, str) and _IDENTITY.fullmatch(item)
+            for item in owned
+        ):
+            raise ProductionOperationError(
+                "terminal successor reconciliation returned invalid resources"
+            )
+        output_identity = canonical_sha256(output)
+        operation_id = (
+            "op-"
+            + hashlib.sha256(
+                (kind + ":" + idempotency_key + ":" + reconciliation_id).encode()
+            ).hexdigest()[:24]
+        )
+        closed = self.receipts.put_reconciliation(
+            reconciliation_id,
+            {
+                "operation_id": operation_id,
+                "operation_kind": kind,
+                "idempotency_key": idempotency_key,
+                "status": OperationStatus.RECOVERED.value,
+                "started_at": started,
+                "completed_at": _utc_now(),
+                "input_identity": input_identity,
+                "output_identity": output_identity,
+                "receipt_path": os.fspath(
+                    self.receipts._path(reconciliation_id)
+                ),
+                "owned_resource_ids": owned,
+                "retryable": False,
+                "failure_class": FailureClass.NONE.value,
+                "source_terminal_receipt_sha256": source_sha256,
+                "successor_recovery_checkpoint_sha256": (
+                    checkpoint["content_sha256"]
+                ),
+                **output,
+            },
         )
         return _operation_result_from_dict(closed)
 

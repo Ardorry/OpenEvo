@@ -73,6 +73,7 @@ from openevo.evolution.models import (
     ArtifactType,
     FailedPlanBoundJobAuthorityResponse,
     SuccessorTransitionJobInventoryResponse,
+    SucceededPlanBoundJobAuthorityResponse,
     SuccessorArtifactAuthorityResponse,
     ContextResolveRequest,
     ContextResolveResponse,
@@ -11280,6 +11281,108 @@ class EvolutionStore:
             execution_envelope_digest=canonical_digest(validated.envelope),
             declared_output_artifact_types=validated.output_artifact_types,
             output_artifact_ids=(),
+            job_result_sha256=canonical_digest(terminal),
+        )
+
+    def get_internal_succeeded_plan_bound_job_authority(
+        self,
+        successor_transition_id: str,
+        target_id: str,
+    ) -> SucceededPlanBoundJobAuthorityResponse:
+        """Return one exact succeeded paid job without creating or retrying it."""
+
+        if (
+            not isinstance(successor_transition_id, str)
+            or not 1 <= len(successor_transition_id) <= 256
+            or not isinstance(target_id, str)
+            or not 1 <= len(target_id) <= 256
+        ):
+            raise ValueError("succeeded plan-bound job identity is invalid")
+        with self.connect() as conn:
+            try:
+                conn.execute("BEGIN")
+                rows = conn.execute(
+                    "SELECT jobs.* FROM jobs JOIN "
+                    "plan_bound_job_transition_bindings AS binding "
+                    "ON binding.job_id = jobs.job_id WHERE "
+                    "binding.successor_transition_id = ? AND jobs.target_id = ? "
+                    "ORDER BY jobs.job_id LIMIT 2",
+                    (successor_transition_id, target_id),
+                ).fetchall()
+                if len(rows) != 1:
+                    raise ValueError(
+                        "succeeded plan target does not own exactly one job"
+                    )
+                row = rows[0]
+                validated = self._validate_plan_bound_job_contract(
+                    conn,
+                    row,
+                    allow_historical_terminal_registry=True,
+                )
+                if (
+                    row["state"] != str(JobState.SUCCEEDED)
+                    or validated.successor_transition_id
+                    != successor_transition_id
+                    or validated.selection.target_id != target_id
+                    or type(row["attempt_count"]) is not int
+                    or not 1 <= int(row["attempt_count"]) <= 100
+                ):
+                    raise ValueError("plan target is not a closed succeeded job")
+                conn.commit()
+            except BaseException:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                raise
+        terminal = self.get_internal_job_result(str(row["job_id"]))
+        output_artifact_ids = terminal.get("artifact_ids")
+        if (
+            terminal.get("state") != str(JobState.SUCCEEDED)
+            or terminal.get("error") is not None
+            or terminal.get("retryable") is not None
+            or terminal.get("successor_transition_id")
+            != successor_transition_id
+            or not isinstance(output_artifact_ids, list)
+            or not output_artifact_ids
+            or len(output_artifact_ids) > 128
+            or any(
+                not isinstance(artifact_id, str) or not artifact_id
+                for artifact_id in output_artifact_ids
+            )
+            or len(output_artifact_ids) != len(set(output_artifact_ids))
+        ):
+            raise ValueError("succeeded plan-bound job terminal authority is invalid")
+        return SucceededPlanBoundJobAuthorityResponse(
+            job_id=str(row["job_id"]),
+            state="succeeded",
+            successor_transition_id=successor_transition_id,
+            plan_id=validated.plan.plan_id,
+            plan_digest=validated.envelope.plan_digest,
+            target_id=validated.selection.target_id,
+            method_id=validated.selection.method_id,
+            method_identity_digest=validated.selection.method_identity_digest,
+            execution_envelope_digest=canonical_digest(validated.envelope),
+            job_type=str(row["job_type"]),
+            predecessor_successor_transition_id=(
+                validated.predecessor_successor_transition_id
+            ),
+            core_config_sha256=validated.envelope.core_config_digest,
+            input_bindings_sha256=canonical_digest(
+                {
+                    "input_bindings": [
+                        {
+                            "binding_id": binding.binding_id,
+                            "artifact_ids": list(binding.artifact_ids),
+                        }
+                        for binding in validated.envelope.input_bindings
+                    ]
+                }
+            ),
+            declared_output_artifact_types=validated.output_artifact_types,
+            output_artifact_ids=tuple(output_artifact_ids),
+            priority=int(row["priority"]),
+            attempt_count=int(row["attempt_count"]),
             job_result_sha256=canonical_digest(terminal),
         )
 

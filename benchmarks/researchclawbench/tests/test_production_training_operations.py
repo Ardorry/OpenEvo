@@ -2296,6 +2296,105 @@ def test_successor_lost_retry_response_reconciles_commit_without_second_post(
     assert [call[0] for call in calls] == ["GET", "POST", "GET"]
 
 
+def test_completed_method_reconciliation_lost_response_reads_commit_without_second_post(
+    monkeypatch,
+) -> None:
+    source = _failed_successor_authority(retryable=False)
+    checkpoint = CoreSuccessorPort(
+        object(), core_authority=_SuccessorCoreAuthority()
+    )._recovery_checkpoint(
+        source,
+        request=_successor_request(),
+        idempotency_key="completed-method-lost-response-key",
+    )
+    reconciliation_id = "successor-reconcile-" + "a" * 40
+    calls = []
+
+    class Client:
+        committed = False
+
+        def __init__(self, _authority):
+            pass
+
+        def close(self):
+            pass
+
+        def readiness(self):
+            return {
+                "generation_matches": True,
+                "secret_recorded": False,
+            }
+
+        def json(self, method, path, *, payload=None, headers=None):
+            calls.append((method, path, payload, headers))
+            if method == "POST":
+                type(self).committed = True
+                raise ports_module.httpx.ReadError(
+                    "lost completed-method reconciliation response"
+                )
+            if type(self).committed:
+                return {
+                    "transition": {
+                        **source["transition"],
+                        "state": "committed",
+                        "error": None,
+                    },
+                    "attempts": [
+                        *source["attempts"],
+                        {
+                            "transition_attempt_id": "reconciliation-attempt-2",
+                            "successor_transition_id": "transition-failed",
+                            "retry_request_id": reconciliation_id,
+                            "reconciliation_only": True,
+                            "state": "committed",
+                            "error": None,
+                        },
+                    ],
+                    "commit": {"commit_id": "commit-reconciled-1"},
+                    "artifacts": [],
+                }
+            return source
+
+    monkeypatch.setattr(ports_module, "CoreControlV2Client", Client)
+    monkeypatch.setattr(
+        CoreSuccessorPort,
+        "_result",
+        staticmethod(
+            lambda _authority, _request, _client: {
+                "successor_commit_id": "commit-reconciled-1",
+                "model_calls_started": 0,
+            }
+        ),
+    )
+    port = CoreSuccessorPort(
+        object(),
+        core_authority=_SuccessorCoreAuthority(),
+    )
+
+    with pytest.raises(
+        ports_module.httpx.ReadError,
+        match="lost completed-method reconciliation response",
+    ):
+        port.reconcile_terminal_successor(
+            _successor_request(),
+            "completed-method-lost-response-key",
+            checkpoint,
+            reconciliation_id,
+        )
+    recovered = port.reconcile_terminal_successor(
+        _successor_request(),
+        "completed-method-lost-response-key",
+        checkpoint,
+        reconciliation_id,
+    )
+
+    assert recovered == {
+        "successor_commit_id": "commit-reconciled-1",
+        "model_calls_started": 0,
+    }
+    assert [call[0] for call in calls] == ["GET", "POST", "GET"]
+
+
 def test_runner_restart_replays_terminal_successor_checkpoint_without_side_effect(
     tmp_path: Path,
     monkeypatch,
@@ -2379,6 +2478,132 @@ def test_runner_restart_replays_terminal_successor_checkpoint_without_side_effec
     assert FailingPort.recover_calls == 1
     assert FailingPort.execute_calls == 1
     assert BombPort.calls == 0
+
+
+def test_terminal_successor_reconciliation_preserves_source_and_replays_without_calls(
+    tmp_path: Path,
+) -> None:
+    checkpoint = CoreSuccessorPort(
+        object(), core_authority=_SuccessorCoreAuthority()
+    )._recovery_checkpoint(
+        _failed_successor_authority(retryable=False),
+        request=_successor_request(),
+        idempotency_key="completed-method-checkpoint-key",
+    )
+
+    class TerminalPort:
+        def recover(self, request, idempotency_key):
+            del request, idempotency_key
+
+        def execute(self, request, idempotency_key):
+            del request, idempotency_key
+            raise SuccessorRecoveryRequired(checkpoint)
+
+    receipt_root = tmp_path / "completed-method-reconciliation"
+    terminal_port = TerminalPort()
+    terminal_operations = ProductionTrainingOperations(
+        config=object(),
+        experiment_run_id="rcb_oe_v0_completed_method_reconciliation",
+        receipt_root=receipt_root,
+        ports=ProductionPorts(
+            candidate=terminal_port,
+            validation=terminal_port,
+            evaluation=terminal_port,
+            attachment=terminal_port,
+            evolution=terminal_port,
+            composite=terminal_port,
+            task_local=terminal_port,
+            sanitizer=terminal_port,
+            freeze=terminal_port,
+        ),
+    )
+    request = {"task_id": CANARY_TASK, **_successor_request()}
+    with pytest.raises(SuccessorRecoveryRequired):
+        terminal_operations.collect_artifact_jobs(
+            request,
+            "completed-method-checkpoint-key",
+        )
+    source_path = terminal_operations.receipts._path(
+        "completed-method-checkpoint-key"
+    )
+    source_before = source_path.read_bytes()
+    source_receipt = terminal_operations.receipts.get(
+        "completed-method-checkpoint-key"
+    )
+    assert source_receipt is not None
+
+    class ReconciliationPort:
+        calls = 0
+
+        def recover(self, request, idempotency_key):
+            raise AssertionError((request, idempotency_key))
+
+        def execute(self, request, idempotency_key):
+            raise AssertionError((request, idempotency_key))
+
+        def reconcile_terminal_successor(
+            self,
+            observed_request,
+            idempotency_key,
+            observed_checkpoint,
+            reconciliation_id,
+        ):
+            type(self).calls += 1
+            assert observed_request == {
+                **request,
+                "operation_phase": "collect",
+            }
+            assert idempotency_key == "completed-method-checkpoint-key"
+            assert observed_checkpoint == checkpoint
+            assert reconciliation_id.startswith("successor-reconcile-")
+            return {
+                "owned_resource_ids": ["successor-commit-reconciled-1"],
+                "successor_commit_id": "successor-commit-reconciled-1",
+                "model_calls_started": 0,
+            }
+
+    reconciliation_port = ReconciliationPort()
+    reconciled_operations = ProductionTrainingOperations(
+        config=object(),
+        experiment_run_id="rcb_oe_v0_completed_method_reconciliation",
+        receipt_root=receipt_root,
+        ports=ProductionPorts(
+            candidate=reconciliation_port,
+            validation=reconciliation_port,
+            evaluation=reconciliation_port,
+            attachment=reconciliation_port,
+            evolution=reconciliation_port,
+            composite=reconciliation_port,
+            task_local=reconciliation_port,
+            sanitizer=reconciliation_port,
+            freeze=reconciliation_port,
+        ),
+    )
+    recovered = reconciled_operations.collect_artifact_jobs(
+        request,
+        "completed-method-checkpoint-key",
+    )
+    assert recovered.status is OperationStatus.RECOVERED
+    assert recovered.payload["successor_commit_id"] == (
+        "successor-commit-reconciled-1"
+    )
+    assert recovered.payload["model_calls_started"] == 0
+    assert recovered.payload["source_terminal_receipt_sha256"] == (
+        source_receipt["content_sha256"]
+    )
+    assert source_path.read_bytes() == source_before
+    assert Path(recovered.receipt_path).is_file()
+    assert Path(recovered.receipt_path) != source_path
+    assert len(tuple(receipt_root.glob("*.json"))) == 2
+    assert ReconciliationPort.calls == 1
+
+    replayed = reconciled_operations.collect_artifact_jobs(
+        request,
+        "completed-method-checkpoint-key",
+    )
+    assert replayed == recovered
+    assert source_path.read_bytes() == source_before
+    assert ReconciliationPort.calls == 1
 
 
 def test_feedback_rejects_completed_dataset_authority_drift() -> None:

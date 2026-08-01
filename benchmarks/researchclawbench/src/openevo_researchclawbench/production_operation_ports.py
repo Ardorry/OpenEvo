@@ -3453,6 +3453,142 @@ class CoreSuccessorPort(ProductionOperationPort):
         finally:
             client.close()
 
+    def reconcile_terminal_successor(
+        self,
+        request: dict[str, Any],
+        idempotency_key: str,
+        checkpoint: dict[str, Any],
+        reconciliation_id: str,
+    ) -> dict[str, Any]:
+        """Invoke Core's no-model completed-method commit tail exactly once."""
+
+        attachment = request.get("attachment")
+        if (
+            not isinstance(attachment, dict)
+            or checkpoint.get("supervisor_idempotency_key") != idempotency_key
+            or checkpoint.get("successor_transition_id")
+            != attachment.get("successor_transition_id")
+            or checkpoint.get("model_side_effect_state")
+            != "REQUIRES_CORE_RECOVERY_RESOLUTION"
+            or not isinstance(reconciliation_id, str)
+            or not reconciliation_id.startswith("successor-reconcile-")
+        ):
+            raise CoreControlError(
+                "completed-method successor reconciliation identity drifted"
+            )
+        transition_id = checkpoint["successor_transition_id"]
+        client = CoreControlV2Client(self.core_authority)
+        try:
+            core = client.readiness()
+            if (
+                core.get("generation_matches") is not True
+                or core.get("secret_recorded") is not False
+            ):
+                raise CoreControlError(
+                    "completed-method successor reconciliation Core is not ready"
+                )
+            authority = client.json(
+                "GET",
+                f"/v2/internal/training-successors/{transition_id}",
+            )
+            transition = authority.get("transition")
+            attempts = authority.get("attempts")
+            if not isinstance(transition, dict) or not isinstance(attempts, list):
+                raise CoreControlError(
+                    "completed-method successor authority is incomplete"
+                )
+            if transition.get("state") == "committed":
+                if (
+                    not attempts
+                    or attempts[-1].get("retry_request_id") != reconciliation_id
+                    or attempts[-1].get("reconciliation_only") is not True
+                ):
+                    raise CoreControlError(
+                        "committed successor lacks reconciliation authority"
+                    )
+                return self._result(authority, request, client)
+            source_attempt_count = checkpoint.get("transition_attempt_count")
+            if (
+                not isinstance(source_attempt_count, int)
+                or source_attempt_count < 1
+                or len(attempts) < source_attempt_count
+            ):
+                raise CoreControlError(
+                    "completed-method successor attempt inventory changed"
+                )
+            if len(attempts) == source_attempt_count:
+                terminal_sha256 = canonical_sha256(
+                    {
+                        "transition": transition,
+                        "attempts": attempts,
+                        "commit": authority.get("commit"),
+                        "artifacts": authority.get("artifacts"),
+                    }
+                )
+                if (
+                    transition.get("state") != "failed"
+                    or authority.get("commit") is not None
+                    or authority.get("artifacts") != []
+                    or attempts[-1].get("transition_attempt_id")
+                    != checkpoint.get("latest_transition_attempt_id")
+                    or terminal_sha256
+                    != checkpoint.get("terminal_authority_sha256")
+                ):
+                    raise CoreControlError(
+                        "completed-method source terminal authority changed"
+                    )
+            elif (
+                len(attempts) != source_attempt_count + 1
+                or attempts[-1].get("retry_request_id") != reconciliation_id
+                or attempts[-1].get("reconciliation_only") is not True
+            ):
+                raise CoreControlError(
+                    "completed-method reconciliation attempt is ambiguous"
+                )
+            client.json(
+                "POST",
+                f"/v2/internal/training-successors/{transition_id}/"
+                "completed-methods-reconcile",
+                payload={
+                    "schema_version": (
+                        "openevo.completed_methods_successor_"
+                        "reconciliation_request.v1"
+                    ),
+                    "expected_project_head_id": (
+                        checkpoint["predecessor_project_head_id"]
+                    ),
+                    "expected_terminal_attempt_id": (
+                        checkpoint["latest_transition_attempt_id"]
+                    ),
+                    "expected_terminal_authority_sha256": (
+                        checkpoint["terminal_authority_sha256"]
+                    ),
+                    "idempotency_key": reconciliation_id,
+                    "model_execution_allowed": False,
+                },
+            )
+            deadline = time.monotonic() + 15 * 60
+            while time.monotonic() < deadline:
+                authority = client.json(
+                    "GET",
+                    f"/v2/internal/training-successors/{transition_id}",
+                )
+                observed = authority.get("transition", {})
+                if observed.get("state") == "committed":
+                    return self._result(authority, request, client)
+                if observed.get("state") == "failed":
+                    raise SuccessorRecoveryRequired(checkpoint)
+                if observed.get("state") in {"cancelled", "superseded"}:
+                    raise CoreControlError(
+                        "completed-method successor reconciliation terminated"
+                    )
+                time.sleep(1.0)
+            raise TimeoutError(
+                "completed-method successor reconciliation exceeded timeout"
+            )
+        finally:
+            client.close()
+
     def _recovery_checkpoint(
         self,
         authority: dict[str, Any],
