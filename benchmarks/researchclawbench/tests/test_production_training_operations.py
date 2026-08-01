@@ -2388,8 +2388,22 @@ def test_completed_method_reconciliation_lost_response_reads_commit_without_seco
         reconciliation_id,
     )
 
-    assert recovered == {
-        "successor_commit_id": "commit-reconciled-1",
+    assert recovered["successor_commit_id"] == "commit-reconciled-1"
+    assert recovered["model_calls_started"] == 0
+    assert recovered["completed_methods_reconciliation"] == {
+        "schema_version": (
+            "openevo.researchclawbench.completed_methods_reconciliation.v1"
+        ),
+        "reconciliation_id": reconciliation_id,
+        "successor_transition_id": "transition-failed",
+        "source_transition_attempt_count": len(source["attempts"]),
+        "source_terminal_authority_sha256": checkpoint[
+            "terminal_authority_sha256"
+        ],
+        "core_generation": "1" * 32,
+        "core_release_identity": "2" * 64,
+        "reconciliation_only": True,
+        "model_execution_allowed": False,
         "model_calls_started": 0,
     }
     assert [call[0] for call in calls] == ["GET", "POST", "GET"]

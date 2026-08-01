@@ -196,3 +196,63 @@ Core generation drift, or contradictory commit evidence remains fail-closed.
 - missing/failed/extra jobs, generation drift, receipt drift, and contradictory
   commit evidence are rejected;
 - model/job/reservation counters remain unchanged across reconciliation.
+
+## Dev17 completed-prefix continuation
+
+### Why v40 cannot resume as an ordinary runner
+
+The v40 Supervisor database is correctly bound to the protocol, Core source,
+and adapter source that created it. Deploying the reconciliation implementation
+necessarily creates a new immutable Core release and adapter identity. Rebinding
+the existing database in place would erase that provenance; starting a normal
+fresh namespace would instead repeat thirteen already-closed Candidate and
+Judge operations. Neither action is admissible.
+
+The repair is therefore split at an explicit authority boundary. A bounded
+repair executor first closes only the existing v40 Energy successor tail and
+advances the source to `NEXT_ATTEMPT_READY`. It authenticates the persisted
+source identity separately from the new executor identity. It may reconcile the
+terminal evolution receipt, admit the resulting composite, and persist the
+workspace handoff, but cannot start a Candidate, Judge, or Reflector operation.
+The source identity columns and its earlier receipts remain unchanged.
+
+### Append-only prefix namespace
+
+A new formal namespace can then import the completed prefix by typed reference.
+Its protocol records the source namespace, state and database digests, all three
+source identity digests, the repaired successor authority, cursor, and exact
+consumed operation counts. The only accepted boundary is a closed
+`NEXT_ATTEMPT_READY` state with:
+
+- contiguous attempts for every completed task and the current task;
+- exactly two evolution cycles per completed task and one per already-closed
+  non-final attempt of the current task;
+- a closed three-job receipt for every evolution cycle;
+- no planned or failed source side effect, active resource, or incomplete
+  transaction;
+- budget reservations equal to the referenced Candidate, Judge, and Reflector
+  prefix, including the protocol's five Reflector-call units per cycle;
+- one active Core project head, composite, and successor workspace authority
+  that agree with the repaired commit.
+
+Initialization is resumable but fail-closed. The destination first remains in
+an import-pending state, writes content-addressed references to attempts,
+completed side effects, and budget reservations with stable destination keys,
+then performs one durable transition to `NEXT_ATTEMPT_READY`. `run_next` cannot
+leave an incomplete prefix import. Repeating initialization must reproduce the
+same rows and transition receipt or fail.
+
+No model artifact is copied into a new result. The local composite journal is
+deterministically reconstructed from the already-admitted evolution receipts,
+and every reconstructed composite must equal its source authority. The one
+sanitized successor workspace needed by the next same-task attempt is copied
+through the deterministic workspace-archive contract into the destination
+namespace; both archive declarations are verified and the rebased authority is
+content-addressed. Core project heads and promoted artifacts remain native Core
+authorities in the persistent Core database.
+
+The destination budget includes the imported reservations, so its remaining
+allowance is the original Dev17 allowance minus the exact source prefix. Final
+verification still requires all 51 attempts, 34 evolution cycles, 102 native
+jobs, 17 task selections, zero active resources, and zero pending or failed
+side effects across the combined referenced prefix and new suffix.

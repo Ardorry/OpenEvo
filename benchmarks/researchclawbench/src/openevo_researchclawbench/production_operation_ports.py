@@ -3477,6 +3477,36 @@ class CoreSuccessorPort(ProductionOperationPort):
                 "completed-method successor reconciliation identity drifted"
             )
         transition_id = checkpoint["successor_transition_id"]
+
+        def reconciliation_result(
+            authority: dict[str, Any],
+            client: CoreControlV2Client,
+        ) -> dict[str, Any]:
+            result = self._result(authority, request, client)
+            return {
+                **result,
+                "model_calls_started": 0,
+                "completed_methods_reconciliation": {
+                    "schema_version": (
+                        "openevo.researchclawbench."
+                        "completed_methods_reconciliation.v1"
+                    ),
+                    "reconciliation_id": reconciliation_id,
+                    "successor_transition_id": transition_id,
+                    "source_transition_attempt_count": checkpoint[
+                        "transition_attempt_count"
+                    ],
+                    "source_terminal_authority_sha256": checkpoint[
+                        "terminal_authority_sha256"
+                    ],
+                    "core_generation": self.core_authority.generation,
+                    "core_release_identity": self.core_authority.release_identity,
+                    "reconciliation_only": True,
+                    "model_execution_allowed": False,
+                    "model_calls_started": 0,
+                },
+            }
+
         client = CoreControlV2Client(self.core_authority)
         try:
             core = client.readiness()
@@ -3506,7 +3536,7 @@ class CoreSuccessorPort(ProductionOperationPort):
                     raise CoreControlError(
                         "committed successor lacks reconciliation authority"
                     )
-                return self._result(authority, request, client)
+                return reconciliation_result(authority, client)
             source_attempt_count = checkpoint.get("transition_attempt_count")
             if (
                 not isinstance(source_attempt_count, int)
@@ -3575,7 +3605,7 @@ class CoreSuccessorPort(ProductionOperationPort):
                 )
                 observed = authority.get("transition", {})
                 if observed.get("state") == "committed":
-                    return self._result(authority, request, client)
+                    return reconciliation_result(authority, client)
                 if observed.get("state") == "failed":
                     raise SuccessorRecoveryRequired(checkpoint)
                 if observed.get("state") in {"cancelled", "superseded"}:

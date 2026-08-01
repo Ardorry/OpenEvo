@@ -7,7 +7,10 @@ from pathlib import Path
 import pytest
 from openevo_researchclawbench.config import FROZEN_TASKS
 from openevo_researchclawbench.owned_resource_registry import OwnedResourceRegistry
-from openevo_researchclawbench.training_state_store import TrainingStateStore
+from openevo_researchclawbench.training_state_store import (
+    TrainingStateStore,
+    canonical_sha256,
+)
 from openevo_researchclawbench.training_supervisor import (
     CandidateAuthorityUnavailable,
     CommunityTrainingSupervisor,
@@ -94,6 +97,22 @@ class SyntheticOperations:
 
     def ensure_candidate(self, request, idempotency_key):
         attempt = request["attempt_index"]
+        workspace_authority = {
+            "schema_version": (
+                "openevo.researchclawbench.successor_workspace_authority.v2"
+            ),
+            "task_id": request["task_id"],
+            "source_attempt_index": attempt,
+            "source_run_id": request["run_id"],
+            "project_id": "project-synthetic",
+            "successor_transition_id": (
+                f"successor-{request['task_id']}-{attempt}"
+            ),
+            "workspace_root": f"/synthetic/{request['task_id']}/{attempt}",
+        }
+        workspace_authority["content_sha256"] = canonical_sha256(
+            workspace_authority
+        )
         return self._once(
             idempotency_key,
             {
@@ -112,15 +131,10 @@ class SyntheticOperations:
                 "runtime_seconds": 10 + attempt,
                 "cost_total_usd": None,
                 "composite_size_bytes": 100 + attempt,
-                "successor_workspace_authority": {
-                    "schema_version": (
-                        "openevo.researchclawbench.successor_workspace_authority.v1"
-                    ),
-                    "task_id": request["task_id"],
-                    "source_attempt_index": attempt,
-                    "source_run_id": request["run_id"],
-                    "content_sha256": f"{attempt + 4}" * 64,
-                },
+                "successor_transition_id": workspace_authority[
+                    "successor_transition_id"
+                ],
+                "successor_workspace_authority": workspace_authority,
             },
         )
 
@@ -410,6 +424,196 @@ def test_next_attempt_intent_binds_sealed_successor_workspace_authority(
         intent["expected_workspace_snapshot"]["workspace_snapshot_id"]
         == "workspace-Life_005-1"
     )
+
+
+def test_completed_successor_failure_reconciles_once_without_candidate_replay(
+    tmp_path: Path,
+) -> None:
+    terminal_sha256 = "a" * 64
+    checkpoint_sha256 = "b" * 64
+
+    class ReconciledOperations(SyntheticOperations):
+        def evolve_artifacts(self, request, idempotency_key):
+            result = super().evolve_artifacts(request, idempotency_key)
+            result.update(
+                {
+                    "source_terminal_receipt_sha256": terminal_sha256,
+                    "successor_recovery_checkpoint_sha256": checkpoint_sha256,
+                    "model_calls_started": 0,
+                    "successor_commit_id": "commit-reconciled",
+                    "completed_methods_reconciliation": {
+                        "reconciliation_only": True,
+                        "model_execution_allowed": False,
+                        "model_calls_started": 0,
+                        "successor_transition_id": request["attachment"].get(
+                            "successor_transition_id"
+                        ),
+                    },
+                }
+            )
+            return result
+
+    operations = ReconciledOperations()
+    supervisor = _supervisor(tmp_path, operations)
+    _drive_to(supervisor, "EVOLUTION_RUNNING")
+    source_state = supervisor.status()
+    executor = SupervisorIdentity(
+        protocol_sha256="4" * 64,
+        core_identity_sha256="5" * 64,
+        adapter_identity_sha256="6" * 64,
+    )
+
+    reconciled = supervisor.reconcile_completed_successor_failure(
+        operation_id="energy-a0",
+        source_identity=IDENTITY,
+        source_state_sha256=source_state["_state_sha256"],
+        expected_source_terminal_receipt_sha256=terminal_sha256,
+        expected_recovery_checkpoint_sha256=checkpoint_sha256,
+        executor_identity=executor,
+        executor_active_identity_sha256="7" * 64,
+        executor_readiness_sha256="8" * 64,
+    )
+    assert reconciled["stage"] == "EVOLUTION_COMPLETED"
+    assert len(reconciled["evolution_job_ids"]) == 3
+    assert operations.calls[
+        "synthetic-training:Life_005:a0:evolution"
+    ] == 1
+
+    assert supervisor.run_next()["stage"] == "COMPOSITE_ADMITTED"
+    closed = supervisor.run_next()
+    assert closed["stage"] == "NEXT_ATTEMPT_READY"
+    replayed = supervisor.reconcile_completed_successor_failure(
+        operation_id="energy-a0",
+        source_identity=IDENTITY,
+        source_state_sha256=source_state["_state_sha256"],
+        expected_source_terminal_receipt_sha256=terminal_sha256,
+        expected_recovery_checkpoint_sha256=checkpoint_sha256,
+        executor_identity=executor,
+        executor_active_identity_sha256="7" * 64,
+        executor_readiness_sha256="8" * 64,
+    )
+    assert replayed == closed
+    assert operations.calls[
+        "synthetic-training:Life_005:a0:evolution"
+    ] == 1
+
+
+def test_completed_prefix_continuation_import_is_idempotent_and_model_free(
+    tmp_path: Path,
+) -> None:
+    tasks = FROZEN_TASKS[:5]
+    source_operations = SyntheticOperations()
+    source_store = TrainingStateStore(tmp_path / "source")
+    source = CommunityTrainingSupervisor(
+        store=source_store,
+        experiment_id="source-prefix",
+        identity=IDENTITY,
+        operations=source_operations,
+        task_ids=tasks,
+    )
+    source.initialize()
+    for _ in range(1000):
+        state = source.status()
+        if (
+            state["stage"] == "NEXT_ATTEMPT_READY"
+            and state["current_task_index"] == 4
+            and state["current_attempt"] == 0
+        ):
+            break
+        source.run_next()
+    else:
+        raise AssertionError("source prefix did not reach the Energy a0 boundary")
+
+    source_state = source.status()
+    attempts = {
+        task: source.store.attempts_for_task("source-prefix", task)
+        for task in tasks
+    }
+    effects = source.store.side_effects_for_experiment("source-prefix")
+    budget = source.store.budget_usage("source-prefix")
+    source_workspace = source_state["active_candidate_receipt"][
+        "successor_workspace_authority"
+    ]
+    rebased_workspace = {
+        **source_workspace,
+        "workspace_root": "/synthetic-destination/Energy_004/0",
+    }
+    rebased_workspace.pop("content_sha256")
+    rebased_workspace["content_sha256"] = canonical_sha256(rebased_workspace)
+    reference = {
+        "source_namespace": "rcb_oe_v0_source_prefix_v40",
+        "source_state_sha256": source_state["_state_sha256"],
+        "source_database_sha256": "4" * 64,
+        "source_protocol_sha256": source_state["_protocol_sha256"],
+        "source_core_identity_sha256": source_state["_core_identity_sha256"],
+        "source_adapter_identity_sha256": source_state[
+            "_adapter_identity_sha256"
+        ],
+        "source_reconciliation_receipt_sha256": "5" * 64,
+        "source_successor_transition_id": source_workspace[
+            "successor_transition_id"
+        ],
+        "source_successor_commit_sha256": "6" * 64,
+        "source_stage": "NEXT_ATTEMPT_READY",
+        "current_task_index": 4,
+        "current_attempt": 0,
+        "source_attempts_consumed": 13,
+        "source_reflector_cycles_consumed": 9,
+        "source_evolution_jobs_consumed": 27,
+        "source_candidate_model_calls": 13,
+        "source_judge_operations": 13,
+        "source_reflector_model_calls": 45,
+        "source_active_resources": 0,
+        "source_pending_side_effects": 0,
+        "source_failed_side_effects": 0,
+        "candidate_reexecuted": False,
+        "model_execution_allowed": False,
+    }
+    destination_operations = SyntheticOperations()
+    destination = CommunityTrainingSupervisor(
+        store=TrainingStateStore(tmp_path / "destination"),
+        experiment_id="destination-prefix",
+        identity=IDENTITY,
+        operations=destination_operations,
+        task_ids=tasks,
+    )
+
+    imported = destination.initialize_completed_prefix_continuation(
+        source_reference=reference,
+        source_state=source_state,
+        attempts_by_task=attempts,
+        completed_side_effects=effects,
+        source_budget_usage=budget,
+        rebased_successor_workspace_authority=rebased_workspace,
+    )
+    assert imported["stage"] == "NEXT_ATTEMPT_READY"
+    assert imported["current_task_index"] == 4
+    assert imported["current_attempt"] == 0
+    assert imported["completed_prefix_import_complete"] is True
+    verification = destination.verify()
+    assert verification["attempt_receipts"] == 13
+    assert verification["completed_reflector_cycles"] == 9
+    assert verification["evolution_job_ids"] == 27
+    assert verification["budget_usage"] == {
+        "candidate_model_calls": 13,
+        "reflector_model_calls": 45,
+        "judge_operations": 13,
+    }
+    assert destination_operations.calls == {}
+
+    replayed = destination.initialize_completed_prefix_continuation(
+        source_reference=reference,
+        source_state=source_state,
+        attempts_by_task=attempts,
+        completed_side_effects=effects,
+        source_budget_usage=budget,
+        rebased_successor_workspace_authority=rebased_workspace,
+    )
+    assert replayed == imported
+    assert destination_operations.calls == {}
+    ready = destination.run_next()
+    assert ready["stage"] == "TASK_ATTEMPT_READY"
+    assert ready["current_attempt"] == 1
 
 
 def test_invalid_candidate_artifact_reaches_fail_closed_terminal_state(

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from .config import ARTIFACT_TYPES, FROZEN_TASKS
-from .training_state_store import TrainingStateStore
+from .training_state_store import TrainingStateStore, canonical_sha256
 from .transition_engine import TrainingStage, evolution_allowed
 
 
@@ -444,6 +444,468 @@ class CommunityTrainingSupervisor:
                 "recovery_admission": admission,
                 "candidate_reexecuted": False,
                 "additional_candidate_model_calls": 0,
+            },
+        )
+
+    def initialize_completed_prefix_continuation(
+        self,
+        *,
+        source_reference: dict[str, Any],
+        source_state: dict[str, Any],
+        attempts_by_task: dict[str, list[dict[str, Any]]],
+        completed_side_effects: list[dict[str, Any]],
+        source_budget_usage: dict[str, int],
+        rebased_successor_workspace_authority: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Admit a closed formal prefix without replaying any operation port.
+
+        The caller must separately rebuild and verify the local composite
+        journal and the rebased sanitized workspace before invoking this
+        method. This method owns only the Supervisor ledger import.
+        """
+
+        required_source = {
+            "source_namespace",
+            "source_state_sha256",
+            "source_database_sha256",
+            "source_protocol_sha256",
+            "source_core_identity_sha256",
+            "source_adapter_identity_sha256",
+            "source_reconciliation_receipt_sha256",
+            "source_successor_transition_id",
+            "source_successor_commit_sha256",
+            "source_stage",
+            "current_task_index",
+            "current_attempt",
+            "source_attempts_consumed",
+            "source_reflector_cycles_consumed",
+            "source_evolution_jobs_consumed",
+            "source_candidate_model_calls",
+            "source_judge_operations",
+            "source_reflector_model_calls",
+            "source_active_resources",
+            "source_pending_side_effects",
+            "source_failed_side_effects",
+            "candidate_reexecuted",
+            "model_execution_allowed",
+        }
+        if set(source_reference) != required_source:
+            raise ValueError("completed-prefix source reference is incomplete")
+        task_index = source_reference.get("current_task_index")
+        attempt_index = source_reference.get("current_attempt")
+        if type(task_index) is not int or type(attempt_index) is not int:
+            raise TypeError("completed-prefix cursor must use integers")
+        expected_attempts = task_index * 3 + attempt_index + 1
+        expected_cycles = task_index * 2 + attempt_index + 1
+        expected_budget = {
+            "candidate_model_calls": expected_attempts,
+            "reflector_model_calls": (
+                expected_cycles * self.budget_policy.reflector_calls_per_cycle
+            ),
+            "judge_operations": expected_attempts,
+        }
+        source_candidate = source_state.get("active_candidate_receipt")
+        source_workspace = (
+            source_candidate.get("successor_workspace_authority")
+            if isinstance(source_candidate, dict)
+            else None
+        )
+        rebased_body = {
+            key: value
+            for key, value in rebased_successor_workspace_authority.items()
+            if key != "content_sha256"
+        }
+        workspace_unchanged = {
+            key: value
+            for key, value in source_workspace.items()
+            if key not in {"workspace_root", "content_sha256"}
+        } if isinstance(source_workspace, dict) else None
+        rebased_unchanged = {
+            key: value
+            for key, value in rebased_successor_workspace_authority.items()
+            if key not in {"workspace_root", "content_sha256"}
+        }
+        flattened_attempts = [
+            item
+            for task in self.task_ids
+            for item in attempts_by_task.get(task, [])
+        ]
+        effect_counts: dict[str, int] = {}
+        for effect in completed_side_effects:
+            kind = effect.get("kind") if isinstance(effect, dict) else None
+            if not isinstance(kind, str):
+                raise ValueError("completed-prefix side effect kind is invalid")
+            effect_counts[kind] = effect_counts.get(kind, 0) + 1
+        source_jobs = source_state.get("evolution_job_ids")
+        expected_task_best = set(self.task_ids[:task_index])
+        source_state_body = {
+            key: value for key, value in source_state.items() if not key.startswith("_")
+        }
+        if (
+            source_reference.get("source_stage") != "NEXT_ATTEMPT_READY"
+            or source_reference.get("source_state_sha256")
+            != source_state.get("_state_sha256")
+            or source_reference.get("source_state_sha256")
+            != canonical_sha256(source_state_body)
+            or source_reference.get("source_protocol_sha256")
+            != source_state.get("_protocol_sha256")
+            or source_reference.get("source_core_identity_sha256")
+            != source_state.get("_core_identity_sha256")
+            or source_reference.get("source_adapter_identity_sha256")
+            != source_state.get("_adapter_identity_sha256")
+            or source_state.get("stage") != "NEXT_ATTEMPT_READY"
+            or source_state.get("task_ids") != list(self.task_ids)
+            or source_state.get("current_task_index") != task_index
+            or source_state.get("current_attempt") != attempt_index
+            or not 0 <= task_index < len(self.task_ids)
+            or attempt_index not in {0, 1}
+            or source_reference.get("source_attempts_consumed")
+            != expected_attempts
+            or source_reference.get("source_candidate_model_calls")
+            != expected_attempts
+            or source_reference.get("source_judge_operations")
+            != expected_attempts
+            or source_reference.get("source_reflector_cycles_consumed")
+            != expected_cycles
+            or source_reference.get("source_evolution_jobs_consumed")
+            != expected_cycles * 3
+            or source_reference.get("source_reflector_model_calls")
+            != expected_budget["reflector_model_calls"]
+            or source_reference.get("source_active_resources") != 0
+            or source_reference.get("source_pending_side_effects") != 0
+            or source_reference.get("source_failed_side_effects") != 0
+            or source_reference.get("candidate_reexecuted") is not False
+            or source_reference.get("model_execution_allowed") is not False
+            or source_reference.get("source_namespace") == self.experiment_id
+            or set(attempts_by_task) != set(self.task_ids)
+            or len(flattened_attempts) != expected_attempts
+            or effect_counts.get("evolution") != expected_cycles
+            or any(effect.get("status") != "completed" for effect in completed_side_effects)
+            or len(
+                {
+                    effect.get("idempotency_key")
+                    for effect in completed_side_effects
+                }
+            ) != len(completed_side_effects)
+            or source_budget_usage != expected_budget
+            or not isinstance(source_jobs, list)
+            or len(source_jobs) != expected_cycles * 3
+            or len(source_jobs) != len(set(source_jobs))
+            or set(source_state.get("task_best", {})) != expected_task_best
+            or not isinstance(source_workspace, dict)
+            or source_workspace.get("successor_transition_id")
+            != source_reference.get("source_successor_transition_id")
+            or rebased_successor_workspace_authority.get("content_sha256")
+            != canonical_sha256(rebased_body)
+            or workspace_unchanged != rebased_unchanged
+        ):
+            raise ValueError("completed-prefix source authority is inconsistent")
+        for task_position, task in enumerate(self.task_ids):
+            records = attempts_by_task[task]
+            expected_count = (
+                3
+                if task_position < task_index
+                else (attempt_index + 1 if task_position == task_index else 0)
+            )
+            if (
+                len(records) != expected_count
+                or [item.get("attempt_index") for item in records]
+                != list(range(expected_count))
+                or any(item.get("task_id") != task for item in records)
+            ):
+                raise ValueError("completed-prefix attempt inventory is not contiguous")
+        evolution_jobs = [
+            job.get("job_id")
+            for effect in completed_side_effects
+            if effect.get("kind") == "evolution"
+            for job in (
+                effect.get("receipt", {}).get("jobs", [])
+                if isinstance(effect.get("receipt"), dict)
+                else []
+            )
+            if isinstance(job, dict)
+        ]
+        if (
+            len(evolution_jobs) != expected_cycles * 3
+            or set(evolution_jobs) != set(source_jobs)
+        ):
+            raise ValueError("completed-prefix evolution authority is incomplete")
+
+        initial = self._initial_state()
+        initial.update(
+            {
+                "namespace_type": "append_only_completed_prefix_continuation",
+                "completed_prefix_source": source_reference,
+                "completed_prefix_import_complete": False,
+                "candidate_reexecuted": False,
+                "additional_candidate_model_calls": 0,
+            }
+        )
+        self.store.initialize_experiment(
+            experiment_id=self.experiment_id,
+            protocol_sha256=self.identity.protocol_sha256,
+            core_identity_sha256=self.identity.core_identity_sha256,
+            adapter_identity_sha256=self.identity.adapter_identity_sha256,
+            initial_state=initial,
+        )
+        state = self.status()
+        if state["stage"] == TrainingStage.NEXT_ATTEMPT_READY.value:
+            if (
+                state.get("completed_prefix_import_complete") is not True
+                or state.get("completed_prefix_source") != source_reference
+            ):
+                raise ValueError("completed-prefix continuation replay conflicts")
+            return state
+        if (
+            state["stage"] != TrainingStage.INITIALIZED.value
+            or state.get("namespace_type")
+            != "append_only_completed_prefix_continuation"
+            or state.get("completed_prefix_source") != source_reference
+        ):
+            raise ValueError("completed-prefix continuation initialization conflicts")
+
+        for task in self.task_ids:
+            for source_attempt in attempts_by_task[task]:
+                referenced_attempt = {
+                    **source_attempt,
+                    "completed_prefix_source": {
+                        "source_namespace": source_reference["source_namespace"],
+                        "source_receipt_sha256": canonical_sha256(source_attempt),
+                    },
+                }
+                self.store.record_attempt(self.experiment_id, referenced_attempt)
+        imported_effects = []
+        for effect in sorted(
+            completed_side_effects,
+            key=lambda item: str(item["idempotency_key"]),
+        ):
+            receipt = effect.get("receipt")
+            if not isinstance(receipt, dict):
+                raise ValueError("completed-prefix side effect lacks a receipt")
+            source_effect_sha256 = canonical_sha256(effect)
+            destination_key = (
+                f"{self.experiment_id}:prefix:"
+                f"{canonical_sha256({'source_key': effect['idempotency_key']})[:32]}"
+            )
+            request = {
+                "source_namespace": source_reference["source_namespace"],
+                "source_idempotency_key": effect["idempotency_key"],
+                "source_request_sha256": effect["request_sha256"],
+                "source_effect_sha256": source_effect_sha256,
+                "model_execution_allowed": False,
+            }
+            planned = self.store.plan_side_effect(
+                experiment_id=self.experiment_id,
+                idempotency_key=destination_key,
+                kind=str(effect["kind"]),
+                request=request,
+            )
+            referenced_receipt = {
+                **receipt,
+                "completed_prefix_source": {
+                    **request,
+                    "source_receipt_sha256": canonical_sha256(receipt),
+                },
+            }
+            if planned["status"] == "planned":
+                closed = self.store.complete_side_effect(
+                    idempotency_key=destination_key,
+                    receipt=referenced_receipt,
+                )
+            else:
+                closed = planned.get("receipt")
+            if closed != referenced_receipt:
+                raise ValueError("completed-prefix side effect replay conflicts")
+            imported_effects.append(
+                {
+                    "destination_key": destination_key,
+                    "source_effect_sha256": source_effect_sha256,
+                }
+            )
+        for category, units in sorted(source_budget_usage.items()):
+            self.store.reserve_budget(
+                experiment_id=self.experiment_id,
+                idempotency_key=f"{self.experiment_id}:prefix-budget:{category}",
+                category=category,
+                units=units,
+                limit_units={
+                    "candidate_model_calls": self.budget_policy.max_candidate_model_calls,
+                    "reflector_model_calls": self.budget_policy.max_reflector_model_calls,
+                    "judge_operations": self.budget_policy.max_judge_operations,
+                }[category],
+            )
+
+        imported_state = {
+            key: value
+            for key, value in source_state.items()
+            if not key.startswith("_")
+            and key
+            not in {
+                "experiment_id",
+                "stage",
+                "last_transition",
+                "updated_at",
+                "schema_version",
+                "namespace_type",
+            }
+        }
+        destination_candidate = dict(source_candidate)
+        destination_candidate["successor_workspace_authority"] = (
+            rebased_successor_workspace_authority
+        )
+        destination_candidate.pop("content_sha256", None)
+        destination_candidate["content_sha256"] = canonical_sha256(
+            destination_candidate
+        )
+        imported_state.update(
+            {
+                "active_candidate_receipt": destination_candidate,
+                "completed_prefix_source": source_reference,
+                "completed_prefix_import_complete": True,
+                "candidate_reexecuted": False,
+                "additional_candidate_model_calls": 0,
+            }
+        )
+        return self._transition(
+            TrainingStage.INITIALIZED,
+            TrainingStage.NEXT_ATTEMPT_READY,
+            "completed-prefix-imported",
+            updates=imported_state,
+            receipt={
+                "operation": "append_only_completed_prefix_continuation",
+                "source": source_reference,
+                "attempt_inventory_sha256": canonical_sha256(attempts_by_task),
+                "side_effect_inventory_sha256": canonical_sha256(imported_effects),
+                "budget_usage": source_budget_usage,
+                "candidate_reexecuted": False,
+                "additional_candidate_model_calls": 0,
+                "model_execution_allowed": False,
+            },
+        )
+
+    def reconcile_completed_successor_failure(
+        self,
+        *,
+        operation_id: str,
+        source_identity: SupervisorIdentity,
+        source_state_sha256: str,
+        expected_source_terminal_receipt_sha256: str,
+        expected_recovery_checkpoint_sha256: str,
+        executor_identity: SupervisorIdentity,
+        executor_active_identity_sha256: str,
+        executor_readiness_sha256: str,
+    ) -> dict[str, Any]:
+        """Close one paid-complete successor tail under a distinct executor."""
+
+        state = self.store.load(self.experiment_id)
+        self.store.verify_identity(
+            state,
+            protocol_sha256=source_identity.protocol_sha256,
+            core_identity_sha256=source_identity.core_identity_sha256,
+            adapter_identity_sha256=source_identity.adapter_identity_sha256,
+        )
+        suffix = f"completed-successor-reconciled-{operation_id}"
+        prior = next(
+            (
+                item
+                for item in self.store.transition_receipts_for_experiment(
+                    self.experiment_id
+                )
+                if item.get("reconciliation_operation_id") == operation_id
+            ),
+            None,
+        )
+        if prior is not None:
+            if (
+                prior.get("source_terminal_receipt_sha256")
+                != expected_source_terminal_receipt_sha256
+                or prior.get("successor_recovery_checkpoint_sha256")
+                != expected_recovery_checkpoint_sha256
+            ):
+                raise ValueError("completed-successor reconciliation replay conflicts")
+            return state
+        task = self.task_ids[state["current_task_index"]]
+        attempt = state["current_attempt"]
+        if (
+            state.get("_state_sha256") != source_state_sha256
+            or state.get("stage") != TrainingStage.EVOLUTION_RUNNING.value
+            or self.store.active_resources(self.experiment_id)
+        ):
+            raise ValueError("completed-successor source state changed")
+        effect_key = f"{self.experiment_id}:{task}:a{attempt}:evolution"
+        effect = self.store.side_effect(effect_key)
+        if (
+            not isinstance(effect, dict)
+            or effect.get("kind") != "evolution"
+            or effect.get("status") != "planned"
+            or effect.get("receipt") is not None
+        ):
+            raise ValueError("completed-successor source side effect is not pending")
+        request = {
+            "task_id": task,
+            "attempt_index": attempt,
+            "attachment": state["active_attachment_receipt"],
+            "parent_composite_id": state["current_composite_id"],
+            "artifact_types": list(ARTIFACT_TYPES),
+        }
+        evolved = self._effect(
+            kind="evolution",
+            request=request,
+            execute=self.operations.evolve_artifacts,
+        )
+        jobs = evolved.get("jobs")
+        reconciliation = evolved.get("completed_methods_reconciliation")
+        if (
+            evolved.get("source_terminal_receipt_sha256")
+            != expected_source_terminal_receipt_sha256
+            or evolved.get("successor_recovery_checkpoint_sha256")
+            != expected_recovery_checkpoint_sha256
+            or evolved.get("model_calls_started") != 0
+            or not isinstance(reconciliation, dict)
+            or reconciliation.get("reconciliation_only") is not True
+            or reconciliation.get("model_execution_allowed") is not False
+            or reconciliation.get("model_calls_started") != 0
+            or reconciliation.get("successor_transition_id")
+            != state["active_attachment_receipt"].get(
+                "successor_transition_id"
+            )
+            or not isinstance(jobs, list)
+            or len(jobs) != 3
+            or {item.get("artifact_type") for item in jobs if isinstance(item, dict)}
+            != set(ARTIFACT_TYPES)
+        ):
+            raise ValueError("completed-successor reconciliation receipt is incomplete")
+        return self._transition(
+            TrainingStage.EVOLUTION_RUNNING,
+            TrainingStage.EVOLUTION_COMPLETED,
+            suffix,
+            updates={
+                "evolution_job_ids": [
+                    *state["evolution_job_ids"],
+                    *[item["job_id"] for item in jobs],
+                ],
+                "active_evolution_receipt": evolved,
+            },
+            receipt={
+                **evolved,
+                "reconciliation_operation_id": operation_id,
+                "source_identity": {
+                    "protocol_sha256": source_identity.protocol_sha256,
+                    "core_identity_sha256": source_identity.core_identity_sha256,
+                    "adapter_identity_sha256": source_identity.adapter_identity_sha256,
+                    "state_sha256": source_state_sha256,
+                },
+                "executor_identity": {
+                    "protocol_sha256": executor_identity.protocol_sha256,
+                    "core_identity_sha256": executor_identity.core_identity_sha256,
+                    "adapter_identity_sha256": executor_identity.adapter_identity_sha256,
+                    "active_identity_sha256": executor_active_identity_sha256,
+                    "readiness_sha256": executor_readiness_sha256,
+                },
+                "candidate_reexecuted": False,
+                "additional_candidate_model_calls": 0,
+                "additional_judge_calls": 0,
+                "model_execution_allowed": False,
             },
         )
 
@@ -1178,6 +1640,13 @@ class CommunityTrainingSupervisor:
             TrainingStage.BUDGET_EXHAUSTED,
         }:
             raise TrainingPaused(f"supervisor is terminal at {stage.value}")
+        if (
+            stage is TrainingStage.INITIALIZED
+            and state.get("namespace_type")
+            == "append_only_completed_prefix_continuation"
+            and state.get("completed_prefix_import_complete") is not True
+        ):
+            raise TrainingPaused("COMPLETED_PREFIX_IMPORT_PENDING")
         if stage is TrainingStage.CANDIDATE_SEALED_RECONCILED:
             source = state.get("reconciliation_source")
             if not isinstance(source, dict):

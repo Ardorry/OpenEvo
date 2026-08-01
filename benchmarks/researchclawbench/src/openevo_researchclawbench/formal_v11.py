@@ -478,7 +478,10 @@ def validate_formal_v11_block(value: object) -> dict[str, Any]:
         "terminal_stage": "FINAL_FROZEN",
     }
     continuation = community.get("successor_recovery_continuation")
-    if continuation is None:
+    completed_prefix = community.get("completed_prefix_continuation")
+    if continuation is not None and completed_prefix is not None:
+        raise FormalV11ProtocolError("formal continuation modes conflict")
+    if continuation is None and completed_prefix is None:
         expected_community = {
             **common_community,
             "namespace_type": "fresh_community17_formal",
@@ -490,7 +493,7 @@ def validate_formal_v11_block(value: object) -> dict[str, Any]:
             "classification": LEGACY_CLASSIFICATION,
             "fresh_path_uses_recovery_endpoint": False,
         }
-    else:
+    elif continuation is not None:
         if not isinstance(continuation, dict):
             raise FormalV11ProtocolError("formal continuation source must be an object")
         required_source = {
@@ -538,6 +541,115 @@ def validate_formal_v11_block(value: object) -> dict[str, Any]:
         expected_legacy = {
             "required": True,
             "classification": "APPEND_ONLY_PRE_JOB_SUCCESSOR_RECOVERY_CONTINUATION",
+            "fresh_path_uses_recovery_endpoint": True,
+        }
+    else:
+        if not isinstance(completed_prefix, dict):
+            raise FormalV11ProtocolError(
+                "formal completed-prefix source must be an object"
+            )
+        required_prefix = {
+            "source_namespace",
+            "source_state_sha256",
+            "source_database_sha256",
+            "source_protocol_sha256",
+            "source_core_identity_sha256",
+            "source_adapter_identity_sha256",
+            "source_reconciliation_receipt_sha256",
+            "source_successor_transition_id",
+            "source_successor_commit_sha256",
+            "source_stage",
+            "current_task_index",
+            "current_attempt",
+            "source_attempts_consumed",
+            "source_reflector_cycles_consumed",
+            "source_evolution_jobs_consumed",
+            "source_candidate_model_calls",
+            "source_judge_operations",
+            "source_reflector_model_calls",
+            "source_active_resources",
+            "source_pending_side_effects",
+            "source_failed_side_effects",
+            "candidate_reexecuted",
+            "model_execution_allowed",
+        }
+        digest_fields = {
+            "source_state_sha256",
+            "source_database_sha256",
+            "source_protocol_sha256",
+            "source_core_identity_sha256",
+            "source_adapter_identity_sha256",
+            "source_reconciliation_receipt_sha256",
+            "source_successor_commit_sha256",
+        }
+        if (
+            set(completed_prefix) != required_prefix
+            or not isinstance(completed_prefix.get("source_namespace"), str)
+            or _RUN_ID.fullmatch(completed_prefix["source_namespace"]) is None
+            or not isinstance(
+                completed_prefix.get("source_successor_transition_id"), str
+            )
+            or not completed_prefix["source_successor_transition_id"]
+            or any(
+                not isinstance(completed_prefix.get(name), str)
+                or _SHA256.fullmatch(completed_prefix[name]) is None
+                for name in digest_fields
+            )
+            or completed_prefix.get("source_stage") != "NEXT_ATTEMPT_READY"
+            or type(completed_prefix.get("current_task_index")) is not int
+            or not 0 <= completed_prefix["current_task_index"] < 17
+            or completed_prefix.get("current_attempt") not in {0, 1}
+            or completed_prefix.get("source_active_resources") != 0
+            or completed_prefix.get("source_pending_side_effects") != 0
+            or completed_prefix.get("source_failed_side_effects") != 0
+            or completed_prefix.get("candidate_reexecuted") is not False
+            or completed_prefix.get("model_execution_allowed") is not False
+        ):
+            raise FormalV11ProtocolError(
+                "formal completed-prefix source authority is invalid"
+            )
+        attempts_consumed = (
+            completed_prefix["current_task_index"] * 3
+            + completed_prefix["current_attempt"]
+            + 1
+        )
+        cycles_consumed = (
+            completed_prefix["current_task_index"] * 2
+            + completed_prefix["current_attempt"]
+            + 1
+        )
+        if (
+            completed_prefix.get("source_attempts_consumed") != attempts_consumed
+            or completed_prefix.get("source_candidate_model_calls")
+            != attempts_consumed
+            or completed_prefix.get("source_judge_operations")
+            != attempts_consumed
+            or completed_prefix.get("source_reflector_cycles_consumed")
+            != cycles_consumed
+            or completed_prefix.get("source_evolution_jobs_consumed")
+            != cycles_consumed * 3
+            or completed_prefix.get("source_reflector_model_calls")
+            != cycles_consumed * 5
+        ):
+            raise FormalV11ProtocolError(
+                "formal completed-prefix operation inventory is inconsistent"
+            )
+        expected_community = {
+            **common_community,
+            "namespace_type": "append_only_completed_prefix_continuation",
+            "fresh_start_required": False,
+            "legacy_source_import_allowed": True,
+            "source_attempts_consumed": attempts_consumed,
+            "candidate_operations_remaining": 51 - attempts_consumed,
+            "source_reflector_cycles_consumed": cycles_consumed,
+            "reflector_cycles_remaining": 34 - cycles_consumed,
+            "source_evolution_jobs_consumed": cycles_consumed * 3,
+            "evolution_jobs_remaining": 102 - cycles_consumed * 3,
+            "completed_prefix_continuation": completed_prefix,
+        }
+        expected_legacy = {
+            "required": True,
+            "classification": "APPEND_ONLY_COMPLETED_PREFIX_CONTINUATION",
             "fresh_path_uses_recovery_endpoint": True,
         }
     expected_official = {
@@ -724,6 +836,7 @@ def prepare_formal_v11_protocol(
     official_run_id: str,
     runtime_assets: FormalV11RuntimeAssetOverrides,
     successor_recovery_continuation: dict[str, Any] | None = None,
+    completed_prefix_continuation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create one fresh, closed v11 protocol and companion identity receipt."""
 
@@ -906,7 +1019,15 @@ def prepare_formal_v11_protocol(
         "reflector_allowed": False,
         "evolution_allowed": False,
     }
-    if successor_recovery_continuation is None:
+    if (
+        successor_recovery_continuation is not None
+        and completed_prefix_continuation is not None
+    ):
+        raise FormalV11ProtocolError("formal continuation modes conflict")
+    if (
+        successor_recovery_continuation is None
+        and completed_prefix_continuation is None
+    ):
         legacy_authority_recovery = {
             "required": False,
             "classification": LEGACY_CLASSIFICATION,
@@ -925,7 +1046,7 @@ def prepare_formal_v11_protocol(
             "artifact_evolution_jobs": 102,
             "terminal_stage": "FINAL_FROZEN",
         }
-    else:
+    elif successor_recovery_continuation is not None:
         continuation = json.loads(canonical_bytes(successor_recovery_continuation))
         legacy_authority_recovery = {
             "required": True,
@@ -947,6 +1068,48 @@ def prepare_formal_v11_protocol(
             "artifact_evolution_jobs": 102,
             "terminal_stage": "FINAL_FROZEN",
             "successor_recovery_continuation": continuation,
+        }
+    else:
+        completed_prefix = json.loads(
+            canonical_bytes(completed_prefix_continuation)
+        )
+        attempts_consumed = completed_prefix.get("source_attempts_consumed")
+        cycles_consumed = completed_prefix.get(
+            "source_reflector_cycles_consumed"
+        )
+        jobs_consumed = completed_prefix.get("source_evolution_jobs_consumed")
+        if not all(type(item) is int for item in (
+            attempts_consumed,
+            cycles_consumed,
+            jobs_consumed,
+        )):
+            raise FormalV11ProtocolError(
+                "formal completed-prefix counts are invalid"
+            )
+        legacy_authority_recovery = {
+            "required": True,
+            "classification": "APPEND_ONLY_COMPLETED_PREFIX_CONTINUATION",
+            "fresh_path_uses_recovery_endpoint": True,
+        }
+        community = {
+            "run_id": community_run_id,
+            "namespace_type": "append_only_completed_prefix_continuation",
+            "scope": "community-17",
+            "fresh_start_required": False,
+            "legacy_source_import_allowed": True,
+            "tasks": 17,
+            "attempts_per_task": 3,
+            "candidate_runs": 51,
+            "source_attempts_consumed": attempts_consumed,
+            "candidate_operations_remaining": 51 - attempts_consumed,
+            "reflector_cycles": 34,
+            "source_reflector_cycles_consumed": cycles_consumed,
+            "reflector_cycles_remaining": 34 - cycles_consumed,
+            "artifact_evolution_jobs": 102,
+            "source_evolution_jobs_consumed": jobs_consumed,
+            "evolution_jobs_remaining": 102 - jobs_consumed,
+            "terminal_stage": "FINAL_FROZEN",
+            "completed_prefix_continuation": completed_prefix,
         }
     payload["formal_runs"] = {
         "contract_version": FORMAL_V11_CONTRACT,

@@ -41,6 +41,7 @@ _ALLOWED: dict[TrainingStage, frozenset[TrainingStage]] = {
     TrainingStage.INITIALIZED: frozenset(
         {
             TrainingStage.TASK_ATTEMPT_READY,
+            TrainingStage.NEXT_ATTEMPT_READY,
             TrainingStage.CANDIDATE_SEALED_RECONCILED,
             TrainingStage.VALIDATOR_FEEDBACK_PENDING,
             TrainingStage.RECOVERY_SEEDED_CONTINUATION,

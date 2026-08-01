@@ -320,6 +320,97 @@ def test_prepare_v11_accepts_only_closed_append_only_recovery_continuation(
     }
 
 
+def _completed_prefix_source() -> dict[str, Any]:
+    return {
+        "source_namespace": "rcb_oe_v0_community17_dev17_source_v40",
+        "source_state_sha256": "1" * 64,
+        "source_database_sha256": "2" * 64,
+        "source_protocol_sha256": "3" * 64,
+        "source_core_identity_sha256": "4" * 64,
+        "source_adapter_identity_sha256": "5" * 64,
+        "source_reconciliation_receipt_sha256": "6" * 64,
+        "source_successor_transition_id": "successor-energy-source",
+        "source_successor_commit_sha256": "7" * 64,
+        "source_stage": "NEXT_ATTEMPT_READY",
+        "current_task_index": 4,
+        "current_attempt": 0,
+        "source_attempts_consumed": 13,
+        "source_reflector_cycles_consumed": 9,
+        "source_evolution_jobs_consumed": 27,
+        "source_candidate_model_calls": 13,
+        "source_judge_operations": 13,
+        "source_reflector_model_calls": 45,
+        "source_active_resources": 0,
+        "source_pending_side_effects": 0,
+        "source_failed_side_effects": 0,
+        "candidate_reexecuted": False,
+        "model_execution_allowed": False,
+    }
+
+
+def test_prepare_v11_accepts_exact_completed_prefix_continuation(
+    tmp_path: Path,
+) -> None:
+    base = _base_config(tmp_path)
+    source = _completed_prefix_source()
+    output = base.path.parent / "formal-v11-prefix.yaml"
+    identity = base.path.parent / "formal-v11-prefix.identity.json"
+    prepare_formal_v11_protocol(
+        base_config=base,
+        output_path=output,
+        identity_path=identity,
+        community_run_id="rcb_oe_v0_community17_prefix_v41",
+        official_run_id="rcb_oe_v0_official40_prefix_v41",
+        runtime_assets=_runtime_assets(base, name="prefix"),
+        completed_prefix_continuation=source,
+    )
+
+    config = ExperimentConfig.load(output)
+    community = config.formal_runs_v11["community"]
+    assert community["namespace_type"] == (
+        "append_only_completed_prefix_continuation"
+    )
+    assert community["source_attempts_consumed"] == 13
+    assert community["candidate_operations_remaining"] == 38
+    assert community["source_reflector_cycles_consumed"] == 9
+    assert community["reflector_cycles_remaining"] == 25
+    assert community["source_evolution_jobs_consumed"] == 27
+    assert community["evolution_jobs_remaining"] == 75
+    assert community["completed_prefix_continuation"] == source
+    assert validate_formal_v11_identity(config)["model_calls"] == 0
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("source_attempts_consumed", 12),
+        ("source_reflector_cycles_consumed", 8),
+        ("source_evolution_jobs_consumed", 24),
+        ("source_reflector_model_calls", 40),
+        ("source_pending_side_effects", 1),
+        ("model_execution_allowed", True),
+    ],
+)
+def test_prepare_v11_rejects_inconsistent_completed_prefix(
+    tmp_path: Path,
+    field: str,
+    value: object,
+) -> None:
+    base = _base_config(tmp_path)
+    source = _completed_prefix_source()
+    source[field] = value
+    with pytest.raises(FormalV11ProtocolError):
+        prepare_formal_v11_protocol(
+            base_config=base,
+            output_path=base.path.parent / f"formal-prefix-{field}.yaml",
+            identity_path=base.path.parent / f"formal-prefix-{field}.identity.json",
+            community_run_id="rcb_oe_v0_community17_prefix_v41",
+            official_run_id="rcb_oe_v0_official40_prefix_v41",
+            runtime_assets=_runtime_assets(base, name=f"prefix-{field}"),
+            completed_prefix_continuation=source,
+        )
+
+
 def test_prepare_formal_protocol_binds_v12_run_suffix(tmp_path: Path) -> None:
     base = _base_config(tmp_path)
     base.raw["bootstrap_scope"] = {
