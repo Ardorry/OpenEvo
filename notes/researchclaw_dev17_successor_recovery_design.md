@@ -397,3 +397,10 @@ wait within their existing attachment deadline and fail closed on timeout.
 The lock file is non-secret, non-symlink, owner-controlled, mode-restricted,
 and does not carry the Core bearer. This preserves independent monitoring
 while preventing it from racing runner attachment.
+
+The serialized attachment implementation is shipped as lifecycle 94. Core's
+deployment ledger deliberately rejects replacing one published release with a
+different release at the same lifecycle, including after the predecessor has
+been stopped and only its monotonic floor remains. Advancing the lifecycle is
+therefore part of the release identity: it permits the exact new bundle while
+preserving downgrade and same-lifecycle replacement rejection.
