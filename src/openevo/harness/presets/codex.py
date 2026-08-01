@@ -173,7 +173,20 @@ for raw_line in lines:
             raise SystemExit(1)
         counts[event_type] += 1
         turn_active = False
-    elif event_type in {{"turn.failed", "error"}}:
+    elif event_type == "error":
+        # Codex may emit a transient transport error while it reconnects and
+        # then finish the same turn. The final structured terminal remains
+        # authoritative; errors outside an active, eventually completed turn
+        # are still rejected by the state and final-event checks.
+        message = event.get("message")
+        if (
+            not turn_active
+            or counts["turn.completed"] != 0
+            or not isinstance(message, str)
+            or not message
+        ):
+            raise SystemExit(1)
+    elif event_type == "turn.failed":
         raise SystemExit(1)
     else:
         raise SystemExit(1)

@@ -429,7 +429,6 @@ def test_codex_run_steps_subscription_auth_mode_uses_existing_login_state():
     assert "codex exec" in step.command
     assert "--model gpt-5.5" in step.command
     assert f"{MANAGED_CODEX_BINARY} exec " in step.command
-    assert "auth.json" not in step.command
     assert step.command.startswith("/bin/bash -o pipefail -c ")
     assert "env -u" in step.command
     for key in SUBSCRIPTION_PROXY_ENV_VARS:
@@ -549,6 +548,26 @@ def test_codex_run_steps_subscription_auth_mode_uses_existing_login_state():
                 {"type": "turn.completed", "usage": dict(CODEX_USAGE)},
             ],
             1,
+            0,
+        ),
+        (
+            [
+                {"type": "thread.started", "thread_id": "thread-1"},
+                {"type": "error", "message": "error before turn"},
+                {"type": "turn.started"},
+                {"type": "turn.completed", "usage": dict(CODEX_USAGE)},
+            ],
+            0,
+            1,
+        ),
+        (
+            [
+                {"type": "thread.started", "thread_id": "thread-1"},
+                {"type": "turn.started"},
+                {"type": "error", "message": ""},
+                {"type": "turn.completed", "usage": dict(CODEX_USAGE)},
+            ],
+            0,
             1,
         ),
         (

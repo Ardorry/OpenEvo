@@ -66,10 +66,10 @@ _SERVICE_GENERATION_HEADER = "X-OpenEvo-Core-Generation"
 _RELEASE_IDENTITY_HEADER = "X-OpenEvo-Core-Release-Identity"
 _PROCESS_GROUP_LIFECYCLE_COMPATIBILITY = 3
 _PRODUCTION_V2_LIFECYCLE_COMPATIBILITY = 10
-# Lifecycle 95 preserves terminal Science Attempt failure authority when
-# Rollout has already closed with an error. Exception cleanup must not replace
-# that authority with a conflicting cancellation of the terminal task.
-V2_DAEMON_LIFECYCLE_COMPATIBILITY = 95
+# Lifecycle 96 preserves a final successful Codex terminal after recoverable
+# in-turn transport errors. Lifecycle 95's terminal Science Attempt failure
+# authority remains unchanged.
+V2_DAEMON_LIFECYCLE_COMPATIBILITY = 96
 _ONEFILE_LAUNCHER_CLEANUP_SECONDS = 10.0
 _ORPHANED_SERVICE_CHILDREN_GUARD = threading.Lock()
 _ORPHANED_SERVICE_CHILDREN: dict[int, subprocess.Popen[bytes]] = {}
