@@ -1181,9 +1181,26 @@ class CoreScienceTaskOwnerV2:
                 _source, plan = self._ledger.successor_abandon_evidence(
                     successor_transition_id
                 )
+                # Project the exact caller-supplied terminal authority into an
+                # in-memory reconciliation context before reading the closed
+                # dataset and jobs.  This permits a later release to verify
+                # historical Evolution authority without changing the stored
+                # source attempt.  The ledger independently checks the same
+                # attempt ID and terminal digest before it appends anything.
+                validation_attempt = source_attempt.model_copy(
+                    update={
+                        "reconciliation_only": True,
+                        "reconciliation_source_attempt_id": (
+                            expected_terminal_attempt_id
+                        ),
+                        "reconciliation_source_authority_sha256": (
+                            expected_terminal_authority_sha256
+                        ),
+                    }
+                )
                 context = self._successor_context(
                     successor_transition_id,
-                    transition_attempt=source_attempt,
+                    transition_attempt=validation_attempt,
                     plan=plan,
                 )
                 if (

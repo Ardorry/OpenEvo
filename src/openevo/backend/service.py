@@ -66,11 +66,10 @@ _SERVICE_GENERATION_HEADER = "X-OpenEvo-Core-Generation"
 _RELEASE_IDENTITY_HEADER = "X-OpenEvo-Core-Release-Identity"
 _PROCESS_GROUP_LIFECYCLE_COMPATIBILITY = 3
 _PRODUCTION_V2_LIFECYCLE_COMPATIBILITY = 10
-# Lifecycle 87 lets restart-safe completed-method reconciliation read exact
-# historical jobs across a release identity change and makes successor context
-# materialization query-before-create.  The no-downgrade floor must distinguish
-# this behavior from lifecycle 86, which still required the Attempt registry.
-V2_DAEMON_LIFECYCLE_COMPATIBILITY = 87
+# Lifecycle 88 projects the exact terminal request authority into the pre-append
+# completed-method readback.  Lifecycle 87 supported the appended attempt but
+# still used the ordinary failed Attempt during its read-only preflight.
+V2_DAEMON_LIFECYCLE_COMPATIBILITY = 88
 _ONEFILE_LAUNCHER_CLEANUP_SECONDS = 10.0
 _ORPHANED_SERVICE_CHILDREN_GUARD = threading.Lock()
 _ORPHANED_SERVICE_CHILDREN: dict[int, subprocess.Popen[bytes]] = {}

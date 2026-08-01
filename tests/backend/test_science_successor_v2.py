@@ -1605,11 +1605,22 @@ class _CompletedMethodsReconciliationPreparer(_Preparer):
     def __init__(self) -> None:
         super().__init__()
         self.reject_materialization = True
+        self.reconciliation_contexts: list[
+            ScienceSuccessorPreparationContextV2
+        ] = []
 
     def _enter(self, phase: str) -> None:
         self.calls.append(phase)
         if phase == "materializing" and self.reject_materialization:
             raise ValueError("historical post-method materialization failure")
+
+    def reconcile_completed_methods(
+        self,
+        context: ScienceSuccessorPreparationContextV2,
+        dataset: SealedTranscriptDatasetV2,
+    ) -> tuple[ScienceMethodOutputV2, ...]:
+        self.reconciliation_contexts.append(context)
+        return super().reconcile_completed_methods(context, dataset)
 
 
 def test_completed_methods_reconciliation_is_no_job_and_idempotent(
@@ -1668,6 +1679,18 @@ def test_completed_methods_reconciliation_is_no_job_and_idempotent(
         assert committed.state == "committed"
         assert preparer.calls.count("running_methods") == 1
         assert preparer.calls.count("reconciling_methods") == 3
+        assert [
+            (
+                context.transition_attempt.reconciliation_only,
+                context.transition_attempt.reconciliation_source_attempt_id,
+                context.transition_attempt.reconciliation_source_authority_sha256,
+            )
+            for context in preparer.reconciliation_contexts
+        ] == [
+            (True, source_attempt.transition_attempt_id, "0" * 64),
+            (True, source_attempt.transition_attempt_id, terminal_sha256),
+            (True, source_attempt.transition_attempt_id, terminal_sha256),
+        ]
         assert calls_before_reconciliation == (
             "sealing_dataset",
             "resolving_training_feedback",

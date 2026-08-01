@@ -219,6 +219,20 @@ its historical registry; a genuinely absent context is created under the
 verified repair registry, which becomes the successor head registry. No model
 job, inference reservation, or paid counter is created in either case.
 
+### Pre-append terminal projection (lifecycle 88)
+
+Lifecycle 87 still performed its first dataset/job closure check with the
+persisted ordinary failed Attempt before appending the reconciliation attempt.
+That check therefore reached the ordinary cross-release registry fence even
+though it was read-only. Lifecycle 88 projects the request's exact terminal
+attempt ID and terminal-authority digest into an in-memory
+`reconciliation_only` validation context. It does not rewrite the source
+Attempt. After the historical dataset and jobs close, the ledger independently
+checks the same terminal ID and digest against its current transaction before
+it can append the durable reconciliation attempt. A mismatched request may
+perform read-only validation but cannot change transition, task, or project
+state.
+
 ### Regression obligations
 
 - reconciliation after all method jobs succeeded does not call job create or
