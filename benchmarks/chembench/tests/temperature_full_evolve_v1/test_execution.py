@@ -249,6 +249,55 @@ def test_executor_rejects_parallel_workers_before_any_side_effect(
         assert client_factory_calls == []
 
 
+def test_client_construction_failure_leaves_no_owned_claim(tmp_path: Path) -> None:
+    run_id = "formal-run-client-construction-0001"
+    service_digest = "7" * 64
+    with TemperatureExperimentLedgerV1(
+        path=(tmp_path / "client-construction-ledger.jsonl").resolve(),
+        run_id=run_id,
+    ) as ledger:
+        plan = prepare_candidate_call_v1(
+            task=_task(),
+            prompt=_prompt(),
+            context=None,
+            context_workspace=None,
+            phase="baseline_test",
+            task_ordinal=0,
+            batch_index=None,
+            ledger=ledger,
+            run_id=run_id,
+            service_identity_sha256=service_digest,
+        )
+        executor = TemperatureFormalExecutorV1(
+            runtime_services=_Runtime(
+                repository_root=tmp_path.resolve(),
+                service_run_id="runtime-service-001",
+                digest=service_digest,
+            ),
+            ledger=ledger,
+            client_factory=lambda: (_ for _ in ()).throw(
+                RuntimeError("local client construction failed")
+            ),
+            audit_function=lambda **_kwargs: (_ for _ in ()).throw(
+                AssertionError("unclaimed call must not be audited")
+            ),
+            no_completion_audit_function=_dual_proof,
+            post_durable_terminal_cooldown_seconds=15,
+            poll_interval_seconds=0,
+            max_poll_attempts=1,
+        )
+
+        with pytest.raises(
+            TemperatureFormalExecutionError,
+            match="FORMAL_CLIENT_INITIALIZATION_FAILED",
+        ):
+            executor.run_many_to_durable_terminal(
+                (FormalCallEnvelopeV1.from_candidate(plan),),
+                max_workers=1,
+            )
+        assert ledger.events == ()
+
+
 def test_executor_closes_first_durable_terminal_before_second_admission(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -790,7 +839,9 @@ def test_unresolved_claim_and_accepted_crash_recover_without_submit(
         assert first.recovered_after_restart is True
         assert second.recovered_after_restart is True
         assert submitted == []
-        assert cooldowns == [15.0, 15.0]
+        # CALL_ACCEPTED proves the first cooldown completed before the crash;
+        # replaying that closed call must not manufacture a 15-second stall.
+        assert cooldowns == [15.0]
         assert sum(event["kind"] == "CALL_ACCEPTED" for event in ledger.events) == 1
         assert sum(event["kind"] == "CALL_EVALUATED" for event in ledger.events) == 1
 

@@ -64,7 +64,9 @@ Codex readiness refusal 或其他外部瞬态，因此报告不得把具体 prov
 每个 durable terminal outcome 与下一次正式 admission 之间固定等待 15 秒。对于 terminal
 no-completion，executor 先完成双重 durable proof 和等待，再写入允许 successor retry 的 failure
 ledger event；若等待期间 crash，恢复只能重审同一 task 并保守地重新等待，不能提前发出替代调用。
-crash recovery 读取既有 completion 时也会再次执行一次 bounded wait，但不会重复 submit。
+crash recovery 读取尚未 accepted 的既有 completion 时也会再次执行一次 bounded wait，但不会重复
+submit；已经存在 `CALL_ACCEPTED` 的 closed call 证明先前 cooldown 已完成，resume 重审时不再次等待，
+避免长阶段恢复被监控误判为 stall。
 Candidate phase 每次只准入一个逻辑 UID，成功后立即 accepted/evaluated；基础设施失败只在当前
 UID 上执行闭集内的 bounded retry，不会继续消耗该批其他 UID。该 pacing
 值进入 closed config 和 config digest，对 Candidate、Reflector、evolved Test 与 baseline Test
@@ -174,8 +176,12 @@ BASELINE_TEST_CLOSED
 AUDIT_CLOSED
 ```
 
-确定性 session/task ID 在模型提交前持久化。恢复时先查询 Rollout 的既有 task：已有 terminal
-completion 必须接续入账，不得重调。只有两类闭合 predecessor 允许固定的 attempt+1（每个
+确定性 session/task ID 在模型提交前持久化。本地 Rollout client 必须先构造成功，再执行紧邻的
+health check、fsync claim 与 submit；client 构造失败不会留下 owned claim。claim 之后若 transport
+结果不明确，只能按 exact task identity 恢复；若既不能证明既有 task/result，也不能证明
+no-completion，则 fail closed，不把缺失观察解释为重调权限。恢复时先查询 Rollout 的既有 task：
+已有 terminal completion 必须接续入账，不得重调。只有两类闭合 predecessor 允许固定的
+attempt+1（每个
 logical call 最多三次）：一是有 Rollout/Gateway 双重证据的 no-completion；二是仅限
 `train_reflector` 的 durable completion 在 response schema、evidence scope 或 packet sequence
 校验失败。第二类事件只保存 response/task-result/transcript/completion identity SHA-256 和闭集

@@ -371,10 +371,11 @@ class TemperatureFormalExecutorV1:
 
         A call is admitted, submitted, polled, and durably audited before the
         next call is admitted. Every durable terminal outcome closes its quiet
-        period even at a batch boundary or after recovery, so a later invocation
-        of this method cannot bypass pacing. ``max_workers`` remains explicit at
-        the boundary so any attempt to restore parallel Candidate execution fails
-        closed.
+        period even at a batch boundary or after unresolved-call recovery, so a
+        later invocation of this method cannot bypass pacing. An already accepted
+        call proves its prior wait completed and is replayed without another
+        delay. ``max_workers`` remains explicit at the boundary so any attempt to
+        restore parallel Candidate execution fails closed.
         """
 
         values = tuple(envelopes)
@@ -389,12 +390,16 @@ class TemperatureFormalExecutorV1:
             raise ValueError("formal execution batch is invalid")
         results: list[DurableFormalOutcomeV1] = []
         for envelope in values:
+            already_accepted = (
+                self._ledger.accepted_call(envelope.logical_call_id) is not None
+            )
             outcome = self._await_durable_terminal(self._admit(envelope))
             self._close_no_completion_before_successor(outcome)
             results.append(outcome)
             if (
                 outcome.state == "completion"
                 and self._post_durable_terminal_cooldown
+                and not already_accepted
             ):
                 time.sleep(self._post_durable_terminal_cooldown)
         return tuple(results)
@@ -433,17 +438,28 @@ class TemperatureFormalExecutorV1:
             ):
                 raise TemperatureFormalExecutionError("FORMAL_CLAIM_IDENTITY_MISMATCH")
 
-        # Health is proven immediately before the irreversible claim/submit pair.
-        # Any exception after the fsync claim remains an unresolved owned call and
-        # is recovered by task identity; it is never interpreted as permission to
-        # issue a replacement model call.
-        self._runtime.require_current()
-        self._ledger.append("CALL_CLAIMED", dict(envelope.claim_payload))
-        client = self._client_factory()
+        # Construct the reversible local client before the irreversible
+        # claim/submit pair. A client-construction failure therefore leaves no
+        # unresolved owned claim.
         try:
-            submitted = client.submit_task(_task_payload(envelope.task_request))
-        except Exception as exc:  # external boundary; outcome may be ambiguous
-            raise TemperatureFormalExecutionError("FORMAL_SUBMIT_OUTCOME_UNRESOLVED") from exc
+            client = self._client_factory()
+        except Exception as exc:
+            raise TemperatureFormalExecutionError(
+                "FORMAL_CLIENT_INITIALIZATION_FAILED"
+            ) from exc
+        try:
+            # Health is proven immediately before the fsync claim. The remaining
+            # post-claim transport ambiguity is intentionally fail-closed and
+            # recovered only by exact task identity; it never authorizes a
+            # replacement model call.
+            self._runtime.require_current()
+            self._ledger.append("CALL_CLAIMED", dict(envelope.claim_payload))
+            try:
+                submitted = client.submit_task(_task_payload(envelope.task_request))
+            except Exception as exc:  # external boundary; outcome may be ambiguous
+                raise TemperatureFormalExecutionError(
+                    "FORMAL_SUBMIT_OUTCOME_UNRESOLVED"
+                ) from exc
         finally:
             client.close()
         if submitted != envelope.task_request.task_id:
