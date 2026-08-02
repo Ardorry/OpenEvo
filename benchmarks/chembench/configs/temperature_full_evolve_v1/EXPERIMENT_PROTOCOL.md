@@ -49,6 +49,12 @@ lifecycle 与 runner 只能由该解释器以 `-I` 运行；旧实验解释器�
 2. 25 个 accepted completion 与私有评估全部闭合后，构造一个 Train-only batch packet。
 3. 只做一次逻辑 Reflector synthesis；它可看本批 GT、pre completion、累计 evidence、当前三
    artifact 和此前 aggregate diagnostics，但看不到 Test。
+   Controller 必须在 canonical prompt 中显式给出动态 `required_response_bindings`，其中
+   `batch_index` 等于当前批次，`prior_evidence_sha256` 在 C0 时为 `null`、其后为前一批
+   evidence index 的精确 SHA-256。Reflector 只能把这两个值逐字复制到 response 同名字段；
+   不得要求模型自行计算哈希，也不得由 Controller 在 completion 后补写或纠正。Prompt 接受层
+   与 evidence merge 层分别做 exact equality 校验，binding 随 prompt hash 和 retry semantics
+   一同封存。
 4. Controller 将 closed JSON 合并为 canonical rule/evidence index。普通长期规则至少需两个
    独立 Train UID 支持；反例、适用范围、置信度与 retired reason 必须保留。单题答案、选项
    字母、题面映射不得投影。

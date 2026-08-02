@@ -71,7 +71,7 @@ reflector:
   mcp_servers: []
   logical_calls_per_batch: 1
 core:
-  framework_lock: state/chembench_temperature_full_evolve_v1/formal_runtime_v7/framework/framework-lock.json
+  framework_lock: state/chembench_temperature_full_evolve_v1/formal_runtime_v8/framework/framework-lock.json
   jobs_per_batch: 3
   targets:
     - text_memory

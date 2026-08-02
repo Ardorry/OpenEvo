@@ -40,12 +40,12 @@ plan、worker claim、typed artifact registration、validation、promotion 和 c
 
 正式服务和付费 runner 使用本实验独立的固定 Python bundle。该 bundle 在源码提交冻结后离线
 构建当前 OpenEvo Core 与 ChemBench wheel，逐个核对 wheel 中 Python 文件与源码，安装到
-`state/chembench_temperature_full_evolve_v1/formal_runtime_v7`，并验证两个 distribution 均为
+`state/chembench_temperature_full_evolve_v1/formal_runtime_v8`，并验证两个 distribution 均为
 non-editable、framework registry 与 wheel/lock 匹配。旧 STV2 runtime 只作为依赖版本来源；其中
 旧 Core、可编辑 ChemBench 包、数据库、completion 和 artifact 均不进入新的正式解释器。所有
 正式入口以 `-I` 启动且重新核验 formal-runtime receipt、源码提交和安装 inventory。
 
-`formal_runtime_v7` 与 `formal_runtime_v7_failures` 是不可覆盖的新 namespace；已有 v2/v3/v4/v5/v6
+`formal_runtime_v8` 与 `formal_runtime_v8_failures` 是不可覆盖的新 namespace；已有 v2/v3/v4/v5/v6/v7
 runtime 及其 failure evidence 保持只读。v3 已把 Candidate formal execution 从并行准入改为全局串行，
 并修正宿主 Rollout 到 Gateway 容器的 callback route。正式运行随后暴露出另一条彼此独立的
 Gateway 终态竞态：subscription 主 POSTRUN 在注册 durable cleanup ownership 后等待 runtime
@@ -113,6 +113,18 @@ agent-message 只作为无副作用 passive item；command update 必须绑定�
 clean refusal 可进行一次 15 秒 bounded retry。canary prompt、模型、reasoning、split、实验 prompt、
 parser、evaluator、artifact 与 feedback 规则均未改变。由于 readiness 接受协议发生变化，v6 run
 保持 immutable invalid evidence，任何 completion、数据库或状态均不导入 v7 的 fresh C0 run。
+
+v7 fresh C0 run 在 Batch 1 完整闭合、Batch 2 pre 闭合后暴露了一个独立的 Reflector 动态契约
+缺口：通用 response schema 要求 `prior_evidence_sha256`，验收器从 Batch 2 起要求它精确等于
+前序 evidence digest，但模型可见 packet 只含 evidence 内容，未提供 controller 已计算的 digest。
+Batch 1 的合法值恰为 `null`，所以该缺口直到 Batch 2 才确定性出现；三次相同 prompt 的 durable
+completion 均被严格 sequence validator 拒绝。v8 不放宽验收、不补写模型 completion，而是在
+canonical prompt 中加入 controller-owned `required_response_bindings`，明确要求逐字复制当前
+`batch_index` 与前序 digest，并让该 binding 进入 prompt hash、TaskRequest 和 retry semantics。
+真实 Batch 2 离线回归同时证明正确 binding 可接受、错误 batch 或 `null` predecessor 仍 fail
+closed。该变更属于模型可见 prompt 语义修复，因此 v7 run 保持 immutable failed evidence；其
+Candidate completion、Reflector、C1 artifact、evidence、数据库和 workspace 均不导入 v8，v8
+仅复用不影响语义的冻结 split 与依赖缓存，从空三个 artifact 的新 C0 run 开始。
 
 订阅 transport 需要容器网络连接 provider，因此不能把 `allow_internet=true` 误写成模型拥有
 网页或 shell 能力。本实验在通用 Codex subscription harness 上选择 closed

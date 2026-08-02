@@ -206,10 +206,10 @@ def test_no_replace_publication_preserves_existing_destination(tmp_path: Path) -
     assert destination.is_dir()
 
 
-def test_v7_runtime_and_failure_namespaces_do_not_alias_prior_state() -> None:
-    assert runtime.FORMAL_RUNTIME_ROOT_RELATIVE.endswith("/formal_runtime_v7")
+def test_v8_runtime_and_failure_namespaces_do_not_alias_prior_state() -> None:
+    assert runtime.FORMAL_RUNTIME_ROOT_RELATIVE.endswith("/formal_runtime_v8")
     assert runtime.FORMAL_RUNTIME_FAILURE_ROOT_RELATIVE.endswith(
-        "/formal_runtime_v7_failures"
+        "/formal_runtime_v8_failures"
     )
     assert runtime.FORMAL_RUNTIME_ROOT_RELATIVE not in {
         "state/chembench_temperature_full_evolve_v1/formal_runtime",
@@ -218,6 +218,7 @@ def test_v7_runtime_and_failure_namespaces_do_not_alias_prior_state() -> None:
         "state/chembench_temperature_full_evolve_v1/formal_runtime_v4",
         "state/chembench_temperature_full_evolve_v1/formal_runtime_v5",
         "state/chembench_temperature_full_evolve_v1/formal_runtime_v6",
+        "state/chembench_temperature_full_evolve_v1/formal_runtime_v7",
     }
     assert runtime.FORMAL_RUNTIME_FAILURE_ROOT_RELATIVE not in {
         "state/chembench_temperature_full_evolve_v1/formal_runtime_failures",
@@ -226,6 +227,7 @@ def test_v7_runtime_and_failure_namespaces_do_not_alias_prior_state() -> None:
         "state/chembench_temperature_full_evolve_v1/formal_runtime_v4_failures",
         "state/chembench_temperature_full_evolve_v1/formal_runtime_v5_failures",
         "state/chembench_temperature_full_evolve_v1/formal_runtime_v6_failures",
+        "state/chembench_temperature_full_evolve_v1/formal_runtime_v7_failures",
     }
 
 

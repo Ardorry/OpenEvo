@@ -12,7 +12,11 @@ from pydantic import ValidationError
 
 from openevo_chembench.supervised_transfer_v1.common import canonical_json_bytes
 from openevo_chembench.supervised_transfer_v2.executor import task_request_digest_v2
-from openevo_chembench.temperature_full_evolve_v1.evidence import RuleEvidenceIndexV1
+from openevo_chembench.temperature_full_evolve_v1.evidence import (
+    BatchReflectionV1,
+    RuleEvidenceIndexV1,
+    apply_batch_reflection,
+)
 from openevo_chembench.temperature_full_evolve_v1.execution import (
     DurableFormalOutcomeV1,
     FormalCallEnvelopeV1,
@@ -23,6 +27,7 @@ from openevo_chembench.temperature_full_evolve_v1.ledger import (
 )
 from openevo_chembench.temperature_full_evolve_v1.packet import (
     BATCH_SIZE,
+    BatchAggregateDiagnosticV1,
     BatchSupervisedPacketV1,
     BatchTrainCaseV1,
     ReflectorArtifactSnapshotV1,
@@ -35,6 +40,7 @@ from openevo_chembench.temperature_full_evolve_v1.reflector import (
     PROMPT_MAX_UTF8_BYTES,
     PROMPT_SCHEMA_SHA256,
     REASONING_EFFORT,
+    REFLECTOR_PROMPT_SCHEMA,
     RESPONSE_MAX_UTF8_BYTES,
     RESPONSE_SCHEMA_SHA256,
     VISIBLE_PACKET_SCHEMA_SHA256,
@@ -132,6 +138,84 @@ def _sealed():
     )
 
 
+def _c1_artifacts() -> tuple[ReflectorArtifactSnapshotV1, ...]:
+    artifacts: list[ReflectorArtifactSnapshotV1] = []
+    for target in ("text_memory", "skill_bundle", "agent_system"):
+        content = f"# {target}\n\nValidated Batch 1 content.\n"
+        artifacts.append(
+            ReflectorArtifactSnapshotV1(
+                target_id=target,  # type: ignore[arg-type]
+                content=content,
+                artifact_id=f"{target}-batch-1",
+                predecessor_artifact_id=None,
+                artifact_payload_sha256=hashlib.sha256(
+                    f"payload-{target}".encode()
+                ).hexdigest(),
+                context_resolution_digest=hashlib.sha256(
+                    f"context-{target}".encode()
+                ).hexdigest(),
+                resolved_content_sha256=hashlib.sha256(content.encode()).hexdigest(),
+                utf8_byte_count=len(content.encode()),
+            )
+        )
+    return tuple(artifacts)
+
+
+def _sealed_batch2():
+    seen_batch1 = frozenset(_uid("train", index) for index in range(25))
+    seen_batch2 = frozenset(_uid("train", index) for index in range(50))
+    prior_evidence = apply_batch_reflection(
+        RuleEvidenceIndexV1.generation_zero(),
+        BatchReflectionV1(
+            batch_index=1,
+            prior_evidence_sha256=None,
+            proposals=(),
+        ),
+        all_train_uids=TRAIN_UIDS,
+        seen_train_uids=seen_batch1,
+        current_batch_uids=seen_batch1,
+    )
+    artifacts = _c1_artifacts()
+    diagnostic = BatchAggregateDiagnosticV1(
+        batch_index=1,
+        task_count=25,
+        pre_correct=20,
+        post_correct=21,
+        both_correct=19,
+        pre_only_correct=1,
+        post_only_correct=2,
+        both_wrong=3,
+        pre_parser_success=25,
+        post_parser_success=25,
+        accuracy_delta_percentage_points=4.0,
+        mcnemar_exact_p=1.0,
+        artifact_total_utf8_bytes=sum(item.utf8_byte_count for item in artifacts),
+        candidate_call_count=50,
+        reflector_accepted_synthesis_count=1,
+        core_job_count=3,
+    )
+    packet = build_batch_supervised_packet_v1(
+        run_id=RUN_ID,
+        source_commit="a" * 40,
+        split_sha256="b" * 64,
+        config_sha256="c" * 64,
+        dataset_sha256="d" * 64,
+        batch_index=2,
+        current_train_cases=tuple(_case(index) for index in range(25, 50)),
+        current_artifacts=artifacts,
+        prior_evidence=prior_evidence,
+        prior_batch_diagnostics=(diagnostic,),
+        all_train_uids=TRAIN_UIDS,
+        seen_train_uids=seen_batch2,
+    )
+    return seal_batch_supervised_packet_v1(
+        packet,
+        all_train_uids=TRAIN_UIDS,
+        seen_train_uids=seen_batch2,
+        test_uids=TEST_UIDS,
+    )
+
+
 def _safe_transcript(response: str) -> str:
     return "\n".join(
         (
@@ -190,7 +274,12 @@ def _reflector_status(response: str, *, task_id: str) -> TaskStatus:
     )
 
 
-def _response(*, support_uid: str | None = None, batch_index: int = 1) -> str:
+def _response(
+    *,
+    support_uid: str | None = None,
+    batch_index: int = 1,
+    prior_evidence_sha256: str | None = None,
+) -> str:
     proposals: list[dict[str, object]] = []
     if support_uid is not None:
         proposals.append(
@@ -210,7 +299,7 @@ def _response(*, support_uid: str | None = None, batch_index: int = 1) -> str:
         {
             "schema_version": "TemperatureBatchReflectionV1",
             "batch_index": batch_index,
-            "prior_evidence_sha256": None,
+            "prior_evidence_sha256": prior_evidence_sha256,
             "proposals": proposals,
         },
         sort_keys=True,
@@ -273,8 +362,81 @@ def test_packet_is_exactly_25_train_items_and_prompt_is_test_blind_and_bounded()
     assert "Do not use shell, files, network tools, web search" in prompt.instruction
     assert "MCP" in prompt.instruction
     assert "exactly one JSON object" in prompt.instruction
+    assert (
+        '"required_response_bindings":{"batch_index":1,'
+        '"prior_evidence_sha256":null}'
+    ) in prompt.instruction
     assert packet.current_train_cases[0].question not in repr(packet)
     assert packet.current_train_cases[0].uid not in repr(sealed)
+
+
+def test_batch2_prompt_exposes_exact_sequence_and_acceptance_remains_fail_closed() -> None:
+    sealed = _sealed_batch2()
+    prompt = render_reflector_prompt_v1(sealed)
+    prior_digest = sealed.packet.prior_evidence.digest
+    required = canonical_json_bytes(
+        {
+            "batch_index": 2,
+            "prior_evidence_sha256": prior_digest,
+        }
+    ).decode().strip()
+    assert f'"required_response_bindings":{required}' in prompt.instruction
+    assert "Copy required_response_bindings.batch_index" in prompt.instruction
+
+    ledger = _Ledger()
+    plan = prepare_reflector_call_v1(
+        sealed=sealed,
+        ledger=ledger,
+        run_id=RUN_ID,
+        service_identity_sha256=SERVICE_IDENTITY,
+    )
+    ledger.add_claim(plan.claim_payload)
+    accepted = accept_reflector_synthesis_v1(
+        sealed=sealed,
+        plan=plan,
+        observed=_observed(
+            _response(
+                batch_index=2,
+                prior_evidence_sha256=prior_digest,
+            )
+        ),
+        ledger=ledger,
+        task_result_sha256="c" * 64,
+        completion_identity_sha256="e" * 64,
+    )
+    assert accepted.next_evidence.batch_index == 2
+    assert plan.task_request.instruction == prompt.instruction
+    assert plan.prompt.prompt_sha256 == hashlib.sha256(
+        plan.task_request.instruction.encode()
+    ).hexdigest()
+    task_metadata = plan.task_request.metadata["openevo_chembench"]
+    assert task_metadata["prompt_schema_sha256"] == PROMPT_SCHEMA_SHA256
+    assert task_metadata["prompt_sha256"] == plan.prompt.prompt_sha256
+
+    for response in (
+        _response(batch_index=1, prior_evidence_sha256=prior_digest),
+        _response(batch_index=2, prior_evidence_sha256=None),
+    ):
+        rejecting_ledger = _Ledger()
+        rejecting_plan = prepare_reflector_call_v1(
+            sealed=sealed,
+            ledger=rejecting_ledger,
+            run_id=RUN_ID,
+            service_identity_sha256=SERVICE_IDENTITY,
+        )
+        rejecting_ledger.add_claim(rejecting_plan.claim_payload)
+        with pytest.raises(
+            TemperatureReflectorError,
+            match="REFLECTOR_RESPONSE_PACKET_SEQUENCE_INVALID",
+        ):
+            accept_reflector_synthesis_v1(
+                sealed=sealed,
+                plan=rejecting_plan,
+                observed=_observed(response),
+                ledger=rejecting_ledger,
+                task_result_sha256="c" * 64,
+                completion_identity_sha256="e" * 64,
+            )
 
 
 def test_packet_rejects_wrong_batch_size_and_aggregate_utf8_overflow() -> None:
@@ -844,11 +1006,16 @@ def test_response_with_test_uid_wrong_batch_or_duplicate_keys_is_never_accepted(
 def test_prompt_and_response_schema_digests_are_canonical() -> None:
     sealed = _sealed()
     prompt = render_reflector_prompt_v1(sealed)
-    assert len(prompt.prompt_schema_sha256) == 64
+    assert REFLECTOR_PROMPT_SCHEMA == "TemperatureBatchReflectorPromptV2"
+    assert PROMPT_SCHEMA_SHA256 == (
+        "6b30fcb34a0c0cc048911ba796124b12af980fb6217d7f650c8c4859e4295e82"
+    )
+    assert prompt.prompt_schema_sha256 == PROMPT_SCHEMA_SHA256
     assert len(prompt.response_schema_sha256) == 64
     assert len(prompt.visible_packet_schema_sha256) == 64
     assert prompt.prompt_sha256 == hashlib.sha256(prompt.instruction.encode()).hexdigest()
     receipt = prompt.to_receipt()
+    assert receipt["schema_version"] == "TemperatureBatchReflectorPromptV2"
     assert receipt["prompt_utf8_byte_count"] == len(prompt.instruction.encode())
     assert receipt["response_max_utf8_bytes"] == 65536
     assert canonical_json_bytes(receipt).endswith(b"\n")

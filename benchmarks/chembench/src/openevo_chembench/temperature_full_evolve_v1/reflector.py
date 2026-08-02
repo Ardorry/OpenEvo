@@ -53,7 +53,7 @@ from openevo_chembench.temperature_full_evolve_v1.retry_semantics import (
     task_request_retry_semantics_sha256_v1,
 )
 
-REFLECTOR_PROMPT_SCHEMA = "TemperatureBatchReflectorPromptV1"
+REFLECTOR_PROMPT_SCHEMA = "TemperatureBatchReflectorPromptV2"
 REFLECTOR_TASK_REQUEST_SCHEMA = "TemperatureBatchReflectorTaskRequestV1"
 REFLECTOR_ACCEPTED_SCHEMA = "TemperatureBatchReflectorAcceptedSynthesisV1"
 PROMPT_MAX_UTF8_BYTES = 768 * 1024
@@ -103,6 +103,11 @@ _PROMPT_CONTRACT = {
     "transport": "TaskRequest->Rollout->Gateway->CodexHarness",
     "packet_schema": "TemperatureReflectorVisibleBatchPacketV1",
     "response_schema": "TemperatureBatchReflectionV1",
+    "required_response_bindings": (
+        "batch_index",
+        "prior_evidence_sha256",
+    ),
+    "response_binding_policy": "copy_exactly_from_controller",
     "logical_syntheses_per_batch": 1,
     "tools_allowed": False,
     "test_data_allowed": False,
@@ -112,6 +117,20 @@ _PROMPT_CONTRACT = {
 PROMPT_SCHEMA_SHA256 = sha256_bytes(canonical_json_bytes(_PROMPT_CONTRACT))
 VISIBLE_PACKET_SCHEMA_SHA256 = _schema_digest(ReflectorVisibleBatchPacketV1)
 RESPONSE_SCHEMA_SHA256 = _schema_digest(BatchReflectionV1)
+
+
+def _required_response_bindings(
+    sealed: SealedBatchSupervisedPacketV1,
+) -> dict[str, object]:
+    """Return controller-owned sequence values the Reflector must copy."""
+
+    if type(sealed) is not SealedBatchSupervisedPacketV1:
+        raise TypeError("Reflector response bindings require an exact sealed packet")
+    prior = sealed.packet.prior_evidence
+    return {
+        "batch_index": sealed.packet.batch_index,
+        "prior_evidence_sha256": None if prior.batch_index == 0 else prior.digest,
+    }
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -181,6 +200,7 @@ def render_reflector_prompt_v1(sealed: SealedBatchSupervisedPacketV1) -> Reflect
         raise TypeError("Reflector prompt requires an exact Test-isolated packet seal")
     visible = sealed.packet.to_reflector_packet()
     visible_payload = visible.model_dump(mode="json")
+    required_response_bindings = _required_response_bindings(sealed)
     response_schema = BatchReflectionV1.model_json_schema()
     envelope = {
         "schema_version": REFLECTOR_PROMPT_SCHEMA,
@@ -190,6 +210,7 @@ def render_reflector_prompt_v1(sealed: SealedBatchSupervisedPacketV1) -> Reflect
         "response_schema_sha256": RESPONSE_SCHEMA_SHA256,
         "response_max_utf8_bytes": RESPONSE_MAX_UTF8_BYTES,
         "visible_train_packet": visible_payload,
+        "required_response_bindings": required_response_bindings,
         "required_response_json_schema": response_schema,
     }
     encoded_envelope = canonical_json_bytes(envelope).decode("utf-8").rstrip("\n")
@@ -227,6 +248,9 @@ def render_reflector_prompt_v1(sealed: SealedBatchSupervisedPacketV1) -> Reflect
                 "commentary, or second object.\n"
                 "- Put every supporting_train_uids and counterexample_train_uids array in "
                 "lexicographic order with no duplicate UID.\n"
+                "- Copy required_response_bindings.batch_index and "
+                "required_response_bindings.prior_evidence_sha256 exactly into the response "
+                "fields with the same names; do not calculate, omit, or substitute either value.\n"
                 f"- The UTF-8 response must not exceed {RESPONSE_MAX_UTF8_BYTES} bytes.\n"
                 f"- The exact response schema SHA-256 is {RESPONSE_SCHEMA_SHA256}.\n"
                 "- The controller will reject duplicate keys, unknown fields, non-finite numbers, "
@@ -663,14 +687,11 @@ def _parse_and_merge(
             response,
             maximum_utf8_bytes=RESPONSE_MAX_UTF8_BYTES,
         )
-        expected_prior = (
-            None
-            if sealed.packet.prior_evidence.batch_index == 0
-            else sealed.packet.prior_evidence.digest
-        )
+        required_response_bindings = _required_response_bindings(sealed)
         if (
-            reflection.batch_index != sealed.packet.batch_index
-            or reflection.prior_evidence_sha256 != expected_prior
+            reflection.batch_index != required_response_bindings["batch_index"]
+            or reflection.prior_evidence_sha256
+            != required_response_bindings["prior_evidence_sha256"]
         ):
             raise TemperatureReflectorError("REFLECTOR_RESPONSE_PACKET_SEQUENCE_INVALID")
         references = frozenset(
