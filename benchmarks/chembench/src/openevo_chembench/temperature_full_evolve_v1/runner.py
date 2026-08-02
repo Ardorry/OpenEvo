@@ -72,6 +72,7 @@ from openevo_chembench.temperature_full_evolve_v1.core_evolution import (
 )
 from openevo_chembench.temperature_full_evolve_v1.evidence import RuleEvidenceIndexV1
 from openevo_chembench.temperature_full_evolve_v1.execution import (
+    MAX_CANDIDATE_WORKERS,
     FormalCallEnvelopeV1,
     TemperatureFormalExecutorV1,
     finalize_candidate_outcome_v1,
@@ -705,7 +706,7 @@ class TemperatureFullEvolveFormalRunnerV1:
                 raise TemperatureFormalRunnerError("RUNNER_CANDIDATE_PHASE_STALLED")
             outcomes = self._executor.run_many_to_durable_terminal(
                 tuple(FormalCallEnvelopeV1.from_candidate(plan) for plan in plans),
-                max_workers=3,
+                max_workers=MAX_CANDIDATE_WORKERS,
             )
             for plan, outcome in zip(plans, outcomes, strict=True):
                 if outcome.state == "terminal_no_completion":

@@ -21,6 +21,7 @@ TRAIN_COUNT = 100
 TEST_COUNT = 100
 RESERVE_COUNT = 2
 BATCH_SIZE = 25
+CANDIDATE_MAX_WORKERS = 1
 SPLIT_NAMESPACE = "chembench-temperature-full-evolve-v1-split-v1-20260802"
 TARGETS = ("text_memory", "skill_bundle", "agent_system")
 HISTORICAL_EXPOSURE_POLICY = "fixed_official_temperature_pool_fresh_c0"
@@ -55,6 +56,10 @@ class TemperatureFullEvolveConfigV1:
     @property
     def task_timeout_seconds(self) -> int:
         return int(self.payload["executor"]["timeout_seconds"])
+
+    @property
+    def candidate_max_workers(self) -> int:
+        return int(self.payload["executor"]["candidate_max_workers"])
 
     @property
     def reflector_timeout_seconds(self) -> int:
@@ -216,6 +221,7 @@ def _validate_config(payload: dict[str, Any]) -> None:
             "allow_internet",
             "mcp_servers",
             "infrastructure_retry_limit",
+            "candidate_max_workers",
         }
         or executor.get("rollout_url") != "http://127.0.0.1:8080"
         or executor.get("runtime_services_state_root")
@@ -233,6 +239,7 @@ def _validate_config(payload: dict[str, Any]) -> None:
         or executor.get("allow_internet") is not True
         or executor.get("mcp_servers") != []
         or executor.get("infrastructure_retry_limit") != 3
+        or executor.get("candidate_max_workers") != CANDIDATE_MAX_WORKERS
     ):
         raise TemperatureFullEvolveConfigError("TEMPERATURE_EXECUTOR_POLICY_INVALID")
     reflector = payload["reflector"]
@@ -306,6 +313,7 @@ def _validate_config(payload: dict[str, Any]) -> None:
 
 __all__ = [
     "BATCH_SIZE",
+    "CANDIDATE_MAX_WORKERS",
     "CATEGORY",
     "CONFIG_SCHEMA",
     "EXPECTED_CANDIDATE_IMAGE_ID",

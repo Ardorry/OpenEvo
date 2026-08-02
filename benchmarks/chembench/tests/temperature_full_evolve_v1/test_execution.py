@@ -25,6 +25,7 @@ from openevo_chembench.temperature_full_evolve_v1.candidate import (
     prepare_candidate_call_v1,
 )
 from openevo_chembench.temperature_full_evolve_v1.execution import (
+    MAX_CANDIDATE_WORKERS,
     FormalCallEnvelopeV1,
     TemperatureFormalExecutionError,
     TemperatureFormalExecutorV1,
@@ -193,6 +194,226 @@ def _terminal_no_completion(call_id: str, logical_call_id: str) -> dict[str, obj
         "durable_gateway_absent": True,
         "no_completion_evidence_sha256": "f" * 64,
     }
+
+
+def test_executor_rejects_parallel_workers_before_any_side_effect(
+    tmp_path: Path,
+) -> None:
+    service_digest = "0" * 64
+    client_factory_calls: list[str] = []
+    with TemperatureExperimentLedgerV1(
+        path=(tmp_path / "serial-ledger.jsonl").resolve(),
+        run_id="formal-run-serial-workers-0001",
+    ) as ledger:
+        plan = prepare_candidate_call_v1(
+            task=_task(),
+            prompt=_prompt(),
+            context=None,
+            context_workspace=None,
+            phase="baseline_test",
+            task_ordinal=0,
+            batch_index=None,
+            ledger=ledger,
+            run_id="formal-run-serial-workers-0001",
+            service_identity_sha256=service_digest,
+        )
+
+        def forbidden_client_factory() -> _Client:
+            client_factory_calls.append("called")
+            raise AssertionError("parallel policy must fail before transport")
+
+        executor = TemperatureFormalExecutorV1(
+            runtime_services=_Runtime(
+                repository_root=tmp_path.resolve(),
+                service_run_id="runtime-service-serial-001",
+                digest=service_digest,
+            ),
+            ledger=ledger,
+            client_factory=forbidden_client_factory,
+            audit_function=lambda **_kwargs: (_ for _ in ()).throw(
+                AssertionError("parallel policy must fail before audit")
+            ),
+            no_completion_audit_function=_dual_proof,
+            poll_interval_seconds=0,
+            max_poll_attempts=1,
+        )
+
+        assert MAX_CANDIDATE_WORKERS == 1
+        with pytest.raises(ValueError, match="formal execution batch is invalid"):
+            executor.run_many_to_durable_terminal(
+                (FormalCallEnvelopeV1.from_candidate(plan),),
+                max_workers=2,
+            )
+        assert ledger.events == ()
+        assert client_factory_calls == []
+
+
+def test_executor_closes_first_durable_terminal_before_second_admission(
+    tmp_path: Path,
+) -> None:
+    run_id = "formal-run-serial-order-0001"
+    service_digest = "e" * 64
+    trace: list[str] = []
+
+    class _TracingLedger:
+        def __init__(self, inner: TemperatureExperimentLedgerV1) -> None:
+            self.inner = inner
+
+        @property
+        def events(self) -> tuple[dict[str, Any], ...]:
+            return self.inner.events
+
+        def append(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+            if kind in {"CALL_CLAIMED", "CALL_NO_COMPLETION_FAILURE"}:
+                trace.append(f"ledger:{kind}:{payload['call_id']}")
+            return self.inner.append(kind, payload)
+
+        def accepted_call(self, logical_call_id: str) -> dict[str, Any] | None:
+            return self.inner.accepted_call(logical_call_id)
+
+        def latest_claim(self, logical_call_id: str) -> dict[str, Any] | None:
+            return self.inner.latest_claim(logical_call_id)
+
+        def failure_has_no_completion(self, call_id: str) -> bool:
+            return self.inner.failure_has_no_completion(call_id)
+
+        def completion_was_rejected(self, call_id: str) -> bool:
+            return self.inner.completion_was_rejected(call_id)
+
+    class _TracingRuntime:
+        repository_root = tmp_path.resolve()
+        service_run_id = "runtime-service-001"
+        digest = service_digest
+
+        def __init__(self) -> None:
+            self.health_checks = 0
+
+        def require_current(self) -> dict[str, object]:
+            self.health_checks += 1
+            trace.append(f"health:{self.health_checks}")
+            return {"runtime_services_identity_sha256": self.digest}
+
+    class _TracingClient:
+        def submit_task(self, payload: dict[str, Any]) -> str:
+            task_id = str(payload["task_id"])
+            trace.append(f"submit:{task_id}")
+            return task_id
+
+        def get_task(self, task_id: str) -> dict[str, Any]:
+            trace.append(f"poll:{task_id}")
+            raise RuntimeError("force durable evidence path")
+
+        def close(self) -> None:
+            return None
+
+    with TemperatureExperimentLedgerV1(
+        path=(tmp_path / "serial-order-ledger.jsonl").resolve(),
+        run_id=run_id,
+    ) as inner:
+        ledger = _TracingLedger(inner)
+        first = prepare_candidate_call_v1(
+            task=_task(),
+            prompt=_prompt(),
+            context=None,
+            context_workspace=None,
+            phase="baseline_test",
+            task_ordinal=0,
+            batch_index=None,
+            ledger=ledger,
+            run_id=run_id,
+            service_identity_sha256=service_digest,
+        )
+        second = prepare_candidate_call_v1(
+            task=_task(),
+            prompt=_prompt(),
+            context=None,
+            context_workspace=None,
+            phase="baseline_test",
+            task_ordinal=1,
+            batch_index=None,
+            ledger=ledger,
+            run_id=run_id,
+            service_identity_sha256=service_digest,
+        )
+        first_task_id = first.task_request.task_id
+        second_task_id = second.task_request.task_id
+        second_status = _status(second_task_id)
+
+        def audit(**values: object) -> PersistedRolloutResultAuditV1:
+            task_id = str(values["task_id"])
+            trace.append(f"durable_audit:{task_id}")
+            if task_id == second_task_id:
+                return _audit(second_status)
+            assert task_id == first_task_id
+            return PersistedRolloutResultAuditV1(
+                state="PROVEN_TERMINAL_NO_COMPLETION",
+                service_run_id="runtime-service-001",
+                task_id_sha256=_sha(task_id),
+                session_id_sha256="1" * 64,
+                result_sha256="2" * 64,
+                result_size_bytes=100,
+                terminal_status="FAILED",
+                completion_exists=False,
+                completion_sha256=None,
+                finding_code=None,
+                result=None,
+            )
+
+        def no_completion_audit(**values: object) -> DurableNoCompletionEvidenceV1:
+            task_id = str(values["task_id"])
+            assert task_id == first_task_id
+            trace.append(f"no_completion_proof:{task_id}")
+            return DurableNoCompletionEvidenceV1(
+                state="PROVEN_NO_COMPLETION",
+                service_run_id="runtime-service-001",
+                task_id_sha256=_sha(task_id),
+                session_id_sha256="1" * 64,
+                rollout_result_sha256="2" * 64,
+                rollout_terminal_status="FAILED",
+                durable_rollout_no_completion=True,
+                durable_gateway_absent=True,
+                gateway_absence_basis="gateway_completion_absent",
+                finding_code=None,
+            )
+
+        executor = TemperatureFormalExecutorV1(
+            runtime_services=_TracingRuntime(),
+            ledger=ledger,
+            client_factory=_TracingClient,
+            audit_function=audit,
+            no_completion_audit_function=no_completion_audit,
+            poll_interval_seconds=0,
+            max_poll_attempts=1,
+        )
+        outcomes = executor.run_many_to_durable_terminal(
+            (
+                FormalCallEnvelopeV1.from_candidate(first),
+                FormalCallEnvelopeV1.from_candidate(second),
+            ),
+            max_workers=1,
+        )
+
+        assert tuple(outcome.state for outcome in outcomes) == (
+            "terminal_no_completion",
+            "completion",
+        )
+        assert inner.failure_has_no_completion(first.call_id)
+        assert trace == [
+            "health:1",
+            f"ledger:CALL_CLAIMED:{first.call_id}",
+            f"submit:{first_task_id}",
+            "health:2",
+            f"poll:{first_task_id}",
+            f"durable_audit:{first_task_id}",
+            f"no_completion_proof:{first_task_id}",
+            f"ledger:CALL_NO_COMPLETION_FAILURE:{first.call_id}",
+            "health:3",
+            f"ledger:CALL_CLAIMED:{second.call_id}",
+            f"submit:{second_task_id}",
+            "health:4",
+            f"poll:{second_task_id}",
+            f"durable_audit:{second_task_id}",
+        ]
 
 
 def test_claim_before_submit_and_private_candidate_finalization(tmp_path: Path) -> None:

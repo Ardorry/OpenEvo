@@ -33,6 +33,7 @@ def _base_topology(path: Path, host_completion_root: Path) -> None:
                 "rollout": {
                     "host": "127.0.0.1",
                     "port": 8080,
+                    "public_url": "http://host.docker.internal:8080",
                     "save_dir": os.fspath(host_completion_root),
                 },
                 "gateway": {
@@ -77,12 +78,19 @@ def test_effective_topology_rewrites_only_container_view(tmp_path: Path) -> None
     )
 
     assert effective["rollout"]["save_dir"] == os.fspath(container_root)
+    assert effective["rollout"]["host"] == "127.0.0.1"
+    assert effective["rollout"]["public_url"] == (
+        "http://host.docker.internal:8080"
+    )
     assert effective["gateway"]["rollout_server_url"] == (
         "http://host.docker.internal:8080"
     )
     assert effective["gateway"]["nodes"][0]["docker_host_path"] == mapping
     persisted = yaml.safe_load(base.read_text(encoding="utf-8"))
     assert persisted["rollout"]["save_dir"] == os.fspath(host_root)
+    assert module._ROLLOUT_CALLBACK_URL == (
+        "http://host.docker.internal:8080/callbacks/session_result"
+    )
 
 
 def test_runtime_mount_evidence_excludes_separate_writable_completion_bind() -> None:
@@ -165,6 +173,35 @@ def test_effective_topology_rejects_unbound_or_disabled_persistence(
     _base_topology(base, host_root)
     loaded = yaml.safe_load(base.read_text(encoding="utf-8"))
     loaded["gateway"]["completion_persistence"]["enabled"] = False
+    base.write_text(yaml.safe_dump(loaded), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="GATEWAY_BOOTSTRAP_TOPOLOGY_INVALID"):
+        module._effective_topology(
+            base,
+            {},
+            host_completion_root=host_root,
+            container_completion_root=Path("/openevo-temperature-completions"),
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("host", "0.0.0.0"),
+        ("public_url", "http://127.0.0.1:8080"),
+    ),
+)
+def test_effective_topology_rejects_callback_route_drift(
+    tmp_path: Path,
+    field: str,
+    value: object,
+) -> None:
+    module = _module()
+    host_root = (tmp_path / "host-completions").resolve()
+    base = tmp_path / "base.yaml"
+    _base_topology(base, host_root)
+    loaded = yaml.safe_load(base.read_text(encoding="utf-8"))
+    loaded["rollout"][field] = value
     base.write_text(yaml.safe_dump(loaded), encoding="utf-8")
 
     with pytest.raises(RuntimeError, match="GATEWAY_BOOTSTRAP_TOPOLOGY_INVALID"):

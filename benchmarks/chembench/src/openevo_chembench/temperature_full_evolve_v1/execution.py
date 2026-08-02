@@ -3,9 +3,9 @@
 The module deliberately separates admission from observation.  The controller
 thread is the only ledger writer: it fsyncs ``CALL_CLAIMED`` before transport,
 submits at most once for that claim, and appends accepted/evaluated records only
-after a durable Rollout result has been recovered and validated.  Poll workers
-perform read-only HTTP and persistence audits, so bounded parallel Candidate
-execution never turns the ledger into a multi-writer resource.
+after a durable Rollout result has been recovered and validated.  Formal calls
+are globally serialized: the preceding call must reach a durable terminal state
+before the next claim can run its credential-readiness setup or provider call.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ import json
 import re
 import time
 from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
@@ -40,6 +39,9 @@ from openevo_chembench.temperature_full_evolve_v1.candidate import (
     evaluate_candidate_completion_v1,
     observe_candidate_task_status_v1,
     prepare_candidate_call_v1,
+)
+from openevo_chembench.temperature_full_evolve_v1.config import (
+    CANDIDATE_MAX_WORKERS,
 )
 from openevo_chembench.temperature_full_evolve_v1.ledger import (
     TemperatureExperimentLedgerV1,
@@ -69,7 +71,9 @@ from openevo_chembench.temperature_full_evolve_v1.runtime_services import (
     audit_persisted_rollout_result_v1,
 )
 
-MAX_CANDIDATE_WORKERS = 3
+# Backward-compatible public name; the closed config owns the single value used
+# by both the formal executor and runner.
+MAX_CANDIDATE_WORKERS = CANDIDATE_MAX_WORKERS
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 DEFAULT_MAX_POLL_ATTEMPTS = 2400
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
@@ -352,11 +356,11 @@ class TemperatureFormalExecutorV1:
         *,
         max_workers: int = MAX_CANDIDATE_WORKERS,
     ) -> tuple[DurableFormalOutcomeV1, ...]:
-        """Execute calls in bounded chunks while preserving input-order results.
+        """Execute calls serially while preserving input-order results.
 
-        Claims and submissions are serial.  Only read-only polling/auditing is
-        concurrent.  The caller must finalize accepted/evaluated records on the
-        same controller thread before admitting later protocol phases.
+        A call is admitted, submitted, polled, and durably audited before the
+        next call is admitted.  ``max_workers`` remains explicit at the boundary
+        so any attempt to restore parallel Candidate execution fails closed.
         """
 
         values = tuple(envelopes)
@@ -366,28 +370,14 @@ class TemperatureFormalExecutorV1:
             or len({value.logical_call_id for value in values}) != len(values)
             or isinstance(max_workers, bool)
             or not isinstance(max_workers, int)
-            or not 1 <= max_workers <= MAX_CANDIDATE_WORKERS
+            or max_workers != MAX_CANDIDATE_WORKERS
         ):
             raise ValueError("formal execution batch is invalid")
         results: list[DurableFormalOutcomeV1] = []
-        for offset in range(0, len(values), max_workers):
-            chunk = values[offset : offset + max_workers]
-            admitted = tuple(self._admit(value) for value in chunk)
-            with ThreadPoolExecutor(max_workers=len(admitted)) as pool:
-                futures = [pool.submit(self._await_durable_terminal, item) for item in admitted]
-                probed: list[DurableFormalOutcomeV1 | Exception] = []
-                for future in futures:
-                    try:
-                        probed.append(future.result())
-                    except Exception as exc:  # noqa: BLE001 - preserve started calls
-                        probed.append(exc)
-            first_error = next((value for value in probed if isinstance(value, Exception)), None)
-            for value in probed:
-                if isinstance(value, DurableFormalOutcomeV1):
-                    self._record_no_completion_if_needed(value)
-                    results.append(value)
-            if first_error is not None:
-                raise first_error
+        for envelope in values:
+            outcome = self._await_durable_terminal(self._admit(envelope))
+            self._record_no_completion_if_needed(outcome)
+            results.append(outcome)
         return tuple(results)
 
     def _admit(self, envelope: FormalCallEnvelopeV1) -> _AdmittedCallV1:

@@ -206,17 +206,19 @@ def test_no_replace_publication_preserves_existing_destination(tmp_path: Path) -
     assert destination.is_dir()
 
 
-def test_v2_runtime_and_failure_namespaces_do_not_alias_legacy_state() -> None:
-    assert runtime.FORMAL_RUNTIME_ROOT_RELATIVE.endswith("/formal_runtime_v2")
+def test_v3_runtime_and_failure_namespaces_do_not_alias_prior_state() -> None:
+    assert runtime.FORMAL_RUNTIME_ROOT_RELATIVE.endswith("/formal_runtime_v3")
     assert runtime.FORMAL_RUNTIME_FAILURE_ROOT_RELATIVE.endswith(
-        "/formal_runtime_v2_failures"
+        "/formal_runtime_v3_failures"
     )
-    assert runtime.FORMAL_RUNTIME_ROOT_RELATIVE != (
-        "state/chembench_temperature_full_evolve_v1/formal_runtime"
-    )
-    assert runtime.FORMAL_RUNTIME_FAILURE_ROOT_RELATIVE != (
-        "state/chembench_temperature_full_evolve_v1/formal_runtime_failures"
-    )
+    assert runtime.FORMAL_RUNTIME_ROOT_RELATIVE not in {
+        "state/chembench_temperature_full_evolve_v1/formal_runtime",
+        "state/chembench_temperature_full_evolve_v1/formal_runtime_v2",
+    }
+    assert runtime.FORMAL_RUNTIME_FAILURE_ROOT_RELATIVE not in {
+        "state/chembench_temperature_full_evolve_v1/formal_runtime_failures",
+        "state/chembench_temperature_full_evolve_v1/formal_runtime_v2_failures",
+    }
 
 
 def test_formal_python_guard_rejects_repository_interpreter(

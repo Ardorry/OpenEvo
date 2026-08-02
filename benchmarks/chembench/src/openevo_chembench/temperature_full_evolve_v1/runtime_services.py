@@ -57,7 +57,7 @@ from openevo_chembench.temperature_full_evolve_v1.formal_runtime import (
     load_temperature_formal_runtime_v1,
 )
 
-SERVICE_RECEIPT_SCHEMA = "TemperatureFullEvolveRuntimeServicesReceiptV1"
+SERVICE_RECEIPT_SCHEMA = "TemperatureFullEvolveRuntimeServicesReceiptV2"
 SERVICE_STOP_RECEIPT_SCHEMA = "TemperatureFullEvolveRuntimeServicesStopReceiptV1"
 SERVICE_POINTER_SCHEMA = "TemperatureFullEvolveRuntimeServicesPointerV1"
 COMPLETION_ROOT_SCHEMA = "TemperatureFullEvolveCompletionRootV1"
@@ -65,6 +65,7 @@ COMPLETION_AUDIT_SCHEMA = "TemperatureFullEvolvePersistedCompletionAuditV1"
 ROLLOUT_RESULT_AUDIT_SCHEMA = "TemperatureFullEvolvePersistedRolloutResultAuditV1"
 NO_COMPLETION_EVIDENCE_SCHEMA = "TemperatureFullEvolveNoCompletionEvidenceV1"
 EMPTY_RUNTIME_INVENTORY_SCHEMA = "TemperatureFullEvolveEmptyRuntimeInventoryV1"
+CALLBACK_ROUTE_SCHEMA = "TemperatureFullEvolveCallbackRouteReceiptV1"
 
 SERVICE_ROOT_RELATIVE = "state/chembench_temperature_full_evolve_v1/runtime_services"
 RUNTIME_PYTHON_RELATIVE = FORMAL_RUNTIME_PYTHON_RELATIVE
@@ -79,6 +80,8 @@ GATEWAY_BOOTSTRAP_RELATIVE = (
 )
 
 ROLLOUT_URL = "http://127.0.0.1:8080"
+ROLLOUT_CONTAINER_URL = "http://host.docker.internal:8080"
+ROLLOUT_CALLBACK_URL = f"{ROLLOUT_CONTAINER_URL}/callbacks/session_result"
 GATEWAY_URL = "http://127.0.0.1:8100"
 GATEWAY_RUNTIME_MOUNT = "/openevo-temperature-runtime"
 GATEWAY_COMPLETION_MOUNT = "/openevo-temperature-completions"
@@ -590,13 +593,20 @@ def start_temperature_runtime_services_v1(
             for service, process in processes.items()
         }
         health = _require_service_health()
+        callback_route = _require_callback_route_ready(
+            host_topology=host_topology_path,
+            effective_topology=gateway_runtime_root / "effective_topology.yaml",
+            rollout_health=health["rollout"],
+        )
         receipt = {
             "schema_version": SERVICE_RECEIPT_SCHEMA,
             "service_run_id": service_run_id,
             "source_commit": source_commit,
             **metadata,
             "rollout_url": ROLLOUT_URL,
+            "rollout_callback_url": ROLLOUT_CALLBACK_URL,
             "gateway_url": GATEWAY_URL,
+            "callback_route": callback_route,
             "completion_root": completion_identity.payload,
             "rollout_process": identities["rollout"].payload,
             "gateway_process": identities["gateway"].payload,
@@ -1107,7 +1117,9 @@ def _load_runtime_identity(
         "runtime_python_sha256",
         "openevo_version",
         "rollout_url",
+        "rollout_callback_url",
         "gateway_url",
+        "callback_route",
         "completion_root",
         "rollout_process",
         "gateway_process",
@@ -1119,6 +1131,7 @@ def _load_runtime_identity(
         receipt["schema_version"] != SERVICE_RECEIPT_SCHEMA
         or receipt["service_run_id"] != service_run_id
         or receipt["rollout_url"] != ROLLOUT_URL
+        or receipt["rollout_callback_url"] != ROLLOUT_CALLBACK_URL
         or receipt["gateway_url"] != GATEWAY_URL
     ):
         raise TemperatureRuntimeServicesError("TEMPERATURE_RUNTIME_RECEIPT_INVALID")
@@ -1143,6 +1156,7 @@ def _load_runtime_identity(
         or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", receipt["openevo_version"]) is None
     ):
         raise TemperatureRuntimeServicesError("TEMPERATURE_RUNTIME_RECEIPT_INVALID")
+    _require_callback_route_receipt(receipt["callback_route"])
 
     completion_root = CompletionRootIdentityV1.from_payload(receipt["completion_root"])
     expected_root_relative = (
@@ -1262,8 +1276,9 @@ def _render_host_topology(template: Path, *, completion_root: Path) -> bytes:
     if (
         topology.rollout.host != "127.0.0.1"
         or topology.rollout.port != 8080
-        or topology.rollout.public_url != ROLLOUT_URL
+        or topology.rollout.public_url != ROLLOUT_CONTAINER_URL
         or topology.rollout.save_dir != os.fspath(completion_root)
+        or topology.gateway.rollout_server_url != ROLLOUT_CONTAINER_URL
         or len(topology.gateway.nodes) != 1
         or topology.gateway.nodes[0].id != "core-gateway"
         or topology.gateway.nodes[0].public_url != GATEWAY_URL
@@ -1277,6 +1292,114 @@ def _render_host_topology(template: Path, *, completion_root: Path) -> bytes:
         default_flow_style=False,
         sort_keys=False,
     ).encode("utf-8")
+
+
+def _require_callback_route_ready(
+    *,
+    host_topology: Path,
+    effective_topology: Path,
+    rollout_health: Mapping[str, Any],
+) -> dict[str, object]:
+    """Bind the callback route to the one proven container-to-host origin.
+
+    The Rollout listener remains loopback-only for host clients.  The Docker
+    host alias is advertised solely because the Gateway executes in a managed
+    container.  A healthy Gateway registration proves that exact container
+    origin reached this Rollout before any benchmark task can be admitted.
+    """
+
+    try:
+        host = TopologyConfig.load(host_topology)
+        effective = TopologyConfig.load(effective_topology)
+    except Exception as exc:
+        raise TemperatureRuntimeServicesError(
+            "TEMPERATURE_RUNTIME_CALLBACK_ROUTE_INVALID"
+        ) from exc
+    registration = rollout_health.get("gateway_registration")
+    if (
+        host.rollout.host != "127.0.0.1"
+        or host.rollout.port != 8080
+        or host.rollout.public_url != ROLLOUT_CONTAINER_URL
+        or host.gateway.rollout_server_url != ROLLOUT_CONTAINER_URL
+        or effective.rollout.host != "127.0.0.1"
+        or effective.rollout.port != 8080
+        or effective.rollout.public_url != ROLLOUT_CONTAINER_URL
+        or effective.gateway.rollout_server_url != ROLLOUT_CONTAINER_URL
+        or len(effective.gateway.nodes) != 1
+        or effective.gateway.nodes[0].id != "core-gateway"
+        or effective.gateway.nodes[0].host != "0.0.0.0"
+        or effective.gateway.nodes[0].public_url != GATEWAY_URL
+        or not isinstance(registration, Mapping)
+        or registration.get("gateway_url") != GATEWAY_URL
+        or registration.get("node_id") != "core-gateway"
+        or registration.get("registered") is not True
+        or registration.get("schedulable") is not True
+    ):
+        raise TemperatureRuntimeServicesError(
+            "TEMPERATURE_RUNTIME_CALLBACK_ROUTE_INVALID"
+        )
+    body: dict[str, object] = {
+        "schema_version": CALLBACK_ROUTE_SCHEMA,
+        "host_client_url": ROLLOUT_URL,
+        "rollout_bind_host": "127.0.0.1",
+        "rollout_advertised_url": ROLLOUT_CONTAINER_URL,
+        "rollout_callback_url": ROLLOUT_CALLBACK_URL,
+        "gateway_control_url": ROLLOUT_CONTAINER_URL,
+        "gateway_registration_url": GATEWAY_URL,
+        "gateway_registered": True,
+        "gateway_schedulable": True,
+        "connectivity_basis": "GATEWAY_REGISTRATION_OVER_EXACT_CONTROL_ORIGIN",
+        "security_boundary": "ROLLOUT_LISTENER_REMAINS_LOOPBACK_ONLY",
+        "model_calls_observed": 0,
+    }
+    body["callback_route_sha256"] = sha256_bytes(
+        canonical_pretty_json_bytes(body)
+    )
+    return body
+
+
+def _require_callback_route_receipt(payload: object) -> None:
+    expected = {
+        "schema_version",
+        "host_client_url",
+        "rollout_bind_host",
+        "rollout_advertised_url",
+        "rollout_callback_url",
+        "gateway_control_url",
+        "gateway_registration_url",
+        "gateway_registered",
+        "gateway_schedulable",
+        "connectivity_basis",
+        "security_boundary",
+        "model_calls_observed",
+        "callback_route_sha256",
+    }
+    if type(payload) is not dict or set(payload) != expected:
+        raise TemperatureRuntimeServicesError("TEMPERATURE_RUNTIME_RECEIPT_INVALID")
+    expected_values = {
+        "schema_version": CALLBACK_ROUTE_SCHEMA,
+        "host_client_url": ROLLOUT_URL,
+        "rollout_bind_host": "127.0.0.1",
+        "rollout_advertised_url": ROLLOUT_CONTAINER_URL,
+        "rollout_callback_url": ROLLOUT_CALLBACK_URL,
+        "gateway_control_url": ROLLOUT_CONTAINER_URL,
+        "gateway_registration_url": GATEWAY_URL,
+        "gateway_registered": True,
+        "gateway_schedulable": True,
+        "connectivity_basis": "GATEWAY_REGISTRATION_OVER_EXACT_CONTROL_ORIGIN",
+        "security_boundary": "ROLLOUT_LISTENER_REMAINS_LOOPBACK_ONLY",
+        "model_calls_observed": 0,
+    }
+    if any(payload.get(key) != value for key, value in expected_values.items()):
+        raise TemperatureRuntimeServicesError("TEMPERATURE_RUNTIME_RECEIPT_INVALID")
+    digest = payload.get("callback_route_sha256")
+    body = {key: value for key, value in payload.items() if key != "callback_route_sha256"}
+    if (
+        type(digest) is not str
+        or _SHA256_RE.fullmatch(digest) is None
+        or digest != sha256_bytes(canonical_pretty_json_bytes(body))
+    ):
+        raise TemperatureRuntimeServicesError("TEMPERATURE_RUNTIME_RECEIPT_INVALID")
 
 
 def _capture_completion_root_identity(
@@ -1345,7 +1468,11 @@ def _require_completion_root_identity(identity: TemperatureRuntimeServicesIdenti
     except Exception as exc:
         raise TemperatureRuntimeServicesError("TEMPERATURE_RUNTIME_TOPOLOGY_DRIFT") from exc
     if (
-        loaded.rollout.save_dir != os.fspath(root)
+        loaded.rollout.host != "127.0.0.1"
+        or loaded.rollout.port != 8080
+        or loaded.rollout.public_url != ROLLOUT_CONTAINER_URL
+        or loaded.rollout.save_dir != os.fspath(root)
+        or loaded.gateway.rollout_server_url != ROLLOUT_CONTAINER_URL
         or not loaded.gateway.completion_persistence.enabled
         or loaded.gateway.completion_persistence.max_field_bytes
         != identity.completion_root.max_field_bytes
@@ -1512,6 +1639,7 @@ def _load_gateway_container_identity(
         "docker_engine_identity_sha256",
         "docker_host_path_identity_sha256",
         "container_id",
+        "rollout_callback_url",
         "completion_root_marker_sha256",
         "container_completion_root",
         "container_completion_root_identity_sha256",
@@ -1521,6 +1649,7 @@ def _load_gateway_container_identity(
     digest_keys = expected_keys - {
         "schema_version",
         "container_completion_root",
+        "rollout_callback_url",
     }
     if any(
         type(receipt[key]) is not str or _SHA256_RE.fullmatch(receipt[key]) is None
@@ -1532,6 +1661,7 @@ def _load_gateway_container_identity(
         receipt["schema_version"] != _GATEWAY_BOOTSTRAP_RECEIPT_SCHEMA
         or receipt["host_topology_sha256"] != _sha256_file(host_topology)
         or receipt["effective_topology_sha256"] != _sha256_file(effective)
+        or receipt["rollout_callback_url"] != ROLLOUT_CALLBACK_URL
         or receipt["completion_root_marker_sha256"] != marker_sha256
         or receipt["container_completion_root"] != GATEWAY_COMPLETION_MOUNT
     ):
@@ -1543,7 +1673,11 @@ def _load_gateway_container_identity(
             "TEMPERATURE_RUNTIME_GATEWAY_BOOTSTRAP_INVALID"
         ) from exc
     if (
-        effective_topology.rollout.save_dir != GATEWAY_COMPLETION_MOUNT
+        effective_topology.rollout.host != "127.0.0.1"
+        or effective_topology.rollout.port != 8080
+        or effective_topology.rollout.public_url != ROLLOUT_CONTAINER_URL
+        or effective_topology.rollout.save_dir != GATEWAY_COMPLETION_MOUNT
+        or effective_topology.gateway.rollout_server_url != ROLLOUT_CONTAINER_URL
         or not effective_topology.gateway.completion_persistence.enabled
         or effective_topology.gateway.completion_persistence.max_field_bytes
         != COMPLETION_MAX_FIELD_BYTES

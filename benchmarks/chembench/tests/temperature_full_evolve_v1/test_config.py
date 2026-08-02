@@ -7,6 +7,7 @@ import yaml
 
 from openevo_chembench.temperature_full_evolve_v1.config import (
     BATCH_SIZE,
+    CANDIDATE_MAX_WORKERS,
     HISTORICAL_EXPOSURE_POLICY,
     TEST_COUNT,
     TRAIN_COUNT,
@@ -32,9 +33,10 @@ def test_live_config_is_closed_and_generation_zero_provenance_is_explicit() -> N
     )
     assert config.payload["protocol_scope"]["prior_artifact_import"] == "forbidden"
     assert config.framework_lock_relative == (
-        "state/chembench_temperature_full_evolve_v1/formal_runtime_v2/framework/"
+        "state/chembench_temperature_full_evolve_v1/formal_runtime_v3/framework/"
         "framework-lock.json"
     )
+    assert config.candidate_max_workers == CANDIDATE_MAX_WORKERS == 1
     assert TRAIN_COUNT == TEST_COUNT == 100
     assert TRAIN_COUNT % BATCH_SIZE == 0
     assert len(config.digest) == 64
@@ -49,5 +51,18 @@ def test_config_rejects_silent_never_exposed_claim(tmp_path: Path) -> None:
     with pytest.raises(
         TemperatureFullEvolveConfigError,
         match="TEMPERATURE_PROTOCOL_SCOPE_INVALID",
+    ):
+        load_temperature_full_evolve_config(candidate.resolve())
+
+
+def test_config_rejects_parallel_candidate_workers(tmp_path: Path) -> None:
+    payload = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    payload["executor"]["candidate_max_workers"] = 2
+    candidate = tmp_path / "config.yaml"
+    candidate.write_text(yaml.safe_dump(payload), encoding="utf-8")
+
+    with pytest.raises(
+        TemperatureFullEvolveConfigError,
+        match="TEMPERATURE_EXECUTOR_POLICY_INVALID",
     ):
         load_temperature_full_evolve_config(candidate.resolve())

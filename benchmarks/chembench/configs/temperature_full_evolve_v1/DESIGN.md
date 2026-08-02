@@ -40,10 +40,17 @@ plan、worker claim、typed artifact registration、validation、promotion 和 c
 
 正式服务和付费 runner 使用本实验独立的固定 Python bundle。该 bundle 在源码提交冻结后离线
 构建当前 OpenEvo Core 与 ChemBench wheel，逐个核对 wheel 中 Python 文件与源码，安装到
-`state/chembench_temperature_full_evolve_v1/formal_runtime_v2`，并验证两个 distribution 均为
+`state/chembench_temperature_full_evolve_v1/formal_runtime_v3`，并验证两个 distribution 均为
 non-editable、framework registry 与 wheel/lock 匹配。旧 STV2 runtime 只作为依赖版本来源；其中
 旧 Core、可编辑 ChemBench 包、数据库、completion 和 artifact 均不进入新的正式解释器。所有
 正式入口以 `-I` 启动且重新核验 formal-runtime receipt、源码提交和安装 inventory。
+
+`formal_runtime_v3` 与 `formal_runtime_v3_failures` 是不可覆盖的新 namespace；已有 v2 runtime
+及其 failure evidence 保持只读。升级 namespace 的直接原因是 Candidate formal execution 已从
+并行准入改为全局串行：前一任务必须先形成 Rollout durable terminal result 与 audit，下一任务
+才可进入自己的 credential-readiness setup。该约束消除多个 Candidate 的并行准入，但不把它
+表述为对全部 Gateway 后台 cleanup 的独立闭合证明，也不把历史 credential-readiness 失败归因于
+某个未经证明的 provider-call overlap；同时不会把旧 v2 receipt 错当作包含该编排修复的新 runtime。
 
 订阅 transport 需要容器网络连接 provider，因此不能把 `allow_internet=true` 误写成模型拥有
 网页或 shell 能力。本实验在通用 Codex subscription harness 上选择 closed
@@ -52,6 +59,17 @@ non-editable、framework registry 与 wheel/lock 匹配。旧 STV2 runtime 只�
 plugins、apps、browser、computer-use 与 subagent 继续由既有 closed profile 禁用；transcript
 零工具审计提供独立的事后完整性检查。credential-isolation readiness canary 是 harness setup
 的基础设施证明，不属于 Candidate/Reflector 任务指令，仍使用既有受控单次 shell canary。
+Candidate formal executor 的 closed 配置固定 `candidate_max_workers=1`；executor 拒绝任何
+大于 1 的值，runner 使用同一权威常量。每个 Candidate 必须完成 submit、poll 和 durable audit
+后才准入下一 Candidate。
+
+Rollout 仍只在宿主 `127.0.0.1:8080` 监听，宿主 runner 也只使用该地址；但它写入 Gateway
+session 的 terminal callback origin 固定为容器可达的
+`http://host.docker.internal:8080`。Gateway bootstrap、host/effective topology validator 与服务
+receipt 共同绑定这一映射，且 Docker argv 必须保留 `host.docker.internal:host-gateway`。因此
+容器不会把 callback 误发到自身 loopback，Rollout 也不会扩大为对外监听。
+新增 callback-route 字段使用 RuntimeServices receipt V2；旧 V1 receipt 文件保持只读，不以新
+schema 重新解释或覆盖。
 
 ## Split
 

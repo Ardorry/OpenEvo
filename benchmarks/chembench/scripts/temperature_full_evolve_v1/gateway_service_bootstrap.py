@@ -19,6 +19,7 @@ import subprocess
 from pathlib import Path
 
 import yaml
+from openevo.config import TopologyConfig
 from openevo.runtime.docker_host import (
     DockerEngineAuthority,
     discover_docker_host_path,
@@ -27,6 +28,7 @@ from openevo.runtime.docker_host import (
 
 _SCHEMA = "TemperatureFullEvolveGatewayBootstrapReceiptV1"
 _ROLLOUT_CONTROL_URL = "http://host.docker.internal:8080"
+_ROLLOUT_CALLBACK_URL = f"{_ROLLOUT_CONTROL_URL}/callbacks/session_result"
 _GATEWAY_BIND_HOST = "0.0.0.0"
 _GATEWAY_PUBLIC_URL = "http://127.0.0.1:8100"
 _CONTAINER_RUNTIME_ROOT = "/openevo-temperature-runtime"
@@ -97,6 +99,7 @@ def main() -> int:
         "docker_engine_identity_sha256": authority.identity_digest,
         "docker_host_path_identity_sha256": mapping.identity_digest,
         "container_id": mapping.container_id,
+        "rollout_callback_url": _ROLLOUT_CALLBACK_URL,
         "completion_root_marker_sha256": arguments.completion_root_marker_sha256,
         "container_completion_root": _CONTAINER_COMPLETION_ROOT,
         "container_completion_root_identity_sha256": completion_identity,
@@ -147,6 +150,9 @@ def _effective_topology(
     persistence = gateway.get("completion_persistence") if isinstance(gateway, dict) else None
     if (
         not isinstance(rollout, dict)
+        or rollout.get("host") != "127.0.0.1"
+        or rollout.get("port") != 8080
+        or rollout.get("public_url") != _ROLLOUT_CONTROL_URL
         or rollout.get("save_dir") != os.fspath(host_completion_root)
         or not isinstance(nodes, list)
         or len(nodes) != 1
@@ -161,6 +167,20 @@ def _effective_topology(
     rollout["save_dir"] = os.fspath(container_completion_root)
     gateway["rollout_server_url"] = _ROLLOUT_CONTROL_URL
     node["host"] = _GATEWAY_BIND_HOST
+    try:
+        topology = TopologyConfig.model_validate(loaded)
+    except Exception as exc:
+        raise RuntimeError("GATEWAY_BOOTSTRAP_TOPOLOGY_INVALID") from exc
+    if (
+        topology.rollout.host != "127.0.0.1"
+        or topology.rollout.port != 8080
+        or topology.rollout.public_url != _ROLLOUT_CONTROL_URL
+        or topology.gateway.rollout_server_url != _ROLLOUT_CONTROL_URL
+        or len(topology.gateway.nodes) != 1
+        or topology.gateway.nodes[0].host != _GATEWAY_BIND_HOST
+        or topology.gateway.nodes[0].public_url != _GATEWAY_PUBLIC_URL
+    ):
+        raise RuntimeError("GATEWAY_BOOTSTRAP_TOPOLOGY_INVALID")
     node["docker_host_path"] = docker_host_path
     return loaded
 

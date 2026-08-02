@@ -1,12 +1,13 @@
 rollout:
   host: 127.0.0.1
   port: 8080
-  public_url: http://127.0.0.1:8080
+  public_url: http://host.docker.internal:8080
   save_dir: __TEMPERATURE_COMPLETION_ROOT_HOST__
   dispatch_poll_interval_seconds: 0.25
   callback_grace_seconds: 120
 
 gateway:
+  rollout_server_url: http://host.docker.internal:8080
   heartbeat_interval_seconds: 5
   completion_persistence:
     enabled: true

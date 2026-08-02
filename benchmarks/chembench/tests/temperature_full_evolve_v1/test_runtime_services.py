@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import stat
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ from typing import Self
 import pytest
 import yaml
 from openevo.rollout.models import SessionResult
+from openevo.rollout.server import _build_state
 
 from openevo_chembench.temperature_full_evolve_v1 import runtime_services as services
 from openevo_chembench.temperature_full_evolve_v1.runtime_services import (
@@ -171,7 +173,18 @@ def test_host_topology_binds_owner_private_rollout_root() -> None:
     encoded = services._render_host_topology(template, completion_root=completion_root)
     topology = yaml.safe_load(encoded)
 
+    assert topology["rollout"]["host"] == "127.0.0.1"
+    assert topology["rollout"]["public_url"] == (
+        "http://host.docker.internal:8080"
+    )
     assert topology["rollout"]["save_dir"] == os.fspath(completion_root)
+    parsed = services.TopologyConfig.model_validate(topology)
+    assert parsed.gateway.rollout_server_url == services.ROLLOUT_CONTAINER_URL
+    assert _build_state(parsed).pipeline.callback_url == services.ROLLOUT_CALLBACK_URL
+    assert services.ROLLOUT_URL == "http://127.0.0.1:8080"
+    assert services.ROLLOUT_CALLBACK_URL == (
+        "http://host.docker.internal:8080/callbacks/session_result"
+    )
     assert topology["gateway"]["completion_persistence"] == {
         "enabled": True,
         "max_field_bytes": 16 * 1024 * 1024,
@@ -180,6 +193,101 @@ def test_host_topology_binds_owner_private_rollout_root() -> None:
     assert services.SERVICE_ROOT_RELATIVE == (
         "state/chembench_temperature_full_evolve_v1/runtime_services"
     )
+
+
+def test_gateway_container_keeps_exact_host_gateway_route(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    socket_metadata = SimpleNamespace(st_mode=stat.S_IFSOCK | 0o660, st_gid=998)
+    original_stat = Path.stat
+
+    def controlled_stat(path: Path, *, follow_symlinks: bool = True):
+        if path == Path("/var/run/docker.sock"):
+            return socket_metadata
+        return original_stat(path, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(Path, "stat", controlled_stat)
+    command = services._gateway_container_command(
+        repository=REPOSITORY,
+        paths={
+            "runtime_python": Path("/runtime/bin/python"),
+            "gateway_bootstrap": Path("/runtime/gateway_service_bootstrap.py"),
+        },
+        source_commit="a" * 40,
+        service_run_id=SERVICE_RUN_ID,
+        container_name="openevo-temperature-gateway-test",
+        gateway_runtime_root=tmp_path / "gateway-runtime",
+        completion_root=tmp_path / "completions",
+        host_topology=tmp_path / "host-topology.yaml",
+        completion_root_marker_sha256="b" * 64,
+        image_id="sha256:" + "c" * 64,
+        auth_source=tmp_path / "auth.json",
+        docker_launcher=Path("/usr/bin/docker"),
+    )
+
+    add_host = command.index("--add-host")
+    publish = command.index("--publish")
+    assert command[add_host + 1] == "host.docker.internal:host-gateway"
+    assert command[publish + 1] == "127.0.0.1:8100:8100"
+
+
+def test_callback_route_receipt_requires_exact_registered_container_origin(
+    tmp_path: Path,
+) -> None:
+    assert services.SERVICE_RECEIPT_SCHEMA == (
+        "TemperatureFullEvolveRuntimeServicesReceiptV2"
+    )
+    template = REPOSITORY / services.TOPOLOGY_RELATIVE
+    completion_root = (tmp_path / "host-completions").resolve()
+    host_topology = tmp_path / "host.yaml"
+    host_topology.write_bytes(
+        services._render_host_topology(template, completion_root=completion_root)
+    )
+    effective_payload = yaml.safe_load(host_topology.read_text(encoding="utf-8"))
+    effective_payload["rollout"]["save_dir"] = services.GATEWAY_COMPLETION_MOUNT
+    effective_payload["gateway"]["rollout_server_url"] = (
+        services.ROLLOUT_CONTAINER_URL
+    )
+    effective_payload["gateway"]["nodes"][0]["host"] = "0.0.0.0"
+    effective_topology = tmp_path / "effective.yaml"
+    effective_topology.write_text(
+        yaml.safe_dump(effective_payload, sort_keys=False),
+        encoding="utf-8",
+    )
+    rollout_health = {
+        "status": "ok",
+        "gateway_registration": {
+            "gateway_url": services.GATEWAY_URL,
+            "node_id": "core-gateway",
+            "registered": True,
+            "schedulable": True,
+        },
+    }
+
+    receipt = services._require_callback_route_ready(
+        host_topology=host_topology,
+        effective_topology=effective_topology,
+        rollout_health=rollout_health,
+    )
+
+    services._require_callback_route_receipt(receipt)
+    assert receipt["host_client_url"] == "http://127.0.0.1:8080"
+    assert receipt["rollout_bind_host"] == "127.0.0.1"
+    assert receipt["rollout_callback_url"] == services.ROLLOUT_CALLBACK_URL
+    assert receipt["gateway_registered"] is True
+    assert receipt["model_calls_observed"] == 0
+
+    rollout_health["gateway_registration"]["schedulable"] = False
+    with pytest.raises(
+        TemperatureRuntimeServicesError,
+        match="TEMPERATURE_RUNTIME_CALLBACK_ROUTE_INVALID",
+    ):
+        services._require_callback_route_ready(
+            host_topology=host_topology,
+            effective_topology=effective_topology,
+            rollout_health=rollout_health,
+        )
 
 
 def test_mount_inventory_requires_readonly_repository_and_shared_rw_root(

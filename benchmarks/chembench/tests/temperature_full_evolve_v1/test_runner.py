@@ -77,6 +77,70 @@ def test_layout_has_independent_evolved_baseline_roots_and_ids(tmp_path: Path) -
     assert len(set(layout.all_run_ids)) == 4
 
 
+def test_candidate_runner_uses_closed_serial_worker_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from benchmarks.chembench.tests.temperature_full_evolve_v1 import (
+        test_execution as execution_fixtures,
+    )
+
+    import openevo_chembench.temperature_full_evolve_v1.runner as module
+
+    run_id = "formal-run-runner-serial-0001"
+    service_digest = "1" * 64
+    observed: list[tuple[int, int]] = []
+
+    class _Executor:
+        def run_many_to_durable_terminal(
+            self,
+            envelopes: tuple[object, ...],
+            *,
+            max_workers: int,
+        ) -> tuple[object, ...]:
+            observed.append((len(envelopes), max_workers))
+            return tuple(SimpleNamespace(state="completion") for _ in envelopes)
+
+    task = execution_fixtures._task()
+    prompt = execution_fixtures._prompt()
+    monkeypatch.setattr(
+        module,
+        "render_official_five_shot_prompt",
+        lambda *_args, **_kwargs: prompt,
+    )
+    monkeypatch.setattr(
+        module,
+        "finalize_candidate_outcome_v1",
+        lambda *, plan, **_kwargs: SimpleNamespace(task_ordinal=plan.task_ordinal),
+    )
+    ledger = TemperatureExperimentLedgerV1(
+        path=(tmp_path / "runner-serial-ledger.jsonl").resolve(),
+        run_id=run_id,
+    )
+    try:
+        runner = object.__new__(TemperatureFullEvolveFormalRunnerV1)
+        runner._ledger = ledger
+        runner._runtime = SimpleNamespace(digest=service_digest)
+        runner._dev = ()
+        runner._executor = _Executor()
+        runner._write_call_checkpoint = lambda _envelope: None
+        runner._controller = SimpleNamespace(write_status=lambda: None)
+
+        completed = runner._run_candidate_phase(
+            tasks=(task, task),
+            phase="baseline_test",
+            batch_index=None,
+            context=None,
+            run_id=run_id,
+            ordinal_offset=0,
+        )
+    finally:
+        ledger.close()
+
+    assert len(completed) == 2
+    assert observed == [(2, 1)]
+
+
 def test_runner_persists_precise_terminal_before_any_fourth_reflector_call(
     tmp_path: Path,
 ) -> None:
