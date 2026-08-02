@@ -18,6 +18,7 @@ from openevo.runtime.codex_isolation import (
     CODEX_SUBSCRIPTION_CANARY_FAILURE_PREFIX,
     CODEX_SUBSCRIPTION_CANARY_OK,
     CODEX_SUBSCRIPTION_CANARY_RETRY_DELAY_SECONDS,
+    CODEX_SUBSCRIPTION_CANARY_VALIDATOR_SCHEMA,
     CODEX_SUBSCRIPTION_PERMISSION_PROFILE,
     CODEX_SUBSCRIPTION_POLICY_SHA256,
     CODEX_SUBSCRIPTION_REFRESH_PERSISTENCE,
@@ -43,7 +44,7 @@ _SCRIPT_PATH = "/openevo/session/workspace/.openevo-test-canary-probe.sh"
 
 def test_codex_subscription_policy_identity_is_stable() -> None:
     assert CODEX_SUBSCRIPTION_POLICY_SHA256 == (
-        "ec34f315217ea13500c8fe6312b03af5c01a6688500975328ee442f9804a6dfe"
+        "1740da516ef64fb37e3580b8e3d99613df3962e426f21a2900558e5d05c24082"
     )
     assert codex_subscription_contract() == {
         "schema_version": 1,
@@ -61,6 +62,14 @@ def test_codex_subscription_policy_identity_is_stable() -> None:
     assert CODEX_SUBSCRIPTION_REFRESH_PERSISTENCE == "unsupported_read_only_auth_overlay"
     assert CODEX_SUBSCRIPTION_CANARY_ATTEMPTS == 2
     assert CODEX_SUBSCRIPTION_CANARY_RETRY_DELAY_SECONDS == 15
+    assert (
+        CODEX_SUBSCRIPTION_CANARY_VALIDATOR_SCHEMA == "openevo.codex-subscription-canary-events.v2"
+    )
+    return_codes = [code for code, _ in codex_isolation._CANARY_VALIDATOR_FAILURE_CODES]
+    failure_codes = [code for _, code in codex_isolation._CANARY_VALIDATOR_FAILURE_CODES]
+    assert len(return_codes) == len(set(return_codes)) == 8
+    assert len(failure_codes) == len(set(failure_codes)) == 8
+    assert not {0, 42} & set(return_codes)
 
 
 def test_codex_subscription_overrides_are_valid_toml_and_closed() -> None:
@@ -177,6 +186,9 @@ def test_codex_subscription_canary_uses_real_exec_and_validates_boundaries() -> 
     assert "turn.completed" in command
     assert command.count("/opt/codex/bin/codex exec ") == 2
     assert command.count("sleep 15") == 1
+    assert command.count(">/dev/null 2>/dev/null") == 2
+    for return_code, failure_code in codex_isolation._CANARY_VALIDATOR_FAILURE_CODES:
+        assert command.count(f"{return_code}) failure_code={failure_code} ;;") == 2
     assert command.count("< /dev/null") == 2
     assert "O_NOFOLLOW" in command
     assert "0o500" in command
@@ -213,7 +225,8 @@ def test_codex_subscription_canary_failure_code_is_closed() -> None:
     marker = CODEX_SUBSCRIPTION_CANARY_FAILURE_PREFIX
 
     assert (
-        codex_subscription_canary_failure_code(f"{marker}EVIDENCE_INVALID\n") == "EVIDENCE_INVALID"
+        codex_subscription_canary_failure_code(f"{marker}CAPTURE_INTEGRITY_INVALID\n")
+        == "CAPTURE_INTEGRITY_INVALID"
     )
     assert (
         codex_subscription_canary_failure_code(
@@ -222,7 +235,9 @@ def test_codex_subscription_canary_failure_code_is_closed() -> None:
         == "CLEAN_REFUSAL_EXHAUSTED"
     )
     assert (
-        codex_subscription_canary_failure_code(f"{marker}EVIDENCE_INVALID\n{marker}INTERRUPTED\n")
+        codex_subscription_canary_failure_code(
+            f"{marker}CAPTURE_INTEGRITY_INVALID\n{marker}INTERRUPTED\n"
+        )
         == "UNKNOWN"
     )
     assert codex_subscription_canary_failure_code(f"{marker}NOT_ALLOWLISTED\n") == "UNKNOWN"
@@ -237,6 +252,24 @@ def test_full_canary_first_attempt_success(
         tmp_path,
         monkeypatch,
         outcomes=[{"kind": "success"}],
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == f"{CODEX_SUBSCRIPTION_CANARY_OK}\n"
+    assert result.stderr == ""
+    assert calls == 1
+
+
+@pytest.mark.parametrize("kind", ["success_diagnostic", "success_stdout_notice"])
+def test_full_canary_bounded_diagnostics_stay_private(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+) -> None:
+    result, calls = _run_generated_canary(
+        tmp_path,
+        monkeypatch,
+        outcomes=[{"kind": kind}],
     )
 
     assert result.returncode == 0
@@ -267,7 +300,11 @@ def test_full_canary_clean_nonzero_refusal_retries_then_succeeds(
 @pytest.mark.parametrize(
     ("kind", "expected_code"),
     [
-        pytest.param("invalid", "EVIDENCE_INVALID", id="invalid-evidence"),
+        pytest.param(
+            "invalid",
+            "TERMINAL_FAILURE_EVENT",
+            id="terminal-failure-event",
+        ),
         pytest.param(
             "exact_nonzero",
             "NONZERO_CLI_WITH_EXACT_EVIDENCE",
@@ -292,6 +329,46 @@ def test_full_canary_unsafe_failure_never_retries(
     assert codex_subscription_canary_failure_code(result.stderr) == expected_code
     assert CODEX_SUBSCRIPTION_CANARY_OK not in result.stdout
     assert "private-provider-diagnostic" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("validator_return_code", "expected_failure_code"),
+    [
+        *[
+            pytest.param(return_code, failure_code, id=failure_code.lower())
+            for return_code, failure_code in codex_isolation._CANARY_VALIDATOR_FAILURE_CODES
+        ],
+        pytest.param(99, "VALIDATOR_INTERNAL_ERROR", id="unknown-validator-code"),
+    ],
+)
+def test_full_canary_maps_every_validator_failure_without_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    validator_return_code: int,
+    expected_failure_code: str,
+) -> None:
+    monkeypatch.setattr(
+        codex_isolation,
+        "_canary_event_validator_command",
+        lambda **_values: f"/bin/sh -c 'exit {validator_return_code}'",
+    )
+
+    result, calls = _run_generated_canary(
+        tmp_path,
+        monkeypatch,
+        outcomes=[{"kind": "success"}, {"kind": "success"}],
+    )
+
+    assert result.returncode != 0
+    assert calls == 1
+    assert codex_subscription_canary_failure_code(result.stderr) == expected_failure_code
+    assert (
+        sum(
+            line.startswith(CODEX_SUBSCRIPTION_CANARY_FAILURE_PREFIX)
+            for line in result.stderr.splitlines()
+        )
+        == 1
+    )
 
 
 def test_full_canary_clean_refusal_exhaustion(
@@ -335,11 +412,24 @@ def test_canary_event_validator_accepts_exact_completed_command(
     assert result.stderr == ""
 
 
-def test_canary_event_validator_accepts_codex_stdin_notice(tmp_path: Path) -> None:
+def test_canary_event_validator_discards_bounded_stderr_diagnostic(tmp_path: Path) -> None:
     result = _run_validator(
         tmp_path,
         _canary_events(),
-        stderr=b"Reading additional input from stdin...\n",
+        stderr=b"private provider diagnostic that must never be forwarded\n",
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+def test_canary_event_validator_accepts_single_stdout_stdin_notice(
+    tmp_path: Path,
+) -> None:
+    result = _run_validator(
+        tmp_path,
+        b"Reading additional input from stdin...\n" + _canary_events(),
     )
 
     assert result.returncode == 0
@@ -348,29 +438,118 @@ def test_canary_event_validator_accepts_codex_stdin_notice(tmp_path: Path) -> No
 
 
 @pytest.mark.parametrize(
-    "case",
+    ("case", "expected_return_code"),
     [
-        pytest.param({"include_started": False}, id="missing-command-start"),
+        pytest.param(
+            {"include_started": False},
+            54,
+            id="missing-command-start",
+        ),
         pytest.param(
             {"command_output": '{"result":"isolated"}\n'},
+            55,
             id="incomplete-marker",
         ),
-        pytest.param({"extra_tool_type": "mcp_tool_call"}, id="extra-tool"),
-        pytest.param({"extra_event_type": "error"}, id="error-event"),
-        pytest.param({"extra_event_type": "deprecated"}, id="unknown-event"),
-        pytest.param({"command_suffix": "; /bin/true"}, id="appended-command"),
+        pytest.param(
+            {"extra_tool_type": "mcp_tool_call"},
+            56,
+            id="extra-tool",
+        ),
+        pytest.param(
+            {"extra_event_type": "error"},
+            52,
+            id="error-event",
+        ),
+        pytest.param(
+            {"extra_event_type": "deprecated"},
+            51,
+            id="unknown-event",
+        ),
+        pytest.param(
+            {"command_suffix": "; /bin/true"},
+            53,
+            id="appended-command",
+        ),
     ],
 )
 def test_canary_event_validator_fails_closed_on_ambiguous_evidence(
     tmp_path: Path,
     case: dict[str, object],
+    expected_return_code: int,
 ) -> None:
     result = _run_validator(tmp_path, _canary_events(**case))
 
-    assert result.returncode != 0
-    assert result.returncode != 42
-    assert "real-exec evidence is invalid" in result.stderr
+    assert result.returncode == expected_return_code
+    assert result.stdout == ""
+    assert result.stderr == ""
     assert CODEX_SUBSCRIPTION_CANARY_OK not in result.stderr
+
+
+def test_canary_event_validator_accepts_command_updates_and_passive_shapes(
+    tmp_path: Path,
+) -> None:
+    events = _decode_events(_canary_events(include_command_update=True))
+    passive = events[-2]["item"]
+    assert isinstance(passive, dict)
+    passive.pop("text")
+
+    result = _run_validator(tmp_path, _encode_events(events))
+
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        pytest.param("status", "failed", id="failed-status"),
+        pytest.param("exit_code", 1, id="nonzero-exit"),
+        pytest.param("aggregated_output", None, id="non-string-output"),
+        pytest.param("aggregated_output", "not-a-prefix", id="foreign-output"),
+    ],
+)
+def test_canary_event_validator_rejects_invalid_command_update_shape(
+    tmp_path: Path,
+    field: str,
+    value: object,
+) -> None:
+    events = _decode_events(_canary_events(include_command_update=True))
+    updated_item = events[3]["item"]
+    assert isinstance(updated_item, dict)
+    updated_item[field] = value
+
+    result = _run_validator(tmp_path, _encode_events(events))
+
+    assert result.returncode == 54
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+@pytest.mark.parametrize(
+    "case", ["item-before-turn", "item-after-terminal", "empty-thread", "bad-usage"]
+)
+def test_canary_event_validator_rejects_lifecycle_drift(
+    tmp_path: Path,
+    case: str,
+) -> None:
+    events = _decode_events(_canary_events())
+    if case == "item-before-turn":
+        events[1], events[2] = events[2], events[1]
+    elif case == "item-after-terminal":
+        events.append(events.pop(-2))
+    elif case == "empty-thread":
+        events[0]["thread_id"] = ""
+    else:
+        usage = events[-1]["usage"]
+        assert isinstance(usage, dict)
+        usage.pop("output_tokens")
+
+    result = _run_validator(tmp_path, _encode_events(events))
+
+    assert result.returncode == 51
+    assert result.stdout == ""
+    assert result.stderr == ""
 
 
 def test_canary_event_validator_allows_only_clean_no_tool_retry(
@@ -481,6 +660,7 @@ def _canary_events(
     *,
     include_command: bool = True,
     include_started: bool = True,
+    include_command_update: bool = False,
     command_output: str | None = None,
     extra_tool_type: str | None = None,
     extra_event_type: str | None = None,
@@ -508,6 +688,20 @@ def _canary_events(
             }
         )
     if include_command:
+        if include_command_update:
+            events.append(
+                {
+                    "type": "item.updated",
+                    "item": {
+                        "id": "item_1",
+                        "type": "command_execution",
+                        "command": command,
+                        "aggregated_output": _expected_output()[:16],
+                        "exit_code": None,
+                        "status": "in_progress",
+                    },
+                }
+            )
         events.append(
             {
                 "type": "item.completed",
@@ -561,6 +755,17 @@ def _canary_events(
     ).encode()
 
 
+def _decode_events(payload: bytes) -> list[dict[str, object]]:
+    return [json.loads(line) for line in payload.decode("utf-8").splitlines()]
+
+
+def _encode_events(events: list[dict[str, object]]) -> bytes:
+    return (
+        "\n".join(json.dumps(event, sort_keys=True, separators=(",", ":")) for event in events)
+        + "\n"
+    ).encode("utf-8")
+
+
 def _run_validator(
     tmp_path: Path,
     events: bytes,
@@ -571,6 +776,8 @@ def _run_validator(
     stderr_file = tmp_path / "stderr"
     event_file.write_bytes(events)
     stderr_file.write_bytes(stderr)
+    event_file.chmod(0o600)
+    stderr_file.chmod(0o600)
     command = _canary_event_validator_command(
         event_file=str(event_file),
         stderr_file=str(stderr_file),
@@ -729,7 +936,13 @@ events = [
     {{"type": "turn.started"}},
 ]
 kind = outcome["kind"]
-if kind in {{"success", "exact_nonzero", "success_cleanup_failure"}}:
+if kind in {{
+    "success",
+    "exact_nonzero",
+    "success_cleanup_failure",
+    "success_diagnostic",
+    "success_stdout_notice",
+}}:
     script_path.with_name(prefix + "-workspace").write_text(nonce, encoding="utf-8")
     Path("/tmp", prefix + "-write").write_text(nonce, encoding="utf-8")
     events.extend(
@@ -762,6 +975,7 @@ if kind in {{"success", "exact_nonzero", "success_cleanup_failure"}}:
         script_path.parent.chmod(0o555)
 elif kind == "invalid":
     print("private-provider-diagnostic", file=sys.stderr)
+    events.append({{"type": "error", "message": "private-provider-diagnostic"}})
 elif kind != "refusal":
     raise SystemExit(93)
 events.extend(
@@ -785,6 +999,10 @@ events.extend(
         }},
     ]
 )
+if kind == "success_diagnostic":
+    print("private-provider-diagnostic", file=sys.stderr)
+if kind == "success_stdout_notice":
+    print("Reading additional input from stdin...")
 for event in events:
     print(json.dumps(event, sort_keys=True, separators=(",", ":")))
 if kind == "exact_nonzero":

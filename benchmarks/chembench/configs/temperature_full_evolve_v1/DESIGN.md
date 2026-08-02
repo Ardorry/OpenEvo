@@ -40,12 +40,12 @@ plan、worker claim、typed artifact registration、validation、promotion 和 c
 
 正式服务和付费 runner 使用本实验独立的固定 Python bundle。该 bundle 在源码提交冻结后离线
 构建当前 OpenEvo Core 与 ChemBench wheel，逐个核对 wheel 中 Python 文件与源码，安装到
-`state/chembench_temperature_full_evolve_v1/formal_runtime_v6`，并验证两个 distribution 均为
+`state/chembench_temperature_full_evolve_v1/formal_runtime_v7`，并验证两个 distribution 均为
 non-editable、framework registry 与 wheel/lock 匹配。旧 STV2 runtime 只作为依赖版本来源；其中
 旧 Core、可编辑 ChemBench 包、数据库、completion 和 artifact 均不进入新的正式解释器。所有
 正式入口以 `-I` 启动且重新核验 formal-runtime receipt、源码提交和安装 inventory。
 
-`formal_runtime_v6` 与 `formal_runtime_v6_failures` 是不可覆盖的新 namespace；已有 v2/v3/v4/v5
+`formal_runtime_v7` 与 `formal_runtime_v7_failures` 是不可覆盖的新 namespace；已有 v2/v3/v4/v5/v6
 runtime 及其 failure evidence 保持只读。v3 已把 Candidate formal execution 从并行准入改为全局串行，
 并修正宿主 Rollout 到 Gateway 容器的 callback route。正式运行随后暴露出另一条彼此独立的
 Gateway 终态竞态：subscription 主 POSTRUN 在注册 durable cleanup ownership 后等待 runtime
@@ -90,6 +90,29 @@ no-tool attempt 的 CLI return code 非零。其他 evidence、exact command evi
 矛盾、inventory 异常全部 fail closed。独立 EXIT cleanup 与 signal handler 不再吞掉终止信号；
 cleanup 失败也不能发布 readiness；对外错误只保留 allowlisted code，不泄露 provider stderr。
 v5 的 run、completion、数据库和任何中间状态均不导入 v6 的 fresh C0 run。
+
+v6 的 fresh C0 健康门共开始 5 个逻辑 Candidate 调用，对应 8 个 physical claim：4 个 accepted
+且 evaluated，4 个以 canary `EVIDENCE_INVALID` no-completion 闭合。首个 Train batch 未闭合，
+Reflector、Core evolution、evolved Test 与 baseline Test 调用均为 0。所有 runtime cleanup journal
+均已退休，服务 stop receipt 证明 cleanup 完成且 completion evidence 保留；该 run 以私有 invalidation
+receipt 封存并禁止 resume。
+
+v6 的安全 cleanup 会删除临时 canary event/stderr；旧 validator 又把 capture、JSON、terminal error、
+未知工具、command evidence 和 lifecycle 的所有拒绝统一折叠为 `EVIDENCE_INVALID`，所以现有持久化
+证据不能证明四次失败的具体 provider/event 子型。代码层面对照同一 Codex harness 的正常 terminal
+validator，确认 canary 存在协议 drift：不接受正常路径允许的 stdout stdin notice；把 bounded stderr
+诊断误当 proof 内容；lifecycle 校验反而缺少顺序、active-turn、usage 和 terminal-last；同时无条件
+拒绝正常协议允许的 `item.updated` 与被动 item shape。
+
+v7 将两套 terminal 协议对齐，并保持隔离证明本身严格：stderr 仍执行 owner、regular-file、link、
+大小和 before/after/path identity 检查，但内容在私有内存中丢弃且永不进入日志；stdout 只允许首行
+出现一次精确 stdin notice；thread、turn、item、usage 与 terminal-last 走有状态校验。reasoning 与
+agent-message 只作为无副作用 passive item；command update 必须绑定同一精确 command identity，最终
+仍必须恰好一个 started/completed pair、exit 0 和 exact probe output，其他 tool 一律拒绝。validator
+使用私有数字状态映射到 allowlisted failure code，未知状态 fail closed；仅严格闭合且零 command 的
+clean refusal 可进行一次 15 秒 bounded retry。canary prompt、模型、reasoning、split、实验 prompt、
+parser、evaluator、artifact 与 feedback 规则均未改变。由于 readiness 接受协议发生变化，v6 run
+保持 immutable invalid evidence，任何 completion、数据库或状态均不导入 v7 的 fresh C0 run。
 
 订阅 transport 需要容器网络连接 provider，因此不能把 `allow_internet=true` 误写成模型拥有
 网页或 shell 能力。本实验在通用 Codex subscription harness 上选择 closed

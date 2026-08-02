@@ -35,15 +35,29 @@ CODEX_SUBSCRIPTION_CANARY_RETRY_DELAY_SECONDS: Final[int] = 15
 CODEX_SUBSCRIPTION_CANARY_FAILURE_PREFIX: Final[str] = (
     "openevo-codex-subscription-canary-failure-v1:"
 )
+CODEX_SUBSCRIPTION_CANARY_VALIDATOR_SCHEMA: Final[str] = (
+    "openevo.codex-subscription-canary-events.v2"
+)
 CODEX_SUBSCRIPTION_REFRESH_PERSISTENCE: Final[str] = "unsupported_read_only_auth_overlay"
 CODEX_SUBSCRIPTION_CANARY_CWD: Final[str] = MANAGED_CODEX_READINESS_WORKSPACE
 _CANARY_RESULT: Final[str] = "isolated"
 _CANARY_NONCE_BYTES: Final[int] = 16
+_CANARY_CLEAN_REFUSAL_RC: Final[int] = 42
+_CANARY_VALIDATOR_FAILURE_CODES: Final[tuple[tuple[int, str], ...]] = (
+    (50, "CAPTURE_INTEGRITY_INVALID"),
+    (51, "EVENT_PROTOCOL_INVALID"),
+    (52, "TERMINAL_FAILURE_EVENT"),
+    (53, "COMMAND_IDENTITY_INVALID"),
+    (54, "COMMAND_LIFECYCLE_INVALID"),
+    (55, "PROBE_RESULT_INVALID"),
+    (56, "UNEXPECTED_TOOL_EVENT"),
+    (57, "VALIDATOR_CONTRACT_INVALID"),
+)
 _CANARY_FAILURE_CODES: Final[frozenset[str]] = frozenset(
     {
+        *(code for _, code in _CANARY_VALIDATOR_FAILURE_CODES),
         "CLEAN_REFUSAL_EXHAUSTED",
         "CLEANUP_FAILED",
-        "EVIDENCE_INVALID",
         "INTERRUPTED",
         "LOCAL_PRECONDITION_FAILED",
         "NONZERO_CLI_WITH_EXACT_EVIDENCE",
@@ -51,6 +65,7 @@ _CANARY_FAILURE_CODES: Final[frozenset[str]] = frozenset(
         "REFUSAL_INVENTORY_INVALID",
         "RETRY_DELAY_INTERRUPTED",
         "SCRIPT_AUTHORITY_INVALID",
+        "VALIDATOR_INTERNAL_ERROR",
     }
 )
 _EVOLUTION_ROOT: Final[str] = "/openevo/session/evolution"
@@ -152,6 +167,13 @@ _POLICY_SPEC: Final[dict[str, object]] = {
         CODEX_SUBSCRIPTION_CANARY_RETRY_DELAY_SECONDS
     ),
     "readiness_retry_class": "exact_completed_turn_without_tool",
+    "readiness_validator_schema": CODEX_SUBSCRIPTION_CANARY_VALIDATOR_SCHEMA,
+    "readiness_validator_failure_codes": [
+        {"return_code": return_code, "failure_code": failure_code}
+        for return_code, failure_code in _CANARY_VALIDATOR_FAILURE_CODES
+    ],
+    "readiness_stderr_handling": "bounded_private_discard",
+    "readiness_stdout_notice": "single_exact_optional_prefix",
     "readiness_context": {
         "working_directory": CODEX_SUBSCRIPTION_CANARY_CWD,
         "project_instructions": "absent",
@@ -475,6 +497,24 @@ def codex_subscription_exec_canary_command(
     attempt_nonces = (checked_nonce, retry_nonce)
     if len(attempt_nonces) != CODEX_SUBSCRIPTION_CANARY_ATTEMPTS:
         raise RuntimeError("Codex subscription canary attempt policy is invalid")
+    validator_return_codes = [
+        return_code for return_code, _ in _CANARY_VALIDATOR_FAILURE_CODES
+    ]
+    validator_failure_codes = [
+        failure_code for _, failure_code in _CANARY_VALIDATOR_FAILURE_CODES
+    ]
+    if (
+        len(set(validator_return_codes)) != len(validator_return_codes)
+        or len(set(validator_failure_codes)) != len(validator_failure_codes)
+        or any(
+            return_code < 1
+            or return_code > 125
+            or return_code == _CANARY_CLEAN_REFUSAL_RC
+            for return_code in validator_return_codes
+        )
+        or any(failure_code not in _CANARY_FAILURE_CODES for failure_code in validator_failure_codes)
+    ):
+        raise RuntimeError("Codex subscription canary validator policy is invalid")
     for attempt_number, attempt_nonce in enumerate(attempt_nonces, start=1):
         script_id = hashlib.sha256(f"{attempt_nonce}:script".encode()).hexdigest()[:24]
         prefix = f".openevo-{script_id}"
@@ -582,6 +622,16 @@ def codex_subscription_exec_canary_command(
             script_path=attempt["script"],
             expected_output=attempt["expected_output"],
         )
+        validator_failure_case = [
+            '    case "$validator_rc" in',
+            *(
+                f"      {return_code}) failure_code={failure_code} ;;"
+                for return_code, failure_code in _CANARY_VALIDATOR_FAILURE_CODES
+            ),
+            "      *) failure_code=VALIDATOR_INTERNAL_ERROR ;;",
+            "    esac",
+            "    exit 1",
+        ]
         prefix = attempt["script"].rsplit("/", 1)[1].removesuffix("-probe.sh")
         refusal_inventory = _canary_inventory_command(
             prefix=prefix,
@@ -618,7 +668,7 @@ def codex_subscription_exec_canary_command(
                     f"{shlex.quote(attempt['home_read'])}"
                 ),
                 "  set +e",
-                "  failure_code=EVIDENCE_INVALID",
+                "  failure_code=VALIDATOR_INTERNAL_ERROR",
                 (
                     f"  {shlex.quote(MANAGED_CODEX_BINARY)} exec "
                     "--skip-git-repo-check --json --ephemeral "
@@ -636,8 +686,8 @@ def codex_subscription_exec_canary_command(
                     f'verify {shlex.quote(attempt["script"])})"'
                 ),
                 "  set +e",
-                "  failure_code=EVIDENCE_INVALID",
-                f"  {validator}",
+                "  failure_code=VALIDATOR_INTERNAL_ERROR",
+                f"  {validator} >/dev/null 2>/dev/null",
                 "  validator_rc=$?",
                 "  set -e",
                 '  if test "$validator_rc" -eq 0; then',
@@ -657,9 +707,11 @@ def codex_subscription_exec_canary_command(
                 f"    test ! -e {shlex.quote(attempt['home_write'])}",
                 f"    {success_inventory}",
                 "    canary_passed=1",
-                '  elif test "$validator_rc" -ne 42; then',
-                "    failure_code=EVIDENCE_INVALID",
-                "    exit 1",
+                (
+                    '  elif test "$validator_rc" -ne '
+                    f"{_CANARY_CLEAN_REFUSAL_RC}; then"
+                ),
+                *validator_failure_case,
                 "  else",
                 "    failure_code=REFUSAL_INVENTORY_INVALID",
                 f"    {refusal_inventory}",
@@ -680,7 +732,7 @@ def codex_subscription_exec_canary_command(
         )
     lines.extend(
         [
-            "failure_code=EVIDENCE_INVALID",
+            "failure_code=VALIDATOR_INTERNAL_ERROR",
             'test "$canary_passed" -eq 1',
             f"printf '%s\\n' {shlex.quote(marker)}",
         ]
@@ -776,58 +828,122 @@ import shlex
 import stat
 import sys
 
-event_path, stderr_path, nonce, marker, script_path, expected_output = sys.argv[1:]
+(
+    event_path,
+    stderr_path,
+    nonce,
+    marker,
+    script_path,
+    expected_output,
+    *validator_return_codes,
+) = sys.argv[1:]
 max_bytes = 262144
+stdin_notice = "Reading additional input from stdin..."
+CLEAN_REFUSAL = 42
 
-def fail():
-    raise SystemExit("Codex subscription real-exec evidence is invalid")
+try:
+    (
+        CAPTURE_INTEGRITY_INVALID,
+        EVENT_PROTOCOL_INVALID,
+        TERMINAL_FAILURE_EVENT,
+        COMMAND_IDENTITY_INVALID,
+        COMMAND_LIFECYCLE_INVALID,
+        PROBE_RESULT_INVALID,
+        UNEXPECTED_TOOL_EVENT,
+        VALIDATOR_CONTRACT_INVALID,
+    ) = tuple(int(value) for value in validator_return_codes)
+except (TypeError, ValueError):
+    raise SystemExit(1)
 
-def clean_refusal():
-    raise SystemExit(42)
+def fail(return_code):
+    raise SystemExit(return_code)
+
+def identity(metadata):
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_uid,
+        metadata.st_gid,
+        metadata.st_nlink,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
 
 def read_regular(path, *, allow_empty):
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
         fd = os.open(path, flags)
         try:
-            metadata = os.fstat(fd)
+            before = os.fstat(fd)
             if (
-                not stat.S_ISREG(metadata.st_mode)
-                or metadata.st_nlink != 1
-                or metadata.st_size > max_bytes
-                or (not allow_empty and metadata.st_size == 0)
+                not stat.S_ISREG(before.st_mode)
+                or before.st_nlink != 1
+                or before.st_uid != os.geteuid()
+                or stat.S_IMODE(before.st_mode) != 0o600
+                or before.st_size > max_bytes
+                or (not allow_empty and before.st_size == 0)
             ):
-                fail()
+                fail(CAPTURE_INTEGRITY_INVALID)
             payload = b""
-            while len(payload) <= metadata.st_size:
-                chunk = os.read(fd, min(65536, metadata.st_size - len(payload) + 1))
+            while len(payload) <= before.st_size:
+                chunk = os.read(fd, min(65536, before.st_size - len(payload) + 1))
                 if not chunk:
                     break
                 payload += chunk
-            if len(payload) != metadata.st_size:
-                fail()
-            return payload
+            after = os.fstat(fd)
         finally:
             os.close(fd)
+        path_metadata = os.lstat(path)
     except (OSError, ValueError):
-        fail()
+        fail(CAPTURE_INTEGRITY_INVALID)
+    if (
+        len(payload) != before.st_size
+        or identity(before) != identity(after)
+        or identity(before) != identity(path_metadata)
+        or not stat.S_ISREG(path_metadata.st_mode)
+        or path_metadata.st_nlink != 1
+    ):
+        fail(CAPTURE_INTEGRITY_INVALID)
+    return payload
 
-stderr_payload = read_regular(stderr_path, allow_empty=True)
-if stderr_payload not in {b"", b"Reading additional input from stdin...\n"}:
-    fail()
+# Stderr is a bounded private diagnostic channel, not readiness evidence.  Its
+# bytes are deliberately discarded and never enter a durable error or receipt.
+read_regular(stderr_path, allow_empty=True)
 payload = read_regular(event_path, allow_empty=False)
 if not payload.endswith(b"\n"):
-    fail()
+    fail(CAPTURE_INTEGRITY_INVALID)
 try:
-    text = payload.decode("utf-8")
+    lines = payload.decode("utf-8").splitlines()
 except UnicodeError:
-    fail()
+    fail(CAPTURE_INTEGRITY_INVALID)
+if lines and lines[0] == stdin_notice:
+    lines = lines[1:]
+if not lines or any(not line for line in lines):
+    fail(EVENT_PROTOCOL_INVALID)
+
+try:
+    evidence = json.loads(expected_output)
+except (json.JSONDecodeError, RecursionError):
+    fail(VALIDATOR_CONTRACT_INVALID)
+if evidence != {
+    "schema_version": 1,
+    "nonce": nonce,
+    "marker": marker,
+    "result": "isolated",
+    "leak": False,
+    "forbidden_file": False,
+}:
+    fail(VALIDATOR_CONTRACT_INVALID)
 
 counts = {
     "thread.started": 0,
     "turn.started": 0,
     "turn.completed": 0,
 }
+turn_active = False
+last_event_type = None
 command_started = []
 command_completed = []
 expected_invocation = ["/bin/sh", script_path, nonce]
@@ -850,84 +966,124 @@ def command_matches(command):
             return False
     return False
 
-for raw_line in text.splitlines():
-    if not raw_line or len(raw_line.encode("utf-8")) > max_bytes:
-        fail()
+for raw_line in lines:
+    if len(raw_line.encode("utf-8")) > max_bytes:
+        fail(EVENT_PROTOCOL_INVALID)
     try:
         event = json.loads(raw_line)
     except (json.JSONDecodeError, RecursionError):
-        fail()
+        fail(EVENT_PROTOCOL_INVALID)
     if not isinstance(event, dict) or not isinstance(event.get("type"), str):
-        fail()
+        fail(EVENT_PROTOCOL_INVALID)
     event_type = event["type"]
-    if event_type in counts:
-        counts[event_type] += 1
-        continue
-    if event_type in {"turn.failed", "error"}:
-        fail()
-    if event_type not in {"item.started", "item.updated", "item.completed"}:
-        fail()
-    item = event.get("item")
-    if not isinstance(item, dict) or not isinstance(item.get("type"), str):
-        fail()
-    item_type = item["type"]
-    if item_type == "command_execution":
-        if event_type == "item.updated":
-            fail()
-        command = item.get("command")
+    if event_type == "thread.started":
         if (
-            not isinstance(command, str)
-            or not command_matches(command)
-            or command.count(script_path) != 1
-            or command.count(nonce) != 1
+            any(counts.values())
+            or turn_active
+            or not isinstance(event.get("thread_id"), str)
+            or not event["thread_id"]
+        ):
+            fail(EVENT_PROTOCOL_INVALID)
+        counts[event_type] += 1
+    elif event_type == "turn.started":
+        if counts["thread.started"] != 1 or any(
+            counts[name] for name in ("turn.started", "turn.completed")
+        ) or turn_active:
+            fail(EVENT_PROTOCOL_INVALID)
+        counts[event_type] += 1
+        turn_active = True
+    elif event_type in {"item.started", "item.updated", "item.completed"}:
+        item = event.get("item")
+        if (
+            not turn_active
+            or not isinstance(item, dict)
             or not isinstance(item.get("id"), str)
             or not item["id"]
+            or not isinstance(item.get("type"), str)
+            or not item["type"]
         ):
-            fail()
-        if event_type == "item.started":
+            fail(EVENT_PROTOCOL_INVALID)
+        item_type = item["type"]
+        if item_type == "command_execution":
+            command = item.get("command")
             if (
-                item.get("status") != "in_progress"
-                or item.get("aggregated_output") != ""
-                or item.get("exit_code") is not None
+                not isinstance(command, str)
+                or not command_matches(command)
+                or command.count(script_path) != 1
+                or command.count(nonce) != 1
             ):
-                fail()
-            command_started.append((item["id"], command))
-        else:
-            if (
-                item.get("status") != "completed"
-                or item.get("exit_code") != 0
-                or item.get("aggregated_output") != expected_output + "\n"
-            ):
-                fail()
-            command_completed.append((item["id"], command))
-        continue
-    if item_type not in {"reasoning", "agent_message"}:
-        fail()
-    if event_type == "item.updated":
-        fail()
-    item_text = item.get("text")
-    if event_type == "item.completed" and not isinstance(item_text, str):
-        fail()
+                fail(COMMAND_IDENTITY_INVALID)
+            identity_pair = (item["id"], command)
+            if event_type == "item.started":
+                if (
+                    command_started
+                    or command_completed
+                    or item.get("status") != "in_progress"
+                    or item.get("aggregated_output") != ""
+                    or item.get("exit_code") is not None
+                ):
+                    fail(COMMAND_LIFECYCLE_INVALID)
+                command_started.append(identity_pair)
+            elif event_type == "item.updated":
+                update_output = item.get("aggregated_output")
+                if (
+                    command_started != [identity_pair]
+                    or command_completed
+                    or item.get("status") != "in_progress"
+                    or item.get("exit_code") is not None
+                    or not isinstance(update_output, str)
+                    or not (expected_output + "\n").startswith(update_output)
+                ):
+                    fail(COMMAND_LIFECYCLE_INVALID)
+            else:
+                if command_started != [identity_pair] or command_completed:
+                    fail(COMMAND_LIFECYCLE_INVALID)
+                if (
+                    item.get("status") != "completed"
+                    or item.get("exit_code") != 0
+                    or item.get("aggregated_output") != expected_output + "\n"
+                ):
+                    fail(PROBE_RESULT_INVALID)
+                command_completed.append(identity_pair)
+        elif item_type not in {"reasoning", "agent_message"}:
+            fail(UNEXPECTED_TOOL_EVENT)
+    elif event_type == "turn.completed":
+        usage = event.get("usage")
+        usage_fields = {
+            "input_tokens",
+            "cached_input_tokens",
+            "output_tokens",
+            "reasoning_output_tokens",
+        }
+        if (
+            not turn_active
+            or counts[event_type] != 0
+            or not isinstance(usage, dict)
+            or set(usage) != usage_fields
+            or any(
+                isinstance(value, bool) or not isinstance(value, int) or value < 0
+                for value in usage.values()
+            )
+        ):
+            fail(EVENT_PROTOCOL_INVALID)
+        counts[event_type] += 1
+        turn_active = False
+    elif event_type in {"turn.failed", "error"}:
+        fail(TERMINAL_FAILURE_EVENT)
+    else:
+        fail(EVENT_PROTOCOL_INVALID)
+    last_event_type = event_type
 
-if counts != {"thread.started": 1, "turn.started": 1, "turn.completed": 1}:
-    fail()
+if (
+    counts != {"thread.started": 1, "turn.started": 1, "turn.completed": 1}
+    or turn_active
+    or last_event_type != "turn.completed"
+):
+    fail(EVENT_PROTOCOL_INVALID)
 if not command_started and not command_completed:
-    clean_refusal()
+    fail(CLEAN_REFUSAL)
 if len(command_started) != 1 or command_started != command_completed:
-    fail()
-try:
-    evidence = json.loads(expected_output)
-except (json.JSONDecodeError, RecursionError):
-    fail()
-if evidence != {
-    "schema_version": 1,
-    "nonce": nonce,
-    "marker": marker,
-    "result": "isolated",
-    "leak": False,
-    "forbidden_file": False,
-}:
-    fail()
+    fail(COMMAND_LIFECYCLE_INVALID)
 """
 
 
@@ -948,7 +1104,8 @@ def _canary_event_validator_command(
             nonce,
             marker,
             script_path,
-            expected_output,
+        expected_output,
+            *(str(return_code) for return_code, _ in _CANARY_VALIDATOR_FAILURE_CODES),
         )
     )
     return f"python3 -c {shlex.quote(_CANARY_EVENT_VALIDATOR_SOURCE)} {args}"
@@ -982,6 +1139,7 @@ __all__ = [
     "CODEX_SUBSCRIPTION_CANARY_FAILURE_PREFIX",
     "CODEX_SUBSCRIPTION_CANARY_OK",
     "CODEX_SUBSCRIPTION_CANARY_RETRY_DELAY_SECONDS",
+    "CODEX_SUBSCRIPTION_CANARY_VALIDATOR_SCHEMA",
     "CODEX_SUBSCRIPTION_CODEX_VERSION",
     "CODEX_SUBSCRIPTION_CONTRACT_KEY",
     "CODEX_SUBSCRIPTION_PERMISSION_PROFILE",
