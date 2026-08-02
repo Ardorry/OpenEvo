@@ -34,6 +34,7 @@ from openevo_chembench.temperature_full_evolve_v1.core_evolution import (
     TemperatureCoreEvolutionCoordinatorV1,
 )
 from openevo_chembench.temperature_full_evolve_v1.ledger import (
+    REFLECTOR_ATTEMPT_RETRY_EXHAUSTED,
     TemperatureExperimentLedgerV1,
 )
 
@@ -86,6 +87,7 @@ class ControllerActionKindV1(StrEnum):
     RUN_BASELINE_TEST = "run_baseline_test"
     CLOSE_BASELINE_TEST = "close_baseline_test"
     CLOSE_AUDIT = "close_audit"
+    HARD_TERMINAL = "hard_terminal"
     COMPLETE = "complete"
 
 
@@ -151,8 +153,18 @@ class TemperatureExperimentControllerV1:
     @property
     def action(self) -> ControllerActionV1:
         self._validate_semantic_prefix()
-        if any(event["kind"] == "RUN_FAILED" for event in self._ledger.events):
-            raise TemperatureControllerError("CONTROLLER_RUN_ALREADY_FAILED")
+        failed = [event for event in self._ledger.events if event["kind"] == "RUN_FAILED"]
+        if failed:
+            if len(failed) != 1:
+                raise TemperatureControllerError("CONTROLLER_RUN_FAILURE_INVALID")
+            payload = failed[0]["payload"]
+            return ControllerActionV1(
+                kind=ControllerActionKindV1.HARD_TERMINAL,
+                phase="failed",
+                batch_index=int(payload["batch_index"]),
+                completed_items=int(payload["attempt_count"]),
+                expected_items=3,
+            )
         expected = self._next_semantic_event()
         unresolved = self._unresolved_claims()
         if unresolved:
@@ -173,6 +185,34 @@ class TemperatureExperimentControllerV1:
                 expected_items=1,
             )
         return self._action_for_expected(expected)
+
+    def record_reflector_retry_exhausted(
+        self,
+        *,
+        batch_index: int,
+    ) -> dict[str, Any]:
+        """Persist the one aggregate-only hard terminal after three closed attempts."""
+
+        if type(batch_index) is not int or not 1 <= batch_index <= 4:
+            raise ValueError("Reflector failure batch is invalid")
+        failed = [event for event in self._ledger.events if event["kind"] == "RUN_FAILED"]
+        if failed:
+            if (
+                len(failed) != 1
+                or failed[0]["payload"].get("failure_code")
+                != REFLECTOR_ATTEMPT_RETRY_EXHAUSTED
+                or failed[0]["payload"].get("batch_index") != batch_index
+            ):
+                raise TemperatureControllerError("CONTROLLER_RUN_FAILURE_INVALID")
+            self.write_status()
+            return dict(failed[0])
+        payload = _reflector_retry_exhausted_payload(
+            events=self._ledger.events,
+            batch_index=batch_index,
+        )
+        event = self._ledger.append("RUN_FAILED", payload)
+        self.write_status()
+        return event
 
     def append_protocol_event(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Append exactly the currently admissible semantic boundary."""
@@ -221,6 +261,9 @@ class TemperatureExperimentControllerV1:
         no_completion = [
             event for event in events if event["kind"] == "CALL_NO_COMPLETION_FAILURE"
         ]
+        rejected_completion = [
+            event for event in events if event["kind"] == "CALL_REJECTED_COMPLETION"
+        ]
         unresolved = self._unresolved_claims()
         now = _utc_now()
         last_progress = (
@@ -245,7 +288,7 @@ class TemperatureExperimentControllerV1:
             "core_jobs": sum(event["kind"] == "TARGET_JOB_COMPLETED" for event in events),
             "active_lease": bool(unresolved),
             "staged_side_effects": len(unresolved),
-            "failed_side_effects": len(no_completion),
+            "failed_side_effects": len(no_completion) + len(rejected_completion),
             "last_progress_at_utc": last_progress,
             "progress_counter": len(events),
             "runner_pid": os.getpid(),
@@ -265,7 +308,13 @@ class TemperatureExperimentControllerV1:
             "ledger_head_sha256": self._ledger.head_digest,
             "ledger_event_count": len(events),
             "failures": sum(
-                event["kind"] in {"CALL_NO_COMPLETION_FAILURE", "INCIDENT_OPENED"}
+                event["kind"]
+                in {
+                    "CALL_NO_COMPLETION_FAILURE",
+                    "CALL_REJECTED_COMPLETION",
+                    "INCIDENT_OPENED",
+                    "RUN_FAILED",
+                }
                 for event in events
             ),
             "retries": len(claims) - len(logical),
@@ -397,7 +446,8 @@ class TemperatureExperimentControllerV1:
         terminal_calls = {
             str(event["payload"].get("call_id"))
             for event in self._ledger.events
-            if event["kind"] == "CALL_NO_COMPLETION_FAILURE"
+            if event["kind"]
+            in {"CALL_NO_COMPLETION_FAILURE", "CALL_REJECTED_COMPLETION"}
         }
         latest = _claims_by_logical(self._ledger.events)
         return tuple(
@@ -535,6 +585,56 @@ def _claims_by_logical(events: tuple[dict[str, Any], ...]) -> dict[str, dict[str
 def _batch_from_logical(logical_call_id: str) -> int | None:
     match = _BATCH_TOKEN.search(logical_call_id)
     return None if match is None else int(match.group("batch"))
+
+
+def _reflector_retry_exhausted_payload(
+    *,
+    events: tuple[dict[str, Any], ...],
+    batch_index: int,
+) -> dict[str, Any]:
+    claims = [
+        event["payload"]
+        for event in events
+        if event["kind"] == "CALL_CLAIMED"
+        and event["payload"].get("phase") == "train_reflector"
+        and _batch_from_logical(str(event["payload"].get("logical_call_id")))
+        == batch_index
+    ]
+    logical = {str(claim.get("logical_call_id")) for claim in claims}
+    call_ids = {str(claim.get("call_id")) for claim in claims}
+    rejected = sum(
+        event["kind"] == "CALL_REJECTED_COMPLETION"
+        and str(event["payload"].get("call_id")) in call_ids
+        for event in events
+    )
+    no_completion = sum(
+        event["kind"] == "CALL_NO_COMPLETION_FAILURE"
+        and str(event["payload"].get("call_id")) in call_ids
+        for event in events
+    )
+    accepted = {
+        str(event["payload"].get("logical_call_id"))
+        for event in events
+        if event["kind"] == "CALL_ACCEPTED"
+    }
+    if (
+        len(claims) != 3
+        or len(logical) != 1
+        or tuple(claim.get("attempt_number") for claim in claims) != (1, 2, 3)
+        or rejected + no_completion != 3
+        or not logical.isdisjoint(accepted)
+    ):
+        raise TemperatureControllerError(
+            "CONTROLLER_REFLECTOR_RETRY_EXHAUSTION_UNPROVEN"
+        )
+    return {
+        "failure_code": REFLECTOR_ATTEMPT_RETRY_EXHAUSTED,
+        "phase": "train_reflector",
+        "batch_index": batch_index,
+        "attempt_count": 3,
+        "rejected_completion_attempt_count": rejected,
+        "no_completion_attempt_count": no_completion,
+    }
 
 
 def _action(

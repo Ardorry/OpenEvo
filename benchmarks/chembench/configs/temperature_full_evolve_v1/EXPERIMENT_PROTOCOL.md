@@ -79,8 +79,13 @@ injection 或 accepted-completion 选择的代码修复，则旧 evolved Test �
 每个逻辑调用在提交前写入 fsync-backed `CALL_CLAIMED`。同步持久化的 Rollout
 `SessionResult` 是 crash recovery 的权威 completion 证据；Gateway completion record 只作辅助。
 已存在 accepted completion 的逻辑调用永不替换。仅在 terminal no-completion 和相关持久化
-闭包均被证明时允许 infrastructure retry；缺失、部分、多个或不合法的结果一律记为 ambiguous
-并停止新副作用。
+闭包均被证明时，或 `train_reflector` 的 durable completion 因闭集 response schema、evidence
+scope、packet sequence 校验失败并写入内容脱敏 rejection receipt 时，允许固定 attempt+1；每个
+logical call 最多三次。Candidate parser invalid 不授权 retry。缺失、部分、多个或其他不合法
+结果一律记为 ambiguous 并停止新副作用。所有 successor 还必须匹配 attempt-independent
+`retry_semantics_sha256`；除 task/call/logical ID 与 session-bound context receipt 外，完整 prompt、
+context artifact/target identity、runtime、agent、tool policy 和 metadata 的任何漂移都在提交前拒绝；
+checkpoint 恢复同样从持久化 TaskRequest 重算该 digest。
 
 正式 runner 使用持久 tmux。独立 monitor 每 600 秒写一个结构化 snapshot，检查 phase、batch、
 题号、accepted/call/Reflector/Core 数量、lease/staged/failed side effects、最近进度、PID、tmux、

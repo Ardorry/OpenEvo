@@ -15,6 +15,9 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 from openevo_chembench.temperature_full_evolve_v1.formal_runtime import (
     require_temperature_formal_runtime_python_v1,
 )
+from openevo_chembench.temperature_full_evolve_v1.reflector import (
+    TemperatureReflectorError,
+)
 from openevo_chembench.temperature_full_evolve_v1.runner import (
     TemperatureFormalRunnerError,
     TemperatureFullEvolveFormalRunnerV1,
@@ -64,7 +67,7 @@ def main() -> int:
         }
         print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
         return 0
-    except TemperatureFormalRunnerError as exc:
+    except (TemperatureFormalRunnerError, TemperatureReflectorError) as exc:
         print(
             json.dumps(
                 {"status": "FAIL_CLOSED", "finding_code": exc.finding_code},

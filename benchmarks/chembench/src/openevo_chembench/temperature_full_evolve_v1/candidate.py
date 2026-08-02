@@ -37,6 +37,9 @@ from openevo_chembench.supervised_transfer_v2.executor import (
     task_request_digest_v2,
 )
 from openevo_chembench.temperature_full_evolve_v1.config import PROTOCOL_ID
+from openevo_chembench.temperature_full_evolve_v1.retry_semantics import (
+    task_request_retry_semantics_sha256_v1,
+)
 
 CANDIDATE_TASK_REQUEST_SCHEMA = "TemperatureCandidateTaskRequestV1"
 CANDIDATE_ACCEPTED_SCHEMA = "TemperatureCandidateAcceptedV1"
@@ -114,6 +117,8 @@ class CandidateCallPlanV1:
             or self.claim_payload.get("logical_call_id") != self.logical_call_id
             or self.claim_payload.get("call_id") != self.call_id
             or self.claim_payload.get("task_request_sha256") != self.task_request_sha256
+            or self.claim_payload.get("retry_semantics_sha256")
+            != task_request_retry_semantics_sha256_v1(self.task_request)
         ):
             raise ValueError("Candidate call plan is invalid")
 
@@ -342,6 +347,7 @@ def prepare_candidate_call_v1(
     metadata["openevo_chembench"] = existing
     task_request = task_request.model_copy(update={"metadata": metadata})
     request_digest = task_request_digest_v2(task_request)
+    retry_semantics_sha256 = task_request_retry_semantics_sha256_v1(task_request)
     claim_payload: dict[str, object] = {
         "logical_call_id": logical_call_id,
         "call_id": call_id,
@@ -350,6 +356,7 @@ def prepare_candidate_call_v1(
         "logical_arm": "candidate" if phase != "baseline_test" else "baseline",
         "attempt_number": attempt_number,
         "task_request_sha256": request_digest,
+        "retry_semantics_sha256": retry_semantics_sha256,
         "service_identity_sha256": service_identity_sha256,
     }
     return CandidateCallPlanV1(

@@ -18,6 +18,15 @@ LEDGER_SCHEMA = "TemperatureFullEvolveLedgerEventV1"
 GENESIS_DIGEST = "0" * 64
 MAX_EVENT_BYTES = 1024 * 1024
 MAX_LEDGER_BYTES = 128 * 1024 * 1024
+LEDGER_PROGRESS_SCHEMA = "TemperatureFullEvolveLedgerProgressV1"
+_READ_SNAPSHOT_ATTEMPTS = 4
+REFLECTOR_REJECTED_COMPLETION_CODES = frozenset(
+    {
+        "REFLECTOR_RESPONSE_PACKET_SEQUENCE_INVALID",
+        "REFLECTOR_RESPONSE_SCHEMA_OR_EVIDENCE_INVALID",
+    }
+)
+REFLECTOR_ATTEMPT_RETRY_EXHAUSTED = "REFLECTOR_ATTEMPT_RETRY_EXHAUSTED"
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _RUNTIME_ID = re.compile(r"[a-z0-9][a-z0-9._-]{7,127}\Z", re.ASCII)
 _RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,191}\Z", re.ASCII)
@@ -29,6 +38,7 @@ _KINDS = frozenset(
         "SPLIT_FROZEN",
         "CALL_CLAIMED",
         "CALL_NO_COMPLETION_FAILURE",
+        "CALL_REJECTED_COMPLETION",
         "CALL_ACCEPTED",
         "CALL_EVALUATED",
         "BATCH_PRE_CLOSED",
@@ -205,6 +215,15 @@ class TemperatureExperimentLedgerV1:
             for event in self._events
         )
 
+    def completion_was_rejected(self, call_id: str) -> bool:
+        """Return whether a durable Reflector completion was schema-rejected."""
+
+        return any(
+            event["kind"] == "CALL_REJECTED_COMPLETION"
+            and event["payload"].get("call_id") == call_id
+            for event in self._events
+        )
+
     def _read_events(self) -> list[dict[str, Any]]:
         os.lseek(self._descriptor, 0, os.SEEK_SET)
         if os.fstat(self._descriptor).st_size > MAX_LEDGER_BYTES:
@@ -216,34 +235,17 @@ class TemperatureExperimentLedgerV1:
                 break
             chunks.append(chunk)
         raw = b"".join(chunks)
-        if not raw:
-            return []
-        if not raw.endswith(b"\n"):
-            raise TemperatureLedgerError("LEDGER_PARTIAL_RECORD")
-        events: list[dict[str, Any]] = []
-        for line in raw.splitlines():
-            if len(line) + 1 > MAX_EVENT_BYTES:
-                raise TemperatureLedgerError("LEDGER_EVENT_TOO_LARGE")
-            try:
-                value = json.loads(
-                    line,
-                    object_pairs_hook=_reject_duplicate_keys,
-                    parse_constant=_reject_nonfinite,
-                )
-            except (UnicodeError, json.JSONDecodeError, TemperatureLedgerError) as exc:
-                raise TemperatureLedgerError("LEDGER_RECORD_MALFORMED") from exc
-            if type(value) is not dict:
-                raise TemperatureLedgerError("LEDGER_RECORD_INVALID")
-            events.append(value)
-        return events
+        return _decode_events(raw)
 
     def _validate_transitions(self, events: tuple[dict[str, Any], ...] | list[dict[str, Any]]) -> None:
         claims_by_logical: dict[str, list[dict[str, Any]]] = {}
         claims_by_call: dict[str, dict[str, Any]] = {}
         no_completion: set[str] = set()
+        rejected_completion: set[str] = set()
         accepted: dict[str, dict[str, Any]] = {}
         evaluated: set[str] = set()
         recovery_count = 0
+        run_failed = False
         previous = GENESIS_DIGEST
         for sequence, event in enumerate(events, start=1):
             expected_keys = {
@@ -276,13 +278,21 @@ class TemperatureExperimentLedgerV1:
             previous = str(event["event_sha256"])
             kind = str(event["kind"])
             payload = event["payload"]
+            if run_failed:
+                raise TemperatureLedgerError("LEDGER_EVENT_AFTER_RUN_FAILED")
             if kind == "CALL_CLAIMED":
                 logical, call_id = _validate_claim(payload)
                 if logical in accepted or call_id in claims_by_call:
                     raise TemperatureLedgerError("LEDGER_DUPLICATE_CALL_CLAIM")
                 prior = claims_by_logical.setdefault(logical, [])
                 if payload["attempt_number"] != len(prior) + 1 or (
-                    prior and str(prior[-1]["call_id"]) not in no_completion
+                    prior
+                    and (
+                        str(prior[-1]["call_id"])
+                        not in no_completion | rejected_completion
+                        or payload.get("retry_semantics_sha256")
+                        != prior[-1].get("retry_semantics_sha256")
+                    )
                 ):
                     raise TemperatureLedgerError("LEDGER_CALL_RETRY_INVALID")
                 prior.append(payload)
@@ -305,6 +315,7 @@ class TemperatureExperimentLedgerV1:
                     or claim["logical_call_id"] != logical
                     or logical in accepted
                     or call_id in no_completion
+                    or call_id in rejected_completion
                     or type(payload.get("failure_class")) is not str
                     or not payload["failure_class"]
                     or type(payload.get("terminal_task_status")) is not str
@@ -318,6 +329,48 @@ class TemperatureExperimentLedgerV1:
                 ):
                     raise TemperatureLedgerError("LEDGER_NO_COMPLETION_FAILURE_INVALID")
                 no_completion.add(call_id)
+            elif kind == "CALL_REJECTED_COMPLETION":
+                logical, call_id = _validate_call_reference(payload)
+                claim = claims_by_call.get(call_id)
+                if (
+                    set(payload)
+                    != {
+                        "logical_call_id",
+                        "call_id",
+                        "rejection_code",
+                        "response_sha256",
+                        "task_result_sha256",
+                        "transcript_sha256",
+                        "completion_identity_sha256",
+                        "durable_completion",
+                        "tool_event_count",
+                        "tool_policy_validated",
+                    }
+                    or claim is None
+                    or claim["logical_call_id"] != logical
+                    or claim.get("phase") != "train_reflector"
+                    or claim.get("logical_arm") != "batch_supervised_reflector"
+                    or logical in accepted
+                    or call_id in no_completion
+                    or call_id in rejected_completion
+                    or payload.get("rejection_code")
+                    not in REFLECTOR_REJECTED_COMPLETION_CODES
+                    or any(
+                        _SHA256.fullmatch(str(payload.get(field))) is None
+                        for field in (
+                            "response_sha256",
+                            "task_result_sha256",
+                            "transcript_sha256",
+                            "completion_identity_sha256",
+                        )
+                    )
+                    or payload.get("durable_completion") is not True
+                    or type(payload.get("tool_event_count")) is not int
+                    or payload["tool_event_count"] != 0
+                    or payload.get("tool_policy_validated") is not True
+                ):
+                    raise TemperatureLedgerError("LEDGER_REJECTED_COMPLETION_INVALID")
+                rejected_completion.add(call_id)
             elif kind == "CALL_ACCEPTED":
                 logical, call_id = _validate_call_reference(payload)
                 claim = claims_by_call.get(call_id)
@@ -340,6 +393,7 @@ class TemperatureExperimentLedgerV1:
                     or claim["logical_call_id"] != logical
                     or logical in accepted
                     or call_id in no_completion
+                    or call_id in rejected_completion
                     or type(response) is not str
                     or _SHA256.fullmatch(str(response_digest)) is None
                     or hashlib.sha256(response.encode("utf-8")).hexdigest() != response_digest
@@ -392,7 +446,123 @@ class TemperatureExperimentLedgerV1:
                     or not 0 <= payload["core_batch_index"] <= 4
                 ):
                     raise TemperatureLedgerError("LEDGER_RECOVERY_EVENT_INVALID")
+            elif kind == "RUN_FAILED":
+                _validate_reflector_retry_exhausted_failure(
+                    payload=payload,
+                    claims_by_logical=claims_by_logical,
+                    no_completion=no_completion,
+                    rejected_completion=rejected_completion,
+                    accepted=accepted,
+                )
+                run_failed = True
         _validate_protocol_state_machine(events)
+
+
+def read_validated_ledger_progress_v1(*, path: Path, run_id: str) -> dict[str, object]:
+    """Read one stable live-ledger snapshot and expose aggregate progress only.
+
+    This observer never opens the ledger for writing and never returns event
+    payloads or their call/task identifiers.  It applies the same complete
+    chain, retry, exactly-once, and protocol validation as writer recovery.
+    """
+
+    if not isinstance(path, Path) or not path.is_absolute():
+        raise TypeError("ledger path must be absolute")
+    if type(run_id) is not str or _RUN_ID.fullmatch(run_id) is None:
+        raise ValueError("run ID is invalid")
+    raw: bytes | None = None
+    for _attempt in range(_READ_SNAPSHOT_ATTEMPTS):
+        try:
+            observed = path.lstat()
+        except FileNotFoundError as exc:
+            raise TemperatureLedgerError("LEDGER_OBSERVER_FILE_MISSING") from exc
+        if (
+            not stat.S_ISREG(observed.st_mode)
+            or stat.S_ISLNK(observed.st_mode)
+            or stat.S_IMODE(observed.st_mode) != 0o600
+            or observed.st_nlink != 1
+            or (hasattr(os, "getuid") and observed.st_uid != os.getuid())
+            or observed.st_size > MAX_LEDGER_BYTES
+        ):
+            raise TemperatureLedgerError("LEDGER_OBSERVER_FILE_UNSAFE")
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        try:
+            before = os.fstat(descriptor)
+            if (before.st_dev, before.st_ino) != (observed.st_dev, observed.st_ino):
+                raise TemperatureLedgerError("LEDGER_OBSERVER_PATH_CHANGED")
+            candidate = os.pread(descriptor, before.st_size, 0)
+            after = os.fstat(descriptor)
+            try:
+                rebound = path.lstat()
+            except FileNotFoundError as exc:
+                raise TemperatureLedgerError("LEDGER_OBSERVER_PATH_CHANGED") from exc
+            if (
+                (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino)
+                or (rebound.st_dev, rebound.st_ino) != (before.st_dev, before.st_ino)
+                or after.st_nlink != 1
+                or stat.S_IMODE(after.st_mode) != 0o600
+            ):
+                raise TemperatureLedgerError("LEDGER_OBSERVER_PATH_CHANGED")
+            if after.st_size != before.st_size or len(candidate) != before.st_size:
+                continue
+            raw = candidate
+            break
+        finally:
+            os.close(descriptor)
+    if raw is None:
+        raise TemperatureLedgerError("LEDGER_OBSERVER_SNAPSHOT_UNSTABLE")
+
+    events = _decode_events(raw)
+    validator = object.__new__(TemperatureExperimentLedgerV1)
+    validator._run_id = run_id
+    validator._validate_transitions(events)
+    kind_counts: dict[str, int] = {}
+    claimed: set[str] = set()
+    closed: set[str] = set()
+    for event in events:
+        kind = str(event["kind"])
+        kind_counts[kind] = kind_counts.get(kind, 0) + 1
+        if kind == "CALL_CLAIMED":
+            claimed.add(str(event["payload"]["call_id"]))
+        elif kind in {
+            "CALL_NO_COMPLETION_FAILURE",
+            "CALL_REJECTED_COMPLETION",
+            "CALL_ACCEPTED",
+        }:
+            closed.add(str(event["payload"]["call_id"]))
+    return {
+        "schema_version": LEDGER_PROGRESS_SCHEMA,
+        "sequence": len(events),
+        "head_sha256": GENESIS_DIGEST if not events else str(events[-1]["event_sha256"]),
+        "kind_counts": dict(sorted(kind_counts.items())),
+        "open_claim_count": len(claimed - closed),
+    }
+
+
+def _decode_events(raw: bytes) -> list[dict[str, Any]]:
+    if not raw:
+        return []
+    if not raw.endswith(b"\n"):
+        raise TemperatureLedgerError("LEDGER_PARTIAL_RECORD")
+    events: list[dict[str, Any]] = []
+    for line in raw.splitlines():
+        if len(line) + 1 > MAX_EVENT_BYTES:
+            raise TemperatureLedgerError("LEDGER_EVENT_TOO_LARGE")
+        try:
+            value = json.loads(
+                line,
+                object_pairs_hook=_reject_duplicate_keys,
+                parse_constant=_reject_nonfinite,
+            )
+        except (UnicodeError, json.JSONDecodeError, TemperatureLedgerError) as exc:
+            raise TemperatureLedgerError("LEDGER_RECORD_MALFORMED") from exc
+        if type(value) is not dict:
+            raise TemperatureLedgerError("LEDGER_RECORD_INVALID")
+        events.append(value)
+    return events
 
 
 def _validate_protocol_state_machine(
@@ -644,6 +814,58 @@ def _evaluated_count(
     )
 
 
+def _validate_reflector_retry_exhausted_failure(
+    *,
+    payload: dict[str, Any],
+    claims_by_logical: dict[str, list[dict[str, Any]]],
+    no_completion: set[str],
+    rejected_completion: set[str],
+    accepted: dict[str, dict[str, Any]],
+) -> None:
+    required = {
+        "failure_code",
+        "phase",
+        "batch_index",
+        "attempt_count",
+        "rejected_completion_attempt_count",
+        "no_completion_attempt_count",
+    }
+    batch_index = payload.get("batch_index")
+    matching = [
+        (logical, attempts)
+        for logical, attempts in claims_by_logical.items()
+        if attempts
+        and attempts[-1].get("phase") == "train_reflector"
+        and _logical_batch(logical) == batch_index
+    ]
+    if len(matching) != 1:
+        raise TemperatureLedgerError("LEDGER_RUN_FAILED_INVALID")
+    logical, attempts = matching[0]
+    call_ids = {str(attempt.get("call_id")) for attempt in attempts}
+    rejected_count = len(call_ids & rejected_completion)
+    no_completion_count = len(call_ids & no_completion)
+    if (
+        set(payload) != required
+        or payload.get("failure_code") != REFLECTOR_ATTEMPT_RETRY_EXHAUSTED
+        or payload.get("phase") != "train_reflector"
+        or type(batch_index) is not int
+        or not 1 <= batch_index <= 4
+        or payload.get("attempt_count") != 3
+        or payload.get("rejected_completion_attempt_count") != rejected_count
+        or payload.get("no_completion_attempt_count") != no_completion_count
+        or rejected_count + no_completion_count != 3
+        or len(attempts) != 3
+        or tuple(attempt.get("attempt_number") for attempt in attempts) != (1, 2, 3)
+        or any(
+            attempt.get("phase") != "train_reflector"
+            or attempt.get("logical_arm") != "batch_supervised_reflector"
+            for attempt in attempts
+        )
+        or logical in accepted
+    ):
+        raise TemperatureLedgerError("LEDGER_RUN_FAILED_INVALID")
+
+
 def _validate_claim(payload: dict[str, Any]) -> tuple[str, str]:
     required = {
         "logical_call_id",
@@ -653,6 +875,7 @@ def _validate_claim(payload: dict[str, Any]) -> tuple[str, str]:
         "logical_arm",
         "attempt_number",
         "task_request_sha256",
+        "retry_semantics_sha256",
         "service_identity_sha256",
     }
     logical, call_id = _validate_call_reference(payload)
@@ -663,7 +886,12 @@ def _validate_claim(payload: dict[str, Any]) -> tuple[str, str]:
         or _RUNTIME_ID.fullmatch(str(payload.get("logical_arm"))) is None
         or type(payload.get("attempt_number")) is not int
         or payload["attempt_number"] < 1
+        or (
+            payload.get("phase") == "train_reflector"
+            and payload["attempt_number"] > 3
+        )
         or _SHA256.fullmatch(str(payload.get("task_request_sha256"))) is None
+        or _SHA256.fullmatch(str(payload.get("retry_semantics_sha256"))) is None
         or _SHA256.fullmatch(str(payload.get("service_identity_sha256"))) is None
     ):
         raise TemperatureLedgerError("LEDGER_CALL_CLAIM_INVALID")
@@ -714,9 +942,12 @@ def _is_canonical_json(value: str) -> bool:
 
 __all__ = [
     "GENESIS_DIGEST",
+    "LEDGER_PROGRESS_SCHEMA",
     "LEDGER_SCHEMA",
     "MAX_EVENT_BYTES",
     "MAX_LEDGER_BYTES",
+    "REFLECTOR_REJECTED_COMPLETION_CODES",
     "TemperatureExperimentLedgerV1",
     "TemperatureLedgerError",
+    "read_validated_ledger_progress_v1",
 ]

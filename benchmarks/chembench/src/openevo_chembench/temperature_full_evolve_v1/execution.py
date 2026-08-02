@@ -50,11 +50,17 @@ from openevo_chembench.temperature_full_evolve_v1.packet import (
 from openevo_chembench.temperature_full_evolve_v1.reflector import (
     AcceptedReflectorSynthesisV1,
     ReflectorCallPlanV1,
+    TemperatureReflectorError,
     accept_reflector_synthesis_v1,
+    build_reflector_rejected_completion_payload_v1,
+    is_retryable_reflector_completion_rejection_v1,
     observe_reflector_task_status_v1,
     prepare_reflector_call_v1,
     recover_accepted_reflector_synthesis_v1,
     render_reflector_prompt_v1,
+)
+from openevo_chembench.temperature_full_evolve_v1.retry_semantics import (
+    task_request_retry_semantics_sha256_v1,
 )
 from openevo_chembench.temperature_full_evolve_v1.runtime_services import (
     DurableNoCompletionEvidenceV1,
@@ -90,6 +96,8 @@ class FormalExecutionLedgerV1(Protocol):
     def latest_claim(self, logical_call_id: str) -> dict[str, Any] | None: ...
 
     def failure_has_no_completion(self, call_id: str) -> bool: ...
+
+    def completion_was_rejected(self, call_id: str) -> bool: ...
 
 
 @runtime_checkable
@@ -129,6 +137,8 @@ class FormalCallEnvelopeV1:
             or self.claim_payload.get("call_id") != self.call_id
             or self.claim_payload.get("task_id") != self.task_request.task_id
             or self.claim_payload.get("task_request_sha256") != self.task_request_sha256
+            or self.claim_payload.get("retry_semantics_sha256")
+            != task_request_retry_semantics_sha256_v1(self.task_request)
         ):
             raise ValueError("formal call envelope is invalid")
 
@@ -258,6 +268,38 @@ class _AdmittedCallV1:
     recovered_after_restart: bool
 
 
+def _is_exact_successor_claim(
+    *,
+    predecessor: Mapping[str, object],
+    successor: Mapping[str, object],
+) -> bool:
+    """Bind retry admission to the one intended successor claim."""
+
+    predecessor_attempt = predecessor.get("attempt_number")
+    successor_attempt = successor.get("attempt_number")
+    logical_call_id = successor.get("logical_call_id")
+    if (
+        type(predecessor_attempt) is not int
+        or type(successor_attempt) is not int
+        or type(logical_call_id) is not str
+        or successor_attempt != predecessor_attempt + 1
+        or not 2 <= successor_attempt <= 3
+        or predecessor.get("call_id") != f"{logical_call_id}-a{predecessor_attempt:02d}"
+        or successor.get("call_id") != f"{logical_call_id}-a{successor_attempt:02d}"
+    ):
+        return False
+    return all(
+        predecessor.get(field) == successor.get(field)
+        for field in (
+            "logical_call_id",
+            "phase",
+            "logical_arm",
+            "retry_semantics_sha256",
+            "service_identity_sha256",
+        )
+    )
+
+
 AuditFunction = Callable[..., PersistedRolloutResultAuditV1]
 NoCompletionAuditFunction = Callable[..., DurableNoCompletionEvidenceV1]
 ClientFactory = Callable[[], RolloutClientPortV1]
@@ -362,11 +404,25 @@ class TemperatureFormalExecutorV1:
                 )
             return _AdmittedCallV1(envelope=envelope, recovered_after_restart=True)
         if latest is not None:
-            if latest != envelope.claim_payload:
+            if latest == envelope.claim_payload:
+                if self._ledger.failure_has_no_completion(
+                    envelope.call_id
+                ) or self._ledger.completion_was_rejected(envelope.call_id):
+                    raise TemperatureFormalExecutionError("FORMAL_COMPLETED_CLAIM_CANNOT_RESUBMIT")
+                return _AdmittedCallV1(envelope=envelope, recovered_after_restart=True)
+            predecessor_call_id = latest.get("call_id")
+            if (
+                type(predecessor_call_id) is not str
+                or not _is_exact_successor_claim(
+                    predecessor=latest,
+                    successor=envelope.claim_payload,
+                )
+                or not (
+                    self._ledger.failure_has_no_completion(predecessor_call_id)
+                    or self._ledger.completion_was_rejected(predecessor_call_id)
+                )
+            ):
                 raise TemperatureFormalExecutionError("FORMAL_CLAIM_IDENTITY_MISMATCH")
-            if self._ledger.failure_has_no_completion(envelope.call_id):
-                raise TemperatureFormalExecutionError("FORMAL_COMPLETED_CLAIM_CANNOT_RESUBMIT")
-            return _AdmittedCallV1(envelope=envelope, recovered_after_restart=True)
 
         # Health is proven immediately before the irreversible claim/submit pair.
         # Any exception after the fsync claim remains an unresolved owned call and
@@ -512,6 +568,9 @@ class _LedgerBeforeCurrentClaimV1:
     def failure_has_no_completion(self, call_id: str) -> bool:
         return self._ledger.failure_has_no_completion(call_id)
 
+    def completion_was_rejected(self, call_id: str) -> bool:
+        return self._ledger.completion_was_rejected(call_id)
+
 
 def recover_existing_candidate_plan_v1(
     *,
@@ -534,7 +593,11 @@ def recover_existing_candidate_plan_v1(
     ):
         raise TypeError("Candidate plan recovery inputs are invalid")
     current = ledger.latest_claim(envelope.logical_call_id)
-    if current != envelope.claim_payload or ledger.failure_has_no_completion(envelope.call_id):
+    if (
+        current != envelope.claim_payload
+        or ledger.failure_has_no_completion(envelope.call_id)
+        or ledger.completion_was_rejected(envelope.call_id)
+    ):
         raise TemperatureFormalExecutionError("CANDIDATE_RECOVERY_CLAIM_INVALID")
     masked = _LedgerBeforeCurrentClaimV1(ledger=ledger, envelope=envelope)
     rebuilt = prepare_candidate_call_v1(
@@ -569,7 +632,11 @@ def recover_existing_reflector_plan_v1(
     ):
         raise TypeError("Reflector plan recovery inputs are invalid")
     current = ledger.latest_claim(envelope.logical_call_id)
-    if current != envelope.claim_payload or ledger.failure_has_no_completion(envelope.call_id):
+    if (
+        current != envelope.claim_payload
+        or ledger.failure_has_no_completion(envelope.call_id)
+        or ledger.completion_was_rejected(envelope.call_id)
+    ):
         raise TemperatureFormalExecutionError("REFLECTOR_RECOVERY_CLAIM_INVALID")
     masked = _LedgerBeforeCurrentClaimV1(ledger=ledger, envelope=envelope)
     rebuilt = prepare_reflector_call_v1(
@@ -679,14 +746,38 @@ def finalize_reflector_outcome_v1(
                 }
             )
         )
-        accepted = accept_reflector_synthesis_v1(
-            sealed=sealed,
-            plan=plan,
-            observed=observed,
-            ledger=ledger,
-            task_result_sha256=task_result_sha256,
-            completion_identity_sha256=completion_identity_sha256,
-        )
+        try:
+            accepted = accept_reflector_synthesis_v1(
+                sealed=sealed,
+                plan=plan,
+                observed=observed,
+                ledger=ledger,
+                task_result_sha256=task_result_sha256,
+                completion_identity_sha256=completion_identity_sha256,
+            )
+        except TemperatureReflectorError as exc:
+            if not is_retryable_reflector_completion_rejection_v1(exc):
+                raise
+            rejected = build_reflector_rejected_completion_payload_v1(
+                plan=plan,
+                observed=observed,
+                ledger=ledger,
+                task_result_sha256=task_result_sha256,
+                completion_identity_sha256=completion_identity_sha256,
+                rejection=exc,
+            )
+            prior_rejection = _event_payload_for_call(
+                ledger.events,
+                kind="CALL_REJECTED_COMPLETION",
+                call_id=plan.call_id,
+            )
+            if prior_rejection is None:
+                ledger.append("CALL_REJECTED_COMPLETION", rejected)
+            elif prior_rejection != rejected:
+                raise TemperatureFormalExecutionError(
+                    "REFLECTOR_REJECTION_RECOVERY_MISMATCH"
+                ) from exc
+            raise
         ledger.append("CALL_ACCEPTED", dict(accepted.call_accepted_payload))
     else:
         accepted = recover_accepted_reflector_synthesis_v1(
@@ -721,6 +812,24 @@ def _event_payload_for_logical(
     ]
     if len(values) > 1:
         raise TemperatureFormalExecutionError("FORMAL_DUPLICATE_FINALIZATION_EVENT")
+    return None if not values else values[0]
+
+
+def _event_payload_for_call(
+    events: tuple[dict[str, Any], ...],
+    *,
+    kind: str,
+    call_id: str,
+) -> dict[str, Any] | None:
+    values = [
+        dict(event["payload"])
+        for event in events
+        if event.get("kind") == kind
+        and isinstance(event.get("payload"), Mapping)
+        and event["payload"].get("call_id") == call_id
+    ]
+    if len(values) > 1:
+        raise TemperatureFormalExecutionError("FORMAL_DUPLICATE_CALL_CLOSURE_EVENT")
     return None if not values else values[0]
 
 

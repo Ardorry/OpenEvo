@@ -14,9 +14,13 @@ from openevo_chembench.supervised_transfer_v1.common import (
     canonical_json_bytes,
     canonical_pretty_json_bytes,
 )
+from openevo_chembench.temperature_full_evolve_v1.controller import (
+    TemperatureExperimentControllerV1,
+)
 from openevo_chembench.temperature_full_evolve_v1.core_evolution import CoreEvolutionStateV1
 from openevo_chembench.temperature_full_evolve_v1.evidence import RuleEvidenceIndexV1
 from openevo_chembench.temperature_full_evolve_v1.ledger import (
+    REFLECTOR_ATTEMPT_RETRY_EXHAUSTED,
     TemperatureExperimentLedgerV1,
 )
 from openevo_chembench.temperature_full_evolve_v1.packet import BatchAggregateDiagnosticV1
@@ -71,6 +75,96 @@ def test_layout_has_independent_evolved_baseline_roots_and_ids(tmp_path: Path) -
     assert layout.evolved_root != layout.baseline_root
     assert layout.core_root not in {layout.evolved_root, layout.baseline_root}
     assert len(set(layout.all_run_ids)) == 4
+
+
+def test_runner_persists_precise_terminal_before_any_fourth_reflector_call(
+    tmp_path: Path,
+) -> None:
+    run_id = "stv3-temperature-full-evolve-v1-20260802T120000Z"
+    ledger_path = (tmp_path / "private/events.jsonl").resolve()
+    status_path = (tmp_path / "status/current.json").resolve()
+    logical = "temperature-reflector-runner-exhausted-b01"
+    with TemperatureExperimentLedgerV1(path=ledger_path, run_id=run_id) as ledger:
+        controller = TemperatureExperimentControllerV1(
+            run_id=run_id,
+            ledger=ledger,
+            status_path=status_path,
+        )
+        for attempt in range(1, 4):
+            call_id = f"{logical}-a{attempt:02d}"
+            ledger.append(
+                "CALL_CLAIMED",
+                {
+                    "logical_call_id": logical,
+                    "call_id": call_id,
+                    "task_id": f"chembench-{logical}-a{attempt:02d}",
+                    "phase": "train_reflector",
+                    "logical_arm": "batch_supervised_reflector",
+                    "attempt_number": attempt,
+                    "task_request_sha256": str(attempt) * 64,
+                    "retry_semantics_sha256": "4" * 64,
+                    "service_identity_sha256": "5" * 64,
+                },
+            )
+            if attempt == 2:
+                ledger.append(
+                    "CALL_NO_COMPLETION_FAILURE",
+                    {
+                        "logical_call_id": logical,
+                        "call_id": call_id,
+                        "failure_class": "durable_rollout_terminal_no_completion",
+                        "terminal_task_status": "failed",
+                        "durable_rollout_no_completion": True,
+                        "durable_gateway_absent": True,
+                        "no_completion_evidence_sha256": "9" * 64,
+                    },
+                )
+            else:
+                ledger.append(
+                    "CALL_REJECTED_COMPLETION",
+                    {
+                        "logical_call_id": logical,
+                        "call_id": call_id,
+                        "rejection_code": (
+                            "REFLECTOR_RESPONSE_SCHEMA_OR_EVIDENCE_INVALID"
+                        ),
+                        "response_sha256": "5" * 64,
+                        "task_result_sha256": "6" * 64,
+                        "transcript_sha256": "7" * 64,
+                        "completion_identity_sha256": "8" * 64,
+                        "durable_completion": True,
+                        "tool_event_count": 0,
+                        "tool_policy_validated": True,
+                    },
+                )
+
+        runner = object.__new__(TemperatureFullEvolveFormalRunnerV1)
+        runner.layout = TemperatureRunLayoutV1.build(
+            repository_root=tmp_path.resolve(),
+            controller_run_id=run_id,
+        )
+        runner._ledger = ledger
+        runner._controller = controller
+        with pytest.raises(
+            TemperatureFormalRunnerError,
+            match=REFLECTOR_ATTEMPT_RETRY_EXHAUSTED,
+        ):
+            runner._terminate_reflector_retry_exhausted(batch_index=1)
+        with pytest.raises(
+            TemperatureFormalRunnerError,
+            match=REFLECTOR_ATTEMPT_RETRY_EXHAUSTED,
+        ):
+            runner._terminate_reflector_retry_exhausted(batch_index=1)
+
+        claims = [event for event in ledger.events if event["kind"] == "CALL_CLAIMED"]
+        reflector_claims = [
+            event
+            for event in claims
+            if event["payload"].get("phase") == "train_reflector"
+        ]
+        assert len(reflector_claims) == 3
+        assert sum(event["kind"] == "RUN_FAILED" for event in ledger.events) == 1
+        assert json.loads(status_path.read_text(encoding="utf-8"))["phase"] == "FAILED"
 
 
 @pytest.mark.parametrize(
@@ -280,6 +374,8 @@ def test_formal_entrypoints_do_not_inject_source_import_paths() -> None:
         assert "sys.path.insert" not in source
         assert "PYTHONPATH" not in source
         assert "flags.isolated" in source
+        if name == "run.py":
+            assert "except (TemperatureFormalRunnerError, TemperatureReflectorError)" in source
     precheck = (scripts / "precheck.py").read_text(encoding="utf-8")
     assert "sys.path.insert" not in precheck
     assert '"PYTHONPATH": "benchmarks/chembench/src:src"' in precheck

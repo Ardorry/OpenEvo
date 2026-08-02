@@ -13,6 +13,10 @@ from openevo_chembench.supervised_transfer_v1.common import (
     write_private_file,
 )
 from openevo_chembench.temperature_full_evolve_v1 import monitoring
+from openevo_chembench.temperature_full_evolve_v1.ledger import (
+    REFLECTOR_ATTEMPT_RETRY_EXHAUSTED,
+    TemperatureExperimentLedgerV1,
+)
 from openevo_chembench.temperature_full_evolve_v1.monitoring import (
     TemperatureMonitorError,
     collect_monitor_snapshot_v1,
@@ -46,6 +50,58 @@ def _controller(*, revision: int = 1, progress: int = 1) -> dict[str, object]:
 
 def _write_status(path: Path, payload: dict[str, object]) -> None:
     write_private_file(path, canonical_json_bytes(payload))
+    ledger_path = path.parent.parent / "private/events.jsonl"
+    if ledger_path.exists():
+        return
+    with TemperatureExperimentLedgerV1(
+        path=ledger_path.resolve(),
+        run_id=str(payload["run_id"]),
+    ) as ledger:
+        ledger.append(
+            "RUN_CREATED",
+            {
+                "generation_zero": True,
+                "old_artifact_imported": False,
+                "old_completion_imported": False,
+                "old_database_imported": False,
+            },
+        )
+        ledger.append(
+            "SPLIT_FROZEN",
+            {
+                "split_sha256": "a" * 64,
+                "train_count": 100,
+                "test_count": 100,
+                "batch_size": 25,
+                "test_sealed": True,
+            },
+        )
+
+
+def _append_open_claim(status_path: Path) -> tuple[str, str, str]:
+    ledger_path = status_path.parent.parent / "private/events.jsonl"
+    logical_id = "private-logical-b01-i001"
+    call_id = "private-call-00000001"
+    task_id = "private-task-00000001"
+    with TemperatureExperimentLedgerV1(
+        path=ledger_path.resolve(),
+        run_id="stv3-temperature-full-evolve-v1-20260802T000000Z",
+    ) as ledger:
+        ledger.append(
+            "CALL_CLAIMED",
+            {
+                "logical_call_id": logical_id,
+                "call_id": call_id,
+                "task_id": task_id,
+                "phase": "train-pre",
+                "logical_arm": "candidate",
+                "attempt_number": 1,
+                "task_request_sha256": "b" * 64,
+                "retry_semantics_sha256": "d" * 64,
+                "service_identity_sha256": "c" * 64,
+            },
+        )
+    return logical_id, call_id, task_id
 
 
 def _database(path: Path) -> None:
@@ -182,6 +238,7 @@ def test_monitor_appends_private_snapshots_and_detects_two_stagnant_polls(
         "run_id": "stv3-temperature-full-evolve-v1-20260802T000000Z",
         "controller_status_relative": "status/current.json",
         "database_relative": "core/evolution.sqlite3",
+        "ledger_relative": "private/events.jsonl",
     }
     assert first["runner_process"]["binding_status"] == "ESTABLISHED"
     assert second["runner_process"]["binding_status"] == "PASS"
@@ -199,6 +256,219 @@ def test_monitor_appends_private_snapshots_and_detects_two_stagnant_polls(
     )
     assert resumed["progress"]["consecutive_no_progress_polls"] == 0
     assert resumed["progress"]["stall_detected"] is False
+
+
+def test_validated_ledger_progress_suppresses_false_stall_without_private_fields(
+    tmp_path: Path,
+    healthy_probes: None,
+) -> None:
+    status_path, database_path, snapshot_log = _formal_paths(tmp_path)
+    _write_status(status_path, _controller())
+    _database(database_path)
+    arguments = {
+        "repository_root": tmp_path.resolve(),
+        "controller_status_path": status_path.resolve(),
+        "database_path": database_path.resolve(),
+        "snapshot_log_path": snapshot_log.resolve(),
+        "tmux_session": "temperature-full-evolve-v1",
+    }
+    first = poll_and_append_monitor_snapshot_v1(
+        **arguments,
+        now_utc="2026-08-02T00:00:00Z",
+    )
+    logical_id, call_id, task_id = _append_open_claim(status_path)
+    second = poll_and_append_monitor_snapshot_v1(
+        **arguments,
+        now_utc="2026-08-02T00:10:00Z",
+    )
+    third = poll_and_append_monitor_snapshot_v1(
+        **arguments,
+        now_utc="2026-08-02T00:20:00Z",
+    )
+    fourth = poll_and_append_monitor_snapshot_v1(
+        **arguments,
+        now_utc="2026-08-02T00:30:00Z",
+    )
+
+    assert first["ledger_progress"]["sequence"] == 2
+    assert second["progress"]["consecutive_no_progress_polls"] == 0
+    assert fourth["progress"]["consecutive_no_progress_polls"] == 2
+    assert fourth["progress"]["stall_detected"] is False
+    assert fourth["progress"]["diagnostics"] == ["WAIT_LEDGER_OPEN_CALLS"]
+    assert fourth["progress"]["automatic_recovery_suppressed"] is True
+    assert fourth["progress"]["recovery_disposition"] == "WAIT_LEDGER_OPEN_CALLS"
+    assert fourth["ledger_progress"] == {
+        "schema_version": "TemperatureFullEvolveLedgerProgressV1",
+        "sequence": 3,
+        "head_sha256": fourth["ledger_progress"]["head_sha256"],
+        "kind_counts": {"CALL_CLAIMED": 1, "RUN_CREATED": 1, "SPLIT_FROZEN": 1},
+        "open_claim_count": 1,
+    }
+    assert len(fourth["ledger_progress"]["head_sha256"]) == 64
+    assert "ledger_seq=3" in format_monitor_line_v1(fourth)
+    assert "open_calls=1" in format_monitor_line_v1(fourth)
+    public_snapshot = json.dumps(fourth, sort_keys=True)
+    assert logical_id not in public_snapshot
+    assert call_id not in public_snapshot
+    assert task_id not in public_snapshot
+    assert third["ledger_progress"] == fourth["ledger_progress"]
+
+
+def test_monitor_fails_closed_on_tampered_ledger_chain(
+    tmp_path: Path,
+    healthy_probes: None,
+) -> None:
+    status_path, database_path, _snapshot_log = _formal_paths(tmp_path)
+    _write_status(status_path, _controller())
+    _database(database_path)
+    ledger_path = status_path.parent.parent / "private/events.jsonl"
+    lines = ledger_path.read_text(encoding="utf-8").splitlines()
+    first = json.loads(lines[0])
+    first["payload"]["generation_zero"] = False
+    lines[0] = json.dumps(first, sort_keys=True, separators=(",", ":"))
+    ledger_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    with pytest.raises(TemperatureMonitorError, match="MONITOR_LEDGER_INVALID"):
+        collect_monitor_snapshot_v1(
+            repository_root=tmp_path.resolve(),
+            controller_status_path=status_path.resolve(),
+            database_path=database_path.resolve(),
+            tmux_session="temperature-full-evolve-v1",
+            now_utc="2026-08-02T00:00:00Z",
+        )
+
+
+def test_historical_failed_attempt_is_warning_not_permanent_health_error(
+    tmp_path: Path,
+    healthy_probes: None,
+) -> None:
+    status_path, database_path, _snapshot_log = _formal_paths(tmp_path)
+    status = _controller(progress=2)
+    status["failed_side_effects"] = 1
+    _write_status(status_path, status)
+    _database(database_path)
+
+    snapshot = collect_monitor_snapshot_v1(
+        repository_root=tmp_path.resolve(),
+        controller_status_path=status_path.resolve(),
+        database_path=database_path.resolve(),
+        tmux_session="temperature-full-evolve-v1",
+        now_utc="2026-08-02T00:00:00Z",
+    )
+
+    assert snapshot["health"]["status"] == "WARN"
+    assert snapshot["progress"]["recovery_disposition"] == "NO_ACTION"
+    assert {
+        (finding["finding_code"], finding["severity"])
+        for finding in snapshot["health"]["findings"]
+    } >= {("FAILED_SIDE_EFFECT_PRESENT", "WARN")}
+
+
+def test_reflector_retry_exhaustion_is_ledger_bound_terminal_health_error(
+    tmp_path: Path,
+    healthy_probes: None,
+) -> None:
+    status_path, database_path, _snapshot_log = _formal_paths(tmp_path)
+    status = _controller(revision=7, progress=0)
+    status.update(
+        {
+            "phase": "FAILED",
+            "batch_index": 1,
+            "item_ordinal": 3,
+            "candidate_calls": 0,
+            "reflector_calls": 1,
+            "failed_side_effects": 3,
+            "progress_counter": 7,
+        }
+    )
+    _write_status(status_path, status)
+    ledger_path = status_path.parent.parent / "private/events.jsonl"
+    ledger_path.unlink()
+    logical = "temperature-reflector-monitor-exhausted-b01"
+    with TemperatureExperimentLedgerV1(
+        path=ledger_path.resolve(),
+        run_id=str(status["run_id"]),
+    ) as ledger:
+        for attempt in range(1, 4):
+            call_id = f"{logical}-a{attempt:02d}"
+            ledger.append(
+                "CALL_CLAIMED",
+                {
+                    "logical_call_id": logical,
+                    "call_id": call_id,
+                    "task_id": f"chembench-{logical}-a{attempt:02d}",
+                    "phase": "train_reflector",
+                    "logical_arm": "batch_supervised_reflector",
+                    "attempt_number": attempt,
+                    "task_request_sha256": str(attempt) * 64,
+                    "retry_semantics_sha256": "4" * 64,
+                    "service_identity_sha256": "5" * 64,
+                },
+            )
+            ledger.append(
+                "CALL_REJECTED_COMPLETION",
+                {
+                    "logical_call_id": logical,
+                    "call_id": call_id,
+                    "rejection_code": "REFLECTOR_RESPONSE_SCHEMA_OR_EVIDENCE_INVALID",
+                    "response_sha256": "6" * 64,
+                    "task_result_sha256": "7" * 64,
+                    "transcript_sha256": "8" * 64,
+                    "completion_identity_sha256": "9" * 64,
+                    "durable_completion": True,
+                    "tool_event_count": 0,
+                    "tool_policy_validated": True,
+                },
+            )
+        ledger.append(
+            "RUN_FAILED",
+            {
+                "failure_code": REFLECTOR_ATTEMPT_RETRY_EXHAUSTED,
+                "phase": "train_reflector",
+                "batch_index": 1,
+                "attempt_count": 3,
+                "rejected_completion_attempt_count": 3,
+                "no_completion_attempt_count": 0,
+            },
+        )
+    _database(database_path)
+
+    snapshot = collect_monitor_snapshot_v1(
+        repository_root=tmp_path.resolve(),
+        controller_status_path=status_path.resolve(),
+        database_path=database_path.resolve(),
+        tmux_session="temperature-full-evolve-v1",
+        now_utc="2026-08-02T00:00:00Z",
+    )
+
+    assert snapshot["terminal"] is True
+    assert snapshot["health"]["status"] == "ERROR"
+    assert snapshot["progress"]["recovery_disposition"] == "TERMINAL_NO_RECOVERY"
+    assert {finding["finding_code"] for finding in snapshot["health"]["findings"]} >= {
+        "CONTROLLER_HARD_TERMINAL"
+    }
+    rendered = json.dumps(snapshot, sort_keys=True)
+    assert logical not in rendered
+    assert REFLECTOR_ATTEMPT_RETRY_EXHAUSTED not in rendered
+
+
+def test_failed_controller_status_requires_run_failed_ledger_event(
+    tmp_path: Path,
+    healthy_probes: None,
+) -> None:
+    status_path, database_path, _snapshot_log = _formal_paths(tmp_path)
+    status = _controller()
+    status["phase"] = "FAILED"
+    _write_status(status_path, status)
+    _database(database_path)
+    with pytest.raises(TemperatureMonitorError, match="RUN_FAILED_BINDING"):
+        collect_monitor_snapshot_v1(
+            repository_root=tmp_path.resolve(),
+            controller_status_path=status_path.resolve(),
+            database_path=database_path.resolve(),
+            tmux_session="temperature-full-evolve-v1",
+            now_utc="2026-08-02T00:00:00Z",
+        )
 
 
 def test_controller_status_rejects_extra_private_fields_and_broad_permissions(

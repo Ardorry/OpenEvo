@@ -40,7 +40,7 @@ plan、worker claim、typed artifact registration、validation、promotion 和 c
 
 正式服务和付费 runner 使用本实验独立的固定 Python bundle。该 bundle 在源码提交冻结后离线
 构建当前 OpenEvo Core 与 ChemBench wheel，逐个核对 wheel 中 Python 文件与源码，安装到
-`state/chembench_temperature_full_evolve_v1/formal_runtime`，并验证两个 distribution 均为
+`state/chembench_temperature_full_evolve_v1/formal_runtime_v2`，并验证两个 distribution 均为
 non-editable、framework registry 与 wheel/lock 匹配。旧 STV2 runtime 只作为依赖版本来源；其中
 旧 Core、可编辑 ChemBench 包、数据库、completion 和 artifact 均不进入新的正式解释器。所有
 正式入口以 `-I` 启动且重新核验 formal-runtime receipt、源码提交和安装 inventory。
@@ -105,12 +105,22 @@ diagnostic metadata，不增加规则的独立支持数。
 不可消费审计 side effect，只有包含三目标完整 identity 的 `BATCH_ARTIFACT_SET_COMMITTED`
 记录才能被下一 session 使用。
 
+输入 dataset 的 `manifest.json` 与 `records.jsonl` 固定写入本 run 的
+`core/artifacts/input_datasets/chembench_temperature_full_evolve_v1/batch_N`，以满足 Core payload
+scanner 的受管根约束；private evidence 目录只保存注册 intent 与 binding。intent 在写 payload
+和登记 artifact 前持久化，并绑定 artifact-root inode、请求 digest、URI 与 payload digest。
+若进程在 `register_artifact` 已提交而 binding 尚未写入的窗口崩溃，恢复只接受数据库、Core
+managed manifest 与 DTO 全字段精确一致的唯一既有 artifact；任何重复、URI/root/manifest 或
+lineage 漂移都 fail closed，不会再次登记同一批 dataset。
+
 私有 append-only ledger 在每次写入后 flush + fsync，并覆盖：
 
 ```text
 RUN_CREATED
 SPLIT_FROZEN
 CALL_CLAIMED
+CALL_NO_COMPLETION_FAILURE
+CALL_REJECTED_COMPLETION
 CALL_ACCEPTED
 CALL_EVALUATED
 BATCH_PRE_CLOSED
@@ -126,9 +136,18 @@ AUDIT_CLOSED
 ```
 
 确定性 session/task ID 在模型提交前持久化。恢复时先查询 Rollout 的既有 task：已有 terminal
-completion 必须接续入账，不得重调；只有明确不存在 completion 的 infrastructure attempt 才能
-按相同输入重试。split、模型、reasoning、prompt、parser、evaluator、runtime、source commit、
-evolution schema 或 artifact policy digest 漂移时禁止 resume。
+completion 必须接续入账，不得重调。只有两类闭合 predecessor 允许固定的 attempt+1（每个
+logical call 最多三次）：一是有 Rollout/Gateway 双重证据的 no-completion；二是仅限
+`train_reflector` 的 durable completion 在 response schema、evidence scope 或 packet sequence
+校验失败。第二类事件只保存 response/task-result/transcript/completion identity SHA-256 和闭集
+rejection code，不保存 response 或 transcript；Candidate parser invalid 仍是已接受 completion
+的评估结果，不能借此重调。已有 accepted synthesis 后禁止 retry，每批仍只有一个最终
+`REFLECTOR_ACCEPTED`。每个 claim 还绑定 `retry_semantics_sha256`：只规范化 attempt-specific task/
+call/logical ID 与 session-bound context receipt，prompt、context artifact/target IDs、runtime、agent、
+tool policy 和其他 metadata 全部参与 canonical digest；checkpoint readback 重新从 TaskRequest 计算，
+successor digest 不同则在提交前 fail closed。
+split、模型、reasoning、prompt、parser、evaluator、runtime、source commit、evolution schema 或
+artifact policy digest 漂移时禁止 resume。
 
 ## Test 与报告
 

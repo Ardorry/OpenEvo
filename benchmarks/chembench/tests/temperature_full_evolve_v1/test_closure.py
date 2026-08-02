@@ -55,6 +55,7 @@ def _claim(
         ),
         "attempt_number": 1,
         "task_request_sha256": _sha(f"request-{logical}-{ordinal}"),
+        "retry_semantics_sha256": _sha(f"retry-semantics-{logical}"),
         "service_identity_sha256": _sha("runtime-service"),
     }
 
@@ -171,10 +172,41 @@ def _context_binding_receipt_sha256(
     ).digest
 
 
-def _reflector(ledger: TemperatureExperimentLedgerV1, *, batch: int) -> str:
+def _reflector(
+    ledger: TemperatureExperimentLedgerV1,
+    *,
+    batch: int,
+    reject_first: bool = False,
+) -> str:
     logical = f"closure-reflector-b{batch:02d}"
     claim = _claim(logical=logical, phase="train_reflector", ordinal=batch)
     ledger.append("CALL_CLAIMED", claim)
+    if reject_first:
+        ledger.append(
+            "CALL_REJECTED_COMPLETION",
+            {
+                "logical_call_id": logical,
+                "call_id": claim["call_id"],
+                "rejection_code": "REFLECTOR_RESPONSE_PACKET_SEQUENCE_INVALID",
+                "response_sha256": _sha(f"rejected-response-{batch}"),
+                "task_result_sha256": _sha(f"rejected-result-{batch}"),
+                "transcript_sha256": _sha(f"rejected-transcript-{batch}"),
+                "completion_identity_sha256": _sha(
+                    f"rejected-completion-{batch}"
+                ),
+                "durable_completion": True,
+                "tool_event_count": 0,
+                "tool_policy_validated": True,
+            },
+        )
+        claim = {
+            **claim,
+            "call_id": f"{logical}-a02",
+            "task_id": f"chembench-{logical}-a02",
+            "attempt_number": 2,
+            "task_request_sha256": _sha(f"request-{logical}-retry-{batch}"),
+        }
+        ledger.append("CALL_CLAIMED", claim)
     ledger.append("CALL_ACCEPTED", _accept(claim))
     return logical
 
@@ -328,6 +360,7 @@ def _write_ledger(
     aggregate_sha256: str,
     incident_opened: bool = False,
     tampered_context_phase: str | None = None,
+    rejected_reflector_batch: int | None = None,
 ) -> None:
     with TemperatureExperimentLedgerV1(
         path=(run_root / "private/events.jsonl").resolve(),
@@ -367,7 +400,11 @@ def _write_ledger(
                 "BATCH_PRE_CLOSED",
                 {"batch_index": batch, "accepted_count": 25, "evaluated_count": 25},
             )
-            logical = _reflector(ledger, batch=batch)
+            logical = _reflector(
+                ledger,
+                batch=batch,
+                reject_first=batch == rejected_reflector_batch,
+            )
             ledger.append(
                 "REFLECTOR_ACCEPTED",
                 {
@@ -508,6 +545,7 @@ def test_formal_closure_replays_private_evidence_and_emits_no_item_data(
     assert receipt.status == "COMPLETE"
     assert receipt.accepted_candidate_count == 400
     assert receipt.accepted_reflector_count == 4
+    assert receipt.rejected_reflector_attempt_count == 0
     assert receipt.core_job_count == 12
     assert receipt.managed_runtime_session_attempt_count == 404
     assert receipt.readiness_passed_for_accepted_call_count == 404
@@ -522,6 +560,58 @@ def test_formal_closure_replays_private_evidence_and_emits_no_item_data(
     output = run_root / "private/formal_closure_receipt_v1.json"
     write_formal_closure_receipt_v1(closure, path=output.resolve())
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
+
+
+def test_formal_closure_binds_rejected_reflector_attempt_to_schema_failure(
+    tmp_path: Path,
+) -> None:
+    run_root = tmp_path / "rejected-run"
+    run_root.mkdir(mode=0o700)
+    preflight_root = tmp_path / "rejected-preflight"
+    payload = _payload()
+    first_batch = payload["train_batches"][0]
+    calls = payload["calls"]
+    assert isinstance(first_batch, dict) and isinstance(calls, dict)
+    failures = calls["failures"]
+    assert isinstance(failures, dict)
+    first_batch.update(
+        {"failed_attempts": 1, "retries": 1, "rejected_attempts": 1}
+    )
+    calls.update(
+        {
+            "managed_runtime_session_attempts": 405,
+            "failed_attempts": 1,
+            "retries": 1,
+            "rejected_attempts": 1,
+        }
+    )
+    failures["artifact_or_schema"] = 1
+    bundle_sha256 = _write_preflight(preflight_root, payload)
+    report = AggregateReportInputV1.model_validate(payload)
+    aggregate = run_root / "private/aggregate_report_input_v1.json"
+    aggregate_sha256 = write_aggregate_report_input_v1(
+        report=report,
+        path=aggregate,
+    )
+    _write_manifest(
+        run_root,
+        report=report,
+        preflight_bundle_sha256=bundle_sha256,
+    )
+    _write_ledger(
+        run_root,
+        report=report,
+        aggregate_sha256=aggregate_sha256,
+        rejected_reflector_batch=1,
+    )
+
+    closure = verify_formal_closure_v1(
+        run_root=run_root.resolve(),
+        preflight_root=preflight_root.resolve(),
+        aggregate_input_path=aggregate.resolve(),
+    )
+    assert closure.receipt.rejected_reflector_attempt_count == 1
+    assert closure.receipt.managed_runtime_session_attempt_count == 405
 
 
 def test_formal_closure_rejects_staged_aggregate_tampering(

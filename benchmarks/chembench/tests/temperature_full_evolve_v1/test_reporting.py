@@ -324,6 +324,7 @@ def _verified_closure(
         "accepted_candidate_count": 400,
         "evaluated_candidate_count": 400,
         "accepted_reflector_count": 4,
+        "rejected_reflector_attempt_count": report.calls.rejected_attempts,
         "core_job_count": 12,
         "preflight_model_call_count": 0,
         "contains_item_identities": False,
@@ -401,6 +402,13 @@ def test_final_report_package_is_closed_aggregate_and_checksum_complete(tmp_path
         "lower_bound": 404,
     }
     assert "managed_model_attempts" not in calls
+    assert calls["rejected_attempts"] == 0
+    assert "rejected attempts" in (destination / "FINAL_REPORT.md").read_text(
+        encoding="utf-8"
+    )
+    assert "rejected/recoveries" in (destination / "HANDOFF.md").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_report_boundary_rejects_private_item_fields_and_nonempty_baseline_context() -> None:

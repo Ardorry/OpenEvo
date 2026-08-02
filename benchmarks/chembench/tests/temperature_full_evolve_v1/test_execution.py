@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import pytest
 from openevo.rollout.models import TaskStatus
 
 from openevo_chembench.chembench4k_models import (
@@ -13,6 +14,11 @@ from openevo_chembench.chembench4k_models import (
     PrivateChemBench4KTask,
     RenderedChemBench4KPrompt,
 )
+from openevo_chembench.supervised_transfer_v1.common import (
+    canonical_json_bytes,
+    sha256_bytes,
+)
+from openevo_chembench.supervised_transfer_v2.executor import task_request_digest_v2
 from openevo_chembench.temperature_full_evolve_v1.candidate import (
     accept_candidate_completion_v1,
     observe_candidate_task_status_v1,
@@ -20,12 +26,19 @@ from openevo_chembench.temperature_full_evolve_v1.candidate import (
 )
 from openevo_chembench.temperature_full_evolve_v1.execution import (
     FormalCallEnvelopeV1,
+    TemperatureFormalExecutionError,
     TemperatureFormalExecutorV1,
     finalize_candidate_outcome_v1,
     recover_existing_candidate_plan_v1,
 )
 from openevo_chembench.temperature_full_evolve_v1.ledger import (
     TemperatureExperimentLedgerV1,
+)
+from openevo_chembench.temperature_full_evolve_v1.reflector import (
+    prepare_reflector_call_v1,
+)
+from openevo_chembench.temperature_full_evolve_v1.retry_semantics import (
+    task_request_retry_semantics_sha256_v1,
 )
 from openevo_chembench.temperature_full_evolve_v1.runtime_services import (
     DurableNoCompletionEvidenceV1,
@@ -170,6 +183,18 @@ def _dual_proof(**_kwargs: object) -> DurableNoCompletionEvidenceV1:
     raise AssertionError("completion path must not request no-completion proof")
 
 
+def _terminal_no_completion(call_id: str, logical_call_id: str) -> dict[str, object]:
+    return {
+        "logical_call_id": logical_call_id,
+        "call_id": call_id,
+        "failure_class": "durable_rollout_terminal_no_completion",
+        "terminal_task_status": "FAILED",
+        "durable_rollout_no_completion": True,
+        "durable_gateway_absent": True,
+        "no_completion_evidence_sha256": "f" * 64,
+    }
+
+
 def test_claim_before_submit_and_private_candidate_finalization(tmp_path: Path) -> None:
     run_id = "formal-run-2001"
     service_digest = "1" * 64
@@ -244,6 +269,20 @@ def test_unresolved_claim_and_accepted_crash_recover_without_submit(tmp_path: Pa
         private_checkpoint = FormalCallEnvelopeV1.from_candidate(
             original
         ).to_private_checkpoint_bytes()
+        tampered_checkpoint = json.loads(private_checkpoint)
+        tampered_checkpoint["envelope"]["claim_payload"][
+            "retry_semantics_sha256"
+        ] = "f" * 64
+        tampered_checkpoint["envelope_sha256"] = sha256_bytes(
+            canonical_json_bytes(tampered_checkpoint["envelope"])
+        )
+        with pytest.raises(
+            TemperatureFormalExecutionError,
+            match="FORMAL_CALL_CHECKPOINT_INVALID",
+        ):
+            FormalCallEnvelopeV1.from_private_checkpoint_bytes(
+                canonical_json_bytes(tampered_checkpoint)
+            )
         ledger.append("CALL_CLAIMED", original.claim_payload)
         envelope = FormalCallEnvelopeV1.from_private_checkpoint_bytes(private_checkpoint)
         recovered = recover_existing_candidate_plan_v1(
@@ -295,3 +334,218 @@ def test_unresolved_claim_and_accepted_crash_recover_without_submit(tmp_path: Pa
         assert submitted == []
         assert sum(event["kind"] == "CALL_ACCEPTED" for event in ledger.events) == 1
         assert sum(event["kind"] == "CALL_EVALUATED" for event in ledger.events) == 1
+
+
+def test_proven_no_completion_admits_only_the_exact_successor_attempt(
+    tmp_path: Path,
+) -> None:
+    run_id = "formal-run-2003"
+    service_digest = "3" * 64
+    submitted: list[str] = []
+    with TemperatureExperimentLedgerV1(
+        path=(tmp_path / "ledger.jsonl").resolve(), run_id=run_id
+    ) as ledger:
+        first = prepare_candidate_call_v1(
+            task=_task(),
+            prompt=_prompt(),
+            context=None,
+            context_workspace=None,
+            phase="baseline_test",
+            task_ordinal=0,
+            batch_index=None,
+            ledger=ledger,
+            run_id=run_id,
+            service_identity_sha256=service_digest,
+        )
+        ledger.append("CALL_CLAIMED", first.claim_payload)
+        ledger.append(
+            "CALL_NO_COMPLETION_FAILURE",
+            _terminal_no_completion(first.call_id, first.logical_call_id),
+        )
+        successor = prepare_candidate_call_v1(
+            task=_task(),
+            prompt=_prompt(),
+            context=None,
+            context_workspace=None,
+            phase="baseline_test",
+            task_ordinal=0,
+            batch_index=None,
+            ledger=ledger,
+            run_id=run_id,
+            service_identity_sha256=service_digest,
+        )
+        status = _status(successor.task_request.task_id)
+        executor = TemperatureFormalExecutorV1(
+            runtime_services=_Runtime(
+                repository_root=tmp_path.resolve(),
+                service_run_id="runtime-service-001",
+                digest=service_digest,
+            ),
+            ledger=ledger,
+            client_factory=lambda: _Client(status=status, submitted=submitted),
+            audit_function=lambda **_kwargs: _audit(status),
+            no_completion_audit_function=_dual_proof,
+            poll_interval_seconds=0,
+            max_poll_attempts=1,
+        )
+
+        # A closed predecessor is immutable; only its separately identified
+        # attempt+1 successor may create a new side effect.
+        with pytest.raises(
+            TemperatureFormalExecutionError,
+            match="FORMAL_COMPLETED_CLAIM_CANNOT_RESUBMIT",
+        ):
+            executor.run_many_to_durable_terminal(
+                (FormalCallEnvelopeV1.from_candidate(first),), max_workers=1
+            )
+        assert submitted == []
+
+        mismatched_claim = {
+            **successor.claim_payload,
+            "logical_arm": "mismatched-candidate-arm",
+        }
+        mismatched = FormalCallEnvelopeV1(
+            logical_call_id=successor.logical_call_id,
+            call_id=successor.call_id,
+            task_request=successor.task_request,
+            task_request_sha256=successor.task_request_sha256,
+            claim_payload=mismatched_claim,
+        )
+        with pytest.raises(
+            TemperatureFormalExecutionError,
+            match="FORMAL_CLAIM_IDENTITY_MISMATCH",
+        ):
+            executor.run_many_to_durable_terminal((mismatched,), max_workers=1)
+        assert submitted == []
+
+        changed_request = successor.task_request.model_copy(
+            update={
+                "instruction": successor.task_request.instruction
+                + "\nsemantic retry drift",
+            }
+        )
+        changed_claim = {
+            **successor.claim_payload,
+            "task_request_sha256": task_request_digest_v2(changed_request),
+            "retry_semantics_sha256": task_request_retry_semantics_sha256_v1(
+                changed_request
+            ),
+        }
+        changed = FormalCallEnvelopeV1(
+            logical_call_id=successor.logical_call_id,
+            call_id=successor.call_id,
+            task_request=changed_request,
+            task_request_sha256=task_request_digest_v2(changed_request),
+            claim_payload=changed_claim,
+        )
+        with pytest.raises(
+            TemperatureFormalExecutionError,
+            match="FORMAL_CLAIM_IDENTITY_MISMATCH",
+        ):
+            executor.run_many_to_durable_terminal((changed,), max_workers=1)
+        assert submitted == []
+
+        outcome = executor.run_many_to_durable_terminal(
+            (FormalCallEnvelopeV1.from_candidate(successor),), max_workers=1
+        )[0]
+        assert outcome.state == "completion"
+        assert outcome.recovered_after_restart is False
+        assert successor.attempt_number == 2
+        assert submitted == [successor.task_request.task_id]
+        assert [
+            event["payload"]["call_id"]
+            for event in ledger.events
+            if event["kind"] == "CALL_CLAIMED"
+        ] == [first.call_id, successor.call_id]
+
+
+def test_rejected_reflector_completion_cannot_retry_with_changed_prompt(
+    tmp_path: Path,
+) -> None:
+    from benchmarks.chembench.tests.temperature_full_evolve_v1 import (
+        test_reflector as reflector_fixtures,
+    )
+
+    service_digest = "4" * 64
+    client_factory_calls: list[str] = []
+
+    def forbidden_client_factory() -> _Client:
+        client_factory_calls.append("called")
+        raise AssertionError("semantic drift must be rejected before submit")
+
+    with TemperatureExperimentLedgerV1(
+        path=(tmp_path / "reflector-ledger.jsonl").resolve(),
+        run_id="formal-run-reflector-semantics-2004",
+    ) as ledger:
+        sealed = reflector_fixtures._sealed()
+        first = prepare_reflector_call_v1(
+            sealed=sealed,
+            ledger=ledger,
+            run_id=reflector_fixtures.RUN_ID,
+            service_identity_sha256=service_digest,
+        )
+        ledger.append("CALL_CLAIMED", first.claim_payload)
+        ledger.append(
+            "CALL_REJECTED_COMPLETION",
+            {
+                "logical_call_id": first.logical_call_id,
+                "call_id": first.call_id,
+                "rejection_code": "REFLECTOR_RESPONSE_PACKET_SEQUENCE_INVALID",
+                "response_sha256": "5" * 64,
+                "task_result_sha256": "6" * 64,
+                "transcript_sha256": "7" * 64,
+                "completion_identity_sha256": "8" * 64,
+                "durable_completion": True,
+                "tool_event_count": 0,
+                "tool_policy_validated": True,
+            },
+        )
+        successor = prepare_reflector_call_v1(
+            sealed=sealed,
+            ledger=ledger,
+            run_id=reflector_fixtures.RUN_ID,
+            service_identity_sha256=service_digest,
+        )
+        assert (
+            successor.claim_payload["retry_semantics_sha256"]
+            == first.claim_payload["retry_semantics_sha256"]
+        )
+        changed_request = successor.task_request.model_copy(
+            update={"instruction": successor.task_request.instruction + "\nsemantic drift"}
+        )
+        changed_digest = task_request_digest_v2(changed_request)
+        changed = FormalCallEnvelopeV1(
+            logical_call_id=successor.logical_call_id,
+            call_id=successor.call_id,
+            task_request=changed_request,
+            task_request_sha256=changed_digest,
+            claim_payload={
+                **successor.claim_payload,
+                "task_request_sha256": changed_digest,
+                "retry_semantics_sha256": task_request_retry_semantics_sha256_v1(
+                    changed_request
+                ),
+            },
+        )
+        executor = TemperatureFormalExecutorV1(
+            runtime_services=_Runtime(
+                repository_root=tmp_path.resolve(),
+                service_run_id="runtime-service-004",
+                digest=service_digest,
+            ),
+            ledger=ledger,
+            client_factory=forbidden_client_factory,
+            audit_function=lambda **_kwargs: (_ for _ in ()).throw(
+                AssertionError("semantic drift must not be audited")
+            ),
+            no_completion_audit_function=_dual_proof,
+            poll_interval_seconds=0,
+            max_poll_attempts=1,
+        )
+        with pytest.raises(
+            TemperatureFormalExecutionError,
+            match="FORMAL_CLAIM_IDENTITY_MISMATCH",
+        ):
+            executor.run_many_to_durable_terminal((changed,), max_workers=1)
+        assert client_factory_calls == []
+        assert ledger.latest_claim(first.logical_call_id) == first.claim_payload

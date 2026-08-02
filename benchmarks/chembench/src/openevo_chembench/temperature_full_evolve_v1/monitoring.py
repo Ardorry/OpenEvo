@@ -33,6 +33,10 @@ from openevo_chembench.supervised_transfer_v2.managed_codex import (
 from openevo_chembench.temperature_full_evolve_v1.candidate import (
     CANDIDATE_TIMEOUT_SECONDS,
 )
+from openevo_chembench.temperature_full_evolve_v1.ledger import (
+    TemperatureLedgerError,
+    read_validated_ledger_progress_v1,
+)
 from openevo_chembench.temperature_full_evolve_v1.reflector import (
     REFLECTOR_TIMEOUT_SECONDS,
 )
@@ -160,6 +164,17 @@ def collect_monitor_snapshot_v1(
         controller_status_path=controller_status_path,
         database_path=database_path,
     )
+    try:
+        ledger_progress = read_validated_ledger_progress_v1(
+            path=run_root / "private/events.jsonl",
+            run_id=controller.run_id,
+        )
+    except (OSError, TemperatureLedgerError) as exc:
+        raise TemperatureMonitorError("MONITOR_LEDGER_INVALID") from exc
+    _validate_terminal_ledger_binding(
+        controller=controller,
+        ledger_progress=ledger_progress,
+    )
     timestamp = now_utc or _utc_now()
     if _UTC.fullmatch(timestamp) is None:
         raise ValueError("monitor timestamp is invalid")
@@ -192,7 +207,11 @@ def collect_monitor_snapshot_v1(
     disk = _probe_disk(run_root)
     memory = _probe_memory()
     auth = _probe_auth_metadata()
-    progress_fingerprint = _progress_fingerprint(controller, database)
+    progress_fingerprint = _progress_fingerprint(
+        controller,
+        database,
+        ledger_progress,
+    )
     previous_progress = _previous_progress(previous_snapshot)
     unchanged_count = 0
     if previous_progress is not None and previous_progress[0] == progress_fingerprint:
@@ -215,7 +234,12 @@ def collect_monitor_snapshot_v1(
         lease["disposition"] == "WAIT_ACTIVE_LEASE"
         and health["status"] != "ERROR"
     )
-    stall = stall_candidate and not healthy_active_lease
+    healthy_open_claims = (
+        ledger_progress["open_claim_count"] > 0
+        and health["status"] != "ERROR"
+    )
+    healthy_active_work = healthy_active_lease or healthy_open_claims
+    stall = stall_candidate and not healthy_active_work
     diagnostics = _stall_diagnostics(
         stall=stall,
         controller=controller,
@@ -227,6 +251,7 @@ def collect_monitor_snapshot_v1(
         auth=auth,
         lease=lease,
         healthy_active_lease=healthy_active_lease,
+        healthy_open_claims=healthy_open_claims,
     )
     if terminal:
         recovery_disposition = "TERMINAL_NO_RECOVERY"
@@ -234,6 +259,8 @@ def collect_monitor_snapshot_v1(
         recovery_disposition = "DIAGNOSE_HEALTH_FAILURE"
     elif healthy_active_lease:
         recovery_disposition = "WAIT_ACTIVE_LEASE"
+    elif healthy_open_claims:
+        recovery_disposition = "WAIT_LEDGER_OPEN_CALLS"
     elif stall:
         recovery_disposition = "DIAGNOSE_STALL"
     else:
@@ -252,7 +279,9 @@ def collect_monitor_snapshot_v1(
             "run_id": controller.run_id,
             "controller_status_relative": "status/current.json",
             "database_relative": "core/evolution.sqlite3",
+            "ledger_relative": "private/events.jsonl",
         },
+        "ledger_progress": ledger_progress,
         "runtime": runtime,
         "database": database,
         "runner_process": process,
@@ -267,7 +296,7 @@ def collect_monitor_snapshot_v1(
             "stall_detected": stall,
             "diagnostics": diagnostics,
             "active_lease": lease,
-            "automatic_recovery_suppressed": healthy_active_lease,
+            "automatic_recovery_suppressed": healthy_active_work,
             "recovery_disposition": recovery_disposition,
         },
         "terminal": terminal,
@@ -359,20 +388,22 @@ def format_monitor_line_v1(snapshot: dict[str, object]) -> str:
     try:
         controller = snapshot["controller"]
         progress = snapshot["progress"]
+        ledger = snapshot["ledger_progress"]
         runtime = snapshot["runtime"]
         database = snapshot["database"]
         memory = snapshot["host_memory"]
         health = snapshot["health"]
         if not all(
             isinstance(value, dict)
-            for value in (controller, progress, runtime, database, memory, health)
+            for value in (controller, progress, ledger, runtime, database, memory, health)
         ):
             raise TypeError
         return (
             f"phase={controller['phase']} batch={controller['batch_index']} "
             f"item={controller['item_ordinal']} accepted={controller['accepted_completions']} "
             f"candidate={controller['candidate_calls']} reflector={controller['reflector_calls']} "
-            f"core={controller['core_jobs']} runtime={runtime['status']} "
+            f"core={controller['core_jobs']} ledger_seq={ledger['sequence']} "
+            f"open_calls={ledger['open_claim_count']} runtime={runtime['status']} "
             f"db={database['status']} memory={memory['status']} health={health['status']} "
             f"action={progress['recovery_disposition']} "
             f"stalled={str(progress['stall_detected']).lower()}"
@@ -881,8 +912,15 @@ def _health_summary(
             "credential_metadata",
             str(auth.get("finding_code") or "CREDENTIAL_METADATA_NOT_PASS"),
         )
+    if controller.phase in {"FAILED", "HARD_BLOCKED"}:
+        add("controller", "CONTROLLER_HARD_TERMINAL")
     if controller.failed_side_effects:
-        add("controller", "FAILED_SIDE_EFFECT_PRESENT")
+        # This field is cumulative: a safely closed no-completion attempt remains
+        # visible after its successor succeeds.  Preserve that audit signal, but
+        # do not turn a resolved historical attempt into a permanent health error.
+        # A retry that does not make progress is still diagnosed by the normal
+        # two-poll stall path below.
+        add("controller", "FAILED_SIDE_EFFECT_PRESENT", severity="WARN")
     clock_finding = lease.get("clock_finding_code")
     if type(clock_finding) is str:
         add("controller", clock_finding)
@@ -899,9 +937,25 @@ def _health_summary(
     return {"status": status, "findings": findings}
 
 
+def _validate_terminal_ledger_binding(
+    *,
+    controller: ControllerStatusV1,
+    ledger_progress: dict[str, object],
+) -> None:
+    kind_counts = ledger_progress.get("kind_counts")
+    if type(kind_counts) is not dict:
+        raise TemperatureMonitorError("MONITOR_LEDGER_PROGRESS_INVALID")
+    run_failed_count = kind_counts.get("RUN_FAILED", 0)
+    if type(run_failed_count) is not int or run_failed_count not in {0, 1}:
+        raise TemperatureMonitorError("MONITOR_RUN_FAILED_BINDING_INVALID")
+    if (controller.phase == "FAILED") != (run_failed_count == 1):
+        raise TemperatureMonitorError("MONITOR_RUN_FAILED_BINDING_INVALID")
+
+
 def _progress_fingerprint(
     controller: ControllerStatusV1,
     database: dict[str, object],
+    ledger_progress: dict[str, object],
 ) -> str:
     return hashlib.sha256(
         canonical_json_bytes(
@@ -919,6 +973,10 @@ def _progress_fingerprint(
                 "failed_side_effects": controller.failed_side_effects,
                 "last_progress_at_utc": controller.last_progress_at_utc,
                 "database_table_row_counts": database.get("table_row_counts", {}),
+                "ledger_sequence": ledger_progress.get("sequence"),
+                "ledger_head_sha256": ledger_progress.get("head_sha256"),
+                "ledger_kind_counts": ledger_progress.get("kind_counts"),
+                "ledger_open_claim_count": ledger_progress.get("open_claim_count"),
             }
         )
     ).hexdigest()
@@ -967,9 +1025,12 @@ def _stall_diagnostics(
     auth: dict[str, object],
     lease: dict[str, object],
     healthy_active_lease: bool,
+    healthy_open_claims: bool,
 ) -> list[str]:
     if healthy_active_lease:
         return ["WAIT_ACTIVE_LEASE"]
+    if healthy_open_claims:
+        return ["WAIT_LEDGER_OPEN_CALLS"]
     if not stall:
         return []
     findings: list[str] = []

@@ -18,7 +18,7 @@ import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, NoReturn
 
 from openevo.evolution.framework import load_verified_framework_registry
 from openevo.evolution.store import EvolutionStore
@@ -84,6 +84,7 @@ from openevo_chembench.temperature_full_evolve_v1.formal_runtime import (
     load_temperature_formal_runtime_v1,
 )
 from openevo_chembench.temperature_full_evolve_v1.ledger import (
+    REFLECTOR_ATTEMPT_RETRY_EXHAUSTED,
     TemperatureExperimentLedgerV1,
 )
 from openevo_chembench.temperature_full_evolve_v1.packet import (
@@ -100,6 +101,8 @@ from openevo_chembench.temperature_full_evolve_v1.preflight import (
 )
 from openevo_chembench.temperature_full_evolve_v1.reflector import (
     AcceptedReflectorSynthesisV1,
+    TemperatureReflectorError,
+    is_retryable_reflector_completion_rejection_v1,
     prepare_reflector_call_v1,
 )
 from openevo_chembench.temperature_full_evolve_v1.reporting import (
@@ -315,6 +318,10 @@ class TemperatureFullEvolveFormalRunnerV1:
             self._ensure_runtime_inventory_admission()
             self._ensure_core_state_checkpoint_chain()
             self._ensure_run_and_split_events()
+            if any(event["kind"] == "RUN_FAILED" for event in self._ledger.events):
+                raise TemperatureFormalRunnerError(
+                    REFLECTOR_ATTEMPT_RETRY_EXHAUSTED
+                )
             diagnostics: list[BatchAggregateDiagnosticV1] = self._load_closed_diagnostics()
             self._record_successful_resume()
             for batch_index in range(1, 5):
@@ -598,6 +605,7 @@ class TemperatureFullEvolveFormalRunnerV1:
             not self._resume
             or self._recovery_recorded
             or _has_semantic_event(self._ledger.events, "AUDIT_CLOSED")
+            or any(event["kind"] == "RUN_FAILED" for event in self._ledger.events)
         ):
             return
         checkpoint = self._core_state_checkpoint_path(self._core.head.batch_index)
@@ -739,8 +747,9 @@ class TemperatureFullEvolveFormalRunnerV1:
             )
         while True:
             latest = self._ledger.latest_claim(logical)
-            if latest is not None and not self._ledger.failure_has_no_completion(
-                str(latest["call_id"])
+            if latest is not None and not (
+                self._ledger.failure_has_no_completion(str(latest["call_id"]))
+                or self._ledger.completion_was_rejected(str(latest["call_id"]))
             ):
                 envelope = self._load_call_checkpoint(str(latest["call_id"]))
                 plan = recover_existing_reflector_plan_v1(
@@ -751,25 +760,45 @@ class TemperatureFullEvolveFormalRunnerV1:
                     service_identity_sha256=self._runtime.digest,
                 )
             else:
-                plan = prepare_reflector_call_v1(
-                    sealed=sealed,
-                    ledger=self._ledger,
-                    run_id=self.layout.controller_run_id,
-                    service_identity_sha256=self._runtime.digest,
-                )
+                try:
+                    plan = prepare_reflector_call_v1(
+                        sealed=sealed,
+                        ledger=self._ledger,
+                        run_id=self.layout.controller_run_id,
+                        service_identity_sha256=self._runtime.digest,
+                    )
+                except TemperatureReflectorError as exc:
+                    if exc.finding_code != REFLECTOR_ATTEMPT_RETRY_EXHAUSTED:
+                        raise
+                    self._terminate_reflector_retry_exhausted(
+                        batch_index=sealed.packet.batch_index,
+                    )
                 envelope = FormalCallEnvelopeV1.from_reflector(plan)
                 self._write_call_checkpoint(envelope)
             outcome = self._executor.run_many_to_durable_terminal((envelope,), max_workers=1)[0]
             if outcome.state == "terminal_no_completion":
                 continue
-            accepted = finalize_reflector_outcome_v1(
-                outcome=outcome,
-                plan=plan,
-                sealed=sealed,
-                ledger=self._ledger,
-            )
+            try:
+                accepted = finalize_reflector_outcome_v1(
+                    outcome=outcome,
+                    plan=plan,
+                    sealed=sealed,
+                    ledger=self._ledger,
+                )
+            except TemperatureReflectorError as exc:
+                if not (
+                    is_retryable_reflector_completion_rejection_v1(exc)
+                    and self._ledger.completion_was_rejected(plan.call_id)
+                ):
+                    raise
+                self._controller.write_status()
+                continue
             self._controller.write_status()
             return accepted
+
+    def _terminate_reflector_retry_exhausted(self, *, batch_index: int) -> NoReturn:
+        self._controller.record_reflector_retry_exhausted(batch_index=batch_index)
+        raise TemperatureFormalRunnerError(REFLECTOR_ATTEMPT_RETRY_EXHAUSTED)
 
     def _run_core_batch(
         self,
@@ -787,7 +816,12 @@ class TemperatureFullEvolveFormalRunnerV1:
         rendered = render_core_text_memory_dataset_v1(
             batch_index=batch_index,
             projected_memory=projected.memory,
-            dataset_directory=self.layout.private_root / f"core_datasets/batch_{batch_index}",
+            dataset_directory=(
+                self.layout.core_root
+                / "artifacts/input_datasets"
+                / PROTOCOL_ID
+                / f"batch_{batch_index}"
+            ),
             source_packet_sha256=packet_sha256,
             reflector_receipt_sha256=sha256_bytes(
                 canonical_json_bytes(reflection.reflector_accepted_payload)
@@ -795,20 +829,16 @@ class TemperatureFullEvolveFormalRunnerV1:
             evidence_sha256=evidence.digest,
             projected_artifact_set_sha256=projected.digest,
         )
-        rendered.write_private()
-        binding_path = self.layout.private_root / f"core_datasets/batch_{batch_index}/binding.json"
-        if binding_path.exists():
-            binding = CoreTextMemoryDatasetBindingV1.model_validate_json(
-                _read_private_bytes(binding_path)
-            )
-            if self._core_store.get_artifact(binding.artifact_id).artifact_id != binding.artifact_id:
-                raise TemperatureFormalRunnerError("RUNNER_CORE_DATASET_BINDING_DRIFT")
-        else:
-            binding = rendered.bind(self._core_store.register_artifact(rendered.artifact_request()))
-            _write_private_once(
-                binding_path,
-                canonical_json_bytes(binding.model_dump(mode="json")),
-            )
+        dataset_evidence_root = (
+            self.layout.private_root / f"core_dataset_bindings/batch_{batch_index}"
+        )
+        binding = _ensure_core_dataset_binding_v1(
+            store=self._core_store,
+            rendered=rendered,
+            artifact_root=self.layout.core_root / "artifacts",
+            intent_path=dataset_evidence_root / "registration_intent.json",
+            binding_path=dataset_evidence_root / "binding.json",
+        )
         prepared = self._core.prepare_batch(
             batch_index=batch_index,
             predecessor=self._core.head,
@@ -1799,6 +1829,462 @@ def _write_private_once(path: Path, payload: bytes) -> None:
     write_private_file(path, payload, replace=False)
 
 
+def _ensure_core_dataset_binding_v1(
+    *,
+    store: EvolutionStore,
+    rendered: Any,
+    artifact_root: Path,
+    intent_path: Path,
+    binding_path: Path,
+) -> CoreTextMemoryDatasetBindingV1:
+    """Register or recover one exact managed Core input dataset.
+
+    The immutable intent precedes payload/DB side effects. If the process dies
+    after Core commits ``register_artifact`` but before the binding is written,
+    the next invocation discovers and validates that one exact row instead of
+    registering a duplicate.
+    """
+
+    from openevo_chembench.temperature_full_evolve_v1.core_evolution import (
+        RenderedCoreTextMemoryDatasetV1,
+    )
+
+    if (
+        type(store) is not EvolutionStore
+        or type(rendered) is not RenderedCoreTextMemoryDatasetV1
+        or not isinstance(artifact_root, Path)
+        or not artifact_root.is_absolute()
+        or not isinstance(intent_path, Path)
+        or not intent_path.is_absolute()
+        or not isinstance(binding_path, Path)
+        or not binding_path.is_absolute()
+        or intent_path == binding_path
+        or store.files.root != artifact_root
+    ):
+        raise TemperatureFormalRunnerError("RUNNER_CORE_DATASET_ARGUMENT_INVALID")
+    root_identity = _core_artifact_root_identity_v1(artifact_root)
+    expected_relative = (
+        Path("input_datasets")
+        / PROTOCOL_ID
+        / f"batch_{rendered.batch_index}"
+    )
+    dataset_directory = rendered.manifest_path.parent
+    if (
+        rendered.records_path.parent != dataset_directory
+        or rendered.manifest_path.name != "manifest.json"
+        or rendered.records_path.name != "records.jsonl"
+    ):
+        raise TemperatureFormalRunnerError("RUNNER_CORE_DATASET_PLACEMENT_INVALID")
+    try:
+        relative = dataset_directory.relative_to(artifact_root)
+    except ValueError as exc:
+        raise TemperatureFormalRunnerError(
+            "RUNNER_CORE_DATASET_PLACEMENT_INVALID"
+        ) from exc
+    if relative != expected_relative:
+        raise TemperatureFormalRunnerError("RUNNER_CORE_DATASET_PLACEMENT_INVALID")
+    _validate_core_dataset_path_chain_v1(
+        artifact_root=artifact_root,
+        dataset_directory=dataset_directory,
+        payload_paths=(rendered.manifest_path, rendered.records_path),
+        require_payloads=False,
+    )
+    request = rendered.artifact_request()
+    request_payload = request.model_dump(mode="json")
+    intent = {
+        "schema_version": "TemperatureCoreDatasetRegistrationIntentV1",
+        "batch_index": rendered.batch_index,
+        "artifact_root_identity": root_identity,
+        "dataset_directory_relative": relative.as_posix(),
+        "artifact_request_sha256": sha256_bytes(
+            canonical_json_bytes(request_payload)
+        ),
+        "artifact_name": rendered.artifact_name,
+        "manifest_uri": rendered.manifest_path.as_uri(),
+        "records_uri": rendered.records_path.as_uri(),
+        "manifest_sha256": sha256_bytes(rendered.manifest_bytes),
+        "manifest_utf8_bytes": len(rendered.manifest_bytes),
+        "records_sha256": sha256_bytes(rendered.records_bytes),
+        "records_utf8_bytes": len(rendered.records_bytes),
+    }
+    intent_bytes = canonical_json_bytes(intent)
+    if intent_path.exists():
+        existing_intent_bytes = _read_private_bytes(intent_path, maximum_bytes=64 * 1024)
+        existing_intent = _decode_json_object(
+            existing_intent_bytes,
+            "RUNNER_CORE_DATASET_INTENT_INVALID",
+        )
+        if existing_intent.get("artifact_root_identity") != root_identity:
+            raise TemperatureFormalRunnerError(
+                "RUNNER_CORE_DATASET_ROOT_IDENTITY_MISMATCH"
+            )
+        if existing_intent != intent or existing_intent_bytes != intent_bytes:
+            raise TemperatureFormalRunnerError("RUNNER_CORE_DATASET_INTENT_DRIFT")
+    else:
+        _write_private_once(intent_path, intent_bytes)
+
+    rendered.write_private()
+    _validate_core_dataset_path_chain_v1(
+        artifact_root=artifact_root,
+        dataset_directory=dataset_directory,
+        payload_paths=(rendered.manifest_path, rendered.records_path),
+        require_payloads=True,
+    )
+    if _core_artifact_root_identity_v1(artifact_root) != root_identity:
+        raise TemperatureFormalRunnerError(
+            "RUNNER_CORE_DATASET_ROOT_IDENTITY_MISMATCH"
+        )
+
+    existing_binding: CoreTextMemoryDatasetBindingV1 | None = None
+    if binding_path.exists():
+        binding_bytes = _read_private_bytes(binding_path, maximum_bytes=64 * 1024)
+        binding_payload = _decode_json_object(
+            binding_bytes,
+            "RUNNER_CORE_DATASET_BINDING_INVALID",
+        )
+        try:
+            existing_binding = CoreTextMemoryDatasetBindingV1.model_validate(
+                binding_payload
+            )
+        except ValueError as exc:
+            raise TemperatureFormalRunnerError(
+                "RUNNER_CORE_DATASET_BINDING_INVALID"
+            ) from exc
+        if binding_bytes != canonical_json_bytes(
+            existing_binding.model_dump(mode="json")
+        ):
+            raise TemperatureFormalRunnerError(
+                "RUNNER_CORE_DATASET_BINDING_INVALID"
+            )
+
+    artifact = _find_core_dataset_registration_v1(
+        store=store,
+        rendered=rendered,
+        artifact_root=artifact_root,
+        expected_artifact_id=(
+            existing_binding.artifact_id if existing_binding is not None else None
+        ),
+    )
+    if artifact is None:
+        if existing_binding is not None:
+            raise TemperatureFormalRunnerError(
+                "RUNNER_CORE_DATASET_BINDING_ARTIFACT_MISSING"
+            )
+        artifact = store.register_artifact(request)
+        recovered = _find_core_dataset_registration_v1(
+            store=store,
+            rendered=rendered,
+            artifact_root=artifact_root,
+            expected_artifact_id=artifact.artifact_id,
+        )
+        if recovered is None:
+            raise TemperatureFormalRunnerError(
+                "RUNNER_CORE_DATASET_REGISTRATION_NOT_DURABLE"
+            )
+        artifact = recovered
+    expected_binding = rendered.bind(artifact)
+    if existing_binding is not None:
+        if existing_binding != expected_binding:
+            raise TemperatureFormalRunnerError(
+                "RUNNER_CORE_DATASET_BINDING_DRIFT"
+            )
+        binding = existing_binding
+    else:
+        binding = expected_binding
+        _write_private_once(
+            binding_path,
+            canonical_json_bytes(binding.model_dump(mode="json")),
+        )
+    if _core_artifact_root_identity_v1(artifact_root) != root_identity:
+        raise TemperatureFormalRunnerError(
+            "RUNNER_CORE_DATASET_ROOT_IDENTITY_MISMATCH"
+        )
+    return binding
+
+
+def _find_core_dataset_registration_v1(
+    *,
+    store: EvolutionStore,
+    rendered: Any,
+    artifact_root: Path,
+    expected_artifact_id: str | None,
+) -> Any | None:
+    """Return the unique exact artifact row for a deterministic dataset intent."""
+
+    request = rendered.artifact_request()
+    request_payload = request.model_dump(mode="json")
+    try:
+        with store.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT artifact_id, type, name, version, state, uri,
+                       manifest_path, manifest_json, lineage_json,
+                       compatibility_json, scores_json, tags_json, promoted,
+                       staging_job_id
+                FROM artifacts
+                WHERE name = ? OR uri = ?
+                ORDER BY artifact_id
+                LIMIT 3
+                """,
+                (request.name, request.uri),
+            ).fetchall()
+            dataset_count = connection.execute(
+                "SELECT COUNT(*) FROM artifacts WHERE type = ?",
+                (str(request_payload["type"]),),
+            ).fetchone()[0]
+    except Exception as exc:
+        raise TemperatureFormalRunnerError(
+            "RUNNER_CORE_DATASET_REGISTRATION_LOOKUP_FAILED"
+        ) from exc
+    if len(rows) > 1:
+        raise TemperatureFormalRunnerError(
+            "RUNNER_CORE_DATASET_REGISTRATION_AMBIGUOUS"
+        )
+    if not rows:
+        if dataset_count != rendered.batch_index - 1:
+            raise TemperatureFormalRunnerError(
+                "RUNNER_CORE_DATASET_REGISTRATION_SET_MISMATCH"
+            )
+        return None
+    if dataset_count != rendered.batch_index:
+        raise TemperatureFormalRunnerError(
+            "RUNNER_CORE_DATASET_REGISTRATION_SET_MISMATCH"
+        )
+    row = rows[0]
+    artifact_id = row["artifact_id"]
+    if (
+        type(artifact_id) is not str
+        or (expected_artifact_id is not None and artifact_id != expected_artifact_id)
+        or row["type"] != request_payload["type"]
+        or row["name"] != request.name
+        or row["version"] != 1
+        or row["state"] != "active"
+        or row["uri"] != request.uri
+        or row["promoted"] != 0
+        or row["staging_job_id"] is not None
+    ):
+        raise TemperatureFormalRunnerError(
+            "RUNNER_CORE_DATASET_REGISTRATION_IDENTITY_MISMATCH"
+        )
+    expected_manifest_path = store.files.artifact_manifest_path(
+        str(request_payload["type"]),
+        artifact_id,
+    )
+    try:
+        expected_manifest_path.relative_to(artifact_root)
+    except ValueError as exc:
+        raise TemperatureFormalRunnerError(
+            "RUNNER_CORE_DATASET_REGISTRATION_MANIFEST_MISMATCH"
+        ) from exc
+    if row["manifest_path"] != os.fspath(expected_manifest_path):
+        raise TemperatureFormalRunnerError(
+            "RUNNER_CORE_DATASET_REGISTRATION_MANIFEST_MISMATCH"
+        )
+    json_fields = {
+        "manifest_json": request_payload["manifest"],
+        "lineage_json": request_payload["lineage"],
+        "compatibility_json": request_payload["compatibility"],
+        "scores_json": request_payload["scores"],
+        "tags_json": request_payload["tags"],
+    }
+    for field, expected in json_fields.items():
+        if _decode_core_store_json_v1(row[field]) != expected:
+            raise TemperatureFormalRunnerError(
+                "RUNNER_CORE_DATASET_REGISTRATION_MANIFEST_MISMATCH"
+            )
+    expected_store_manifest = {
+        "artifact_id": artifact_id,
+        "type": request_payload["type"],
+        "name": request.name,
+        "uri": request.uri,
+        "manifest": request_payload["manifest"],
+        "lineage": request_payload["lineage"],
+        "compatibility": request_payload["compatibility"],
+        "scores": request_payload["scores"],
+        "tags": request_payload["tags"],
+        "promoted": False,
+    }
+    if _read_core_store_manifest_v1(expected_manifest_path) != expected_store_manifest:
+        raise TemperatureFormalRunnerError(
+            "RUNNER_CORE_DATASET_REGISTRATION_MANIFEST_MISMATCH"
+        )
+    try:
+        artifact = store.get_artifact(artifact_id)
+    except Exception as exc:
+        raise TemperatureFormalRunnerError(
+            "RUNNER_CORE_DATASET_BINDING_ARTIFACT_MISSING"
+        ) from exc
+    if (
+        artifact.artifact_id != artifact_id
+        or artifact.type != request.type
+        or artifact.name != request.name
+        or artifact.version != 1
+        or str(artifact.state) != "active"
+        or artifact.uri != request.uri
+        or artifact.manifest != request.manifest
+        or artifact.compatibility != request.compatibility
+        or artifact.scores != request.scores
+        or artifact.tags != request.tags
+        or artifact.promoted
+    ):
+        raise TemperatureFormalRunnerError(
+            "RUNNER_CORE_DATASET_REGISTRATION_DTO_MISMATCH"
+        )
+    return artifact
+
+
+def _core_artifact_root_identity_v1(root: Path) -> dict[str, object]:
+    try:
+        metadata = root.lstat()
+        resolved = root.resolve(strict=True)
+    except OSError as exc:
+        raise TemperatureFormalRunnerError(
+            "RUNNER_CORE_DATASET_ROOT_IDENTITY_INVALID"
+        ) from exc
+    if (
+        resolved != root
+        or not stat.S_ISDIR(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or metadata.st_uid != os.geteuid()
+        or stat.S_IMODE(metadata.st_mode) & 0o022
+    ):
+        raise TemperatureFormalRunnerError(
+            "RUNNER_CORE_DATASET_ROOT_IDENTITY_INVALID"
+        )
+    return {
+        "device": metadata.st_dev,
+        "inode": metadata.st_ino,
+        "owner_uid": metadata.st_uid,
+        "mode": stat.S_IMODE(metadata.st_mode),
+        "path_sha256": sha256_bytes(os.fspath(root).encode("utf-8")),
+    }
+
+
+def _validate_core_dataset_path_chain_v1(
+    *,
+    artifact_root: Path,
+    dataset_directory: Path,
+    payload_paths: tuple[Path, Path],
+    require_payloads: bool,
+) -> None:
+    try:
+        relative = dataset_directory.relative_to(artifact_root)
+    except ValueError as exc:
+        raise TemperatureFormalRunnerError(
+            "RUNNER_CORE_DATASET_PLACEMENT_INVALID"
+        ) from exc
+    current = artifact_root
+    for part in relative.parts:
+        current = current / part
+        try:
+            metadata = current.lstat()
+        except FileNotFoundError:
+            if require_payloads:
+                raise TemperatureFormalRunnerError(
+                    "RUNNER_CORE_DATASET_PLACEMENT_INVALID"
+                ) from None
+            break
+        except OSError as exc:
+            raise TemperatureFormalRunnerError(
+                "RUNNER_CORE_DATASET_PLACEMENT_INVALID"
+            ) from exc
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or stat.S_ISLNK(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(metadata.st_mode) & 0o022
+        ):
+            raise TemperatureFormalRunnerError(
+                "RUNNER_CORE_DATASET_PLACEMENT_INVALID"
+            )
+    for path in payload_paths:
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            if require_payloads:
+                raise TemperatureFormalRunnerError(
+                    "RUNNER_CORE_DATASET_PAYLOAD_INVALID"
+                ) from None
+            continue
+        except OSError as exc:
+            raise TemperatureFormalRunnerError(
+                "RUNNER_CORE_DATASET_PAYLOAD_INVALID"
+            ) from exc
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_ISLNK(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or metadata.st_nlink != 1
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+        ):
+            raise TemperatureFormalRunnerError(
+                "RUNNER_CORE_DATASET_PAYLOAD_INVALID"
+            )
+
+
+def _decode_core_store_json_v1(value: object) -> Any:
+    if type(value) is not str or not 2 <= len(value.encode("utf-8")) <= 64 * 1024:
+        raise TemperatureFormalRunnerError(
+            "RUNNER_CORE_DATASET_REGISTRATION_MANIFEST_MISMATCH"
+        )
+
+    def unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in result:
+                raise ValueError("duplicate key")
+            result[key] = item
+        return result
+
+    try:
+        return json.loads(
+            value,
+            object_pairs_hook=unique_pairs,
+            parse_constant=lambda _value: (_ for _ in ()).throw(
+                ValueError("non-finite")
+            ),
+        )
+    except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        raise TemperatureFormalRunnerError(
+            "RUNNER_CORE_DATASET_REGISTRATION_MANIFEST_MISMATCH"
+        ) from exc
+
+
+def _read_core_store_manifest_v1(path: Path) -> dict[str, Any]:
+    try:
+        metadata = path.lstat()
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_ISLNK(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or metadata.st_nlink != 1
+            or stat.S_IMODE(metadata.st_mode) & 0o022
+            or not 2 <= metadata.st_size <= 128 * 1024
+        ):
+            raise OSError("unsafe Core artifact manifest")
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        try:
+            current = os.fstat(descriptor)
+            if (current.st_dev, current.st_ino) != (metadata.st_dev, metadata.st_ino):
+                raise OSError("Core artifact manifest changed")
+            payload = os.read(descriptor, metadata.st_size + 1)
+        finally:
+            os.close(descriptor)
+        if len(payload) != metadata.st_size:
+            raise OSError("Core artifact manifest short read")
+    except OSError as exc:
+        raise TemperatureFormalRunnerError(
+            "RUNNER_CORE_DATASET_REGISTRATION_MANIFEST_MISMATCH"
+        ) from exc
+    return _decode_json_object(
+        payload,
+        "RUNNER_CORE_DATASET_REGISTRATION_MANIFEST_MISMATCH",
+    )
+
+
 def _file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -2107,7 +2593,7 @@ def _phase_attempt_counts(
     *,
     phases: frozenset[str],
     batch_index: int | None,
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, int]:
     claims = [
         event
         for event in events
@@ -2118,12 +2604,22 @@ def _phase_attempt_counts(
     ]
     logical = {str(event["payload"]["logical_call_id"]) for event in claims}
     call_ids = {str(event["payload"]["call_id"]) for event in claims}
-    failures = sum(
+    no_completion = sum(
         event["kind"] == "CALL_NO_COMPLETION_FAILURE"
         and str(event["payload"].get("call_id")) in call_ids
         for event in events
     )
-    return len(claims), len(claims) - len(logical), failures
+    rejected = sum(
+        event["kind"] == "CALL_REJECTED_COMPLETION"
+        and str(event["payload"].get("call_id")) in call_ids
+        for event in events
+    )
+    return (
+        len(claims),
+        len(claims) - len(logical),
+        no_completion + rejected,
+        rejected,
+    )
 
 
 def _logical_batch_index(logical_call_id: str) -> int | None:
@@ -2146,7 +2642,7 @@ def _train_batch_aggregate_payload(
         or state.batch_index != batch_index
     ):
         raise TemperatureFormalRunnerError("RUNNER_BATCH_AGGREGATE_SEQUENCE_INVALID")
-    _attempts, retries, failures = _phase_attempt_counts(
+    _attempts, retries, failures, rejected = _phase_attempt_counts(
         ledger_events,
         phases=frozenset({"train-pre", "train-post", "train_reflector"}),
         batch_index=batch_index,
@@ -2171,7 +2667,7 @@ def _train_batch_aggregate_payload(
         "core_jobs": 3,
         "failed_attempts": failures,
         "retries": retries,
-        "rejected_attempts": 0,
+        "rejected_attempts": rejected,
         "artifacts": artifacts,
         "rules": _rule_aggregate(evidence),
     }
@@ -2185,7 +2681,7 @@ def _test_arm_aggregate(
     events: tuple[dict[str, Any], ...],
 ) -> dict[str, Any]:
     phase = "evolved-test" if arm == "evolved" else "baseline-test"
-    attempts, retries, failures = _phase_attempt_counts(
+    attempts, retries, failures, rejected = _phase_attempt_counts(
         events,
         phases=frozenset({phase}),
         batch_index=None,
@@ -2212,7 +2708,7 @@ def _test_arm_aggregate(
         "model_attempts": attempts,
         "failed_attempts": failures,
         "retries": retries,
-        "rejected_attempts": 0,
+        "rejected_attempts": rejected,
         "context_bytes": context_summary["combined_context_bytes"],
         "context_sha256": context_summary["combined_context_sha256"],
         "feedback_enabled": False,
@@ -2255,6 +2751,9 @@ def _aggregate_report_payload(
     logical = {str(event["payload"]["logical_call_id"]) for event in claims}
     no_completion = sum(
         event["kind"] == "CALL_NO_COMPLETION_FAILURE" for event in ledger_events
+    )
+    rejected_completion = sum(
+        event["kind"] == "CALL_REJECTED_COMPLETION" for event in ledger_events
     )
     incidents = sum(event["kind"] == "INCIDENT_OPENED" for event in ledger_events)
     if incidents or any(event["kind"] == "RUN_FAILED" for event in ledger_events):
@@ -2402,9 +2901,9 @@ def _aggregate_report_payload(
                 "status": "NOT_MEASURED",
                 "lower_bound": 404,
             },
-            "failed_attempts": no_completion,
+            "failed_attempts": no_completion + rejected_completion,
             "retries": len(claims) - len(logical),
-            "rejected_attempts": 0,
+            "rejected_attempts": rejected_completion,
             "recoveries": sum(
                 event["kind"] == "RECOVERY_COMPLETED" for event in ledger_events
             ),
@@ -2415,7 +2914,7 @@ def _aggregate_report_payload(
                 "orchestration": 0,
                 "runtime_or_credential": 0,
                 "duplicate_or_lease": 0,
-                "artifact_or_schema": 0,
+                "artifact_or_schema": rejected_completion,
                 "data_integrity": 0,
             },
         },

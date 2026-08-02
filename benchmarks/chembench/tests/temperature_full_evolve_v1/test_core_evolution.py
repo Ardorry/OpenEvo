@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from typing import Any, ClassVar
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -17,6 +18,10 @@ from openevo.evolution.framework.builtins import (
 from openevo.evolution.framework.loading import _verify_distribution_install
 from openevo.evolution.store import EvolutionStore
 
+from openevo_chembench.supervised_transfer_v1.common import (
+    canonical_json_bytes,
+    write_private_file,
+)
 from openevo_chembench.supervised_transfer_v2.artifacts import (
     CoreResolvedSupervisedContextV2,
 )
@@ -34,6 +39,10 @@ from openevo_chembench.temperature_full_evolve_v1.core_evolution import (
 from openevo_chembench.temperature_full_evolve_v1.evidence import (
     CanonicalRuleV1,
     RuleEvidenceIndexV1,
+)
+from openevo_chembench.temperature_full_evolve_v1.runner import (
+    TemperatureFormalRunnerError,
+    _ensure_core_dataset_binding_v1,
 )
 
 
@@ -174,6 +183,41 @@ def _setup(tmp_path: Path, registry):
     )
 
 
+def _runner_dataset_setup(tmp_path: Path, registry):
+    artifact_root = (tmp_path / "core/artifacts").resolve()
+    store = EvolutionStore(
+        db_path=tmp_path / "core/evolution.db",
+        artifact_root=artifact_root,
+        executable_registry=registry,
+    )
+    store.initialize()
+    evidence = _evidence()
+    projected = project_artifacts(
+        evidence,
+        forbidden_questions=("Private synthetic question text.",),
+    )
+    rendered = render_core_text_memory_dataset_v1(
+        batch_index=1,
+        projected_memory=projected.memory,
+        dataset_directory=(
+            artifact_root
+            / "input_datasets/chembench_temperature_full_evolve_v1/batch_1"
+        ),
+        source_packet_sha256=_sha("source-packet"),
+        reflector_receipt_sha256=_sha("reflector-receipt"),
+        evidence_sha256=evidence.digest,
+        projected_artifact_set_sha256=projected.digest,
+    )
+    evidence_root = (tmp_path / "private/core_dataset_bindings/batch_1").resolve()
+    return (
+        store,
+        artifact_root,
+        rendered,
+        evidence_root / "registration_intent.json",
+        evidence_root / "binding.json",
+    )
+
+
 def _prepare(setup):
     (
         _store,
@@ -196,6 +240,201 @@ def _prepare(setup):
         text_memory_dataset=dataset,
         forbidden_questions=forbidden,
     )
+
+
+def test_runner_core_dataset_recovers_register_to_binding_crash_exactly_once(
+    tmp_path: Path,
+    executable_registry: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, artifact_root, rendered, intent_path, binding_path = (
+        _runner_dataset_setup(tmp_path, executable_registry)
+    )
+    register = store.register_artifact
+    registered_id: list[str] = []
+
+    def crash_after_register(request):
+        artifact = register(request)
+        registered_id.append(artifact.artifact_id)
+        raise SystemExit("synthetic crash after durable register")
+
+    monkeypatch.setattr(store, "register_artifact", crash_after_register)
+    with pytest.raises(SystemExit, match="synthetic crash"):
+        _ensure_core_dataset_binding_v1(
+            store=store,
+            rendered=rendered,
+            artifact_root=artifact_root,
+            intent_path=intent_path,
+            binding_path=binding_path,
+        )
+    assert intent_path.is_file()
+    assert rendered.records_path.is_file()
+    assert rendered.manifest_path.is_file()
+    assert not binding_path.exists()
+
+    monkeypatch.setattr(store, "register_artifact", register)
+    recovered = _ensure_core_dataset_binding_v1(
+        store=store,
+        rendered=rendered,
+        artifact_root=artifact_root,
+        intent_path=intent_path,
+        binding_path=binding_path,
+    )
+    repeated = _ensure_core_dataset_binding_v1(
+        store=store,
+        rendered=rendered,
+        artifact_root=artifact_root,
+        intent_path=intent_path,
+        binding_path=binding_path,
+    )
+    with store.connect() as connection:
+        artifact_count = connection.execute(
+            "SELECT COUNT(*) FROM artifacts"
+        ).fetchone()[0]
+
+    assert recovered == repeated
+    assert recovered.artifact_id == registered_id[0]
+    assert artifact_count == 1
+    assert rendered.records_path.is_relative_to(artifact_root)
+    assert rendered.manifest_path.is_relative_to(artifact_root)
+    assert not rendered.records_path.is_relative_to(intent_path.parent)
+
+
+@pytest.mark.parametrize("field", ("uri", "manifest_json"))
+def test_runner_core_dataset_recovery_rejects_store_identity_drift(
+    tmp_path: Path,
+    executable_registry: Any,
+    field: str,
+) -> None:
+    store, artifact_root, rendered, intent_path, binding_path = (
+        _runner_dataset_setup(tmp_path, executable_registry)
+    )
+    _ensure_core_dataset_binding_v1(
+        store=store,
+        rendered=rendered,
+        artifact_root=artifact_root,
+        intent_path=intent_path,
+        binding_path=binding_path,
+    )
+    replacement = "file:///mismatched/manifest.json" if field == "uri" else "{}"
+    with store.connect() as connection:
+        connection.execute(
+            f"UPDATE artifacts SET {field} = ?",
+            (replacement,),
+        )
+        connection.commit()
+
+    with pytest.raises(
+        TemperatureFormalRunnerError,
+        match=(
+            "REGISTRATION_IDENTITY_MISMATCH"
+            if field == "uri"
+            else "REGISTRATION_MANIFEST_MISMATCH"
+        ),
+    ):
+        _ensure_core_dataset_binding_v1(
+            store=store,
+            rendered=rendered,
+            artifact_root=artifact_root,
+            intent_path=intent_path,
+            binding_path=binding_path,
+        )
+
+
+def test_runner_core_dataset_recovery_rejects_binding_dto_drift(
+    tmp_path: Path,
+    executable_registry: Any,
+) -> None:
+    store, artifact_root, rendered, intent_path, binding_path = (
+        _runner_dataset_setup(tmp_path, executable_registry)
+    )
+    _ensure_core_dataset_binding_v1(
+        store=store,
+        rendered=rendered,
+        artifact_root=artifact_root,
+        intent_path=intent_path,
+        binding_path=binding_path,
+    )
+    payload = json.loads(binding_path.read_bytes())
+    payload["manifest_uri"] = "file:///mismatched/manifest.json"
+    write_private_file(binding_path, canonical_json_bytes(payload))
+
+    with pytest.raises(
+        TemperatureFormalRunnerError,
+        match="RUNNER_CORE_DATASET_BINDING_DRIFT",
+    ):
+        _ensure_core_dataset_binding_v1(
+            store=store,
+            rendered=rendered,
+            artifact_root=artifact_root,
+            intent_path=intent_path,
+            binding_path=binding_path,
+        )
+
+
+def test_runner_core_dataset_recovery_rejects_root_identity_drift(
+    tmp_path: Path,
+    executable_registry: Any,
+) -> None:
+    store, artifact_root, rendered, intent_path, binding_path = (
+        _runner_dataset_setup(tmp_path, executable_registry)
+    )
+    _ensure_core_dataset_binding_v1(
+        store=store,
+        rendered=rendered,
+        artifact_root=artifact_root,
+        intent_path=intent_path,
+        binding_path=binding_path,
+    )
+    payload = json.loads(intent_path.read_bytes())
+    payload["artifact_root_identity"]["inode"] += 1
+    write_private_file(intent_path, canonical_json_bytes(payload))
+
+    with pytest.raises(
+        TemperatureFormalRunnerError,
+        match="RUNNER_CORE_DATASET_ROOT_IDENTITY_MISMATCH",
+    ):
+        _ensure_core_dataset_binding_v1(
+            store=store,
+            rendered=rendered,
+            artifact_root=artifact_root,
+            intent_path=intent_path,
+            binding_path=binding_path,
+        )
+
+
+def test_runner_core_dataset_rejects_payload_outside_managed_artifact_root(
+    tmp_path: Path,
+    executable_registry: Any,
+) -> None:
+    store, artifact_root, rendered, intent_path, binding_path = (
+        _runner_dataset_setup(tmp_path, executable_registry)
+    )
+    outside = render_core_text_memory_dataset_v1(
+        batch_index=rendered.batch_index,
+        projected_memory=project_artifacts(
+            _evidence(),
+            forbidden_questions=("Private synthetic question text.",),
+        ).memory,
+        dataset_directory=(tmp_path / "private/core_dataset_payload").resolve(),
+        source_packet_sha256=rendered.source_packet_sha256,
+        reflector_receipt_sha256=rendered.reflector_receipt_sha256,
+        evidence_sha256=rendered.evidence_sha256,
+        projected_artifact_set_sha256=rendered.projected_artifact_set_sha256,
+    )
+
+    with pytest.raises(
+        TemperatureFormalRunnerError,
+        match="RUNNER_CORE_DATASET_PLACEMENT_INVALID",
+    ):
+        _ensure_core_dataset_binding_v1(
+            store=store,
+            rendered=outside,
+            artifact_root=artifact_root,
+            intent_path=intent_path,
+            binding_path=binding_path,
+        )
+    assert not outside.records_path.exists()
 
 
 def _run_jobs(coordinator, prepared):

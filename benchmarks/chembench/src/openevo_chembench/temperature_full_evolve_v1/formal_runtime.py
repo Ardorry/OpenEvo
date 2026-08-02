@@ -39,7 +39,7 @@ from openevo_chembench.supervised_transfer_v1.common import (
 
 FORMAL_RUNTIME_SCHEMA: Final[str] = "TemperatureFormalRuntimeReceiptV1"
 FORMAL_RUNTIME_ROOT_RELATIVE: Final[str] = (
-    "state/chembench_temperature_full_evolve_v1/formal_runtime"
+    "state/chembench_temperature_full_evolve_v1/formal_runtime_v2"
 )
 FORMAL_RUNTIME_PYTHON_RELATIVE: Final[str] = (
     f"{FORMAL_RUNTIME_ROOT_RELATIVE}/runtime_venv/bin/python"
@@ -49,6 +49,9 @@ FORMAL_FRAMEWORK_LOCK_RELATIVE: Final[str] = (
 )
 FORMAL_RUNTIME_RECEIPT_RELATIVE: Final[str] = (
     f"{FORMAL_RUNTIME_ROOT_RELATIVE}/formal_runtime_receipt_v1.json"
+)
+FORMAL_RUNTIME_FAILURE_ROOT_RELATIVE: Final[str] = (
+    "state/chembench_temperature_full_evolve_v1/formal_runtime_v2_failures"
 )
 BASE_RUNTIME_ROOT_RELATIVE: Final[str] = (
     "state/chembench_supervised_transfer_v2/runtime_venv"
@@ -143,7 +146,7 @@ def prepare_temperature_formal_runtime_v1(
     state_root = final.parent
     state_root.mkdir(parents=True, exist_ok=True)
     _require_owned_directory(state_root, exact_mode=None)
-    failures = state_root / "formal_runtime_failures"
+    failures = repository / FORMAL_RUNTIME_FAILURE_ROOT_RELATIVE
     failures.mkdir(mode=0o700, exist_ok=True)
     failures.chmod(0o700)
     _require_owned_directory(failures, exact_mode=0o700)
@@ -1359,6 +1362,7 @@ def _fsync_directory(path: Path) -> None:
 
 __all__ = [
     "FORMAL_FRAMEWORK_LOCK_RELATIVE",
+    "FORMAL_RUNTIME_FAILURE_ROOT_RELATIVE",
     "FORMAL_RUNTIME_PYTHON_RELATIVE",
     "FORMAL_RUNTIME_RECEIPT_RELATIVE",
     "FORMAL_RUNTIME_ROOT_RELATIVE",

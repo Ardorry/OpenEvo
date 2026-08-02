@@ -13,6 +13,11 @@ from pydantic import ValidationError
 from openevo_chembench.supervised_transfer_v1.common import canonical_json_bytes
 from openevo_chembench.supervised_transfer_v2.executor import task_request_digest_v2
 from openevo_chembench.temperature_full_evolve_v1.evidence import RuleEvidenceIndexV1
+from openevo_chembench.temperature_full_evolve_v1.execution import (
+    DurableFormalOutcomeV1,
+    FormalCallEnvelopeV1,
+    finalize_reflector_outcome_v1,
+)
 from openevo_chembench.temperature_full_evolve_v1.ledger import (
     TemperatureExperimentLedgerV1,
 )
@@ -36,11 +41,16 @@ from openevo_chembench.temperature_full_evolve_v1.reflector import (
     ObservedReflectorCompletionV1,
     TemperatureReflectorError,
     accept_reflector_synthesis_v1,
+    build_reflector_rejected_completion_payload_v1,
+    is_retryable_reflector_completion_rejection_v1,
     observe_reflector_task_status_v1,
     prepare_reflector_call_v1,
     recover_accepted_reflector_synthesis_v1,
     render_reflector_prompt_v1,
     validate_reflector_transcripts_v1,
+)
+from openevo_chembench.temperature_full_evolve_v1.runtime_services import (
+    PersistedRolloutResultAuditV1,
 )
 
 
@@ -149,6 +159,37 @@ def _safe_transcript(response: str) -> str:
     )
 
 
+def _reflector_status(response: str, *, task_id: str) -> TaskStatus:
+    return TaskStatus(
+        task_id=task_id,
+        status="completed",
+        total_sessions=1,
+        completed_sessions=1,
+        results=[
+            SessionResult(
+                session_id="sk-openevo-reflector-rejected-session",
+                task_id=task_id,
+                status=SessionStatus.COMPLETED,
+                trajectory=Trajectory(
+                    status="COMPLETED",
+                    metadata={"capture_mode": "transcript"},
+                    traces=[
+                        Trace(
+                            response_messages=[
+                                {"role": "assistant", "content": response}
+                            ],
+                            metadata={
+                                "capture_mode": "transcript",
+                                "transcript": _safe_transcript(response),
+                            },
+                        )
+                    ],
+                ),
+            )
+        ],
+    )
+
+
 def _response(*, support_uid: str | None = None, batch_index: int = 1) -> str:
     proposals: list[dict[str, object]] = []
     if support_uid is not None:
@@ -177,11 +218,20 @@ def _response(*, support_uid: str | None = None, batch_index: int = 1) -> str:
     )
 
 
+def _observed(response: str) -> ObservedReflectorCompletionV1:
+    return ObservedReflectorCompletionV1(
+        response=response,
+        response_sha256=hashlib.sha256(response.encode()).hexdigest(),
+        transcript=validate_reflector_transcripts_v1((_safe_transcript(response),)),
+    )
+
+
 class _Ledger:
     def __init__(self) -> None:
         self.claims: dict[str, list[dict[str, Any]]] = {}
         self.accepted: dict[str, dict[str, Any]] = {}
         self.no_completion: set[str] = set()
+        self.rejected_completion: set[str] = set()
 
     def accepted_call(self, logical_call_id: str) -> dict[str, Any] | None:
         value = self.accepted.get(logical_call_id)
@@ -193,6 +243,9 @@ class _Ledger:
 
     def failure_has_no_completion(self, call_id: str) -> bool:
         return call_id in self.no_completion
+
+    def completion_was_rejected(self, call_id: str) -> bool:
+        return call_id in self.rejected_completion
 
     def add_claim(self, payload: dict[str, object]) -> None:
         self.claims.setdefault(str(payload["logical_call_id"]), []).append(dict(payload))
@@ -505,6 +558,252 @@ def test_retry_requires_prior_no_completion_and_keeps_one_logical_call_id() -> N
     assert second.logical_call_id == first.logical_call_id
     assert second.call_id != first.call_id
     assert second.task_request_sha256 != first.task_request_sha256
+    assert (
+        second.claim_payload["retry_semantics_sha256"]
+        == first.claim_payload["retry_semantics_sha256"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("response", "expected_code"),
+    (
+        (_response(batch_index=2), "REFLECTOR_RESPONSE_PACKET_SEQUENCE_INVALID"),
+        (
+            '{"schema_version":"TemperatureBatchReflectionV1","batch_index":1,'
+            + '"batch_index":1,"prior_evidence_sha256":null,"proposals":[]}',
+            "REFLECTOR_RESPONSE_SCHEMA_OR_EVIDENCE_INVALID",
+        ),
+        (
+            _response(support_uid=next(iter(TEST_UIDS))),
+            "REFLECTOR_RESPONSE_SCHEMA_OR_EVIDENCE_INVALID",
+        ),
+    ),
+)
+def test_only_allowlisted_durable_response_rejections_create_redacted_retry_proof(
+    response: str,
+    expected_code: str,
+) -> None:
+    sealed = _sealed()
+    ledger = _Ledger()
+    plan = prepare_reflector_call_v1(
+        sealed=sealed,
+        ledger=ledger,
+        run_id=RUN_ID,
+        service_identity_sha256=SERVICE_IDENTITY,
+    )
+    ledger.add_claim(plan.claim_payload)
+    observed = _observed(response)
+    with pytest.raises(TemperatureReflectorError) as captured:
+        accept_reflector_synthesis_v1(
+            sealed=sealed,
+            plan=plan,
+            observed=observed,
+            ledger=ledger,
+            task_result_sha256="c" * 64,
+            completion_identity_sha256="e" * 64,
+        )
+    assert captured.value.finding_code == expected_code
+    assert is_retryable_reflector_completion_rejection_v1(captured.value)
+    payload = build_reflector_rejected_completion_payload_v1(
+        plan=plan,
+        observed=observed,
+        ledger=ledger,
+        task_result_sha256="c" * 64,
+        completion_identity_sha256="e" * 64,
+        rejection=captured.value,
+    )
+    assert payload["rejection_code"] == expected_code
+    assert "response" not in payload
+    assert response not in json.dumps(payload, sort_keys=True)
+    assert payload["durable_completion"] is True
+    ledger.rejected_completion.add(plan.call_id)
+    retry = prepare_reflector_call_v1(
+        sealed=sealed,
+        ledger=ledger,
+        run_id=RUN_ID,
+        service_identity_sha256=SERVICE_IDENTITY,
+    )
+    assert retry.logical_call_id == plan.logical_call_id
+    assert retry.attempt_number == 2
+
+
+def test_non_response_validation_error_cannot_authorize_rejected_completion_retry() -> None:
+    sealed = _sealed()
+    ledger = _Ledger()
+    plan = prepare_reflector_call_v1(
+        sealed=sealed,
+        ledger=ledger,
+        run_id=RUN_ID,
+        service_identity_sha256=SERVICE_IDENTITY,
+    )
+    ledger.add_claim(plan.claim_payload)
+    response = _response()
+    with pytest.raises(
+        TemperatureReflectorError,
+        match="REFLECTOR_REJECTED_COMPLETION_NOT_ALLOWLISTED",
+    ):
+        build_reflector_rejected_completion_payload_v1(
+            plan=plan,
+            observed=_observed(response),
+            ledger=ledger,
+            task_result_sha256="c" * 64,
+            completion_identity_sha256="e" * 64,
+            rejection=TemperatureReflectorError("REFLECTOR_TRANSCRIPT_INVALID"),
+        )
+
+
+def test_formal_finalizer_records_durable_schema_rejection_without_accepting_content(
+    tmp_path: Path,
+) -> None:
+    sealed = _sealed()
+    path = (tmp_path / "private/finalizer-ledger.jsonl").resolve()
+    with TemperatureExperimentLedgerV1(
+        path=path,
+        run_id="formal-reflector-finalizer-rejected-0001",
+    ) as ledger:
+        plan = prepare_reflector_call_v1(
+            sealed=sealed,
+            ledger=ledger,
+            run_id=RUN_ID,
+            service_identity_sha256=SERVICE_IDENTITY,
+        )
+        ledger.append("CALL_CLAIMED", plan.claim_payload)
+        response = _response(batch_index=2)
+        status = _reflector_status(response, task_id=plan.task_request.task_id)
+        session = status.results[0]
+        outcome = DurableFormalOutcomeV1(
+            envelope=FormalCallEnvelopeV1.from_reflector(plan),
+            state="completion",
+            status=status,
+            audit=PersistedRolloutResultAuditV1(
+                state="PROVEN_COMPLETE",
+                service_run_id="runtime-service-reflector-rejected-001",
+                task_id_sha256=hashlib.sha256(
+                    plan.task_request.task_id.encode()
+                ).hexdigest(),
+                session_id_sha256=hashlib.sha256(
+                    session.session_id.encode()
+                ).hexdigest(),
+                result_sha256="a" * 64,
+                result_size_bytes=100,
+                terminal_status="COMPLETED",
+                completion_exists=True,
+                completion_sha256=hashlib.sha256(response.encode()).hexdigest(),
+                finding_code=None,
+                result=session,
+            ),
+            recovered_after_restart=False,
+        )
+        with pytest.raises(
+            TemperatureReflectorError,
+            match="REFLECTOR_RESPONSE_PACKET_SEQUENCE_INVALID",
+        ):
+            finalize_reflector_outcome_v1(
+                outcome=outcome,
+                plan=plan,
+                sealed=sealed,
+                ledger=ledger,
+            )
+        assert ledger.accepted_call(plan.logical_call_id) is None
+        assert ledger.completion_was_rejected(plan.call_id)
+        event = ledger.events[-1]
+        assert event["kind"] == "CALL_REJECTED_COMPLETION"
+        assert "response" not in event["payload"]
+        assert event["payload"]["response_sha256"] == hashlib.sha256(
+            response.encode()
+        ).hexdigest()
+        assert response not in path.read_text(encoding="utf-8")
+
+
+def test_rejected_completion_retry_is_restart_safe_bounded_and_acceptance_terminal(
+    tmp_path: Path,
+) -> None:
+    sealed = _sealed()
+    path = (tmp_path / "private/events.jsonl").resolve()
+    ledger_run_id = "formal-reflector-rejected-run-0001"
+    response = _response(batch_index=2)
+    with TemperatureExperimentLedgerV1(path=path, run_id=ledger_run_id) as ledger:
+        first = prepare_reflector_call_v1(
+            sealed=sealed,
+            ledger=ledger,
+            run_id=RUN_ID,
+            service_identity_sha256=SERVICE_IDENTITY,
+        )
+        ledger.append("CALL_CLAIMED", first.claim_payload)
+        observed = _observed(response)
+        with pytest.raises(TemperatureReflectorError) as captured:
+            accept_reflector_synthesis_v1(
+                sealed=sealed,
+                plan=first,
+                observed=observed,
+                ledger=ledger,
+                task_result_sha256="c" * 64,
+                completion_identity_sha256="e" * 64,
+            )
+        rejected = build_reflector_rejected_completion_payload_v1(
+            plan=first,
+            observed=observed,
+            ledger=ledger,
+            task_result_sha256="c" * 64,
+            completion_identity_sha256="e" * 64,
+            rejection=captured.value,
+        )
+        ledger.append("CALL_REJECTED_COMPLETION", rejected)
+
+    raw = path.read_text(encoding="utf-8")
+    assert response not in raw
+    assert "proposals" not in raw
+    with TemperatureExperimentLedgerV1(path=path, run_id=ledger_run_id) as ledger:
+        second = prepare_reflector_call_v1(
+            sealed=sealed,
+            ledger=ledger,
+            run_id=RUN_ID,
+            service_identity_sha256=SERVICE_IDENTITY,
+        )
+        assert second.attempt_number == 2
+        ledger.append("CALL_CLAIMED", second.claim_payload)
+        second_response = _response()
+        accepted = accept_reflector_synthesis_v1(
+            sealed=sealed,
+            plan=second,
+            observed=_observed(second_response),
+            ledger=ledger,
+            task_result_sha256="a" * 64,
+            completion_identity_sha256="b" * 64,
+        )
+        ledger.append("CALL_ACCEPTED", accepted.call_accepted_payload)
+        with pytest.raises(
+            TemperatureReflectorError,
+            match="REFLECTOR_LOGICAL_SYNTHESIS_ALREADY_ACCEPTED",
+        ):
+            prepare_reflector_call_v1(
+                sealed=sealed,
+                ledger=ledger,
+                run_id=RUN_ID,
+                service_identity_sha256=SERVICE_IDENTITY,
+            )
+
+    bounded = _Ledger()
+    for attempt in range(1, 4):
+        plan = prepare_reflector_call_v1(
+            sealed=sealed,
+            ledger=bounded,
+            run_id=RUN_ID,
+            service_identity_sha256=SERVICE_IDENTITY,
+        )
+        assert plan.attempt_number == attempt
+        bounded.add_claim(plan.claim_payload)
+        bounded.rejected_completion.add(plan.call_id)
+    with pytest.raises(
+        TemperatureReflectorError,
+        match="REFLECTOR_ATTEMPT_RETRY_EXHAUSTED",
+    ):
+        prepare_reflector_call_v1(
+            sealed=sealed,
+            ledger=bounded,
+            run_id=RUN_ID,
+            service_identity_sha256=SERVICE_IDENTITY,
+        )
 
 
 def test_response_with_test_uid_wrong_batch_or_duplicate_keys_is_never_accepted() -> None:

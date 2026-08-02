@@ -41,10 +41,16 @@ from openevo_chembench.temperature_full_evolve_v1.evidence import (
     apply_batch_reflection,
     parse_batch_reflection,
 )
+from openevo_chembench.temperature_full_evolve_v1.ledger import (
+    REFLECTOR_REJECTED_COMPLETION_CODES,
+)
 from openevo_chembench.temperature_full_evolve_v1.packet import (
     ReflectorVisibleBatchPacketV1,
     SealedBatchSupervisedPacketV1,
     TemperatureBatchPacketError,
+)
+from openevo_chembench.temperature_full_evolve_v1.retry_semantics import (
+    task_request_retry_semantics_sha256_v1,
 )
 
 REFLECTOR_PROMPT_SCHEMA = "TemperatureBatchReflectorPromptV1"
@@ -65,6 +71,21 @@ _TRANSCRIPT_REFERENCE_PREFIX = "openevo-rollout-jsonl:sha256:"
 
 class TemperatureReflectorError(RuntimeError):
     """Content-free formal Reflector transport failure."""
+
+    def __init__(self, finding_code: str) -> None:
+        self.finding_code = finding_code
+        super().__init__(finding_code)
+
+
+def is_retryable_reflector_completion_rejection_v1(
+    error: BaseException,
+) -> bool:
+    """Recognize only post-completion schema/evidence rejection codes."""
+
+    return (
+        type(error) is TemperatureReflectorError
+        and error.finding_code in REFLECTOR_REJECTED_COMPLETION_CODES
+    )
 
 
 def _require_sha256(value: object, field_name: str) -> str:
@@ -438,6 +459,8 @@ class ReflectorLedgerViewV1(Protocol):
 
     def failure_has_no_completion(self, call_id: str) -> bool: ...
 
+    def completion_was_rejected(self, call_id: str) -> bool: ...
+
 
 @dataclass(frozen=True, slots=True, repr=False)
 class ReflectorCallPlanV1:
@@ -460,6 +483,8 @@ class ReflectorCallPlanV1:
             or self.claim_payload.get("logical_call_id") != self.logical_call_id
             or self.claim_payload.get("call_id") != self.call_id
             or self.claim_payload.get("task_request_sha256") != self.task_request_sha256
+            or self.claim_payload.get("retry_semantics_sha256")
+            != task_request_retry_semantics_sha256_v1(self.task_request)
         ):
             raise ValueError("Reflector call plan is invalid")
 
@@ -481,7 +506,7 @@ def prepare_reflector_call_v1(
     run_id: str,
     service_identity_sha256: str,
 ) -> ReflectorCallPlanV1:
-    """Prepare the first call, or an infrastructure-only retry, without appending."""
+    """Prepare the first call or a bounded, ledger-proven retry without appending."""
 
     if type(sealed) is not SealedBatchSupervisedPacketV1:
         raise TypeError("Reflector call preparation requires an exact sealed packet")
@@ -502,12 +527,15 @@ def prepare_reflector_call_v1(
         if (
             type(prior_call_id) is not str
             or type(prior_attempt) is not int
-            or not ledger.failure_has_no_completion(prior_call_id)
+            or not (
+                ledger.failure_has_no_completion(prior_call_id)
+                or ledger.completion_was_rejected(prior_call_id)
+            )
         ):
             raise TemperatureReflectorError("REFLECTOR_CALL_OWNERSHIP_UNRESOLVED")
         attempt_number = prior_attempt + 1
     if attempt_number > 3:
-        raise TemperatureReflectorError("REFLECTOR_INFRASTRUCTURE_RETRY_EXHAUSTED")
+        raise TemperatureReflectorError("REFLECTOR_ATTEMPT_RETRY_EXHAUSTED")
     call_id = f"{logical_call_id}-a{attempt_number:02d}"
     task_id = "chembench-" + call_id
     prompt = render_reflector_prompt_v1(sealed)
@@ -518,6 +546,7 @@ def prepare_reflector_call_v1(
         service_identity_sha256=service_identity_sha256,
     )
     request_digest = task_request_digest_v2(request)
+    retry_semantics_sha256 = task_request_retry_semantics_sha256_v1(request)
     claim_payload: dict[str, object] = {
         "logical_call_id": logical_call_id,
         "call_id": call_id,
@@ -526,6 +555,7 @@ def prepare_reflector_call_v1(
         "logical_arm": "batch_supervised_reflector",
         "attempt_number": attempt_number,
         "task_request_sha256": request_digest,
+        "retry_semantics_sha256": retry_semantics_sha256,
         "service_identity_sha256": service_identity_sha256,
     }
     return ReflectorCallPlanV1(
@@ -537,6 +567,60 @@ def prepare_reflector_call_v1(
         task_request_sha256=request_digest,
         claim_payload=claim_payload,
     )
+
+
+def build_reflector_rejected_completion_payload_v1(
+    *,
+    plan: ReflectorCallPlanV1,
+    observed: ObservedReflectorCompletionV1,
+    ledger: ReflectorLedgerViewV1,
+    task_result_sha256: str,
+    completion_identity_sha256: str,
+    rejection: TemperatureReflectorError,
+) -> dict[str, object]:
+    """Build a content-redacted closure for one durable invalid synthesis.
+
+    Only a response that reached the managed harness's durable completion
+    boundary and then failed the allowlisted response schema/evidence checks is
+    eligible.  The raw response and transcript are deliberately excluded.
+    """
+
+    if (
+        type(plan) is not ReflectorCallPlanV1
+        or type(observed) is not ObservedReflectorCompletionV1
+        or not isinstance(ledger, ReflectorLedgerViewV1)
+        or not is_retryable_reflector_completion_rejection_v1(rejection)
+    ):
+        raise TemperatureReflectorError(
+            "REFLECTOR_REJECTED_COMPLETION_NOT_ALLOWLISTED"
+        )
+    try:
+        _require_sha256(task_result_sha256, "task result digest")
+        _require_sha256(completion_identity_sha256, "completion identity digest")
+    except ValueError as exc:
+        raise TemperatureReflectorError("REFLECTOR_COMPLETION_IDENTITY_INVALID") from exc
+    claim = ledger.latest_claim(plan.logical_call_id)
+    if (
+        claim != plan.claim_payload
+        or ledger.failure_has_no_completion(plan.call_id)
+        or ledger.completion_was_rejected(plan.call_id)
+        or ledger.accepted_call(plan.logical_call_id) is not None
+    ):
+        raise TemperatureReflectorError(
+            "REFLECTOR_REJECTION_WITHOUT_ACTIVE_CLAIM"
+        )
+    return {
+        "logical_call_id": plan.logical_call_id,
+        "call_id": plan.call_id,
+        "rejection_code": rejection.finding_code,
+        "response_sha256": observed.response_sha256,
+        "task_result_sha256": task_result_sha256,
+        "transcript_sha256": observed.transcript.transcript_sha256,
+        "completion_identity_sha256": completion_identity_sha256,
+        "durable_completion": True,
+        "tool_event_count": 0,
+        "tool_policy_validated": True,
+    }
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -694,6 +778,7 @@ def accept_reflector_synthesis_v1(
         claim is None
         or claim != plan.claim_payload
         or ledger.failure_has_no_completion(plan.call_id)
+        or ledger.completion_was_rejected(plan.call_id)
     ):
         raise TemperatureReflectorError("REFLECTOR_ACCEPTANCE_WITHOUT_ACTIVE_CLAIM")
     reflection, next_evidence = _parse_and_merge(
@@ -854,7 +939,9 @@ __all__ = [
     "ReflectorTranscriptReceiptV1",
     "TemperatureReflectorError",
     "accept_reflector_synthesis_v1",
+    "build_reflector_rejected_completion_payload_v1",
     "build_reflector_task_request_v1",
+    "is_retryable_reflector_completion_rejection_v1",
     "observe_reflector_task_status_v1",
     "prepare_reflector_call_v1",
     "recover_accepted_reflector_synthesis_v1",

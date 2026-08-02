@@ -1219,13 +1219,22 @@ def _write_charts(
     )
     _simple_bar(
         root / "call_and_failure_summary.png",
-        ("Candidate", "Reflector", "Core jobs", "Failures", "Retries", "Recoveries"),
+        (
+            "Candidate",
+            "Reflector",
+            "Core jobs",
+            "Failures",
+            "Retries",
+            "Rejected",
+            "Recoveries",
+        ),
         (
             report.calls.candidate_logical_calls,
             report.calls.reflector_logical_calls,
             report.calls.core_jobs,
             report.calls.failed_attempts,
             report.calls.retries,
+            report.calls.rejected_attempts,
             report.calls.recoveries,
         ),
         "Calls and failures",
@@ -1472,8 +1481,9 @@ Candidate/Reflector/Core logical calls/jobs 为 {report.calls.candidate_logical_
 credential-readiness；readiness canary 自身的原始 provider attempt 精确总数未被权威采集，状态为
 `{report.calls.canary_provider_attempts.status}`，只能报告保守下界
 {report.calls.canary_provider_attempts.lower_bound}。因此不能把 404 解释为本实验全部 provider
-调用的精确总数。Failed attempts/retries/recoveries/invalidated runs 为
-{report.calls.failed_attempts}/{report.calls.retries}/{report.calls.recoveries}/
+调用的精确总数。Failed attempts/retries/rejected attempts/recoveries/invalidated runs 为
+{report.calls.failed_attempts}/{report.calls.retries}/{report.calls.rejected_attempts}/
+{report.calls.recoveries}/
 {report.calls.invalidated_formal_runs}。完整闭集分类见 `call_and_failure_summary.json`。
 
 Run IDs: {", ".join(f"`{value}`" for value in report.run_ids.all_run_ids)}。
@@ -1514,7 +1524,8 @@ def _handoff_markdown(
   {report.calls.readiness_passed_for_accepted_calls}; canary provider attempts:
   `{report.calls.canary_provider_attempts.status}` (lower bound
   {report.calls.canary_provider_attempts.lower_bound})
-- Failures/recoveries: {report.calls.failed_attempts}/{report.calls.recoveries}
+- Failures/retries/rejected/recoveries: {report.calls.failed_attempts}/
+  {report.calls.retries}/{report.calls.rejected_attempts}/{report.calls.recoveries}
 - Controller run: `{report.run_ids.controller_run_id}`
 - Evolved/baseline runs: `{report.run_ids.evolved_run_id}` /
   `{report.run_ids.baseline_run_id}`

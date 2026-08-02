@@ -16,6 +16,7 @@ from openevo_chembench.temperature_full_evolve_v1.controller import (
     TemperatureExperimentControllerV1,
 )
 from openevo_chembench.temperature_full_evolve_v1.ledger import (
+    REFLECTOR_ATTEMPT_RETRY_EXHAUSTED,
     TemperatureExperimentLedgerV1,
     TemperatureLedgerError,
 )
@@ -35,6 +36,7 @@ def _claim(index: int, *, phase: str = "train-pre", batch: int = 1) -> dict[str,
         "logical_arm": "candidate",
         "attempt_number": 1,
         "task_request_sha256": _sha(f"request-{phase}-{batch}-{index}"),
+        "retry_semantics_sha256": _sha(f"semantics-{phase}-{batch}-{index}"),
         "service_identity_sha256": "1" * 64,
     }
 
@@ -132,6 +134,7 @@ def _append_reflector_call(
         "logical_arm": "batch_supervised_reflector",
         "attempt_number": 1,
         "task_request_sha256": _sha(f"reflect-request-{batch}"),
+        "retry_semantics_sha256": _sha(f"reflect-semantics-{batch}"),
         "service_identity_sha256": "1" * 64,
     }
     ledger.append("CALL_CLAIMED", claim)
@@ -236,6 +239,159 @@ def test_unresolved_claim_preempts_new_work_and_formal_utc_run_id_is_allowed(
             status_path=(tmp_path / "utc-status" / "current.json").resolve(),
         )
         assert controller.action.kind is ControllerActionKindV1.CREATE_RUN
+
+
+def test_rejected_reflector_attempt_is_closed_retryable_and_counted(
+    tmp_path: Path,
+) -> None:
+    run_id = "formal-run-reflector-rejected-3001"
+    with TemperatureExperimentLedgerV1(
+        path=(tmp_path / "rejected-ledger.jsonl").resolve(),
+        run_id=run_id,
+    ) as ledger:
+        controller = TemperatureExperimentControllerV1(
+            run_id=run_id,
+            ledger=ledger,
+            status_path=(tmp_path / "status" / "current.json").resolve(),
+        )
+        controller.append_protocol_event("RUN_CREATED", _run_created_payload())
+        controller.append_protocol_event("SPLIT_FROZEN", _split_payload())
+        _close_candidate_phase(ledger, phase="train-pre", batch=1)
+        controller.append_protocol_event(
+            "BATCH_PRE_CLOSED",
+            {"batch_index": 1, "accepted_count": 25, "evaluated_count": 25},
+        )
+        logical = "temperature-reflector-controller-rejected-b01"
+        first = {
+            "logical_call_id": logical,
+            "call_id": f"{logical}-a01",
+            "task_id": f"chembench-{logical}-a01",
+            "phase": "train_reflector",
+            "logical_arm": "batch_supervised_reflector",
+            "attempt_number": 1,
+            "task_request_sha256": _sha("reflect-rejected-request-1"),
+            "retry_semantics_sha256": _sha("reflect-rejected-semantics"),
+            "service_identity_sha256": "1" * 64,
+        }
+        ledger.append("CALL_CLAIMED", first)
+        ledger.append(
+            "CALL_REJECTED_COMPLETION",
+            {
+                "logical_call_id": logical,
+                "call_id": first["call_id"],
+                "rejection_code": "REFLECTOR_RESPONSE_PACKET_SEQUENCE_INVALID",
+                "response_sha256": "2" * 64,
+                "task_result_sha256": "3" * 64,
+                "transcript_sha256": "4" * 64,
+                "completion_identity_sha256": "5" * 64,
+                "durable_completion": True,
+                "tool_event_count": 0,
+                "tool_policy_validated": True,
+            },
+        )
+        assert controller.action.kind is ControllerActionKindV1.RUN_REFLECTOR
+        status = controller.write_status()
+        assert status["active_lease"] is False
+        assert status["failed_side_effects"] == 1
+        second = {
+            **first,
+            "call_id": f"{logical}-a02",
+            "task_id": f"chembench-{logical}-a02",
+            "attempt_number": 2,
+            "task_request_sha256": _sha("reflect-rejected-request-2"),
+            "retry_semantics_sha256": first["retry_semantics_sha256"],
+        }
+        ledger.append("CALL_CLAIMED", second)
+        assert controller.action.kind is ControllerActionKindV1.RECOVER_UNRESOLVED_CALL
+
+
+def test_three_mixed_reflector_failures_persist_idempotent_hard_terminal(
+    tmp_path: Path,
+) -> None:
+    run_id = "formal-run-reflector-exhausted-3002"
+    ledger_path = (tmp_path / "exhausted-ledger.jsonl").resolve()
+    status_path = (tmp_path / "exhausted-status/current.json").resolve()
+    logical = "temperature-reflector-controller-exhausted-b01"
+    with TemperatureExperimentLedgerV1(path=ledger_path, run_id=run_id) as ledger:
+        controller = TemperatureExperimentControllerV1(
+            run_id=run_id,
+            ledger=ledger,
+            status_path=status_path,
+        )
+        controller.append_protocol_event("RUN_CREATED", _run_created_payload())
+        controller.append_protocol_event("SPLIT_FROZEN", _split_payload())
+        _close_candidate_phase(ledger, phase="train-pre", batch=1)
+        controller.append_protocol_event(
+            "BATCH_PRE_CLOSED",
+            {"batch_index": 1, "accepted_count": 25, "evaluated_count": 25},
+        )
+        for attempt in range(1, 4):
+            call_id = f"{logical}-a{attempt:02d}"
+            claim = {
+                "logical_call_id": logical,
+                "call_id": call_id,
+                "task_id": f"chembench-{logical}-a{attempt:02d}",
+                "phase": "train_reflector",
+                "logical_arm": "batch_supervised_reflector",
+                "attempt_number": attempt,
+                "task_request_sha256": _sha(f"reflect-exhausted-request-{attempt}"),
+                "retry_semantics_sha256": _sha("reflect-exhausted-semantics"),
+                "service_identity_sha256": "1" * 64,
+            }
+            ledger.append("CALL_CLAIMED", claim)
+            if attempt == 2:
+                ledger.append(
+                    "CALL_NO_COMPLETION_FAILURE",
+                    {
+                        "logical_call_id": logical,
+                        "call_id": call_id,
+                        "failure_class": "durable_rollout_terminal_no_completion",
+                        "terminal_task_status": "failed",
+                        "durable_rollout_no_completion": True,
+                        "durable_gateway_absent": True,
+                        "no_completion_evidence_sha256": "6" * 64,
+                    },
+                )
+            else:
+                ledger.append(
+                    "CALL_REJECTED_COMPLETION",
+                    {
+                        "logical_call_id": logical,
+                        "call_id": call_id,
+                        "rejection_code": (
+                            "REFLECTOR_RESPONSE_SCHEMA_OR_EVIDENCE_INVALID"
+                        ),
+                        "response_sha256": "2" * 64,
+                        "task_result_sha256": "3" * 64,
+                        "transcript_sha256": "4" * 64,
+                        "completion_identity_sha256": "5" * 64,
+                        "durable_completion": True,
+                        "tool_event_count": 0,
+                        "tool_policy_validated": True,
+                    },
+                )
+        first = controller.record_reflector_retry_exhausted(batch_index=1)
+        second = controller.record_reflector_retry_exhausted(batch_index=1)
+        assert first == second
+        assert first["payload"]["failure_code"] == REFLECTOR_ATTEMPT_RETRY_EXHAUSTED
+        assert sum(event["kind"] == "RUN_FAILED" for event in ledger.events) == 1
+        action = controller.action
+        assert action.kind is ControllerActionKindV1.HARD_TERMINAL
+        assert action.phase == "failed"
+        status = json.loads(status_path.read_text(encoding="utf-8"))
+        assert status["phase"] == "FAILED"
+        assert status["active_lease"] is False
+
+    with TemperatureExperimentLedgerV1(path=ledger_path, run_id=run_id) as recovered:
+        restarted = TemperatureExperimentControllerV1(
+            run_id=run_id,
+            ledger=recovered,
+            status_path=status_path,
+        )
+        assert restarted.action.kind is ControllerActionKindV1.HARD_TERMINAL
+        assert restarted.record_reflector_retry_exhausted(batch_index=1)["payload"] == (
+            first["payload"]
+        )
 
 
 def test_test_freeze_rejects_late_reflector_or_core_semantics(tmp_path: Path) -> None:

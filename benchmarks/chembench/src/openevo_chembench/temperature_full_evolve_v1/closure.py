@@ -121,6 +121,7 @@ class FormalClosureReceiptV1(BaseModel):
     accepted_candidate_count: Literal[400]
     evaluated_candidate_count: Literal[400]
     accepted_reflector_count: Literal[4]
+    rejected_reflector_attempt_count: int = Field(ge=0, le=8)
     core_job_count: Literal[12]
     preflight_model_call_count: Literal[0]
     contains_item_identities: Literal[False]
@@ -263,8 +264,11 @@ def verify_formal_closure_v1(
         "accepted_candidate_count": 400,
         "evaluated_candidate_count": 400,
         "accepted_reflector_count": 4,
+        "rejected_reflector_attempt_count": counts[
+            "rejected_reflector_attempt_count"
+        ],
         "core_job_count": 12,
-    }:
+    } or not 0 <= counts["rejected_reflector_attempt_count"] <= 8:
         raise TemperatureClosureError("CLOSURE_LEDGER_COUNTS_INVALID")
     _bind_ledger_aggregates(report=report, events=events)
 
@@ -422,6 +426,7 @@ def _ledger_counts(events: tuple[dict[str, Any], ...]) -> dict[str, int]:
     run_failed = 0
     incident_opened = 0
     core_jobs = 0
+    rejected_reflector_attempts = 0
     for event in events:
         kind = event["kind"]
         payload = event["payload"]
@@ -433,6 +438,8 @@ def _ledger_counts(events: tuple[dict[str, Any], ...]) -> dict[str, int]:
             evaluated.add(str(payload["logical_call_id"]))
         elif kind == "TARGET_JOB_COMPLETED":
             core_jobs += 1
+        elif kind == "CALL_REJECTED_COMPLETION":
+            rejected_reflector_attempts += 1
         elif kind == "RUN_FAILED":
             run_failed += 1
         elif kind == "INCIDENT_OPENED":
@@ -452,6 +459,7 @@ def _ledger_counts(events: tuple[dict[str, Any], ...]) -> dict[str, int]:
         "accepted_candidate_count": len(candidate),
         "evaluated_candidate_count": len(evaluated & candidate),
         "accepted_reflector_count": len(reflector),
+        "rejected_reflector_attempt_count": rejected_reflector_attempts,
         "core_job_count": core_jobs,
     }
 
@@ -465,6 +473,9 @@ def _bind_ledger_aggregates(*, report: Any, events: tuple[dict[str, Any], ...]) 
     }
     no_completion = [
         event["payload"] for event in events if event["kind"] == "CALL_NO_COMPLETION_FAILURE"
+    ]
+    rejected_completion = [
+        event["payload"] for event in events if event["kind"] == "CALL_REJECTED_COMPLETION"
     ]
     logical = {str(claim["logical_call_id"]) for claim in claims}
     claim_by_logical = {
@@ -484,24 +495,28 @@ def _bind_ledger_aggregates(*, report: Any, events: tuple[dict[str, Any], ...]) 
         or report.calls.canary_provider_attempts.status != "NOT_MEASURED"
         or report.calls.canary_provider_attempts.lower_bound != len(accepted)
         or report.calls.retries != len(claims) - len(logical)
-        or report.calls.failed_attempts != len(no_completion)
+        or report.calls.failed_attempts
+        != len(no_completion) + len(rejected_completion)
         or report.calls.failures.infrastructure_no_completion != len(no_completion)
         or report.calls.recoveries != recoveries
+        or report.calls.rejected_attempts != len(rejected_completion)
+        or report.calls.failures.artifact_or_schema != len(rejected_completion)
+        or len(claims) - len(logical)
+        != len(no_completion) + len(rejected_completion)
         or any(
             (
                 report.calls.failures.parser_or_evaluator,
                 report.calls.failures.orchestration,
                 report.calls.failures.runtime_or_credential,
                 report.calls.failures.duplicate_or_lease,
-                report.calls.failures.artifact_or_schema,
                 report.calls.failures.data_integrity,
-                report.calls.rejected_attempts,
             )
         )
     ):
         raise TemperatureClosureError("CLOSURE_CALL_AGGREGATE_MISMATCH")
 
     failures_by_phase: dict[str, int] = {}
+    rejections_by_phase: dict[str, int] = {}
     claim_by_call = {str(claim["call_id"]): claim for claim in claims}
     for failure in no_completion:
         claim = claim_by_call.get(str(failure["call_id"]))
@@ -509,13 +524,20 @@ def _bind_ledger_aggregates(*, report: Any, events: tuple[dict[str, Any], ...]) 
             raise TemperatureClosureError("CLOSURE_CALL_AGGREGATE_MISMATCH")
         phase = str(claim["phase"])
         failures_by_phase[phase] = failures_by_phase.get(phase, 0) + 1
+    for rejection in rejected_completion:
+        claim = claim_by_call.get(str(rejection["call_id"]))
+        if claim is None or claim.get("phase") != "train_reflector":
+            raise TemperatureClosureError("CLOSURE_CALL_AGGREGATE_MISMATCH")
+        phase = str(claim["phase"])
+        failures_by_phase[phase] = failures_by_phase.get(phase, 0) + 1
+        rejections_by_phase[phase] = rejections_by_phase.get(phase, 0) + 1
     for phase, arm in (("evolved-test", report.evolved_test), ("baseline-test", report.baseline_test)):
         attempts = sum(claim["phase"] == phase for claim in claims)
         if (
             arm.model_attempts != attempts
             or arm.retries != attempts - 100
             or arm.failed_attempts != failures_by_phase.get(phase, 0)
-            or arm.rejected_attempts != 0
+            or arm.rejected_attempts != rejections_by_phase.get(phase, 0)
         ):
             raise TemperatureClosureError("CLOSURE_TEST_CALL_AGGREGATE_MISMATCH")
 
@@ -571,7 +593,15 @@ def _bind_ledger_aggregates(*, report: Any, events: tuple[dict[str, Any], ...]) 
             batch.retries != len(batch_claims) - len(batch_logical_ids)
             or batch.failed_attempts
             != sum(str(failure["call_id"]) in batch_call_ids for failure in no_completion)
-            or batch.rejected_attempts != 0
+            + sum(
+                str(rejection["call_id"]) in batch_call_ids
+                for rejection in rejected_completion
+            )
+            or batch.rejected_attempts
+            != sum(
+                str(rejection["call_id"]) in batch_call_ids
+                for rejection in rejected_completion
+            )
         ):
             raise TemperatureClosureError("CLOSURE_TRAIN_CALL_AGGREGATE_MISMATCH")
         pre = evaluations.get(("train_pre", batch.batch_index), {})

@@ -272,6 +272,10 @@ def test_retry_needs_proven_no_completion_and_tool_event_fails_closed(tmp_path: 
         ledger.append("CALL_NO_COMPLETION_FAILURE", _failure(plan.call_id))
         retry = prepare_candidate_call_v1(ledger=ledger, **arguments)
         assert retry.attempt_number == 2
+        assert (
+            retry.claim_payload["retry_semantics_sha256"]
+            == plan.claim_payload["retry_semantics_sha256"]
+        )
         ledger.append("CALL_CLAIMED", retry.claim_payload)
         with pytest.raises(TemperatureCandidateError, match="CANDIDATE_TERMINAL_RESULT_INVALID"):
             observe_candidate_task_status_v1(
