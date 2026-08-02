@@ -4,10 +4,43 @@ import hashlib
 from pathlib import Path
 
 from openevo_chembench.temperature_full_evolve_v1.reporting import (
+    build_managed_runtime_receipt,
     write_blocked_report_package,
 )
 
 REPOSITORY = Path(__file__).resolve().parents[4]
+
+
+def test_runtime_receipt_uses_public_candidate_source_mapping() -> None:
+    candidate = {
+        "source": "openevo_core_managed_science_runtime_v1",
+        "image_id": "sha256:" + "1" * 64,
+        "image_authority": "sha256:" + "1" * 64,
+        "codex_cli_version": "codex-cli 0.144.1",
+        "npm_package": "@openai/codex@0.144.1",
+        "executable_sha256": "2" * 64,
+        "receipt_sha256": "3" * 64,
+    }
+    reflector = {
+        "source": "openevo_core_managed_codex_v1",
+        "codex_cli_version": "codex-cli 0.144.1",
+        "npm_package": "@openai/codex@0.144.1",
+        "executable_sha256": "2" * 64,
+        "receipt_sha256": "4" * 64,
+    }
+
+    receipt = build_managed_runtime_receipt(
+        candidate_identity=candidate,
+        reflector_identity=reflector,
+        framework_lock_present=True,
+        runtime_services_receipt_present=False,
+        disk_total_bytes=100,
+        disk_free_bytes=50,
+    )
+
+    assert receipt["candidate_source"] == candidate["source"]
+    assert receipt["reflector_source"] == reflector["source"]
+    assert receipt["candidate_reflector_executable_equal"] is True
 
 
 def test_blocked_report_package_is_closed_and_checksum_verified(tmp_path: Path) -> None:

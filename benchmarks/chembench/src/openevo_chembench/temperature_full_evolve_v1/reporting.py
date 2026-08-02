@@ -21,6 +21,55 @@ from openevo_chembench.temperature_full_evolve_v1.capacity_preflight import (
 REPORT_SCHEMA = "TemperatureFullEvolveBlockedReportPackageV1"
 
 
+def build_managed_runtime_receipt(
+    *,
+    candidate_identity: Mapping[str, object],
+    reflector_identity: Mapping[str, object],
+    framework_lock_present: bool,
+    runtime_services_receipt_present: bool,
+    disk_total_bytes: int,
+    disk_free_bytes: int,
+) -> dict[str, object]:
+    """Project verified runtime DTOs into an aggregate, path-free public receipt."""
+
+    required = {
+        "source",
+        "codex_cli_version",
+        "npm_package",
+        "executable_sha256",
+        "receipt_sha256",
+    }
+    if not required <= set(candidate_identity) or not required <= set(reflector_identity):
+        raise ValueError("managed runtime public identity is incomplete")
+    if "image_id" not in candidate_identity or "image_authority" not in candidate_identity:
+        raise ValueError("candidate managed image identity is incomplete")
+    return {
+        "schema_version": "TemperatureFullEvolveManagedRuntimeReceiptV1",
+        "status": "PASS_STATIC_IDENTITY_NO_FORMAL_SERVICE_STARTED",
+        "candidate_source": candidate_identity["source"],
+        "candidate_image_id": candidate_identity["image_id"],
+        "candidate_image_authority": candidate_identity["image_authority"],
+        "candidate_codex_cli_version": candidate_identity["codex_cli_version"],
+        "candidate_npm_package": candidate_identity["npm_package"],
+        "candidate_executable_sha256": candidate_identity["executable_sha256"],
+        "candidate_receipt_sha256": candidate_identity["receipt_sha256"],
+        "reflector_source": reflector_identity["source"],
+        "reflector_codex_cli_version": reflector_identity["codex_cli_version"],
+        "reflector_npm_package": reflector_identity["npm_package"],
+        "reflector_executable_sha256": reflector_identity["executable_sha256"],
+        "reflector_receipt_sha256": reflector_identity["receipt_sha256"],
+        "candidate_reflector_executable_equal": (
+            candidate_identity["executable_sha256"] == reflector_identity["executable_sha256"]
+        ),
+        "framework_lock_present": framework_lock_present,
+        "runtime_services_current_receipt_present": runtime_services_receipt_present,
+        "runtime_services_started_for_this_audit": False,
+        "credential_content_read": False,
+        "disk_total_bytes": disk_total_bytes,
+        "disk_free_bytes": disk_free_bytes,
+    }
+
+
 def write_blocked_report_package(
     *,
     repository_root: Path,
@@ -597,4 +646,8 @@ def _file_sha256(path: Path) -> str:
     return sha256_bytes(path.read_bytes())
 
 
-__all__ = ["REPORT_SCHEMA", "write_blocked_report_package"]
+__all__ = [
+    "REPORT_SCHEMA",
+    "build_managed_runtime_receipt",
+    "write_blocked_report_package",
+]

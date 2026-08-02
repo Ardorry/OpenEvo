@@ -21,6 +21,7 @@ from openevo_chembench.supervised_transfer_v2.managed_codex import (
     load_managed_codex_v2,
 )
 from openevo_chembench.temperature_full_evolve_v1.reporting import (
+    build_managed_runtime_receipt,
     write_blocked_report_package,
 )
 
@@ -60,31 +61,14 @@ def main() -> int:
         "credential_content_read": False,
         "model_calls": 0,
     }
-    runtime_identity = {
-        "schema_version": "TemperatureFullEvolveManagedRuntimeReceiptV1",
-        "status": "PASS_STATIC_IDENTITY_NO_FORMAL_SERVICE_STARTED",
-        "candidate_source": candidate.source,
-        "candidate_image_id": candidate.image_id,
-        "candidate_image_authority": candidate.image_authority,
-        "candidate_codex_cli_version": candidate.codex_cli_version,
-        "candidate_npm_package": candidate.npm_package,
-        "candidate_executable_sha256": candidate.executable_sha256,
-        "candidate_receipt_sha256": candidate.receipt_sha256,
-        "reflector_source": reflector.source,
-        "reflector_codex_cli_version": reflector.codex_cli_version,
-        "reflector_npm_package": reflector.npm_package,
-        "reflector_executable_sha256": reflector.executable_sha256,
-        "reflector_receipt_sha256": reflector.receipt_sha256,
-        "candidate_reflector_executable_equal": (
-            candidate.executable_sha256 == reflector.executable_sha256
-        ),
-        "framework_lock_present": framework_lock.is_file(),
-        "runtime_services_current_receipt_present": runtime_state.is_file(),
-        "runtime_services_started_for_this_audit": False,
-        "credential_content_read": False,
-        "disk_total_bytes": disk.total,
-        "disk_free_bytes": disk.free,
-    }
+    runtime_identity = build_managed_runtime_receipt(
+        candidate_identity=candidate.public_identity,
+        reflector_identity=reflector.public_identity,
+        framework_lock_present=framework_lock.is_file(),
+        runtime_services_receipt_present=runtime_state.is_file(),
+        disk_total_bytes=disk.total,
+        disk_free_bytes=disk.free,
+    )
     payload = write_blocked_report_package(
         repository_root=repository,
         destination=arguments.destination.resolve(),
