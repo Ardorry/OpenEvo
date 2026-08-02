@@ -77,7 +77,7 @@ def test_layout_has_independent_evolved_baseline_roots_and_ids(tmp_path: Path) -
     assert len(set(layout.all_run_ids)) == 4
 
 
-def test_candidate_runner_uses_closed_serial_worker_limit(
+def test_candidate_runner_retries_one_uid_before_admitting_the_next(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -89,7 +89,7 @@ def test_candidate_runner_uses_closed_serial_worker_limit(
 
     run_id = "formal-run-runner-serial-0001"
     service_digest = "1" * 64
-    observed: list[tuple[int, int]] = []
+    observed: list[tuple[int, int, str, str]] = []
 
     class _Executor:
         def run_many_to_durable_terminal(
@@ -98,8 +98,27 @@ def test_candidate_runner_uses_closed_serial_worker_limit(
             *,
             max_workers: int,
         ) -> tuple[object, ...]:
-            observed.append((len(envelopes), max_workers))
-            return tuple(SimpleNamespace(state="completion") for _ in envelopes)
+            assert len(envelopes) == 1
+            envelope = envelopes[0]
+            logical_call_id = str(envelope.logical_call_id)
+            call_id = str(envelope.call_id)
+            observed.append((len(envelopes), max_workers, logical_call_id, call_id))
+            ledger.append("CALL_CLAIMED", dict(envelope.claim_payload))
+            if len(observed) == 1:
+                ledger.append(
+                    "CALL_NO_COMPLETION_FAILURE",
+                    {
+                        "logical_call_id": logical_call_id,
+                        "call_id": call_id,
+                        "failure_class": "durable_rollout_terminal_no_completion",
+                        "terminal_task_status": "failed",
+                        "durable_rollout_no_completion": True,
+                        "durable_gateway_absent": True,
+                        "no_completion_evidence_sha256": "9" * 64,
+                    },
+                )
+                return (SimpleNamespace(state="terminal_no_completion"),)
+            return (SimpleNamespace(state="completion"),)
 
     task = execution_fixtures._task()
     prompt = execution_fixtures._prompt()
@@ -138,7 +157,12 @@ def test_candidate_runner_uses_closed_serial_worker_limit(
         ledger.close()
 
     assert len(completed) == 2
-    assert observed == [(2, 1)]
+    assert [entry[:2] for entry in observed] == [(1, 1), (1, 1), (1, 1)]
+    assert observed[0][2] == observed[1][2]
+    assert observed[0][3].endswith("-a01")
+    assert observed[1][3].endswith("-a02")
+    assert observed[2][2] != observed[1][2]
+    assert observed[2][3].endswith("-a01")
 
 
 def test_runner_persists_precise_terminal_before_any_fourth_reflector_call(

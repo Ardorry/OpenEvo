@@ -22,6 +22,7 @@ TEST_COUNT = 100
 RESERVE_COUNT = 2
 BATCH_SIZE = 25
 CANDIDATE_MAX_WORKERS = 1
+POST_DURABLE_TERMINAL_COOLDOWN_SECONDS = 15
 SPLIT_NAMESPACE = "chembench-temperature-full-evolve-v1-split-v1-20260802"
 TARGETS = ("text_memory", "skill_bundle", "agent_system")
 HISTORICAL_EXPOSURE_POLICY = "fixed_official_temperature_pool_fresh_c0"
@@ -60,6 +61,12 @@ class TemperatureFullEvolveConfigV1:
     @property
     def candidate_max_workers(self) -> int:
         return int(self.payload["executor"]["candidate_max_workers"])
+
+    @property
+    def post_durable_terminal_cooldown_seconds(self) -> int:
+        return int(
+            self.payload["executor"]["post_durable_terminal_cooldown_seconds"]
+        )
 
     @property
     def reflector_timeout_seconds(self) -> int:
@@ -222,6 +229,7 @@ def _validate_config(payload: dict[str, Any]) -> None:
             "mcp_servers",
             "infrastructure_retry_limit",
             "candidate_max_workers",
+            "post_durable_terminal_cooldown_seconds",
         }
         or executor.get("rollout_url") != "http://127.0.0.1:8080"
         or executor.get("runtime_services_state_root")
@@ -240,6 +248,9 @@ def _validate_config(payload: dict[str, Any]) -> None:
         or executor.get("mcp_servers") != []
         or executor.get("infrastructure_retry_limit") != 3
         or executor.get("candidate_max_workers") != CANDIDATE_MAX_WORKERS
+        or type(executor.get("post_durable_terminal_cooldown_seconds")) is not int
+        or executor.get("post_durable_terminal_cooldown_seconds")
+        != POST_DURABLE_TERMINAL_COOLDOWN_SECONDS
     ):
         raise TemperatureFullEvolveConfigError("TEMPERATURE_EXECUTOR_POLICY_INVALID")
     reflector = payload["reflector"]
@@ -319,6 +330,7 @@ __all__ = [
     "EXPECTED_CANDIDATE_IMAGE_ID",
     "EXPECTED_CODEX_SHA256",
     "HISTORICAL_EXPOSURE_POLICY",
+    "POST_DURABLE_TERMINAL_COOLDOWN_SECONDS",
     "PROTOCOL_ID",
     "RESERVE_COUNT",
     "SPLIT_NAMESPACE",

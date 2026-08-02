@@ -40,13 +40,13 @@ plan、worker claim、typed artifact registration、validation、promotion 和 c
 
 正式服务和付费 runner 使用本实验独立的固定 Python bundle。该 bundle 在源码提交冻结后离线
 构建当前 OpenEvo Core 与 ChemBench wheel，逐个核对 wheel 中 Python 文件与源码，安装到
-`state/chembench_temperature_full_evolve_v1/formal_runtime_v4`，并验证两个 distribution 均为
+`state/chembench_temperature_full_evolve_v1/formal_runtime_v5`，并验证两个 distribution 均为
 non-editable、framework registry 与 wheel/lock 匹配。旧 STV2 runtime 只作为依赖版本来源；其中
 旧 Core、可编辑 ChemBench 包、数据库、completion 和 artifact 均不进入新的正式解释器。所有
 正式入口以 `-I` 启动且重新核验 formal-runtime receipt、源码提交和安装 inventory。
 
-`formal_runtime_v4` 与 `formal_runtime_v4_failures` 是不可覆盖的新 namespace；已有 v2/v3 runtime
-及其 failure evidence 保持只读。v3 已把 Candidate formal execution 从并行准入改为全局串行，
+`formal_runtime_v5` 与 `formal_runtime_v5_failures` 是不可覆盖的新 namespace；已有 v2/v3/v4
+runtime 及其 failure evidence 保持只读。v3 已把 Candidate formal execution 从并行准入改为全局串行，
 并修正宿主 Rollout 到 Gateway 容器的 callback route。正式运行随后暴露出另一条彼此独立的
 Gateway 终态竞态：subscription 主 POSTRUN 在注册 durable cleanup ownership 后等待 runtime
 停止，后台 cleanup reconciler 可在这段窗口先构造终态；主路径随后又以略晚的 timer snapshot
@@ -55,6 +55,22 @@ Gateway 终态竞态：subscription 主 POSTRUN 在注册 durable cleanup owners
 确定性并发回归要求 primary 与 background 同时到达时 finalizer 恰好执行一次。该修复只改变
 cleanup 编排与幂等性，不改变 split、prompt、artifact、模型、reasoning、parser、evaluator、
 retry 选择或 feedback 可见性；v3 completion 不导入 v4 的 fresh C0 run。
+
+v4 的首次 fresh run 证明上述终态修复有效：terminal identity、cleanup CAS 与 callback connection
+错误均为 0。但在立即串接正式 session 时，前 8 个 runtime 结果稳定交替为 4 个 credential-isolation
+no-completion 与 4 个 completion；所有失败都发生在下一次 back-to-back admission 的 readiness
+阶段，Train batch 尚未闭合且 accepted completion 为 0。现有持久化证据不能区分 provider cooldown、
+Codex readiness refusal 或其他外部瞬态，因此报告不得把具体 provider 根因写成已证明事实。v5 在
+每个 durable terminal outcome 与下一次正式 admission 之间固定等待 15 秒。对于 terminal
+no-completion，executor 先完成双重 durable proof 和等待，再写入允许 successor retry 的 failure
+ledger event；若等待期间 crash，恢复只能重审同一 task 并保守地重新等待，不能提前发出替代调用。
+crash recovery 读取既有 completion 时也会再次执行一次 bounded wait，但不会重复 submit。
+Candidate phase 每次只准入一个逻辑 UID，成功后立即 accepted/evaluated；基础设施失败只在当前
+UID 上执行闭集内的 bounded retry，不会继续消耗该批其他 UID。该 pacing
+值进入 closed config 和 config digest，对 Candidate、Reflector、evolved Test 与 baseline Test
+使用同一 executor，不改变任何模型可见内容、parser/evaluator 或 arm 间公平性。定向回归证明
+cooldown 只出现在前一 terminal outcome 已 durable audit、下一 claim 尚未写入的边界；v4
+completion、artifact 与数据库不导入 v5 的 fresh C0 run。
 
 订阅 transport 需要容器网络连接 provider，因此不能把 `allow_internet=true` 误写成模型拥有
 网页或 shell 能力。本实验在通用 Codex subscription harness 上选择 closed
@@ -65,7 +81,8 @@ plugins、apps、browser、computer-use 与 subagent 继续由既有 closed prof
 的基础设施证明，不属于 Candidate/Reflector 任务指令，仍使用既有受控单次 shell canary。
 Candidate formal executor 的 closed 配置固定 `candidate_max_workers=1`；executor 拒绝任何
 大于 1 的值，runner 使用同一权威常量。每个 Candidate 必须完成 submit、poll 和 durable audit
-后才准入下一 Candidate。
+后才准入下一 Candidate；任一 durable terminal outcome 后还必须满足 fixed 15-second pacing
+guard。
 
 Rollout 仍只在宿主 `127.0.0.1:8080` 监听，宿主 runner 也只使用该地址；但它写入 Gateway
 session 的 terminal callback origin 固定为容器可达的

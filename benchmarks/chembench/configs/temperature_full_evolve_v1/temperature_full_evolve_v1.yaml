@@ -57,6 +57,7 @@ executor:
   mcp_servers: []
   infrastructure_retry_limit: 3
   candidate_max_workers: 1
+  post_durable_terminal_cooldown_seconds: 15
 reflector:
   execution_path: TaskRequest_Rollout_Gateway_CodexHarness
   timeout_seconds: 1800
@@ -70,7 +71,7 @@ reflector:
   mcp_servers: []
   logical_calls_per_batch: 1
 core:
-  framework_lock: state/chembench_temperature_full_evolve_v1/formal_runtime_v4/framework/framework-lock.json
+  framework_lock: state/chembench_temperature_full_evolve_v1/formal_runtime_v5/framework/framework-lock.json
   jobs_per_batch: 3
   targets:
     - text_memory

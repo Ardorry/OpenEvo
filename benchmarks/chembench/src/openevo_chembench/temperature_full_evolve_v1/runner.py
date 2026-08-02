@@ -270,6 +270,9 @@ class TemperatureFullEvolveFormalRunnerV1:
         self._executor = TemperatureFormalExecutorV1(
             runtime_services=self._runtime,
             ledger=self._ledger,
+            post_durable_terminal_cooldown_seconds=(
+                self._admission.config.post_durable_terminal_cooldown_seconds
+            ),
         )
         registry = load_verified_framework_registry(
             self.layout.repository_root / self._admission.config.framework_lock_relative
@@ -702,6 +705,12 @@ class TemperatureFullEvolveFormalRunnerV1:
                     self._write_call_checkpoint(FormalCallEnvelopeV1.from_candidate(plan))
                 plans.append(plan)
                 task_by_logical[plan.logical_call_id] = task
+                # Close one logical Candidate completely before admitting the
+                # next UID.  In particular, a durable infrastructure failure is
+                # retried for this exact logical call (within the bounded retry
+                # policy) instead of consuming fresh calls for the rest of the
+                # 25-task batch while a shared runtime fault may still be active.
+                break
             if not plans:
                 raise TemperatureFormalRunnerError("RUNNER_CANDIDATE_PHASE_STALLED")
             outcomes = self._executor.run_many_to_durable_terminal(

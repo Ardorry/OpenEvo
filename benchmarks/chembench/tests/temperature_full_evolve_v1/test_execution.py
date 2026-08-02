@@ -234,6 +234,7 @@ def test_executor_rejects_parallel_workers_before_any_side_effect(
                 AssertionError("parallel policy must fail before audit")
             ),
             no_completion_audit_function=_dual_proof,
+            post_durable_terminal_cooldown_seconds=0,
             poll_interval_seconds=0,
             max_poll_attempts=1,
         )
@@ -250,6 +251,7 @@ def test_executor_rejects_parallel_workers_before_any_side_effect(
 
 def test_executor_closes_first_durable_terminal_before_second_admission(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     run_id = "formal-run-serial-order-0001"
     service_digest = "e" * 64
@@ -382,8 +384,18 @@ def test_executor_closes_first_durable_terminal_before_second_admission(
             client_factory=_TracingClient,
             audit_function=audit,
             no_completion_audit_function=no_completion_audit,
+            post_durable_terminal_cooldown_seconds=15,
             poll_interval_seconds=0,
             max_poll_attempts=1,
+        )
+        def record_cooldown(seconds: float) -> None:
+            if not any(item.startswith("cooldown:") for item in trace):
+                assert not inner.failure_has_no_completion(first.call_id)
+            trace.append(f"cooldown:{seconds}")
+
+        monkeypatch.setattr(
+            "openevo_chembench.temperature_full_evolve_v1.execution.time.sleep",
+            record_cooldown,
         )
         outcomes = executor.run_many_to_durable_terminal(
             (
@@ -406,6 +418,7 @@ def test_executor_closes_first_durable_terminal_before_second_admission(
             f"poll:{first_task_id}",
             f"durable_audit:{first_task_id}",
             f"no_completion_proof:{first_task_id}",
+            "cooldown:15.0",
             f"ledger:CALL_NO_COMPLETION_FAILURE:{first.call_id}",
             "health:3",
             f"ledger:CALL_CLAIMED:{second.call_id}",
@@ -413,7 +426,221 @@ def test_executor_closes_first_durable_terminal_before_second_admission(
             "health:4",
             f"poll:{second_task_id}",
             f"durable_audit:{second_task_id}",
+            "cooldown:15.0",
         ]
+
+
+def test_executor_paces_new_completion_before_next_admission(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_id = "formal-run-completion-pacing-0001"
+    service_digest = "9" * 64
+    trace: list[str] = []
+
+    class _PacedClient:
+        def submit_task(self, payload: dict[str, Any]) -> str:
+            task_id = str(payload["task_id"])
+            trace.append(f"submit:{task_id}")
+            return task_id
+
+        def get_task(self, task_id: str) -> dict[str, Any]:
+            return statuses[task_id].model_dump(mode="json")
+
+        def close(self) -> None:
+            return None
+
+    with TemperatureExperimentLedgerV1(
+        path=(tmp_path / "completion-pacing-ledger.jsonl").resolve(),
+        run_id=run_id,
+    ) as ledger:
+        plans = tuple(
+            prepare_candidate_call_v1(
+                task=_task(),
+                prompt=_prompt(),
+                context=None,
+                context_workspace=None,
+                phase="baseline_test",
+                task_ordinal=ordinal,
+                batch_index=None,
+                ledger=ledger,
+                run_id=run_id,
+                service_identity_sha256=service_digest,
+            )
+            for ordinal in range(2)
+        )
+        statuses = {plan.task_request.task_id: _status(plan.task_request.task_id) for plan in plans}
+
+        def audit(**values: object) -> PersistedRolloutResultAuditV1:
+            task_id = str(values["task_id"])
+            trace.append(f"audit:{task_id}")
+            return _audit(statuses[task_id])
+
+        monkeypatch.setattr(
+            "openevo_chembench.temperature_full_evolve_v1.execution.time.sleep",
+            lambda seconds: trace.append(f"cooldown:{seconds}"),
+        )
+        executor = TemperatureFormalExecutorV1(
+            runtime_services=_Runtime(
+                repository_root=tmp_path.resolve(),
+                service_run_id="runtime-service-001",
+                digest=service_digest,
+            ),
+            ledger=ledger,
+            client_factory=_PacedClient,
+            audit_function=audit,
+            no_completion_audit_function=_dual_proof,
+            post_durable_terminal_cooldown_seconds=15,
+            poll_interval_seconds=0,
+            max_poll_attempts=1,
+        )
+        outcomes = tuple(
+            executor.run_many_to_durable_terminal(
+                (FormalCallEnvelopeV1.from_candidate(plan),),
+                max_workers=1,
+            )[0]
+            for plan in plans
+        )
+
+        assert tuple(outcome.state for outcome in outcomes) == ("completion", "completion")
+        assert trace == [
+            f"submit:{plans[0].task_request.task_id}",
+            f"audit:{plans[0].task_request.task_id}",
+            "cooldown:15.0",
+            f"submit:{plans[1].task_request.task_id}",
+            f"audit:{plans[1].task_request.task_id}",
+            "cooldown:15.0",
+        ]
+
+
+def test_no_completion_cooldown_crash_cannot_enable_successor_or_resubmit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_id = "formal-run-no-completion-cooldown-crash-0001"
+    service_digest = "8" * 64
+    submitted: list[str] = []
+    sleep_calls: list[float] = []
+
+    class _NoCompletionClient:
+        def submit_task(self, payload: dict[str, Any]) -> str:
+            task_id = str(payload["task_id"])
+            submitted.append(task_id)
+            return task_id
+
+        def get_task(self, _task_id: str) -> dict[str, Any]:
+            raise RuntimeError("use durable no-completion evidence")
+
+        def close(self) -> None:
+            return None
+
+    def sleep_once_interrupted(seconds: float) -> None:
+        sleep_calls.append(seconds)
+        if len(sleep_calls) == 1:
+            raise InterruptedError("simulated process stop during cooldown")
+
+    with TemperatureExperimentLedgerV1(
+        path=(tmp_path / "cooldown-crash-ledger.jsonl").resolve(),
+        run_id=run_id,
+    ) as ledger:
+        plan = prepare_candidate_call_v1(
+            task=_task(),
+            prompt=_prompt(),
+            context=None,
+            context_workspace=None,
+            phase="baseline_test",
+            task_ordinal=0,
+            batch_index=None,
+            ledger=ledger,
+            run_id=run_id,
+            service_identity_sha256=service_digest,
+        )
+        task_id = plan.task_request.task_id
+
+        def audit(**values: object) -> PersistedRolloutResultAuditV1:
+            assert values["task_id"] == task_id
+            return PersistedRolloutResultAuditV1(
+                state="PROVEN_TERMINAL_NO_COMPLETION",
+                service_run_id="runtime-service-001",
+                task_id_sha256=_sha(task_id),
+                session_id_sha256="1" * 64,
+                result_sha256="2" * 64,
+                result_size_bytes=100,
+                terminal_status="FAILED",
+                completion_exists=False,
+                completion_sha256=None,
+                finding_code=None,
+                result=None,
+            )
+
+        def no_completion_audit(
+            **values: object,
+        ) -> DurableNoCompletionEvidenceV1:
+            assert values["task_id"] == task_id
+            return DurableNoCompletionEvidenceV1(
+                state="PROVEN_NO_COMPLETION",
+                service_run_id="runtime-service-001",
+                task_id_sha256=_sha(task_id),
+                session_id_sha256="1" * 64,
+                rollout_result_sha256="2" * 64,
+                rollout_terminal_status="FAILED",
+                durable_rollout_no_completion=True,
+                durable_gateway_absent=True,
+                gateway_absence_basis="gateway_completion_absent",
+                finding_code=None,
+            )
+
+        monkeypatch.setattr(
+            "openevo_chembench.temperature_full_evolve_v1.execution.time.sleep",
+            sleep_once_interrupted,
+        )
+
+        def build_executor() -> TemperatureFormalExecutorV1:
+            return TemperatureFormalExecutorV1(
+                runtime_services=_Runtime(
+                    repository_root=tmp_path.resolve(),
+                    service_run_id="runtime-service-001",
+                    digest=service_digest,
+                ),
+                ledger=ledger,
+                client_factory=_NoCompletionClient,
+                audit_function=audit,
+                no_completion_audit_function=no_completion_audit,
+                post_durable_terminal_cooldown_seconds=15,
+                poll_interval_seconds=0,
+                max_poll_attempts=1,
+            )
+
+        envelope = FormalCallEnvelopeV1.from_candidate(plan)
+        with pytest.raises(InterruptedError, match="simulated process stop"):
+            build_executor().run_many_to_durable_terminal((envelope,), max_workers=1)
+        assert submitted == [task_id]
+        assert not ledger.failure_has_no_completion(plan.call_id)
+
+        recovered = build_executor().run_many_to_durable_terminal(
+            (envelope,),
+            max_workers=1,
+        )[0]
+        assert recovered.state == "terminal_no_completion"
+        assert recovered.recovered_after_restart is True
+        assert submitted == [task_id]
+        assert sleep_calls == [15.0, 15.0]
+        assert ledger.failure_has_no_completion(plan.call_id)
+
+        successor = prepare_candidate_call_v1(
+            task=_task(),
+            prompt=_prompt(),
+            context=None,
+            context_workspace=None,
+            phase="baseline_test",
+            task_ordinal=0,
+            batch_index=None,
+            ledger=ledger,
+            run_id=run_id,
+            service_identity_sha256=service_digest,
+        )
+        assert successor.attempt_number == 2
+        assert successor.logical_call_id == plan.logical_call_id
 
 
 def test_claim_before_submit_and_private_candidate_finalization(tmp_path: Path) -> None:
@@ -446,6 +673,7 @@ def test_claim_before_submit_and_private_candidate_finalization(tmp_path: Path) 
             client_factory=lambda: _Client(status=status, submitted=submitted),
             audit_function=lambda **_kwargs: _audit(status),
             no_completion_audit_function=_dual_proof,
+            post_durable_terminal_cooldown_seconds=0,
             poll_interval_seconds=0,
             max_poll_attempts=1,
         )
@@ -468,7 +696,10 @@ def test_claim_before_submit_and_private_candidate_finalization(tmp_path: Path) 
         ]
 
 
-def test_unresolved_claim_and_accepted_crash_recover_without_submit(tmp_path: Path) -> None:
+def test_unresolved_claim_and_accepted_crash_recover_without_submit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     run_id = "formal-run-2002"
     service_digest = "2" * 64
     submitted: list[str] = []
@@ -520,6 +751,11 @@ def test_unresolved_claim_and_accepted_crash_recover_without_submit(tmp_path: Pa
             service_identity_sha256=service_digest,
         )
         status = _status(recovered.task_request.task_id)
+        cooldowns: list[float] = []
+        monkeypatch.setattr(
+            "openevo_chembench.temperature_full_evolve_v1.execution.time.sleep",
+            cooldowns.append,
+        )
         executor = TemperatureFormalExecutorV1(
             runtime_services=_Runtime(
                 repository_root=tmp_path.resolve(),
@@ -530,6 +766,7 @@ def test_unresolved_claim_and_accepted_crash_recover_without_submit(tmp_path: Pa
             client_factory=lambda: _Client(status=status, submitted=submitted),
             audit_function=lambda **_kwargs: _audit(status),
             no_completion_audit_function=_dual_proof,
+            post_durable_terminal_cooldown_seconds=15,
             poll_interval_seconds=0,
             max_poll_attempts=1,
         )
@@ -553,6 +790,7 @@ def test_unresolved_claim_and_accepted_crash_recover_without_submit(tmp_path: Pa
         assert first.recovered_after_restart is True
         assert second.recovered_after_restart is True
         assert submitted == []
+        assert cooldowns == [15.0, 15.0]
         assert sum(event["kind"] == "CALL_ACCEPTED" for event in ledger.events) == 1
         assert sum(event["kind"] == "CALL_EVALUATED" for event in ledger.events) == 1
 
@@ -606,6 +844,7 @@ def test_proven_no_completion_admits_only_the_exact_successor_attempt(
             client_factory=lambda: _Client(status=status, submitted=submitted),
             audit_function=lambda **_kwargs: _audit(status),
             no_completion_audit_function=_dual_proof,
+            post_durable_terminal_cooldown_seconds=0,
             poll_interval_seconds=0,
             max_poll_attempts=1,
         )
@@ -760,6 +999,7 @@ def test_rejected_reflector_completion_cannot_retry_with_changed_prompt(
                 AssertionError("semantic drift must not be audited")
             ),
             no_completion_audit_function=_dual_proof,
+            post_durable_terminal_cooldown_seconds=0,
             poll_interval_seconds=0,
             max_poll_attempts=1,
         )

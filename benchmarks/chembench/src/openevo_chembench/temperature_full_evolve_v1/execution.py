@@ -5,7 +5,9 @@ thread is the only ledger writer: it fsyncs ``CALL_CLAIMED`` before transport,
 submits at most once for that claim, and appends accepted/evaluated records only
 after a durable Rollout result has been recovered and validated.  Formal calls
 are globally serialized: the preceding call must reach a durable terminal state
-before the next claim can run its credential-readiness setup or provider call.
+before the next claim can run its credential-readiness setup or provider call;
+each durable terminal outcome also closes a fixed quiet period before control
+returns.
 """
 
 from __future__ import annotations
@@ -322,6 +324,7 @@ class TemperatureFormalExecutorV1:
         no_completion_audit_function: NoCompletionAuditFunction = (
             audit_durable_no_completion_v1
         ),
+        post_durable_terminal_cooldown_seconds: float,
         poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
         max_poll_attempts: int = DEFAULT_MAX_POLL_ATTEMPTS,
     ) -> None:
@@ -333,6 +336,11 @@ class TemperatureFormalExecutorV1:
             isinstance(poll_interval_seconds, bool)
             or not isinstance(poll_interval_seconds, (int, float))
             or poll_interval_seconds < 0
+            or isinstance(post_durable_terminal_cooldown_seconds, bool)
+            or not isinstance(
+                post_durable_terminal_cooldown_seconds, (int, float)
+            )
+            or not 0 <= post_durable_terminal_cooldown_seconds <= 60
             or isinstance(max_poll_attempts, bool)
             or not isinstance(max_poll_attempts, int)
             or max_poll_attempts < 1
@@ -347,6 +355,9 @@ class TemperatureFormalExecutorV1:
         )
         self._audit = audit_function
         self._no_completion_audit = no_completion_audit_function
+        self._post_durable_terminal_cooldown = float(
+            post_durable_terminal_cooldown_seconds
+        )
         self._poll_interval = float(poll_interval_seconds)
         self._max_polls = max_poll_attempts
 
@@ -359,8 +370,11 @@ class TemperatureFormalExecutorV1:
         """Execute calls serially while preserving input-order results.
 
         A call is admitted, submitted, polled, and durably audited before the
-        next call is admitted.  ``max_workers`` remains explicit at the boundary
-        so any attempt to restore parallel Candidate execution fails closed.
+        next call is admitted. Every durable terminal outcome closes its quiet
+        period even at a batch boundary or after recovery, so a later invocation
+        of this method cannot bypass pacing. ``max_workers`` remains explicit at
+        the boundary so any attempt to restore parallel Candidate execution fails
+        closed.
         """
 
         values = tuple(envelopes)
@@ -376,8 +390,13 @@ class TemperatureFormalExecutorV1:
         results: list[DurableFormalOutcomeV1] = []
         for envelope in values:
             outcome = self._await_durable_terminal(self._admit(envelope))
-            self._record_no_completion_if_needed(outcome)
+            self._close_no_completion_before_successor(outcome)
             results.append(outcome)
+            if (
+                outcome.state == "completion"
+                and self._post_durable_terminal_cooldown
+            ):
+                time.sleep(self._post_durable_terminal_cooldown)
         return tuple(results)
 
     def _admit(self, envelope: FormalCallEnvelopeV1) -> _AdmittedCallV1:
@@ -501,7 +520,18 @@ class TemperatureFormalExecutorV1:
             if client is not None:
                 client.close()
 
-    def _record_no_completion_if_needed(self, outcome: DurableFormalOutcomeV1) -> None:
+    def _close_no_completion_before_successor(
+        self,
+        outcome: DurableFormalOutcomeV1,
+    ) -> None:
+        """Prove, pace, then make a no-completion successor retry-eligible.
+
+        The failure ledger event is the authorization for a replacement attempt.
+        It is deliberately appended only after the quiet period. If the process
+        stops while waiting, recovery re-audits the same task and waits again;
+        it cannot admit a successor early or repeat the original submit.
+        """
+
         if outcome.state != "terminal_no_completion":
             return
         envelope = outcome.envelope
@@ -524,6 +554,8 @@ class TemperatureFormalExecutorV1:
             "terminal_task_status": str(audit.terminal_status),
             **dual_proof.ledger_fields,
         }
+        if self._post_durable_terminal_cooldown:
+            time.sleep(self._post_durable_terminal_cooldown)
         self._ledger.append("CALL_NO_COMPLETION_FAILURE", payload)
 
 
