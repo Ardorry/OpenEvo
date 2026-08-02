@@ -1,0 +1,28 @@
+{
+  "failure_classification": [
+    {
+      "code": "PRE_EXISTING_V2_SOURCE_MANIFEST_DRIFT",
+      "count": 8,
+      "new_preflight_defect": false
+    },
+    {
+      "code": "EXPECTED_LEGACY_RECOVERY_SCOPE_REJECTION_ON_NEW_BRANCH",
+      "count": 1,
+      "new_preflight_defect": false
+    },
+    {
+      "code": "LEGACY_LAYOUT_PRIVATE_FIXTURE_OR_STALE_MANIFEST_UNAVAILABLE",
+      "count": 30,
+      "new_preflight_defect": false
+    }
+  ],
+  "focused_failed": 0,
+  "focused_passed": 17,
+  "full_failed": 39,
+  "full_passed": 1023,
+  "full_subtests_passed": 58,
+  "full_suite_model_calls": 0,
+  "historical_evidence_modified_to_force_green": false,
+  "schema_version": "TemperatureFullEvolveRegressionSummaryV1",
+  "status": "FOCUSED_PASS_FULL_SUITE_HAS_UNRELATED_OR_EXPECTED_FAILURES"
+}

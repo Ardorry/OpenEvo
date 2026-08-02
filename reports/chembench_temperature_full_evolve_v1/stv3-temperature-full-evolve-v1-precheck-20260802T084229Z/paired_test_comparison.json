@@ -1,0 +1,19 @@
+{
+  "N": 0,
+  "accepted_completion_count": 0,
+  "baseline_correct": null,
+  "baseline_only_correct": null,
+  "both_correct": null,
+  "both_wrong": null,
+  "core_job_count": 0,
+  "evolved_correct": null,
+  "evolved_only_correct": null,
+  "finding_code": "INSUFFICIENT_NEVER_EXPOSED_TEMPERATURE_DATA",
+  "mcnemar_exact_p": null,
+  "model_call_count": 0,
+  "paired_95_percent_ci": null,
+  "paired_delta_percentage_points": null,
+  "parser_success_count": 0,
+  "reflector_call_count": 0,
+  "status": "NOT_RUN"
+}

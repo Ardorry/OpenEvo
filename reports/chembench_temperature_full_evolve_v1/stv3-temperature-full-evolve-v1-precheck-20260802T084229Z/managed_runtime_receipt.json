@@ -1,0 +1,23 @@
+{
+  "candidate_codex_cli_version": "codex-cli 0.144.1",
+  "candidate_executable_sha256": "a96f944d1a596dbfb7fdd84f482be5c50e34b04bb371126840d873e4ebf26902",
+  "candidate_image_authority": "sha256:7a0079f9cb1bce5768cff5bce3d1181811c6a231ad800cac8fb503d66852c81b",
+  "candidate_image_id": "sha256:7a0079f9cb1bce5768cff5bce3d1181811c6a231ad800cac8fb503d66852c81b",
+  "candidate_npm_package": "@openai/codex@0.144.1",
+  "candidate_receipt_sha256": "0ecfb5d6b68982d84afad20a01d809ff84f1c663eb3f078c4367168d49951a20",
+  "candidate_reflector_executable_equal": true,
+  "candidate_source": "openevo_core_managed_science_runtime_v1",
+  "credential_content_read": false,
+  "disk_free_bytes": 936678498304,
+  "disk_total_bytes": 1081101176832,
+  "framework_lock_present": true,
+  "reflector_codex_cli_version": "codex-cli 0.144.1",
+  "reflector_executable_sha256": "a96f944d1a596dbfb7fdd84f482be5c50e34b04bb371126840d873e4ebf26902",
+  "reflector_npm_package": "@openai/codex@0.144.1",
+  "reflector_receipt_sha256": "a39a29b231f97abd5f733cccca5e8c4def7cb1b79e5cb9abc1ff99ef802d4d01",
+  "reflector_source": "openevo_core_managed_codex_v1",
+  "runtime_services_current_receipt_present": false,
+  "runtime_services_started_for_this_audit": false,
+  "schema_version": "TemperatureFullEvolveManagedRuntimeReceiptV1",
+  "status": "PASS_STATIC_IDENTITY_NO_FORMAL_SERVICE_STARTED"
+}
