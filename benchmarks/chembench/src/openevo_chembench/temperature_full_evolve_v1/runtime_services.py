@@ -1,10 +1,11 @@
 """Durable, experiment-local Rollout/Gateway lifecycle.
 
-This wrapper keeps the audited v2 runtime binaries and managed Codex image but
-uses an independent service namespace and a run-scoped owner-private
-completion root.  The host Rollout writes session results to the host spelling
-of that root; the Gateway bootstrap rewrites the same topology field to a
-fixed container spelling backed by an explicit read-write bind mount.
+This wrapper uses the experiment-local, immutable non-editable wheel runtime
+and the audited managed Codex image, plus an independent service namespace and
+a run-scoped owner-private completion root.  The host Rollout writes session
+results to the host spelling of that root; the Gateway bootstrap rewrites the
+same topology field to a fixed container spelling backed by an explicit
+read-write bind mount.
 
 Subscription transcript sessions normally bypass the Gateway LLM proxy, so a
 Gateway ``CompletionWriter`` file is only auxiliary evidence.  The primary
@@ -49,6 +50,12 @@ from openevo_chembench.supervised_transfer_v2.managed_codex import (
 from openevo_chembench.supervised_transfer_v2.runtime_services import (
     RuntimeProcessIdentityV2,
 )
+from openevo_chembench.temperature_full_evolve_v1.formal_runtime import (
+    FORMAL_FRAMEWORK_LOCK_RELATIVE,
+    FORMAL_RUNTIME_PYTHON_RELATIVE,
+    TemperatureFormalRuntimeError,
+    load_temperature_formal_runtime_v1,
+)
 
 SERVICE_RECEIPT_SCHEMA = "TemperatureFullEvolveRuntimeServicesReceiptV1"
 SERVICE_STOP_RECEIPT_SCHEMA = "TemperatureFullEvolveRuntimeServicesStopReceiptV1"
@@ -60,8 +67,8 @@ NO_COMPLETION_EVIDENCE_SCHEMA = "TemperatureFullEvolveNoCompletionEvidenceV1"
 EMPTY_RUNTIME_INVENTORY_SCHEMA = "TemperatureFullEvolveEmptyRuntimeInventoryV1"
 
 SERVICE_ROOT_RELATIVE = "state/chembench_temperature_full_evolve_v1/runtime_services"
-RUNTIME_PYTHON_RELATIVE = "state/chembench_supervised_transfer_v2/runtime_venv/bin/python"
-FRAMEWORK_LOCK_RELATIVE = "state/chembench_supervised_transfer_v2/framework/framework-lock.json"
+RUNTIME_PYTHON_RELATIVE = FORMAL_RUNTIME_PYTHON_RELATIVE
+FRAMEWORK_LOCK_RELATIVE = FORMAL_FRAMEWORK_LOCK_RELATIVE
 TOPOLOGY_RELATIVE = (
     "benchmarks/chembench/configs/temperature_full_evolve_v1/"
     "runtime_services_topology.yaml"
@@ -1188,15 +1195,15 @@ def _load_runtime_identity(
 
 
 def _runtime_paths(repository: Path) -> dict[str, Path]:
-    framework_root = repository / "state/chembench_supervised_transfer_v2/framework"
-    wheels = tuple(framework_root.glob("openevo-*.whl")) if framework_root.is_dir() else ()
-    if len(wheels) != 1:
-        raise TemperatureRuntimeServicesError("TEMPERATURE_RUNTIME_FRAMEWORK_WHEEL_INVALID")
+    try:
+        formal = load_temperature_formal_runtime_v1(repository_root=repository)
+    except TemperatureFormalRuntimeError as exc:
+        raise TemperatureRuntimeServicesError(exc.finding_code) from exc
     return {
         "service_root": repository / SERVICE_ROOT_RELATIVE,
-        "runtime_python": repository / RUNTIME_PYTHON_RELATIVE,
-        "framework_lock": repository / FRAMEWORK_LOCK_RELATIVE,
-        "framework_wheel": wheels[0],
+        "runtime_python": formal.runtime_python,
+        "framework_lock": formal.framework_lock,
+        "framework_wheel": formal.core_wheel,
         "topology": repository / TOPOLOGY_RELATIVE,
         "gateway_bootstrap": repository / GATEWAY_BOOTSTRAP_RELATIVE,
     }

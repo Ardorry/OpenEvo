@@ -102,6 +102,20 @@ def healthy_probes(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(
         monitoring,
+        "_probe_memory",
+        lambda: {
+            "status": "PASS",
+            "mem_total_bytes": 8 * 1024**3,
+            "mem_available_bytes": 4 * 1024**3,
+            "swap_total_bytes": 2 * 1024**3,
+            "swap_free_bytes": 1 * 1024**3,
+            "warning_below_bytes": 2 * 1024**3,
+            "error_below_bytes": 1 * 1024**3,
+            "finding_code": None,
+        },
+    )
+    monkeypatch.setattr(
+        monitoring,
         "_probe_tmux",
         lambda session: {
             "status": "PASS",
@@ -172,6 +186,7 @@ def test_monitor_appends_private_snapshots_and_detects_two_stagnant_polls(
     assert first["runner_process"]["binding_status"] == "ESTABLISHED"
     assert second["runner_process"]["binding_status"] == "PASS"
     assert third["health"] == {"status": "PASS", "findings": []}
+    assert third["host_memory"]["mem_available_bytes"] == 4 * 1024**3
     assert stat.S_IMODE(snapshot_log.stat().st_mode) == 0o600
     assert len(snapshot_log.read_text(encoding="utf-8").splitlines()) == 3
     assert "phase=TRAIN_PRE" in format_monitor_line_v1(third)
@@ -449,6 +464,11 @@ def test_probe_failures_are_immediate_structured_health_findings(
     )
     monkeypatch.setattr(
         monitoring,
+        "_probe_memory",
+        lambda: {"status": "ERROR", "finding_code": "HOST_MEMORY_CRITICAL"},
+    )
+    monkeypatch.setattr(
+        monitoring,
         "_probe_auth_metadata",
         lambda: {"status": "ERROR", "finding_code": "AUTH_DOWN"},
     )
@@ -473,8 +493,68 @@ def test_probe_failures_are_immediate_structured_health_findings(
         ("runner_process", "PROCESS_DOWN"),
         ("tmux", "TMUX_DOWN"),
         ("disk", "DISK_DOWN"),
+        ("host_memory", "HOST_MEMORY_CRITICAL"),
         ("credential_metadata", "AUTH_DOWN"),
     }
+
+
+@pytest.mark.parametrize(
+    ("available_kib", "expected_status", "expected_finding"),
+    (
+        (3 * 1024**2, "PASS", None),
+        (1536 * 1024, "WARN", "HOST_MEMORY_LOW"),
+        (512 * 1024, "ERROR", "HOST_MEMORY_CRITICAL"),
+    ),
+)
+def test_memory_probe_records_host_counters_and_threshold_findings(
+    tmp_path: Path,
+    available_kib: int,
+    expected_status: str,
+    expected_finding: str | None,
+) -> None:
+    meminfo = tmp_path / "meminfo"
+    meminfo.write_text(
+        "\n".join(
+            (
+                "MemTotal:       8388608 kB",
+                f"MemAvailable:   {available_kib} kB",
+                "SwapTotal:      2097152 kB",
+                "SwapFree:       1048576 kB",
+            )
+        )
+        + "\n",
+        encoding="ascii",
+    )
+
+    result = monitoring._probe_memory(meminfo)
+
+    assert result == {
+        "status": expected_status,
+        "mem_total_bytes": 8 * 1024**3,
+        "mem_available_bytes": available_kib * 1024,
+        "swap_total_bytes": 2 * 1024**3,
+        "swap_free_bytes": 1 * 1024**3,
+        "warning_below_bytes": 2 * 1024**3,
+        "error_below_bytes": 1 * 1024**3,
+        "finding_code": expected_finding,
+    }
+
+
+def test_memory_probe_fails_closed_on_missing_or_inconsistent_counters(
+    tmp_path: Path,
+) -> None:
+    meminfo = tmp_path / "meminfo"
+    meminfo.write_text(
+        "MemTotal: 1024 kB\nMemAvailable: 2048 kB\nSwapTotal: 0 kB\n",
+        encoding="ascii",
+    )
+
+    result = monitoring._probe_memory(meminfo)
+
+    assert result["status"] == "ERROR"
+    assert result["finding_code"] == "HOST_MEMORY_PROBE_FAILED"
+    assert result["mem_total_bytes"] == 0
+    assert result["mem_available_bytes"] == 0
 
 
 def test_stale_active_lease_does_not_mask_dead_runner_health(

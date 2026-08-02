@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import importlib.util
 import json
+import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -19,6 +22,22 @@ from openevo_chembench.temperature_full_evolve_v1.preflight import (
     write_public_preflight_bundle_v1,
 )
 from openevo_chembench.temperature_full_evolve_v1.split import build_temperature_split_v1
+
+PRECHECK_SCRIPT = (
+    Path(__file__).resolve().parents[2]
+    / "scripts/temperature_full_evolve_v1/precheck.py"
+)
+
+
+def _precheck_cli_module():
+    spec = importlib.util.spec_from_file_location(
+        "temperature_full_evolve_precheck_cli",
+        PRECHECK_SCRIPT,
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _repository() -> Path:
@@ -54,6 +73,15 @@ def _runtime(**updates: object) -> RuntimePreflightEvidenceV1:
         "managed_runtime_passed": True,
         "framework_registry_passed": True,
         "framework_lock_sha256": "a" * 64,
+        "formal_runtime_identity_sha256": "1" * 64,
+        "formal_runtime_receipt_sha256": "2" * 64,
+        "formal_runtime_source_commit": "f" * 40,
+        "formal_runtime_source_tree_sha256": "4" * 64,
+        "core_wheel_sha256": "5" * 64,
+        "chembench_wheel_sha256": "6" * 64,
+        "core_editable": False,
+        "chembench_editable": False,
+        "formal_runtime_python_isolated": True,
         "runtime_services_ready": True,
         "runtime_services_identity_sha256": "b" * 64,
         "completion_persistence_shared": True,
@@ -93,6 +121,11 @@ def test_zero_call_preflight_closes_schedule_split_and_generation_zero(tmp_path:
     )
     assert bundle.report["status"] == "PASS_READY_FOR_FORMAL_EXECUTION"
     assert bundle.report["preflight_model_calls"] == 0
+    assert bundle.runtime_identity_receipt["formal_runtime_identity_sha256"] == (
+        "1" * 64
+    )
+    assert bundle.runtime_identity_receipt["core_editable"] is False
+    assert bundle.runtime_identity_receipt["chembench_editable"] is False
     assert bundle.report["planned"] == {
         "train_count": 100,
         "test_count": 100,
@@ -118,6 +151,10 @@ def test_zero_call_preflight_closes_schedule_split_and_generation_zero(tmp_path:
 def test_preflight_rejects_dirty_source_or_nonzero_model_call() -> None:
     with pytest.raises(ValueError, match="runtime preflight identity is not admissible"):
         _runtime(model_calls=1)
+    with pytest.raises(ValueError, match="runtime preflight identity is not admissible"):
+        _runtime(core_editable=True)
+    with pytest.raises(ValueError, match="runtime preflight identity is not admissible"):
+        _runtime(formal_runtime_python_isolated=False)
     with pytest.raises(TemperaturePreflightError, match="SOURCE_IDENTITY_NOT_FROZEN"):
         build_zero_model_preflight_v1(
             config=_config(),
@@ -127,3 +164,31 @@ def test_preflight_rejects_dirty_source_or_nonzero_model_call() -> None:
             source_commit="f" * 40,
             source_tree_clean=False,
         )
+    with pytest.raises(
+        TemperaturePreflightError,
+        match="FORMAL_RUNTIME_SOURCE_COMMIT_MISMATCH",
+    ):
+        build_zero_model_preflight_v1(
+            config=_config(),
+            split=_split(),
+            runtime=_runtime(formal_runtime_source_commit="3" * 40),
+            regression=_regression(),
+            source_commit="f" * 40,
+            source_tree_clean=True,
+        )
+
+
+def test_regression_python_guard_preserves_repository_symlink_path(
+    tmp_path: Path,
+) -> None:
+    module = _precheck_cli_module()
+    repository = (tmp_path / "repository").resolve()
+    binary = repository / ".venv/bin/python"
+    binary.parent.mkdir(parents=True)
+    binary.symlink_to(Path(sys.executable).resolve(strict=True))
+
+    selected = module._repository_test_python(repository)
+
+    assert selected == binary
+    assert os.fspath(selected).startswith(os.fspath(repository))
+    assert selected.resolve(strict=True) != selected

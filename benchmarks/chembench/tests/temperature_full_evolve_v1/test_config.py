@@ -31,6 +31,10 @@ def test_live_config_is_closed_and_generation_zero_provenance_is_explicit() -> N
         HISTORICAL_EXPOSURE_POLICY
     )
     assert config.payload["protocol_scope"]["prior_artifact_import"] == "forbidden"
+    assert config.framework_lock_relative == (
+        "state/chembench_temperature_full_evolve_v1/formal_runtime/framework/"
+        "framework-lock.json"
+    )
     assert TRAIN_COUNT == TEST_COUNT == 100
     assert TRAIN_COUNT % BATCH_SIZE == 0
     assert len(config.digest) == 64

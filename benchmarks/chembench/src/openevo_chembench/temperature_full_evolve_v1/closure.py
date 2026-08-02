@@ -29,6 +29,11 @@ from openevo_chembench.supervised_transfer_v1.common import (
     sha256_bytes,
     write_private_file,
 )
+from openevo_chembench.supervised_transfer_v2.context_binding import (
+    SupervisedSessionContextBindingV2,
+    SupervisedTargetBindingV2,
+    issue_supervised_context_binding_receipt_v2,
+)
 from openevo_chembench.temperature_full_evolve_v1.config import PROTOCOL_ID
 from openevo_chembench.temperature_full_evolve_v1.ledger import (
     LEDGER_SCHEMA,
@@ -87,6 +92,13 @@ class FormalClosureReceiptV1(BaseModel):
     config_sha256: str
     split_sha256: str
     dataset_sha256: str
+    formal_runtime_identity_sha256: str
+    formal_runtime_receipt_sha256: str
+    source_tree_sha256: str
+    core_wheel_sha256: str
+    chembench_wheel_sha256: str
+    core_editable: Literal[False]
+    chembench_editable: Literal[False]
     preflight_bundle_sha256: str
     run_manifest_sha256: str
     runtime_services_identity_sha256: str
@@ -100,6 +112,7 @@ class FormalClosureReceiptV1(BaseModel):
     audit_closed_at_utc: str
     unresolved_call_count: Literal[0]
     run_failed_event_count: Literal[0]
+    incident_opened_event_count: Literal[0]
     claimed_logical_call_count: Literal[404]
     managed_runtime_session_attempt_count: int = Field(ge=404)
     readiness_passed_for_accepted_call_count: Literal[404]
@@ -129,6 +142,11 @@ class FormalClosureReceiptV1(BaseModel):
             self.config_sha256,
             self.split_sha256,
             self.dataset_sha256,
+            self.formal_runtime_identity_sha256,
+            self.formal_runtime_receipt_sha256,
+            self.source_tree_sha256,
+            self.core_wheel_sha256,
+            self.chembench_wheel_sha256,
             self.preflight_bundle_sha256,
             self.run_manifest_sha256,
             self.runtime_services_identity_sha256,
@@ -240,6 +258,7 @@ def verify_formal_closure_v1(
     if counts != {
         "unresolved_call_count": 0,
         "run_failed_event_count": 0,
+        "incident_opened_event_count": 0,
         "claimed_logical_call_count": 404,
         "accepted_candidate_count": 400,
         "evaluated_candidate_count": 400,
@@ -281,6 +300,17 @@ def verify_formal_closure_v1(
         "config_sha256": report.identity.config_sha256,
         "split_sha256": report.identity.split_sha256,
         "dataset_sha256": report.identity.dataset_sha256,
+        "formal_runtime_identity_sha256": (
+            report.identity.formal_runtime_identity_sha256
+        ),
+        "formal_runtime_receipt_sha256": (
+            report.identity.formal_runtime_receipt_sha256
+        ),
+        "source_tree_sha256": report.identity.source_tree_sha256,
+        "core_wheel_sha256": report.identity.core_wheel_sha256,
+        "chembench_wheel_sha256": report.identity.chembench_wheel_sha256,
+        "core_editable": False,
+        "chembench_editable": False,
         "preflight_bundle_sha256": preflight_digest,
         "run_manifest_sha256": sha256_bytes(manifest_bytes),
         "runtime_services_identity_sha256": report.identity.runtime_services_identity_sha256,
@@ -390,6 +420,7 @@ def _ledger_counts(events: tuple[dict[str, Any], ...]) -> dict[str, int]:
     accepted: set[str] = set()
     evaluated: set[str] = set()
     run_failed = 0
+    incident_opened = 0
     core_jobs = 0
     for event in events:
         kind = event["kind"]
@@ -404,6 +435,8 @@ def _ledger_counts(events: tuple[dict[str, Any], ...]) -> dict[str, int]:
             core_jobs += 1
         elif kind == "RUN_FAILED":
             run_failed += 1
+        elif kind == "INCIDENT_OPENED":
+            incident_opened += 1
     unresolved = sum(logical not in accepted for logical in claims)
     candidate = {
         logical for logical in accepted if claims.get(logical, {}).get("phase") != "train_reflector"
@@ -414,6 +447,7 @@ def _ledger_counts(events: tuple[dict[str, Any], ...]) -> dict[str, int]:
     return {
         "unresolved_call_count": unresolved,
         "run_failed_event_count": run_failed,
+        "incident_opened_event_count": incident_opened,
         "claimed_logical_call_count": len(claims),
         "accepted_candidate_count": len(candidate),
         "evaluated_candidate_count": len(evaluated & candidate),
@@ -433,6 +467,11 @@ def _bind_ledger_aggregates(*, report: Any, events: tuple[dict[str, Any], ...]) 
         event["payload"] for event in events if event["kind"] == "CALL_NO_COMPLETION_FAILURE"
     ]
     logical = {str(claim["logical_call_id"]) for claim in claims}
+    claim_by_logical = {
+        str(claim["logical_call_id"]): claim
+        for claim in claims
+    }
+    frozen_context_targets = _frozen_context_targets(events)
     recoveries = sum(event["kind"] == "RECOVERY_COMPLETED" for event in events)
     # The managed harness admits an accepted completion only after credential
     # readiness passes.  The ledger does not expose raw canary-provider
@@ -484,6 +523,7 @@ def _bind_ledger_aggregates(*, report: Any, events: tuple[dict[str, Any], ...]) 
     for event in events:
         if event["kind"] != "CALL_EVALUATED":
             continue
+        event_logical = str(event["payload"]["logical_call_id"])
         value = _decode_json_object(
             str(event["payload"]["evaluation_json"]).encode("utf-8"),
             "CLOSURE_EVALUATION_JSON_INVALID",
@@ -495,6 +535,7 @@ def _bind_ledger_aggregates(*, report: Any, events: tuple[dict[str, Any], ...]) 
             type(phase) is not str
             or (batch_index is not None and type(batch_index) is not int)
             or type(ordinal) is not int
+            or value.get("logical_call_id") != event_logical
             or type(value.get("correct")) is not bool
             or type(value.get("official_parse_status")) is not str
             or type(value.get("strict_parse_status")) is not str
@@ -505,8 +546,18 @@ def _bind_ledger_aggregates(*, report: Any, events: tuple[dict[str, Any], ...]) 
             raise TemperatureClosureError("CLOSURE_EVALUATION_AGGREGATE_INVALID")
         bucket[ordinal] = value
 
-    _bind_test_evaluations(report.evolved_test, evaluations.get(("evolved_test", None), {}))
-    _bind_test_evaluations(report.baseline_test, evaluations.get(("baseline_test", None), {}))
+    _bind_test_evaluations(
+        report.evolved_test,
+        evaluations.get(("evolved_test", None), {}),
+        claims=claim_by_logical,
+        expected_targets=frozen_context_targets,
+    )
+    _bind_test_evaluations(
+        report.baseline_test,
+        evaluations.get(("baseline_test", None), {}),
+        claims=claim_by_logical,
+        expected_targets=(),
+    )
     for batch in report.train_batches:
         batch_claims = [
             claim
@@ -550,18 +601,74 @@ def _bind_ledger_aggregates(*, report: Any, events: tuple[dict[str, Any], ...]) 
             raise TemperatureClosureError("CLOSURE_TRAIN_EVALUATION_AGGREGATE_MISMATCH")
 
 
-def _bind_test_evaluations(arm: Any, values: dict[int, dict[str, Any]]) -> None:
+def _bind_test_evaluations(
+    arm: Any,
+    values: dict[int, dict[str, Any]],
+    *,
+    claims: dict[str, dict[str, Any]],
+    expected_targets: tuple[SupervisedTargetBindingV2, ...],
+) -> None:
     if set(values) != set(range(100)):
         raise TemperatureClosureError("CLOSURE_TEST_EVALUATION_AGGREGATE_MISMATCH")
     ordered = [values[index] for index in range(100)]
+    context_bindings_valid = True
+    for value in ordered:
+        logical = str(value["logical_call_id"])
+        claim = claims.get(logical)
+        if claim is None or value.get("context_binding_sha256") != (
+            _expected_context_binding_receipt_sha256(
+                call_id=str(claim["call_id"]),
+                targets=expected_targets,
+            )
+        ):
+            context_bindings_valid = False
+            break
     if (
         tuple(value["correct"] for value in ordered) != arm.correctness
         or sum(value["official_parse_status"] == "parsed" for value in ordered)
         != arm.official_parser_success_count
         or sum(value["strict_parse_status"] == "parsed" for value in ordered)
         != arm.strict_parser_success_count
+        or not context_bindings_valid
     ):
         raise TemperatureClosureError("CLOSURE_TEST_EVALUATION_AGGREGATE_MISMATCH")
+
+
+def _frozen_context_targets(
+    events: tuple[dict[str, Any], ...],
+) -> tuple[SupervisedTargetBindingV2, ...]:
+    frozen = [event for event in events if event["kind"] == "FINAL_STATE_FROZEN"]
+    if len(frozen) != 1:
+        raise TemperatureClosureError("CLOSURE_FINAL_CONTEXT_BINDING_INVALID")
+    raw = frozen[0]["payload"].get("frozen_context_targets")
+    if type(raw) is not list:
+        raise TemperatureClosureError("CLOSURE_FINAL_CONTEXT_BINDING_INVALID")
+    try:
+        targets = tuple(
+            SupervisedTargetBindingV2(**value)
+            for value in raw
+            if type(value) is dict
+        )
+    except (TypeError, ValueError) as exc:
+        raise TemperatureClosureError("CLOSURE_FINAL_CONTEXT_BINDING_INVALID") from exc
+    if len(targets) != 3:
+        raise TemperatureClosureError("CLOSURE_FINAL_CONTEXT_BINDING_INVALID")
+    return targets
+
+
+def _expected_context_binding_receipt_sha256(
+    *,
+    call_id: str,
+    targets: tuple[SupervisedTargetBindingV2, ...],
+) -> str:
+    binding = SupervisedSessionContextBindingV2(
+        session_id="temp-" + sha256_bytes(call_id.encode("utf-8"))[:40],
+        targets=targets,
+    )
+    return issue_supervised_context_binding_receipt_v2(
+        expected=binding,
+        actual=binding,
+    ).digest
 
 
 def _logical_batch(logical_call_id: str) -> int | None:
@@ -617,6 +724,20 @@ def _bind_preflight_report(
         or runtime_file_digest != report.identity.managed_runtime_receipt_sha256
         or runtime.get("runtime_services_identity_sha256")
         != report.identity.runtime_services_identity_sha256
+        or runtime.get("formal_runtime_identity_sha256")
+        != report.identity.formal_runtime_identity_sha256
+        or runtime.get("formal_runtime_receipt_sha256")
+        != report.identity.formal_runtime_receipt_sha256
+        or runtime.get("formal_runtime_source_commit")
+        != report.identity.source_commit
+        or runtime.get("formal_runtime_source_tree_sha256")
+        != report.identity.source_tree_sha256
+        or runtime.get("core_wheel_sha256") != report.identity.core_wheel_sha256
+        or runtime.get("chembench_wheel_sha256")
+        != report.identity.chembench_wheel_sha256
+        or runtime.get("core_editable") is not False
+        or runtime.get("chembench_editable") is not False
+        or runtime.get("formal_runtime_python_isolated") is not True
         or regression.get("model_calls") != 0
         or regression.get("focused_test_count") != report.preflight.focused_test_count
         or regression.get("focused_failure_count") != report.preflight.focused_failure_count

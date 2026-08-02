@@ -38,6 +38,9 @@ from openevo_chembench.supervised_transfer_v1.common import (
 from openevo_chembench.supervised_transfer_v2.artifacts import (
     CoreResolvedSupervisedContextV2,
 )
+from openevo_chembench.supervised_transfer_v2.context_binding import (
+    SupervisedSessionContextBindingV2,
+)
 from openevo_chembench.temperature_full_evolve_v1.artifacts import (
     ProjectedArtifactSetV1,
     project_artifacts,
@@ -75,6 +78,10 @@ from openevo_chembench.temperature_full_evolve_v1.execution import (
     finalize_reflector_outcome_v1,
     recover_existing_candidate_plan_v1,
     recover_existing_reflector_plan_v1,
+)
+from openevo_chembench.temperature_full_evolve_v1.formal_runtime import (
+    TemperatureFormalRuntimeError,
+    load_temperature_formal_runtime_v1,
 )
 from openevo_chembench.temperature_full_evolve_v1.ledger import (
     TemperatureExperimentLedgerV1,
@@ -478,6 +485,7 @@ class TemperatureFullEvolveFormalRunnerV1:
             if final_state.batch_index != 4 or context is None:
                 raise TemperatureFormalRunnerError("RUNNER_FINAL_C4_MISSING")
             if not _has_semantic_event(self._ledger.events, "FINAL_STATE_FROZEN"):
+                frozen_context = _frozen_context_target_payload(context)
                 self._controller.append_protocol_event(
                     "FINAL_STATE_FROZEN",
                     {
@@ -486,6 +494,7 @@ class TemperatureFullEvolveFormalRunnerV1:
                         "artifact_count": 3,
                         "feedback_disabled": True,
                         "test_sealed": True,
+                        **frozen_context,
                     },
                 )
             evolved = self._run_candidate_phase(
@@ -1341,6 +1350,27 @@ def _load_and_verify_admission(
         raise TemperatureFormalRunnerError("RUNNER_SOURCE_TREE_NOT_FROZEN")
     if runtime.source_commit != source_commit:
         raise TemperatureFormalRunnerError("RUNNER_RUNTIME_SOURCE_COMMIT_MISMATCH")
+    try:
+        formal_runtime = load_temperature_formal_runtime_v1(
+            repository_root=repository
+        )
+    except TemperatureFormalRuntimeError as exc:
+        raise TemperatureFormalRunnerError(
+            "RUNNER_FORMAL_RUNTIME_IDENTITY_INVALID"
+        ) from exc
+    formal_runtime_receipt = formal_runtime.public_receipt
+    if (
+        formal_runtime_receipt.get("source_commit") != source_commit
+        or formal_runtime.framework_lock
+        != repository / config.framework_lock_relative
+        or runtime.framework_lock_sha256
+        != formal_runtime_receipt.get("framework_lock_sha256")
+        or runtime.framework_wheel_sha256
+        != formal_runtime_receipt.get("core_wheel_sha256")
+    ):
+        raise TemperatureFormalRunnerError(
+            "RUNNER_FORMAL_RUNTIME_IDENTITY_MISMATCH"
+        )
 
     names = {
         "preflight_report": "preflight_report.json",
@@ -1418,6 +1448,34 @@ def _load_and_verify_admission(
         != runtime.framework_lock_sha256
     ):
         raise TemperatureFormalRunnerError("RUNNER_INFERENCE_IDENTITY_MISMATCH")
+    formal_runtime_keys = (
+        "formal_runtime_identity_sha256",
+        "formal_runtime_receipt_sha256",
+        "source_commit",
+        "source_tree_sha256",
+        "core_wheel_sha256",
+        "chembench_wheel_sha256",
+        "core_editable",
+        "chembench_editable",
+    )
+    preflight_key_by_formal_key = {
+        "formal_runtime_identity_sha256": "formal_runtime_identity_sha256",
+        "formal_runtime_receipt_sha256": "formal_runtime_receipt_sha256",
+        "source_commit": "formal_runtime_source_commit",
+        "source_tree_sha256": "formal_runtime_source_tree_sha256",
+        "core_wheel_sha256": "core_wheel_sha256",
+        "chembench_wheel_sha256": "chembench_wheel_sha256",
+        "core_editable": "core_editable",
+        "chembench_editable": "chembench_editable",
+    }
+    if any(
+        runtime_receipt.get(preflight_key_by_formal_key[key])
+        != formal_runtime_receipt.get(key)
+        for key in formal_runtime_keys
+    ) or runtime_receipt.get("formal_runtime_python_isolated") is not True:
+        raise TemperatureFormalRunnerError(
+            "RUNNER_FORMAL_RUNTIME_PREFLIGHT_MISMATCH"
+        )
     runtime_body = {
         key: value
         for key, value in runtime_receipt.items()
@@ -1888,6 +1946,24 @@ def _test_closure_payload(
     return payload
 
 
+def _frozen_context_target_payload(
+    context: CoreResolvedSupervisedContextV2,
+) -> dict[str, object]:
+    binding = SupervisedSessionContextBindingV2.from_context(
+        session_id="temp-frozen-c4-context",
+        context=context,
+    )
+    targets = [target.to_dict() for target in binding.targets]
+    if len(targets) != 3:
+        raise TemperatureFormalRunnerError("RUNNER_FINAL_CONTEXT_BINDING_INVALID")
+    return {
+        "frozen_context_targets": targets,
+        "frozen_context_targets_sha256": sha256_bytes(
+            canonical_json_bytes(targets)
+        ),
+    }
+
+
 def _artifact_snapshots(
     state: CoreEvolutionStateV1,
     *,
@@ -2218,6 +2294,25 @@ def _aggregate_report_payload(
             "group_manifest_sha256": admission.split.plan.group_manifest_sha256,
             "group_assignment_sha256": admission.split.plan.group_assignment_sha256,
             "framework_lock_sha256": runtime.framework_lock_sha256,
+            "formal_runtime_identity_sha256": admission.runtime_identity_receipt[
+                "formal_runtime_identity_sha256"
+            ],
+            "formal_runtime_receipt_sha256": admission.runtime_identity_receipt[
+                "formal_runtime_receipt_sha256"
+            ],
+            "source_tree_sha256": admission.runtime_identity_receipt[
+                "formal_runtime_source_tree_sha256"
+            ],
+            "core_wheel_sha256": admission.runtime_identity_receipt[
+                "core_wheel_sha256"
+            ],
+            "chembench_wheel_sha256": admission.runtime_identity_receipt[
+                "chembench_wheel_sha256"
+            ],
+            "core_editable": admission.runtime_identity_receipt["core_editable"],
+            "chembench_editable": admission.runtime_identity_receipt[
+                "chembench_editable"
+            ],
             "runtime_services_identity_sha256": runtime.digest,
             "model_identity_receipt_sha256": _file_sha256(
                 admission.preflight_root / "model_identity_receipt.json"

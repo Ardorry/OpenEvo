@@ -10,12 +10,10 @@ import re
 import sys
 from pathlib import Path
 
-PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
-sys.path.insert(0, str(PACKAGE_ROOT / "src"))
 
-from openevo_chembench.supervised_transfer_v2.managed_codex import (
-    require_paid_runtime_python_v2,
+from openevo_chembench.temperature_full_evolve_v1.formal_runtime import (
+    require_temperature_formal_runtime_python_v1,
 )
 from openevo_chembench.temperature_full_evolve_v1.runner import (
     TemperatureFormalRunnerError,
@@ -45,7 +43,9 @@ def main() -> int:
         ):
             raise RuntimeError("FORMAL_PAID_CALL_AUTHORIZATION_MISSING")
         repository = REPOSITORY_ROOT.resolve(strict=True)
-        require_paid_runtime_python_v2(repository_root=repository)
+        if not sys.flags.isolated:
+            raise RuntimeError("FORMAL_RUNTIME_ISOLATED_MODE_REQUIRED")
+        require_temperature_formal_runtime_python_v1(repository_root=repository)
         runner = TemperatureFullEvolveFormalRunnerV1(
             repository_root=repository,
             controller_run_id=arguments.run_id,

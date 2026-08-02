@@ -10,6 +10,9 @@ import yaml
 
 from openevo_chembench.chembench4k_models import CHEMBENCH4K_REVISION
 from openevo_chembench.supervised_transfer_v1.common import canonical_json_bytes, sha256_bytes
+from openevo_chembench.temperature_full_evolve_v1.formal_runtime import (
+    FORMAL_FRAMEWORK_LOCK_RELATIVE,
+)
 
 CONFIG_SCHEMA = "chembench_temperature_full_evolve_config_v1"
 PROTOCOL_ID = "chembench_temperature_full_evolve_v1"
@@ -268,8 +271,7 @@ def _validate_config(payload: dict[str, Any]) -> None:
         type(core) is not dict
         or set(core)
         != {"framework_lock", "jobs_per_batch", "targets", "target_methods"}
-        or core.get("framework_lock")
-        != "state/chembench_supervised_transfer_v2/framework/framework-lock.json"
+        or core.get("framework_lock") != FORMAL_FRAMEWORK_LOCK_RELATIVE
         or core.get("jobs_per_batch") != 3
         or tuple(core.get("targets", ())) != TARGETS
         or core.get("target_methods")

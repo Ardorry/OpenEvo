@@ -8,9 +8,7 @@ import json
 import sys
 from pathlib import Path
 
-PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
-sys.path.insert(0, str(PACKAGE_ROOT / "src"))
 
 from openevo_chembench.temperature_full_evolve_v1.runtime_services import (
     TemperatureRuntimeServicesError,
@@ -29,6 +27,10 @@ def main() -> int:
     if arguments.command == "start":
         if not arguments.service_run_id:
             parser.error("start requires --service-run-id")
+        if not sys.flags.isolated:
+            raise TemperatureRuntimeServicesError(
+                "TEMPERATURE_RUNTIME_ISOLATED_MODE_REQUIRED"
+            )
         identity = start_temperature_runtime_services_v1(
             repository_root=repository,
             service_run_id=arguments.service_run_id,

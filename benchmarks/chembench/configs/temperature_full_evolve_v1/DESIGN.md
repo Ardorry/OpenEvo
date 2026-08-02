@@ -38,6 +38,13 @@ Candidate、Reflector、evolved Test 与 baseline 的模型推理都必须通过
 plan、worker claim、typed artifact registration、validation、promotion 和 context resolution
 执行；benchmark controller 不直接登记伪造 artifact。
 
+正式服务和付费 runner 使用本实验独立的固定 Python bundle。该 bundle 在源码提交冻结后离线
+构建当前 OpenEvo Core 与 ChemBench wheel，逐个核对 wheel 中 Python 文件与源码，安装到
+`state/chembench_temperature_full_evolve_v1/formal_runtime`，并验证两个 distribution 均为
+non-editable、framework registry 与 wheel/lock 匹配。旧 STV2 runtime 只作为依赖版本来源；其中
+旧 Core、可编辑 ChemBench 包、数据库、completion 和 artifact 均不进入新的正式解释器。所有
+正式入口以 `-I` 启动且重新核验 formal-runtime receipt、源码提交和安装 inventory。
+
 订阅 transport 需要容器网络连接 provider，因此不能把 `allow_internet=true` 误写成模型拥有
 网页或 shell 能力。本实验在通用 Codex subscription harness 上选择 closed
 `tool_policy=disabled`：正式 Candidate/Reflector 推理命令固定为 `web_search=disabled`、

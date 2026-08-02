@@ -10,7 +10,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from openevo_chembench.supervised_transfer_v1.common import canonical_pretty_json_bytes
+from openevo_chembench.supervised_transfer_v1.common import (
+    canonical_json_bytes,
+    canonical_pretty_json_bytes,
+)
 from openevo_chembench.temperature_full_evolve_v1.core_evolution import CoreEvolutionStateV1
 from openevo_chembench.temperature_full_evolve_v1.evidence import RuleEvidenceIndexV1
 from openevo_chembench.temperature_full_evolve_v1.ledger import (
@@ -270,6 +273,21 @@ def test_formal_cli_rejects_noncanonical_run_id_without_side_effects(tmp_path: P
     assert "--run-id must use" in completed.stderr
 
 
+def test_formal_entrypoints_do_not_inject_source_import_paths() -> None:
+    scripts = Path(__file__).resolve().parents[2] / "scripts/temperature_full_evolve_v1"
+    for name in ("run.py", "runtime_services.py"):
+        source = (scripts / name).read_text(encoding="utf-8")
+        assert "sys.path.insert" not in source
+        assert "PYTHONPATH" not in source
+        assert "flags.isolated" in source
+    precheck = (scripts / "precheck.py").read_text(encoding="utf-8")
+    assert "sys.path.insert" not in precheck
+    assert '"PYTHONPATH": "benchmarks/chembench/src:src"' in precheck
+    assert '"OPENEVO_ALLOW_PAID_CALLS": "0"' in precheck
+    assert '"CHEMBENCH_ALLOW_PAID_CALLS": "0"' in precheck
+    assert "flags.isolated" in precheck
+
+
 def test_formal_cli_redacts_boundary_failure(tmp_path: Path) -> None:
     script = (
         Path(__file__).resolve().parents[2]
@@ -411,6 +429,32 @@ def _orchestration_runner(
     runner._load_batch_report = lambda _batch: {}
     runner._context_for_state = (
         lambda state: None if state.batch_index == 0 else f"context-C{state.batch_index}"
+    )
+    frozen_targets = [
+        {
+            "target_id": target,
+            "core_artifact_id": f"artifact-{target}",
+            "artifact_payload_sha256": hashlib.sha256(
+                f"payload-{target}".encode()
+            ).hexdigest(),
+            "resolved_content_sha256": hashlib.sha256(
+                f"resolved-{target}".encode()
+            ).hexdigest(),
+            "context_resolution_digest": hashlib.sha256(
+                b"frozen-context"
+            ).hexdigest(),
+        }
+        for target in ("text_memory", "skill_bundle", "agent_system")
+    ]
+    monkeypatch.setattr(
+        module,
+        "_frozen_context_target_payload",
+        lambda _context: {
+            "frozen_context_targets": frozen_targets,
+            "frozen_context_targets_sha256": hashlib.sha256(
+                canonical_json_bytes(frozen_targets)
+            ).hexdigest(),
+        },
     )
 
     def candidate(**kwargs: object) -> tuple[object, ...]:

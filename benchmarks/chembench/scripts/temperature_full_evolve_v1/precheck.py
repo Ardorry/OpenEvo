@@ -13,9 +13,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
-sys.path.insert(0, str(PACKAGE_ROOT / "src"))
 
 from openevo.evolution.framework import load_verified_framework_registry
 from openevo.runtime.codex_isolation import codex_subscription_cli_overrides
@@ -32,12 +30,15 @@ from openevo_chembench.supervised_transfer_v2.managed_codex import (
     codex_subscription_auth_source_v2,
     load_managed_candidate_codex_v2,
     load_managed_codex_v2,
-    require_paid_runtime_python_v2,
 )
 from openevo_chembench.temperature_full_evolve_v1.config import (
     EXPECTED_CANDIDATE_IMAGE_ID,
     EXPECTED_CODEX_SHA256,
     load_temperature_full_evolve_config,
+)
+from openevo_chembench.temperature_full_evolve_v1.formal_runtime import (
+    load_temperature_formal_runtime_v1,
+    require_temperature_formal_runtime_python_v1,
 )
 from openevo_chembench.temperature_full_evolve_v1.preflight import (
     RegressionReceiptV1,
@@ -68,7 +69,10 @@ def main() -> int:
         destination=arguments.destination,
         private_split_root=arguments.private_split_root,
     )
-    require_paid_runtime_python_v2(repository_root=repository)
+    if not sys.flags.isolated:
+        raise RuntimeError("FORMAL_RUNTIME_ISOLATED_MODE_REQUIRED")
+    require_temperature_formal_runtime_python_v1(repository_root=repository)
+    formal_runtime = load_temperature_formal_runtime_v1(repository_root=repository)
     source_commit = _git(repository, "rev-parse", "HEAD")
     if _tracked_tree_dirty(repository) or _experiment_tree_not_frozen(repository):
         raise RuntimeError("SOURCE_IDENTITY_NOT_FROZEN")
@@ -97,6 +101,8 @@ def main() -> int:
         repository_root=repository
     )
     framework_lock = repository / config.framework_lock_relative
+    if framework_lock != formal_runtime.framework_lock:
+        raise RuntimeError("FORMAL_RUNTIME_FRAMEWORK_LOCK_MISMATCH")
     registry = load_verified_framework_registry(framework_lock)
     required_methods = {"text_memory", "skill_bundle", "agent_system"}
     if not required_methods <= set(registry.snapshot.methods):
@@ -132,6 +138,15 @@ def main() -> int:
     )
     if empty_inventory_after != empty_inventory_before:
         raise RuntimeError("PREFLIGHT_RUNTIME_INVENTORY_CHANGED")
+    formal_receipt = formal_runtime.public_receipt
+    if (
+        services.source_commit != formal_receipt["source_commit"]
+        or services.framework_lock_sha256
+        != formal_receipt["framework_lock_sha256"]
+        or services.framework_wheel_sha256
+        != formal_receipt["core_wheel_sha256"]
+    ):
+        raise RuntimeError("FORMAL_RUNTIME_SERVICE_IDENTITY_MISMATCH")
     runtime = RuntimePreflightEvidenceV1(
         candidate_codex_executable_sha256=candidate.executable_sha256,
         reflector_codex_executable_sha256=reflector.executable_sha256,
@@ -144,6 +159,17 @@ def main() -> int:
         managed_runtime_passed=True,
         framework_registry_passed=True,
         framework_lock_sha256=_file_sha256(framework_lock),
+        formal_runtime_identity_sha256=formal_runtime.digest,
+        formal_runtime_receipt_sha256=formal_runtime.receipt_sha256,
+        formal_runtime_source_commit=str(formal_receipt["source_commit"]),
+        formal_runtime_source_tree_sha256=str(
+            formal_receipt["source_tree_sha256"]
+        ),
+        core_wheel_sha256=str(formal_receipt["core_wheel_sha256"]),
+        chembench_wheel_sha256=str(formal_receipt["chembench_wheel_sha256"]),
+        core_editable=formal_receipt["core_editable"],
+        chembench_editable=formal_receipt["chembench_editable"],
+        formal_runtime_python_isolated=sys.flags.isolated == 1,
         runtime_services_ready=True,
         runtime_services_identity_sha256=services.digest,
         completion_persistence_shared=True,
@@ -185,6 +211,8 @@ def main() -> int:
         "runtime_services_identity_sha256": services.digest,
         "service_run_id": services.service_run_id,
         "framework_registry_digest": registry.snapshot.registry_digest,
+        "formal_runtime_identity_sha256": formal_runtime.digest,
+        "formal_runtime_receipt_sha256": formal_runtime.receipt_sha256,
         "preflight_bundle_sha256": bundle.digest,
         "runtime_health_receipt_sha256": sha256_bytes(canonical_json_bytes(services_health)),
         "preflight_model_calls": 0,
@@ -277,8 +305,8 @@ def _experiment_tree_not_frozen(repository: Path) -> bool:
     """
 
     experiment_paths = (
-        # Formal PYTHONPATH roots are closed in full so an untracked module
-        # cannot shadow an audited dependency outside this experiment package.
+        # Formal installed-wheel roots are closed in full so an untracked module
+        # cannot replace audited source when the immutable runtime is prepared.
         "src/openevo",
         "benchmarks/chembench/src",
         "benchmarks/chembench/configs/temperature_full_evolve_v1",
@@ -350,12 +378,10 @@ def _run_regression_suites(repository: Path) -> RegressionReceiptV1:
     call gate.
     """
 
-    test_python = (repository / ".venv/bin/python").resolve(strict=True)
-    if repository not in test_python.parents:
-        raise RuntimeError("REGRESSION_PYTHON_OUTSIDE_REPOSITORY")
+    test_python = _repository_test_python(repository)
     commands = (
-        (str(test_python), "-m", "pytest", "-q", *_FOCUSED_TESTS),
-        (str(test_python), "-m", "pytest", "-q", *_INTEGRATION_TESTS),
+        (os.fspath(test_python), "-m", "pytest", "-q", *_FOCUSED_TESTS),
+        (os.fspath(test_python), "-m", "pytest", "-q", *_INTEGRATION_TESTS),
     )
     # Regression subprocesses receive a minimal, non-secret environment.  In
     # particular no API key, credential, proxy, MCP or caller-specific runtime
@@ -367,6 +393,9 @@ def _run_regression_suites(repository: Path) -> RegressionReceiptV1:
     }
     environment.update(
         {
+            # This source-only path is restricted to paid-gate-closed regression
+            # subprocesses. The formal precheck owner itself still runs from the
+            # non-editable formal runtime under isolated mode.
             "PYTHONPATH": "benchmarks/chembench/src:src",
             "PYTHONHASHSEED": "0",
             "OPENEVO_ALLOW_PAID_CALLS": "0",
@@ -409,6 +438,17 @@ def _run_regression_suites(repository: Path) -> RegressionReceiptV1:
         output_sha256=sha256_bytes(b"\n---SUITE-BOUNDARY---\n".join(outputs)),
         model_calls=0,
     )
+
+
+def _repository_test_python(repository: Path) -> Path:
+    """Return the repository test venv without resolving its Python symlink."""
+
+    if not isinstance(repository, Path) or not repository.is_absolute():
+        raise RuntimeError("REGRESSION_REPOSITORY_INVALID")
+    test_python = repository / ".venv/bin/python"
+    if not test_python.is_file() or not os.access(test_python, os.X_OK):
+        raise RuntimeError("REGRESSION_PYTHON_UNAVAILABLE")
+    return test_python
 
 
 if __name__ == "__main__":

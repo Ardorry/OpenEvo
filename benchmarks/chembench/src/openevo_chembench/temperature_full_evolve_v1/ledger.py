@@ -21,6 +21,7 @@ MAX_LEDGER_BYTES = 128 * 1024 * 1024
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _RUNTIME_ID = re.compile(r"[a-z0-9][a-z0-9._-]{7,127}\Z", re.ASCII)
 _RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,191}\Z", re.ASCII)
+_ARTIFACT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,191}\Z", re.ASCII)
 _RECORDED_AT = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\Z", re.ASCII)
 _KINDS = frozenset(
     {
@@ -553,6 +554,7 @@ def _validate_protocol_boundary_payload(
             or payload.get("artifact_count") != 3
             or payload.get("feedback_disabled") is not True
             or payload.get("test_sealed") is not True
+            or not _valid_frozen_context_targets(payload)
         ):
             raise TemperatureLedgerError("LEDGER_FINAL_FREEZE_PROOF_INVALID")
         return
@@ -583,6 +585,48 @@ def _validate_protocol_boundary_payload(
 def _logical_batch(logical_call_id: str) -> int | None:
     match = re.search(r"(?:^|-)b(0[1-4])(?:-|$)", logical_call_id, re.ASCII)
     return None if match is None else int(match.group(1))
+
+
+def _valid_frozen_context_targets(payload: dict[str, Any]) -> bool:
+    values = payload.get("frozen_context_targets")
+    expected_digest = payload.get("frozen_context_targets_sha256")
+    required = {
+        "target_id",
+        "core_artifact_id",
+        "artifact_payload_sha256",
+        "resolved_content_sha256",
+        "context_resolution_digest",
+    }
+    if (
+        type(values) is not list
+        or len(values) != len(_TARGETS)
+        or tuple(
+            value.get("target_id") if type(value) is dict else None
+            for value in values
+        )
+        != _TARGETS
+        or _SHA256.fullmatch(str(expected_digest)) is None
+        or hashlib.sha256(canonical_json_bytes(values)).hexdigest() != expected_digest
+    ):
+        return False
+    resolution_digests: set[str] = set()
+    for value in values:
+        if (
+            type(value) is not dict
+            or set(value) != required
+            or _ARTIFACT_ID.fullmatch(str(value.get("core_artifact_id"))) is None
+            or any(
+                _SHA256.fullmatch(str(value.get(field))) is None
+                for field in (
+                    "artifact_payload_sha256",
+                    "resolved_content_sha256",
+                    "context_resolution_digest",
+                )
+            )
+        ):
+            return False
+        resolution_digests.add(str(value["context_resolution_digest"]))
+    return len(resolution_digests) == 1
 
 
 def _evaluated_count(

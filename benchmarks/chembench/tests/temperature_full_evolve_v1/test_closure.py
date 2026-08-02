@@ -16,6 +16,11 @@ from openevo_chembench.supervised_transfer_v1.common import (
     write_private_file,
     write_public_file,
 )
+from openevo_chembench.supervised_transfer_v2.context_binding import (
+    SupervisedSessionContextBindingV2,
+    SupervisedTargetBindingV2,
+    issue_supervised_context_binding_receipt_v2,
+)
 from openevo_chembench.temperature_full_evolve_v1.closure import (
     TemperatureClosureError,
     verify_formal_closure_v1,
@@ -76,17 +81,20 @@ def _evaluate(
     batch: int | None,
     ordinal: int,
     correct: bool,
+    context_binding_sha256: str | None = None,
 ) -> dict[str, object]:
-    value = canonical_json_bytes(
-        {
-            "phase": phase.replace("-", "_"),
-            "batch_index": batch,
-            "task_ordinal": ordinal,
-            "correct": correct,
-            "official_parse_status": "parsed",
-            "strict_parse_status": "parsed",
-        }
-    ).decode("utf-8")
+    body: dict[str, object] = {
+        "logical_call_id": claim["logical_call_id"],
+        "phase": phase.replace("-", "_"),
+        "batch_index": batch,
+        "task_ordinal": ordinal,
+        "correct": correct,
+        "official_parse_status": "parsed",
+        "strict_parse_status": "parsed",
+    }
+    if context_binding_sha256 is not None:
+        body["context_binding_sha256"] = context_binding_sha256
+    value = canonical_json_bytes(body).decode("utf-8")
     return {
         "logical_call_id": claim["logical_call_id"],
         "evaluation_json": value,
@@ -101,12 +109,24 @@ def _candidate_phase(
     batch: int | None,
     correctness: tuple[bool, ...],
     ordinal_start: int = 0,
+    context_targets: tuple[SupervisedTargetBindingV2, ...] | None = None,
+    tamper_context_binding: bool = False,
 ) -> None:
     for local_ordinal, correct in enumerate(correctness):
         ordinal = ordinal_start + local_ordinal
         token = f"-b{batch:02d}" if batch is not None else ""
         logical = f"closure-{phase}{token}-i{ordinal:03d}"
         claim = _claim(logical=logical, phase=phase, ordinal=ordinal)
+        context_binding_sha256 = (
+            None
+            if context_targets is None
+            else _context_binding_receipt_sha256(
+                call_id=str(claim["call_id"]),
+                targets=context_targets,
+            )
+        )
+        if tamper_context_binding and local_ordinal == 0:
+            context_binding_sha256 = _sha(f"tampered-{phase}")
         ledger.append("CALL_CLAIMED", claim)
         ledger.append("CALL_ACCEPTED", _accept(claim))
         ledger.append(
@@ -117,8 +137,38 @@ def _candidate_phase(
                 batch=batch,
                 ordinal=ordinal,
                 correct=correct,
+                context_binding_sha256=context_binding_sha256,
             ),
         )
+
+
+def _frozen_context_targets() -> tuple[SupervisedTargetBindingV2, ...]:
+    resolution = _sha("frozen-c4-materialization")
+    return tuple(
+        SupervisedTargetBindingV2(
+            target_id=target,  # type: ignore[arg-type]
+            core_artifact_id=f"artifact-{target}",
+            artifact_payload_sha256=_sha(f"payload-{target}"),
+            resolved_content_sha256=_sha(f"resolved-{target}"),
+            context_resolution_digest=resolution,
+        )
+        for target in ("text_memory", "skill_bundle", "agent_system")
+    )
+
+
+def _context_binding_receipt_sha256(
+    *,
+    call_id: str,
+    targets: tuple[SupervisedTargetBindingV2, ...],
+) -> str:
+    binding = SupervisedSessionContextBindingV2(
+        session_id="temp-" + _sha(call_id)[:40],
+        targets=targets,
+    )
+    return issue_supervised_context_binding_receipt_v2(
+        expected=binding,
+        actual=binding,
+    ).digest
 
 
 def _reflector(ledger: TemperatureExperimentLedgerV1, *, batch: int) -> str:
@@ -168,6 +218,19 @@ def _write_preflight(root: Path, payload: dict[str, object]) -> str:
         "managed_runtime_passed": True,
         "framework_registry_passed": True,
         "framework_lock_sha256": identity["framework_lock_sha256"],
+        "formal_runtime_identity_sha256": identity[
+            "formal_runtime_identity_sha256"
+        ],
+        "formal_runtime_receipt_sha256": identity[
+            "formal_runtime_receipt_sha256"
+        ],
+        "formal_runtime_source_commit": identity["source_commit"],
+        "formal_runtime_source_tree_sha256": identity["source_tree_sha256"],
+        "core_wheel_sha256": identity["core_wheel_sha256"],
+        "chembench_wheel_sha256": identity["chembench_wheel_sha256"],
+        "core_editable": False,
+        "chembench_editable": False,
+        "formal_runtime_python_isolated": True,
         "runtime_services_ready": True,
         "runtime_services_identity_sha256": identity["runtime_services_identity_sha256"],
         "completion_persistence_shared": True,
@@ -258,7 +321,14 @@ def _write_manifest(
     )
 
 
-def _write_ledger(run_root: Path, *, report: AggregateReportInputV1, aggregate_sha256: str) -> None:
+def _write_ledger(
+    run_root: Path,
+    *,
+    report: AggregateReportInputV1,
+    aggregate_sha256: str,
+    incident_opened: bool = False,
+    tampered_context_phase: str | None = None,
+) -> None:
     with TemperatureExperimentLedgerV1(
         path=(run_root / "private/events.jsonl").resolve(),
         run_id=report.run_ids.controller_run_id,
@@ -340,6 +410,8 @@ def _write_ledger(run_root: Path, *, report: AggregateReportInputV1, aggregate_s
                 "BATCH_POST_CLOSED",
                 {"batch_index": batch, "accepted_count": 25, "evaluated_count": 25},
             )
+        frozen_targets = _frozen_context_targets()
+        frozen_target_payload = [target.to_dict() for target in frozen_targets]
         ledger.append(
             "FINAL_STATE_FROZEN",
             {
@@ -348,6 +420,10 @@ def _write_ledger(run_root: Path, *, report: AggregateReportInputV1, aggregate_s
                 "artifact_count": 3,
                 "feedback_disabled": True,
                 "test_sealed": True,
+                "frozen_context_targets": frozen_target_payload,
+                "frozen_context_targets_sha256": sha256_bytes(
+                    canonical_json_bytes(frozen_target_payload)
+                ),
             },
         )
         _candidate_phase(
@@ -355,6 +431,8 @@ def _write_ledger(run_root: Path, *, report: AggregateReportInputV1, aggregate_s
             phase="evolved-test",
             batch=None,
             correctness=tuple(report.evolved_test.correctness),
+            context_targets=frozen_targets,
+            tamper_context_binding=tampered_context_phase == "evolved-test",
         )
         ledger.append(
             "EVOLVED_TEST_CLOSED",
@@ -372,6 +450,8 @@ def _write_ledger(run_root: Path, *, report: AggregateReportInputV1, aggregate_s
             phase="baseline-test",
             batch=None,
             correctness=tuple(report.baseline_test.correctness),
+            context_targets=(),
+            tamper_context_binding=tampered_context_phase == "baseline-test",
         )
         ledger.append(
             "BASELINE_TEST_CLOSED",
@@ -385,6 +465,11 @@ def _write_ledger(run_root: Path, *, report: AggregateReportInputV1, aggregate_s
                 "context_empty": True,
             },
         )
+        if incident_opened:
+            ledger.append(
+                "INCIDENT_OPENED",
+                {"finding_code": "SYNTHETIC_CLOSURE_INCIDENT"},
+            )
         ledger.append(
             "AUDIT_CLOSED",
             {
@@ -478,4 +563,109 @@ def test_formal_closure_rejects_preflight_or_manifest_substitution(
             run_root=run.resolve(),
             preflight_root=preflight.resolve(),
             aggregate_input_path=(run / "private/aggregate_report_input_v1.json").resolve(),
+        )
+
+
+def test_formal_closure_rejects_formal_runtime_identity_substitution(
+    closed_evidence: tuple[Path, Path, Path],
+    tmp_path: Path,
+) -> None:
+    source_run, source_preflight, _source_aggregate = closed_evidence
+    run = tmp_path / "run"
+    preflight = tmp_path / "preflight"
+    shutil.copytree(source_run, run)
+    shutil.copytree(source_preflight, preflight)
+    runtime = preflight / "managed_runtime_receipt.json"
+    value = json.loads(runtime.read_text(encoding="utf-8"))
+    value["core_wheel_sha256"] = _sha("substituted-core-wheel")
+    runtime_body = {
+        key: item
+        for key, item in value.items()
+        if key != "runtime_preflight_sha256"
+    }
+    value["runtime_preflight_sha256"] = sha256_bytes(
+        canonical_json_bytes(runtime_body)
+    )
+    write_public_file(runtime, canonical_pretty_json_bytes(value))
+
+    with pytest.raises(TemperatureClosureError, match="PREFLIGHT_BINDING"):
+        verify_formal_closure_v1(
+            run_root=run.resolve(),
+            preflight_root=preflight.resolve(),
+            aggregate_input_path=(
+                run / "private/aggregate_report_input_v1.json"
+            ).resolve(),
+        )
+
+
+def test_formal_closure_rejects_incident_even_with_terminal_audit(
+    tmp_path: Path,
+) -> None:
+    run = tmp_path / "run"
+    run.mkdir(mode=0o700)
+    preflight = tmp_path / "preflight"
+    payload = _payload()
+    bundle_sha256 = _write_preflight(preflight, payload)
+    report = AggregateReportInputV1.model_validate(payload)
+    aggregate = run / "private/aggregate_report_input_v1.json"
+    aggregate_sha256 = write_aggregate_report_input_v1(
+        report=report,
+        path=aggregate,
+    )
+    _write_manifest(
+        run,
+        report=report,
+        preflight_bundle_sha256=bundle_sha256,
+    )
+    _write_ledger(
+        run,
+        report=report,
+        aggregate_sha256=aggregate_sha256,
+        incident_opened=True,
+    )
+
+    with pytest.raises(TemperatureClosureError, match="LEDGER_COUNTS_INVALID"):
+        verify_formal_closure_v1(
+            run_root=run.resolve(),
+            preflight_root=preflight.resolve(),
+            aggregate_input_path=aggregate.resolve(),
+        )
+
+
+@pytest.mark.parametrize("tampered_phase", ("evolved-test", "baseline-test"))
+def test_formal_closure_rejects_test_context_binding_substitution(
+    tmp_path: Path,
+    tampered_phase: str,
+) -> None:
+    run = tmp_path / tampered_phase
+    run.mkdir(mode=0o700)
+    preflight = tmp_path / f"preflight-{tampered_phase}"
+    payload = _payload()
+    bundle_sha256 = _write_preflight(preflight, payload)
+    report = AggregateReportInputV1.model_validate(payload)
+    aggregate = run / "private/aggregate_report_input_v1.json"
+    aggregate_sha256 = write_aggregate_report_input_v1(
+        report=report,
+        path=aggregate,
+    )
+    _write_manifest(
+        run,
+        report=report,
+        preflight_bundle_sha256=bundle_sha256,
+    )
+    _write_ledger(
+        run,
+        report=report,
+        aggregate_sha256=aggregate_sha256,
+        tampered_context_phase=tampered_phase,
+    )
+
+    with pytest.raises(
+        TemperatureClosureError,
+        match="TEST_EVALUATION_AGGREGATE_MISMATCH",
+    ):
+        verify_formal_closure_v1(
+            run_root=run.resolve(),
+            preflight_root=preflight.resolve(),
+            aggregate_input_path=aggregate.resolve(),
         )

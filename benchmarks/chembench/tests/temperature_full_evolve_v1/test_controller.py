@@ -98,6 +98,26 @@ def _split_payload() -> dict[str, object]:
     }
 
 
+def _frozen_context_payload() -> dict[str, object]:
+    resolution = _sha("frozen-context-resolution")
+    targets = [
+        {
+            "target_id": target,
+            "core_artifact_id": f"artifact-{target}",
+            "artifact_payload_sha256": _sha(f"payload-{target}"),
+            "resolved_content_sha256": _sha(f"resolved-{target}"),
+            "context_resolution_digest": resolution,
+        }
+        for target in ("text_memory", "skill_bundle", "agent_system")
+    ]
+    return {
+        "frozen_context_targets": targets,
+        "frozen_context_targets_sha256": hashlib.sha256(
+            canonical_json_bytes(targets)
+        ).hexdigest(),
+    }
+
+
 def _append_reflector_call(
     ledger: TemperatureExperimentLedgerV1,
     *,
@@ -278,6 +298,7 @@ def test_test_freeze_rejects_late_reflector_or_core_semantics(tmp_path: Path) ->
                 "artifact_count": 3,
                 "feedback_disabled": True,
                 "test_sealed": True,
+                **_frozen_context_payload(),
             },
         )
         controller = TemperatureExperimentControllerV1(

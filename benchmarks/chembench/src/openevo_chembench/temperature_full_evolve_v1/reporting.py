@@ -98,6 +98,13 @@ class ExecutionIdentityAggregateV1(_StrictReportModel):
     group_manifest_sha256: str
     group_assignment_sha256: str
     framework_lock_sha256: str
+    formal_runtime_identity_sha256: str
+    formal_runtime_receipt_sha256: str
+    source_tree_sha256: str
+    core_wheel_sha256: str
+    chembench_wheel_sha256: str
+    core_editable: StrictBool
+    chembench_editable: StrictBool
     runtime_services_identity_sha256: str
     model_identity_receipt_sha256: str
     managed_runtime_receipt_sha256: str
@@ -125,6 +132,11 @@ class ExecutionIdentityAggregateV1(_StrictReportModel):
             self.group_manifest_sha256,
             self.group_assignment_sha256,
             self.framework_lock_sha256,
+            self.formal_runtime_identity_sha256,
+            self.formal_runtime_receipt_sha256,
+            self.source_tree_sha256,
+            self.core_wheel_sha256,
+            self.chembench_wheel_sha256,
             self.runtime_services_identity_sha256,
             self.model_identity_receipt_sha256,
             self.managed_runtime_receipt_sha256,
@@ -134,6 +146,8 @@ class ExecutionIdentityAggregateV1(_StrictReportModel):
             _COMMIT.fullmatch(self.source_commit) is None
             or _SAFE_ID.fullmatch(self.branch) is None
             or any(_SHA256.fullmatch(value) is None for value in digests)
+            or self.core_editable
+            or self.chembench_editable
             or self.managed_codex_executable_sha256 != EXPECTED_CODEX_SHA256
             or self.managed_candidate_image_id != EXPECTED_CANDIDATE_IMAGE_ID
             or not self.candidate_baseline_stack_equal
@@ -616,6 +630,16 @@ def _require_closure_binding(
         or receipt.config_sha256 != report.identity.config_sha256
         or receipt.split_sha256 != report.identity.split_sha256
         or receipt.dataset_sha256 != report.identity.dataset_sha256
+        or receipt.formal_runtime_identity_sha256
+        != report.identity.formal_runtime_identity_sha256
+        or receipt.formal_runtime_receipt_sha256
+        != report.identity.formal_runtime_receipt_sha256
+        or receipt.source_tree_sha256 != report.identity.source_tree_sha256
+        or receipt.core_wheel_sha256 != report.identity.core_wheel_sha256
+        or receipt.chembench_wheel_sha256
+        != report.identity.chembench_wheel_sha256
+        or receipt.core_editable is not False
+        or receipt.chembench_editable is not False
         or receipt.preflight_bundle_sha256 != report.preflight.preflight_bundle_sha256
         or receipt.runtime_services_identity_sha256
         != report.identity.runtime_services_identity_sha256
@@ -860,6 +884,14 @@ def _runtime_receipt(report: AggregateReportInputV1) -> dict[str, object]:
         "service_run_id": report.run_ids.runtime_service_run_id,
         "managed_codex_executable_sha256": identity.managed_codex_executable_sha256,
         "managed_candidate_image_id": identity.managed_candidate_image_id,
+        "source_commit": identity.source_commit,
+        "source_tree_sha256": identity.source_tree_sha256,
+        "formal_runtime_identity_sha256": identity.formal_runtime_identity_sha256,
+        "formal_runtime_receipt_sha256": identity.formal_runtime_receipt_sha256,
+        "core_wheel_sha256": identity.core_wheel_sha256,
+        "chembench_wheel_sha256": identity.chembench_wheel_sha256,
+        "core_editable": identity.core_editable,
+        "chembench_editable": identity.chembench_editable,
         "framework_lock_sha256": identity.framework_lock_sha256,
         "runtime_services_identity_sha256": identity.runtime_services_identity_sha256,
         "receipt_sha256": identity.managed_runtime_receipt_sha256,
@@ -1364,7 +1396,7 @@ evolved {comparison.candidate_correct}/{comparison.n}（{100 * comparison.candid
 - Test 在 Train 闭合前保持 sealed；Test feedback、Reflector、Core job、artifact update 均为 0。
 - Candidate 与 baseline 使用相同模型、reasoning、prompt/harness policy、parser/evaluator 与 retry
   语义；managed Codex SHA-256 为 `{report.identity.managed_codex_executable_sha256}`。
-- 历史暴露没有作为 eligibility exclusion，这是用户在 2026-08-02 对本探索实验的明确修订；
+- 历史暴露没有作为 eligibility exclusion，且没有用于本次固定池内的题目选择；
   因此被选项目可能曾在其他实验中暴露。与此同时，旧 artifact、completion、database、workspace
   的导入数量都为 0，C0 注入上下文为 0 bytes。该 provenance 限制不能被表述为 never-exposed
   验证。

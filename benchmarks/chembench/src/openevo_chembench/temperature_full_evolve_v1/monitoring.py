@@ -49,7 +49,11 @@ MAX_CONTROLLER_STATUS_BYTES = 128 * 1024
 MAX_SNAPSHOT_BYTES = 256 * 1024
 MAX_SNAPSHOT_LOG_BYTES = 64 * 1024 * 1024
 MAX_DATABASE_TABLES = 64
+MAX_MEMINFO_BYTES = 64 * 1024
+MIN_MEMORY_ERROR_BYTES = 1 * 1024**3
+MIN_MEMORY_WARNING_BYTES = 2 * 1024**3
 FORMAL_RUNS_RELATIVE = Path("state/chembench_temperature_full_evolve_v1/runs")
+PROC_MEMINFO_PATH = Path("/proc/meminfo")
 _SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z", re.ASCII)
 _SAFE_TABLE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}\Z", re.ASCII)
 _UTC = re.compile(r"20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\Z")
@@ -186,6 +190,7 @@ def collect_monitor_snapshot_v1(
     process = _probe_process(controller.runner_pid, bound_process=bound_process)
     tmux = _probe_tmux(tmux_session)
     disk = _probe_disk(run_root)
+    memory = _probe_memory()
     auth = _probe_auth_metadata()
     progress_fingerprint = _progress_fingerprint(controller, database)
     previous_progress = _previous_progress(previous_snapshot)
@@ -202,12 +207,13 @@ def collect_monitor_snapshot_v1(
         process=process,
         tmux=tmux,
         disk=disk,
+        memory=memory,
         auth=auth,
         lease=lease,
     )
     healthy_active_lease = (
         lease["disposition"] == "WAIT_ACTIVE_LEASE"
-        and health["status"] == "WAIT_ACTIVE_LEASE"
+        and health["status"] != "ERROR"
     )
     stall = stall_candidate and not healthy_active_lease
     diagnostics = _stall_diagnostics(
@@ -217,6 +223,7 @@ def collect_monitor_snapshot_v1(
         database=database,
         process=process,
         tmux=tmux,
+        memory=memory,
         auth=auth,
         lease=lease,
         healthy_active_lease=healthy_active_lease,
@@ -251,6 +258,7 @@ def collect_monitor_snapshot_v1(
         "runner_process": process,
         "tmux": tmux,
         "disk": disk,
+        "host_memory": memory,
         "credential_metadata": auth,
         "health": health,
         "progress": {
@@ -353,10 +361,11 @@ def format_monitor_line_v1(snapshot: dict[str, object]) -> str:
         progress = snapshot["progress"]
         runtime = snapshot["runtime"]
         database = snapshot["database"]
+        memory = snapshot["host_memory"]
         health = snapshot["health"]
         if not all(
             isinstance(value, dict)
-            for value in (controller, progress, runtime, database, health)
+            for value in (controller, progress, runtime, database, memory, health)
         ):
             raise TypeError
         return (
@@ -364,7 +373,7 @@ def format_monitor_line_v1(snapshot: dict[str, object]) -> str:
             f"item={controller['item_ordinal']} accepted={controller['accepted_completions']} "
             f"candidate={controller['candidate_calls']} reflector={controller['reflector_calls']} "
             f"core={controller['core_jobs']} runtime={runtime['status']} "
-            f"db={database['status']} health={health['status']} "
+            f"db={database['status']} memory={memory['status']} health={health['status']} "
             f"action={progress['recovery_disposition']} "
             f"stalled={str(progress['stall_detected']).lower()}"
         )
@@ -607,6 +616,80 @@ def _probe_disk(repository: Path) -> dict[str, object]:
         }
 
 
+def _probe_memory(path: Path = PROC_MEMINFO_PATH) -> dict[str, object]:
+    """Read bounded aggregate host memory counters from Linux procfs."""
+
+    empty = {
+        "mem_total_bytes": 0,
+        "mem_available_bytes": 0,
+        "swap_total_bytes": 0,
+        "swap_free_bytes": 0,
+        "warning_below_bytes": MIN_MEMORY_WARNING_BYTES,
+        "error_below_bytes": MIN_MEMORY_ERROR_BYTES,
+    }
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        try:
+            encoded = os.read(descriptor, MAX_MEMINFO_BYTES + 1)
+        finally:
+            os.close(descriptor)
+        if len(encoded) > MAX_MEMINFO_BYTES:
+            raise ValueError("meminfo exceeds monitor budget")
+        text = encoded.decode("ascii")
+        expected = {"MemTotal", "MemAvailable", "SwapTotal", "SwapFree"}
+        values: dict[str, int] = {}
+        for line in text.splitlines():
+            key, separator, raw_value = line.partition(":")
+            if not separator or key not in expected:
+                continue
+            if key in values:
+                raise ValueError("duplicate meminfo field")
+            match = re.fullmatch(r"([0-9]+) kB", raw_value.strip(), re.ASCII)
+            if match is None:
+                raise ValueError("invalid meminfo field")
+            value_kib = int(match.group(1))
+            if value_kib > (2**63 - 1) // 1024:
+                raise ValueError("meminfo field exceeds monitor range")
+            values[key] = value_kib * 1024
+        if set(values) != expected:
+            raise ValueError("required meminfo fields are missing")
+        if (
+            values["MemTotal"] < 1
+            or values["MemAvailable"] > values["MemTotal"]
+            or values["SwapFree"] > values["SwapTotal"]
+        ):
+            raise ValueError("meminfo counters are inconsistent")
+        available = values["MemAvailable"]
+        if available < MIN_MEMORY_ERROR_BYTES:
+            status = "ERROR"
+            finding_code = "HOST_MEMORY_CRITICAL"
+        elif available < MIN_MEMORY_WARNING_BYTES:
+            status = "WARN"
+            finding_code = "HOST_MEMORY_LOW"
+        else:
+            status = "PASS"
+            finding_code = None
+        return {
+            "status": status,
+            "mem_total_bytes": values["MemTotal"],
+            "mem_available_bytes": available,
+            "swap_total_bytes": values["SwapTotal"],
+            "swap_free_bytes": values["SwapFree"],
+            "warning_below_bytes": MIN_MEMORY_WARNING_BYTES,
+            "error_below_bytes": MIN_MEMORY_ERROR_BYTES,
+            "finding_code": finding_code,
+        }
+    except (OSError, UnicodeError, ValueError):
+        return {
+            "status": "ERROR",
+            **empty,
+            "finding_code": "HOST_MEMORY_PROBE_FAILED",
+        }
+
+
 def _probe_auth_metadata() -> dict[str, object]:
     try:
         auth_path = codex_subscription_auth_source_v2()
@@ -751,6 +834,7 @@ def _health_summary(
     process: dict[str, object],
     tmux: dict[str, object],
     disk: dict[str, object],
+    memory: dict[str, object],
     auth: dict[str, object],
     lease: dict[str, object],
 ) -> dict[str, object]:
@@ -781,6 +865,17 @@ def _health_summary(
         add("tmux", str(tmux.get("finding_code") or "TMUX_REQUIRED_WINDOW_MISSING"))
     if disk.get("status") != "PASS":
         add("disk", str(disk.get("finding_code") or "DISK_SPACE_LOW"))
+    if memory.get("status") == "WARN":
+        add(
+            "host_memory",
+            str(memory.get("finding_code") or "HOST_MEMORY_LOW"),
+            severity="WARN",
+        )
+    elif memory.get("status") != "PASS":
+        add(
+            "host_memory",
+            str(memory.get("finding_code") or "HOST_MEMORY_PROBE_FAILED"),
+        )
     if auth.get("status") != "PASS":
         add(
             "credential_metadata",
@@ -795,9 +890,12 @@ def _health_summary(
         add("controller", "WAIT_ACTIVE_LEASE", severity="INFO")
     elif lease.get("disposition") == "ACTIVE_LEASE_TIMEOUT_EXCEEDED":
         add("controller", "ACTIVE_LEASE_TIMEOUT_EXCEEDED")
-    status = "ERROR" if any(value["severity"] == "ERROR" for value in findings) else (
-        "WAIT_ACTIVE_LEASE" if findings else "PASS"
-    )
+    if any(value["severity"] == "ERROR" for value in findings):
+        status = "ERROR"
+    elif any(value["severity"] == "WARN" for value in findings):
+        status = "WARN"
+    else:
+        status = "WAIT_ACTIVE_LEASE" if findings else "PASS"
     return {"status": status, "findings": findings}
 
 
@@ -865,6 +963,7 @@ def _stall_diagnostics(
     database: dict[str, object],
     process: dict[str, object],
     tmux: dict[str, object],
+    memory: dict[str, object],
     auth: dict[str, object],
     lease: dict[str, object],
     healthy_active_lease: bool,
@@ -884,6 +983,8 @@ def _stall_diagnostics(
         findings.append("DATABASE_INTEGRITY_NOT_PASS")
     if auth.get("status") != "PASS":
         findings.append("CREDENTIAL_METADATA_NOT_PASS")
+    if memory.get("status") != "PASS":
+        findings.append(str(memory.get("finding_code") or "HOST_MEMORY_NOT_PASS"))
     if lease.get("disposition") == "ACTIVE_LEASE_TIMEOUT_EXCEEDED":
         findings.append("ACTIVE_LEASE_TIMEOUT_EXCEEDED")
     elif lease.get("disposition") == "WAIT_ACTIVE_LEASE":

@@ -36,6 +36,11 @@ Test 是相对于全部历史运行的 never-exposed holdout；它检验的是
 任何模型调用前必须冻结 split、配置、源码 commit、managed executable/image、framework
 registry、runtime-services identity 和 owner-private持久化根；零调用 preflight 必须通过。
 
+正式解释器来自本实验独立、不可编辑且内容寻址的 runtime bundle。当前提交的 OpenEvo Core 与
+ChemBench wheel 必须在无索引模式下构建，wheel Python 源与冻结源码逐文件一致，安装 inventory、
+两个 wheel、framework lock、解释器和 runtime receipt 全部计算 SHA-256。正式 precheck、service
+lifecycle 与 runner 只能由该解释器以 `-I` 运行；旧实验解释器中的项目包不得直接承担本次调用。
+
 ## 每批 Full-Evolve 状态机
 
 设 `C0` 为空状态，`Ci` 为第 i 批完整提交后的三目标状态。每批严格执行：

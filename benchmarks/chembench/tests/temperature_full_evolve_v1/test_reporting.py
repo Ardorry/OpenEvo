@@ -117,6 +117,13 @@ def _payload() -> dict[str, object]:
             "group_manifest_sha256": _digest("groups"),
             "group_assignment_sha256": _digest("assignments"),
             "framework_lock_sha256": _digest("framework"),
+            "formal_runtime_identity_sha256": _digest("formal-runtime"),
+            "formal_runtime_receipt_sha256": _digest("formal-runtime-receipt"),
+            "source_tree_sha256": _digest("formal-source-tree"),
+            "core_wheel_sha256": _digest("core-wheel"),
+            "chembench_wheel_sha256": _digest("chembench-wheel"),
+            "core_editable": False,
+            "chembench_editable": False,
             "runtime_services_identity_sha256": _digest("services"),
             "model_identity_receipt_sha256": _digest("model-receipt"),
             "managed_runtime_receipt_sha256": _digest("runtime-receipt"),
@@ -280,6 +287,17 @@ def _verified_closure(
         "config_sha256": report.identity.config_sha256,
         "split_sha256": report.identity.split_sha256,
         "dataset_sha256": report.identity.dataset_sha256,
+        "formal_runtime_identity_sha256": (
+            report.identity.formal_runtime_identity_sha256
+        ),
+        "formal_runtime_receipt_sha256": (
+            report.identity.formal_runtime_receipt_sha256
+        ),
+        "source_tree_sha256": report.identity.source_tree_sha256,
+        "core_wheel_sha256": report.identity.core_wheel_sha256,
+        "chembench_wheel_sha256": report.identity.chembench_wheel_sha256,
+        "core_editable": False,
+        "chembench_editable": False,
         "preflight_bundle_sha256": report.preflight.preflight_bundle_sha256,
         "run_manifest_sha256": _digest("run-manifest"),
         "runtime_services_identity_sha256": report.identity.runtime_services_identity_sha256,
@@ -297,6 +315,7 @@ def _verified_closure(
         "audit_closed_at_utc": "2026-08-02T04:00:00Z",
         "unresolved_call_count": 0,
         "run_failed_event_count": 0,
+        "incident_opened_event_count": 0,
         "claimed_logical_call_count": 404,
         "managed_runtime_session_attempt_count": 404,
         "readiness_passed_for_accepted_call_count": 404,
@@ -366,6 +385,13 @@ def test_final_report_package_is_closed_aggregate_and_checksum_complete(tmp_path
     formal_closure = json.loads((destination / "formal_closure_receipt.json").read_text())
     assert formal_closure["status"] == "COMPLETE"
     assert formal_closure["contains_benchmark_content"] is False
+    runtime = json.loads((destination / "managed_runtime_receipt.json").read_text())
+    assert runtime["formal_runtime_identity_sha256"] == _digest("formal-runtime")
+    assert runtime["source_tree_sha256"] == _digest("formal-source-tree")
+    assert runtime["core_wheel_sha256"] == _digest("core-wheel")
+    assert runtime["chembench_wheel_sha256"] == _digest("chembench-wheel")
+    assert runtime["core_editable"] is False
+    assert runtime["chembench_editable"] is False
     calls = json.loads((destination / "call_and_failure_summary.json").read_text())
     assert calls["experimental_model_logical_calls"] == 404
     assert calls["managed_runtime_session_attempts"] == 404

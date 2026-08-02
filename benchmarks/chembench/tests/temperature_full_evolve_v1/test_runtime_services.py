@@ -267,6 +267,33 @@ def test_runtime_identity_exposes_v2_executor_duck_contract() -> None:
     assert callable(services.TemperatureRuntimeServicesIdentityV1.require_identity_current)
 
 
+def test_runtime_paths_are_bound_to_noneditable_formal_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = tmp_path.resolve()
+    formal_root = repository / "state/formal"
+    identity = SimpleNamespace(
+        runtime_python=formal_root / "runtime_venv/bin/python",
+        framework_lock=formal_root / "framework/framework-lock.json",
+        core_wheel=formal_root / "framework/openevo-0.3.0-py3-none-any.whl",
+    )
+    monkeypatch.setattr(
+        services,
+        "load_temperature_formal_runtime_v1",
+        lambda **_values: identity,
+    )
+
+    paths = services._runtime_paths(repository)
+
+    assert paths["runtime_python"] == identity.runtime_python
+    assert paths["framework_lock"] == identity.framework_lock
+    assert paths["framework_wheel"] == identity.core_wheel
+    assert "chembench_supervised_transfer_v2" not in os.fspath(
+        paths["runtime_python"]
+    )
+
+
 def test_empty_runtime_inventory_binds_rollout_and_completion_root(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

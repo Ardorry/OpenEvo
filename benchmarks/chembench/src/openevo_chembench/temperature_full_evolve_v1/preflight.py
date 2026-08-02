@@ -62,6 +62,15 @@ class RuntimePreflightEvidenceV1(BaseModel):
     managed_runtime_passed: bool
     framework_registry_passed: bool
     framework_lock_sha256: str
+    formal_runtime_identity_sha256: str
+    formal_runtime_receipt_sha256: str
+    formal_runtime_source_commit: str
+    formal_runtime_source_tree_sha256: str
+    core_wheel_sha256: str
+    chembench_wheel_sha256: str
+    core_editable: StrictBool
+    chembench_editable: StrictBool
+    formal_runtime_python_isolated: StrictBool
     runtime_services_ready: bool
     runtime_services_identity_sha256: str
     completion_persistence_shared: bool
@@ -79,6 +88,11 @@ class RuntimePreflightEvidenceV1(BaseModel):
             self.candidate_codex_executable_sha256,
             self.reflector_codex_executable_sha256,
             self.framework_lock_sha256,
+            self.formal_runtime_identity_sha256,
+            self.formal_runtime_receipt_sha256,
+            self.formal_runtime_source_tree_sha256,
+            self.core_wheel_sha256,
+            self.chembench_wheel_sha256,
             self.runtime_services_identity_sha256,
             self.completion_persistence_identity_sha256,
             self.empty_runtime_inventory_sha256,
@@ -96,6 +110,10 @@ class RuntimePreflightEvidenceV1(BaseModel):
             or self.credential_content_read
             or not self.managed_runtime_passed
             or not self.framework_registry_passed
+            or _COMMIT.fullmatch(self.formal_runtime_source_commit) is None
+            or self.core_editable
+            or self.chembench_editable
+            or not self.formal_runtime_python_isolated
             or not self.runtime_services_ready
             or not self.completion_persistence_shared
             or self.rollout_task_count_before_first_call
@@ -192,6 +210,8 @@ def build_zero_model_preflight_v1(
         raise TypeError("preflight identity receipts must be exact DTOs")
     if _COMMIT.fullmatch(source_commit) is None or source_tree_clean is not True:
         raise TemperaturePreflightError("SOURCE_IDENTITY_NOT_FROZEN")
+    if runtime.formal_runtime_source_commit != source_commit:
+        raise TemperaturePreflightError("FORMAL_RUNTIME_SOURCE_COMMIT_MISMATCH")
     _require_current_run_split_isolation(split)
     zero = RuleEvidenceIndexV1.generation_zero()
     if zero.rules or zero.batch_index != 0:
@@ -297,6 +317,9 @@ def build_zero_model_preflight_v1(
         "group_isolation": "PASS",
         "generation_zero_empty_context": "PASS",
         "managed_codex_identity": "PASS",
+        "formal_runtime_identity": "PASS",
+        "formal_runtime_noneditable_wheels": "PASS",
+        "formal_runtime_isolated_python": "PASS",
         "credential_metadata": "PASS",
         "parser_evaluator_identity": "PASS",
         "formal_harness_only": "PASS",
