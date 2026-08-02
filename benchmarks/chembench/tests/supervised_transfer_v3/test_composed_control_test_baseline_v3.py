@@ -19,6 +19,7 @@ from openevo_chembench.supervised_transfer_v3.composed_control_test_baseline imp
     BASELINE_PROTOCOL_ID,
     EVOLVED_FINAL_TEST_RUN_ID,
     GENERATION_ZERO_CONTEXT_SET_SHA256,
+    ControlFinalTestBaselineV3Error,
     audit_completed_evolved_final_test_v3,
     build_control_baseline_dry_run_v3,
     build_control_baseline_source_compatibility_receipt_v3,
@@ -30,8 +31,7 @@ from openevo_chembench.supervised_transfer_v3.experiment import (
 
 REPOSITORY = Path(__file__).resolve().parents[4]
 CONFIG_PATH = (
-    REPOSITORY
-    / "benchmarks/chembench/configs/supervised_transfer_v3/"
+    REPOSITORY / "benchmarks/chembench/configs/supervised_transfer_v3/"
     "chembench_supervised_transfer_v3_two_round_one_evolution.yaml"
 )
 EVOLVED_RECEIPT = (
@@ -61,9 +61,7 @@ def live_audit(live_inputs):
     )
 
 
-def test_completed_evolved_final_test_is_exact_pair_authority(
-    live_inputs, live_audit
-) -> None:
+def test_completed_evolved_final_test_is_exact_pair_authority(live_inputs, live_audit) -> None:
     assert live_audit.run_id == EVOLVED_FINAL_TEST_RUN_ID
     assert live_audit.correct_count == 382
     assert live_audit.test_order_sha256
@@ -93,24 +91,17 @@ def test_control_baseline_dry_run_is_test_only(live_inputs, live_audit) -> None:
     assert payload["model_calls"] == 0
 
 
-def test_runtime_health_fix_has_exact_source_compatibility_receipt(
+def test_original_full_baseline_gate_rejects_suffix_recovery_source(
     live_inputs, live_audit
 ) -> None:
-    receipt = build_control_baseline_source_compatibility_receipt_v3(
-        inputs=live_inputs,
-        audit=live_audit,
-    )
-    transition = receipt["reviewed_executor_transition"]
-    assert transition["change_class"] == "runtime_health_recovery_only"
-    runtime_transition = receipt["reviewed_runtime_services_transition"]
-    assert (
-        runtime_transition["change_class"]
-        == "docker_identity_read_timeout_recovery_only"
-    )
-    assert receipt["runtime_health_recovery_reviewed"] is True
-    assert receipt["docker_identity_read_timeout_recovery_reviewed"] is True
-    assert receipt["terminal_completion_semantics_unchanged"] is True
-    assert receipt["semantically_compatible"] is True
+    with pytest.raises(
+        ControlFinalTestBaselineV3Error,
+        match="BASELINE_SOURCE_SCOPE_INVALID",
+    ):
+        build_control_baseline_source_compatibility_receipt_v3(
+            inputs=live_inputs,
+            audit=live_audit,
+        )
 
 
 def test_control_request_uses_managed_codex_harness_without_context(
@@ -187,8 +178,7 @@ def test_control_ledger_permits_exactly_one_completion_per_test_item(
 
 def test_baseline_adapter_has_no_codex_or_artifact_import_bypass() -> None:
     source = (
-        REPOSITORY
-        / "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v3/"
+        REPOSITORY / "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v3/"
         "composed_control_test_baseline.py"
     ).read_text(encoding="utf-8")
     assert "codex exec" not in source
@@ -204,8 +194,7 @@ def test_baseline_adapter_has_no_codex_or_artifact_import_bypass() -> None:
 
 def test_existing_evolved_final_test_path_is_unchanged() -> None:
     source = (
-        REPOSITORY
-        / "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v3/"
+        REPOSITORY / "benchmarks/chembench/src/openevo_chembench/supervised_transfer_v3/"
         "experiment.py"
     ).read_text(encoding="utf-8")
     assert "composed_control_test_baseline" not in source

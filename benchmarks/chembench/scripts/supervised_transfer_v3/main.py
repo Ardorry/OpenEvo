@@ -39,6 +39,13 @@ from openevo_chembench.supervised_transfer_v3.composed_control_test_baseline imp
     build_control_baseline_dry_run_v3,
     build_control_baseline_source_compatibility_receipt_v3,
 )
+from openevo_chembench.supervised_transfer_v3.composed_control_test_baseline_recovery import (
+    DEFAULT_PARENT_CONTROL_BASELINE_RUN_ID,
+    ComposedControlFinalTestBaselineSuffixRecoveryV3,
+    audit_failed_control_baseline_prefix_v3,
+    build_control_baseline_recovery_dry_run_v3,
+    build_control_baseline_recovery_source_compatibility_receipt_v3,
+)
 from openevo_chembench.supervised_transfer_v3.composed_final_test import (
     COMPOSITION_RUN_ID,
     ComposedFinalTestExperimentV3,
@@ -130,6 +137,9 @@ def main() -> int:
             "composed-control-baseline-verify",
             "composed-control-baseline-dry-run",
             "composed-control-baseline-run",
+            "composed-control-baseline-recovery-verify",
+            "composed-control-baseline-recovery-dry-run",
+            "composed-control-baseline-recover",
         ),
     )
     arguments = parser.parse_args()
@@ -433,6 +443,105 @@ def main() -> int:
         )
         write_public_file(write_path, canonical_pretty_json_bytes(compatibility))
         payload = experiment.run_category_shard_recovery()
+    elif arguments.command in {
+        "composed-control-baseline-recovery-verify",
+        "composed-control-baseline-recovery-dry-run",
+    }:
+        inputs = load_experiment_inputs_v3(
+            REPOSITORY_ROOT,
+            config,
+            require_runtime=False,
+        )
+        evolved = audit_completed_evolved_final_test_v3(
+            repository_root=REPOSITORY_ROOT,
+            inputs=inputs,
+            run_id=(arguments.paired_evolved_run_id or EVOLVED_FINAL_TEST_RUN_ID),
+        )
+        prefix = audit_failed_control_baseline_prefix_v3(
+            repository_root=REPOSITORY_ROOT,
+            inputs=inputs,
+            evolved_audit=evolved,
+            parent_run_id=(arguments.parent_run_id or DEFAULT_PARENT_CONTROL_BASELINE_RUN_ID),
+        )
+        if arguments.command == "composed-control-baseline-recovery-verify":
+            payload = {
+                "status": "PASS",
+                "parent_run_id": prefix.parent_run_id,
+                "parent_prefix_receipt_sha256": prefix.accepted.digest,
+                "discarded_incomplete_task_receipt_sha256": (prefix.discarded.digest),
+                "excluded_historical_runs_receipt_sha256": prefix.excluded.digest,
+                "accepted_completion_count": prefix.accepted.completion_count,
+                "accepted_attempt_event_count": (prefix.accepted.accepted_attempt_count),
+                "start_task_ordinal": prefix.start_task_ordinal,
+                "first_category": prefix.discarded.category,
+                "first_category_task_ordinal": prefix.start_task_ordinal % 50,
+                "excluded_historical_completion_event_count": (
+                    prefix.excluded.excluded_completion_event_count
+                ),
+                "excluded_historical_unique_task_count": (
+                    prefix.excluded.excluded_unique_task_count
+                ),
+                "excluded_historical_attempt_event_count": (
+                    prefix.excluded.excluded_attempt_event_count
+                ),
+                "excluded_historical_no_completion_attempt_count": (
+                    prefix.excluded.excluded_no_completion_attempt_count
+                ),
+                "correctness_used_for_parent_selection": False,
+                "parent_results_or_state_modified": False,
+                "parent_ledger_modified": False,
+                "model_calls": 0,
+            }
+        else:
+            if not arguments.run_id:
+                parser.error("composed-control-baseline-recovery-dry-run requires --run-id")
+            payload = build_control_baseline_recovery_dry_run_v3(
+                inputs=inputs,
+                evolved_audit=evolved,
+                prefix_audit=prefix,
+                recovery_run_id=arguments.run_id,
+            )
+    elif arguments.command == "composed-control-baseline-recover":
+        if not arguments.allow_paid:
+            parser.error("composed-control-baseline-recover requires --allow-paid")
+        if not arguments.run_id:
+            parser.error("composed-control-baseline-recover requires --run-id")
+        require_paid_runtime_python_v2(repository_root=REPOSITORY_ROOT)
+        inputs = load_experiment_inputs_v3(
+            REPOSITORY_ROOT,
+            config,
+            require_runtime=True,
+        )
+        evolved = audit_completed_evolved_final_test_v3(
+            repository_root=REPOSITORY_ROOT,
+            inputs=inputs,
+            run_id=(arguments.paired_evolved_run_id or EVOLVED_FINAL_TEST_RUN_ID),
+        )
+        prefix = audit_failed_control_baseline_prefix_v3(
+            repository_root=REPOSITORY_ROOT,
+            inputs=inputs,
+            evolved_audit=evolved,
+            parent_run_id=(arguments.parent_run_id or DEFAULT_PARENT_CONTROL_BASELINE_RUN_ID),
+        )
+        compatibility = build_control_baseline_recovery_source_compatibility_receipt_v3(
+            inputs=inputs,
+            evolved_audit=evolved,
+            prefix_audit=prefix,
+        )
+        if compatibility["semantically_compatible"] is not True:
+            raise RuntimeError("CONTROL_BASELINE_RECOVERY_SOURCE_NOT_SEMANTICALLY_COMPATIBLE")
+        experiment = ComposedControlFinalTestBaselineSuffixRecoveryV3(
+            inputs=inputs,
+            run_id=arguments.run_id,
+            evolved_audit=evolved,
+            prefix_audit=prefix,
+        )
+        write_public_file(
+            experiment.result_root
+            / "public/control_baseline_recovery_source_compatibility_receipt_v3.json",
+            canonical_pretty_json_bytes(compatibility),
+        )
+        payload = experiment.run_control_baseline_recovery()
     elif arguments.command in {
         "composed-control-baseline-verify",
         "composed-control-baseline-dry-run",
