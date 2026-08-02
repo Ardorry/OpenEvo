@@ -61,6 +61,8 @@ def test_blocked_report_package_is_closed_and_checksum_verified(tmp_path: Path) 
             "candidate_executable_sha256": "2" * 64,
             "candidate_image_id": "sha256:" + "3" * 64,
         },
+        preflight_tool_failures=1,
+        preflight_tool_repairs=1,
     )
 
     assert payload["status"] == "HARD_BLOCKED"
@@ -71,6 +73,9 @@ def test_blocked_report_package_is_closed_and_checksum_verified(tmp_path: Path) 
         assert hashlib.sha256((destination / name).read_bytes()).hexdigest() == digest
     assert "UID values" not in (destination / "historical_exclusion_manifest.json").read_text()
     assert not (destination / "train_private_manifest.jsonl").exists()
+    call_summary = (destination / "call_and_failure_summary.json").read_text(encoding="utf-8")
+    assert '"preflight_tool_failures": 1' in call_summary
+    assert '"preflight_tool_repairs": 1' in call_summary
 
 
 def test_result_metrics_are_explicitly_not_run(tmp_path: Path) -> None:

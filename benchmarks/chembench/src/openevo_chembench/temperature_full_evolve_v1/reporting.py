@@ -80,6 +80,8 @@ def write_blocked_report_package(
     branch: str,
     model_identity: Mapping[str, object],
     managed_runtime_identity: Mapping[str, object],
+    preflight_tool_failures: int = 0,
+    preflight_tool_repairs: int = 0,
 ) -> dict[str, object]:
     """Write the closed aggregate package after the capacity gate blocks launch."""
 
@@ -89,6 +91,15 @@ def write_blocked_report_package(
         raise RuntimeError("BLOCKED_REPORT_REQUIRES_FAILED_CAPACITY_GATE")
     if receipt["side_effects"]["total_model_calls"] != 0:
         raise RuntimeError("BLOCKED_REPORT_REQUIRES_ZERO_MODEL_CALLS")
+    if (
+        isinstance(preflight_tool_failures, bool)
+        or not isinstance(preflight_tool_failures, int)
+        or preflight_tool_failures < 0
+        or isinstance(preflight_tool_repairs, bool)
+        or not isinstance(preflight_tool_repairs, int)
+        or preflight_tool_repairs < 0
+    ):
+        raise ValueError("preflight tool failure and repair counts must be non-negative")
     if destination.exists():
         raise FileExistsError(destination)
     destination.mkdir(parents=True, mode=0o755)
@@ -210,6 +221,9 @@ def write_blocked_report_package(
             "failed_attempts": 0,
             "retries": 0,
             "recoveries": 0,
+            "preflight_tool_failures": preflight_tool_failures,
+            "preflight_tool_repairs": preflight_tool_repairs,
+            "preflight_tool_failure_model_side_effects": 0,
         },
     )
 
@@ -298,12 +312,16 @@ def write_blocked_report_package(
         branch=branch,
         model_identity=model_identity,
         managed_runtime_identity=managed_runtime_identity,
+        preflight_tool_failures=preflight_tool_failures,
+        preflight_tool_repairs=preflight_tool_repairs,
     )
     handoff_markdown = _handoff_markdown(
         receipt=receipt,
         audit_id=audit_id,
         source_code_commit=source_code_commit,
         branch=branch,
+        preflight_tool_failures=preflight_tool_failures,
+        preflight_tool_repairs=preflight_tool_repairs,
     )
     write_public_file(destination / "PRECHECK_REPORT.md", precheck_markdown.encode("utf-8"))
     write_public_file(destination / "FINAL_REPORT.md", final_markdown.encode("utf-8"))
@@ -409,28 +427,25 @@ def _precheck_markdown(receipt: Mapping[str, object], audit_id: str, generated_a
     dataset = receipt["dataset"]
     historical = receipt["historical_exposure"]
     capacity = receipt["capacity_gate"]
-    return f"""# Temperature Full-Evolve v1 Precheck
+    return f"""# Temperature Full-Evolve v1 零模型预检
 
-- Audit ID: `{audit_id}`
-- Generated: `{generated_at_utc}`
-- Status: **{receipt["finding_code"]}**
-- Model calls: **0**
+- 审计 ID：`{audit_id}`
+- 生成时间：`{generated_at_utc}`
+- 状态：**{receipt["finding_code"]}**
+- 模型调用：**0**
 
-The frozen Temperature test pool contains {dataset["temperature_test_count"]} items. The
-current authoritative exposure closure contains {historical["actual_exposed_union_count"]}
-items, leaving at most
-{capacity["maximum_provable_never_exposed_count_before_near_duplicate_grouping"]} candidates
-before semantic near-duplicate grouping. The protocol requires at least
-{capacity["minimum_required_total"]} candidates for 100 Train + 100 Test, so the shortfall
-is {capacity["capacity_shortfall_before_near_duplicate_grouping"]}.
+冻结的 Temperature Test 池只有 {dataset["temperature_test_count"]} 题；当前权威历史暴露闭包
+包含 {historical["actual_exposed_union_count"]} 题，因此在语义近重复分组前最多剩
+{capacity["maximum_provable_never_exposed_count_before_near_duplicate_grouping"]} 题。协议要求至少
+{capacity["minimum_required_total"]} 题以构造 100 Train + 100 Test，缺口为
+{capacity["capacity_shortfall_before_near_duplicate_grouping"]} 题。
 
-The five dev items are not candidates because the official renderer injects them with
-answers as category-local demonstrations. No split, run root, database, artifact lineage,
-Core generation, tmux session, credential staging, or model call was created.
+5 道 Dev 题会连同答案被官方 renderer 注入为类别内 demonstrations，不能作为 never-exposed
+候选。本次没有创建 split、run root、数据库、artifact lineage、Core generation、tmux、凭据
+暂存或模型调用。
 
-Exact normalized question/option checks found no literal duplicates. The dataset exposes no
-reaction, paper, template, or source-group identifier; semantic grouping would only reduce
-the eligible upper bound and cannot repair this capacity failure.
+标准化 question/options 的四种精确检查没有发现字面重复；但数据没有 reaction、paper、
+template 或 source-group 标识。语义分组只可能进一步缩小候选上界，不能修复容量失败。
 """
 
 
@@ -444,128 +459,118 @@ def _final_report_markdown(
     branch: str,
     model_identity: Mapping[str, object],
     managed_runtime_identity: Mapping[str, object],
+    preflight_tool_failures: int,
+    preflight_tool_repairs: int,
 ) -> str:
     dataset = receipt["dataset"]
     historical = receipt["historical_exposure"]
     capacity = receipt["capacity_gate"]
     partition = receipt["v2_partition_crosscheck"]
     event_scan = historical["event_scan"]
-    return f"""# ChemBench Temperature Full-Evolve v1 Final Report
+    return f"""# ChemBench Temperature Full-Evolve v1 最终报告
 
-## Decision
+## 最终判定
 
 **HARD BLOCKED — `{FINDING_CODE}`**
 
-This is the terminal, compliant result of the zero-model preflight. It is not an
-incomplete formal experiment: the user-defined protocol explicitly forbids launch below
-100 never-exposed Train + 100 never-exposed Test items.
+这是零模型调用 preflight 的合规终态，不是半途退出。用户协议明确规定：少于 100 道从未暴露
+的 Train 加 100 道从未暴露的 Test 时必须停止正式实验。
 
-## Capacity evidence
+## 容量证据
 
-| Evidence | Count |
+| 证据 | 数量 |
 |---|---:|
-| Frozen Temperature test items | {dataset["temperature_test_count"]} |
-| Dev demonstrations, excluded | {dataset["temperature_dev_count"]} |
-| Old authoritative snapshot actual exposure | {historical["prior_snapshot_actual_count"]} |
-| Current actual-exposure union | {historical["actual_exposed_union_count"]} |
-| Maximum provable never-exposed candidates | {capacity["maximum_provable_never_exposed_count_before_near_duplicate_grouping"]} |
-| Minimum required total | {capacity["minimum_required_total"]} |
-| Shortfall before near-duplicate grouping | {capacity["capacity_shortfall_before_near_duplicate_grouping"]} |
+| 冻结 Temperature Test 全集 | {dataset["temperature_test_count"]} |
+| Dev demonstrations，排除 | {dataset["temperature_dev_count"]} |
+| 旧权威 exposure snapshot 已确认实际暴露 | {historical["prior_snapshot_actual_count"]} |
+| 当前实际暴露并集 | {historical["actual_exposed_union_count"]} |
+| 可证明的 never-exposed 最大上界 | {capacity["maximum_provable_never_exposed_count_before_near_duplicate_grouping"]} |
+| 最低总需求 | {capacity["minimum_required_total"]} |
+| 近重复分组前的缺口 | {capacity["capacity_shortfall_before_near_duplicate_grouping"]} |
 
-The 72 private event ledgers total {event_scan["byte_count"]} bytes and have inventory
-SHA-256 `{event_scan["inventory_sha256"]}`. All records parsed, no Temperature UID fell
-outside the frozen dataset, and the current union maps onto the old v2 partitions as
-{partition["exposed_union_by_partition"]}. The remaining upper bound maps as
-{partition["remaining_by_partition"]}.
+72 份私有事件账本共 {event_scan["byte_count"]} bytes，inventory SHA-256 为
+`{event_scan["inventory_sha256"]}`。全部记录成功解析，未知 Temperature UID 为零。当前暴露并集
+在旧 v2 分区中为：Train {partition["exposed_union_by_partition"]["train"]}、Test
+{partition["exposed_union_by_partition"]["test"]}、Reserve
+{partition["exposed_union_by_partition"]["reserve"]}；剩余上界为：Train
+{partition["remaining_by_partition"]["train"]}、Test
+{partition["remaining_by_partition"]["test"]}、Reserve
+{partition["remaining_by_partition"]["reserve"]}。
 
-Set digests use `SHA256(LF-joined sorted unique lowercase UID values plus final LF)` and do
-not disclose UID values:
+集合 digest 使用“唯一 UID 排序、LF 连接并保留末尾 LF 后计算 SHA-256”的固定算法，不披露
+UID 明文：
 
-- Full Temperature set: `{dataset["temperature_uid_set_sha256"]}`
-- Actual exposure union: `{historical["actual_exposed_uid_set_sha256"]}`
-- Maximum remaining set: `{capacity["maximum_provable_never_exposed_uid_set_sha256"]}`
+- Temperature 全集：`{dataset["temperature_uid_set_sha256"]}`
+- 实际暴露并集：`{historical["actual_exposed_uid_set_sha256"]}`
+- 最大剩余集合：`{capacity["maximum_provable_never_exposed_uid_set_sha256"]}`
 
-The tracked v2/v3 statement that historical Test exposure was zero is a time-bounded old
-snapshot, not a valid current isolation proof. Current v1 ledgers alone intersect the later
-v2 Test by 9 items and its Reserve by 21 items; current v3 ledgers cover all 50 Train and all
-50 Test Temperature members.
+旧 tracked v2/v3 receipt 中“历史 Test 暴露为零”只是当时的快照，不能作为本次隔离证明。
+当前 v1 账本与后来 v2 Test 相交 9 题、与 Reserve 相交 21 题；v3 账本已覆盖 Temperature 的
+Train 50 与 Test 50 全部题目。
 
-## Zero-side-effect and identity audit
+## 零副作用与身份审计
 
-- Formal run IDs: none.
-- Candidate, Reflector, baseline and total model calls: 0.
-- Core jobs, retries and recoveries: 0.
-- Split SHA-256: unavailable because no split was created.
-- Source code commit used for the audit: `{source_code_commit}` on `{branch}`.
-- Model configuration: `{model_identity.get("model")}`, reasoning
-  `{model_identity.get("reasoning_effort")}`.
-- Managed native executable SHA-256:
-  `{managed_runtime_identity.get("candidate_executable_sha256")}`.
-- Managed candidate image:
-  `{managed_runtime_identity.get("candidate_image_id")}`.
-- Credential check inspected only owner/type/mode metadata; credential contents were not
-  read or copied.
+- 正式 run ID：无。
+- Candidate、Reflector、baseline 及总模型调用：0。
+- Core job、模型重试、正式 recovery：0。
+- 报告工具故障/修复：{preflight_tool_failures}/{preflight_tool_repairs}，模型副作用为 0。
+- Split SHA-256：未生成，因为容量门槛先失败。
+- 审计源码 commit：`{source_code_commit}`，分支 `{branch}`。
+- 模型配置：`{model_identity.get("model")}`，reasoning
+  `{model_identity.get("reasoning_effort")}`。
+- Managed native executable SHA-256：
+  `{managed_runtime_identity.get("candidate_executable_sha256")}`。
+- Managed candidate image：
+  `{managed_runtime_identity.get("candidate_image_id")}`。
+- 凭据检查只验证 owner/type/mode 元数据，没有读取或复制凭据内容。
 
-## Code review
+## 代码审查
 
-Candidate and baseline inference can reuse the formal
-`TaskRequest -> Rollout -> Gateway -> CodexHarness` executor, identical parser/evaluator,
-managed runtime identity, empty-context baseline, Core planned jobs, typed artifacts and
-paired statistics. No `src/openevo/**` change is required.
+Candidate 与 baseline 可复用正式 `TaskRequest -> Rollout -> Gateway -> CodexHarness`
+executor、同一 parser/evaluator、managed runtime identity、空上下文 baseline、Core planned
+jobs、typed artifacts 和 paired statistics。本轮不需要修改 `src/openevo/**`。
 
-The existing STV3 runner is not the requested experiment: it updates per item, records
-`resume_allowed=false`, has no atomic batch-25 exactly-once ledger, allows much larger
-artifact payloads, and its report path can contain per-item CSV. Its Reflector is managed
-and attested but calls the Codex CLI inside a Core planned job rather than traversing the
-formal Candidate harness chain. These gaps must be closed in a distinct benchmark package
-after a qualifying dataset exists. The implementation audit lists
-{len(implementation_audit["blocking_gaps_if_new_data_is_acquired"])} concrete gaps.
+但现有 STV3 不是本实验：它逐题更新，记录 `resume_allowed=false`，没有 batch-25 原子
+exactly-once ledger，artifact 上限远高于本轮 8 KiB，报告路径还可能含逐题 CSV。现有
+Reflector 虽由 managed Codex 与 Core planned job 承载，却没有经过用户要求的正式 Candidate
+harness 调用链。新数据通过门槛后，必须在独立 benchmark package 中修复这些问题；实现审查共
+列出 {len(implementation_audit["blocking_gaps_if_new_data_is_acquired"])} 项具体缺口。
 
-## Why the previous baseline beat evolved
+## 为什么上一轮 baseline 反而更好
 
-The prior Train same-item jump from 38/50 to 48/50 is supervised replay evidence, not
-independent generalization. A high generation-zero baseline (47/50) also leaves little
-upside: a few negative flips dominate the category delta. The previous per-item updater
-could encode recency and item-specific correlations, while three overlapping artifacts and
-about 17.1 KiB of context diluted the original task signal. Selecting the final accumulated
-state without forward, unseen validation makes these errors persist. Parser success only
-proves that an answer was syntactically scoreable; it does not imply chemical correctness.
+Train 同题从 38/50 升至 48/50 是监督后 replay 证据，不是独立泛化。Generation-zero baseline
+已经达到 47/50，向上空间很小，少数 negative flips 就足以主导类别差值。上一轮逐题 updater
+容易记录近期样本和局部相关性；三个 target 内容重叠、总上下文约 17.1 KiB，又会稀释原题信号。
+在没有 forward unseen validation 的情况下固定使用最终累计状态，会把这些错误保留下来。
+Parser 成功只代表输出可被评分，不代表化学答案正确。
 
-The most plausible interpretation is therefore overfitting plus context interference, not
-evidence that evolution is intrinsically harmful.
+因此，更合理的解释是过拟合与上下文干扰，而不是“演化天然有害”。
 
-## Recommended redesign
+## 下一步设计建议
 
-1. Acquire and pin a new authoritative Temperature source with at least 119 additional
-   never-exposed items beyond the current 81; acquire a margin for source-group and semantic
-   near-duplicate losses. Do not fabricate or rewrite items.
-2. Reconstruct historical exposure against the new revision before coding or model calls,
-   then freeze a group-aware split and source closure.
-3. Implement one batch-level synthesis per 25 items, a canonical evidence index, support and
-   contradiction counts, conditional rules, and deterministic retirement. Never treat the
-   same-item post score as generalization.
-4. Make the projections disjoint: facts in text memory, procedure in skill, stable behavior
-   in agent system. Enforce 6 KiB target and 8 KiB serialized hard limit including framing.
-5. Add forward-only Train diagnostics: rules learned through batch i should be evaluated on
-   batch i+1 before that batch's feedback. Use this only to calibrate or retire rules from
-   Train evidence; never use Test for selection.
-6. Add a pre-registered Train validation slice or obtain enough extra data for one. Guard
-   against negative flips on that independent Train-only slice while always freezing Ck
-   before Test.
-7. Route Reflector synthesis through the formal managed harness, retain Core ownership of
-   the planned jobs, and add crash-injection tests at every accepted-completion and artifact
-   commit boundary.
-8. Repeat across pre-registered splits or a larger external holdout before claiming that
-   full-evolve is beneficial. Report effect size, paired flips and confidence intervals, not
-   only one p value.
+1. 获取并 pin 新的权威 Temperature 数据源：在现有 81 题上至少新增 119 道从未暴露题，并为
+   source-group/语义近重复损耗预留余量；不得伪造或改写题目。
+2. 在写 runner 或调用模型前，针对新 revision 重建历史暴露闭包，再冻结 group-aware split
+   与 source closure。
+3. 每 25 题只做一次 batch synthesis；使用 canonical evidence index、support/contradiction、
+   条件化规则和确定性退役。不得把同题 Post 提升当作泛化。
+4. 三目标严格分工：事实进 text memory，流程进 skill，长期行为进 agent system；按包含 framing
+   的真实序列化大小执行 6 KiB 目标与 8 KiB 硬门。
+5. 增加 forward-only Train 诊断：截至 batch i 学到的规则，先在 batch i+1 的反馈前评估，再
+   用 Train 证据校准或退役；Test 永不用于选择。
+6. 预注册独立的 Train validation slice，或获取足够额外数据单独留出；只用这部分 guard
+   negative flips，仍固定在 Test 前冻结 Ck。
+7. 让 Reflector synthesis 也经过正式 managed harness，同时保留 Core 对 planned job 的所有权；
+   对每个 accepted completion 和 artifact commit 边界做 crash-injection 测试。
+8. 在多个预注册 split 或更大的外部 holdout 上重复后，再讨论 full-evolve 是否有效；同时报告
+   effect size、paired flips 和置信区间，不能只看一次 p 值。
 
-## Missing experiment metrics
+## 未产生的实验指标
 
-Train curves, artifacts, evolved Test, baseline Test, paired delta, flips, McNemar p and
-confidence intervals are intentionally `NOT_RUN`. Creating zero-valued charts would be
-misleading; `capacity_gate.svg` is the only generated chart.
+Train 曲线、artifact、evolved Test、baseline Test、paired delta、flips、McNemar p 和置信区间
+均明确为 `NOT_RUN`。生成全零结果图会造成误导，因此只生成 `capacity_gate.svg`。
 
-Audit ID: `{audit_id}`. Generated: `{generated_at_utc}`.
+审计 ID：`{audit_id}`。生成时间：`{generated_at_utc}`。
 """
 
 
@@ -575,25 +580,27 @@ def _handoff_markdown(
     audit_id: str,
     source_code_commit: str,
     branch: str,
+    preflight_tool_failures: int,
+    preflight_tool_repairs: int,
 ) -> str:
     capacity = receipt["capacity_gate"]
-    return f"""# Handoff
+    return f"""# 交接说明
 
-- Status: `{FINDING_CODE}`
-- Audit ID: `{audit_id}`
-- Formal run IDs: none
-- Train/Test selected: 0/0
-- Maximum never-exposed pool: {capacity["maximum_provable_never_exposed_count_before_near_duplicate_grouping"]}
-- Required minimum pool: {capacity["minimum_required_total"]}
-- Split SHA-256: not created
-- Source code commit: `{source_code_commit}`
-- Branch: `{branch}`
-- Model calls / Core jobs / retries / recoveries: 0 / 0 / 0 / 0
-- tmux attach/status/stop: not applicable; no session was created
+- 状态：`{FINDING_CODE}`
+- 审计 ID：`{audit_id}`
+- 正式 run ID：无
+- 选定 Train/Test：0/0
+- never-exposed 最大上界：{capacity["maximum_provable_never_exposed_count_before_near_duplicate_grouping"]}
+- 最低总需求：{capacity["minimum_required_total"]}
+- Split SHA-256：未生成
+- 源码 commit：`{source_code_commit}`
+- 分支：`{branch}`
+- 模型调用 / Core job / 模型重试 / 正式 recovery：0 / 0 / 0 / 0
+- 报告工具失败 / 修复：{preflight_tool_failures} / {preflight_tool_repairs}
+- tmux attach/status/stop：不适用；未创建 session
 
-To unblock, provide a pinned authoritative source revision with at least 119 additional
-never-exposed Temperature items plus margin for group isolation. Rerun the zero-model gate;
-do not relax the 100+100 minimum or import old artifacts.
+解除阻塞需要 pin 新的权威数据 revision，至少增加 119 道从未暴露的 Temperature 题，并为
+group isolation 保留余量。随后重新执行零模型门槛；不得降低 100+100 下限或导入旧 artifact。
 """
 
 

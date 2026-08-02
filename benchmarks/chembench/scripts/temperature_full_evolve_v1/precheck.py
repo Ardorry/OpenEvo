@@ -31,6 +31,8 @@ def main() -> int:
     parser.add_argument("--destination", type=Path, required=True)
     parser.add_argument("--audit-id")
     parser.add_argument("--generated-at-utc")
+    parser.add_argument("--preflight-tool-failures", type=int, default=0)
+    parser.add_argument("--preflight-tool-repairs", type=int, default=0)
     arguments = parser.parse_args()
 
     generated = arguments.generated_at_utc or datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -78,6 +80,8 @@ def main() -> int:
         branch=branch,
         model_identity=model_identity,
         managed_runtime_identity=runtime_identity,
+        preflight_tool_failures=arguments.preflight_tool_failures,
+        preflight_tool_repairs=arguments.preflight_tool_repairs,
     )
     print(payload)
     return 0
