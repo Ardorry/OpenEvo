@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -30,6 +31,7 @@ from openevo_chembench.temperature_full_evolve_v1.runner import (
     TemperatureRunLayoutV1,
     _batch_diagnostic_from_ledger,
     _candidate_logical_call_id,
+    _create_fresh_private_run_root,
     _require_exact_preflight_payloads,
     _stage_and_close_aggregate_input,
     _validated_admission_roots,
@@ -75,6 +77,26 @@ def test_layout_has_independent_evolved_baseline_roots_and_ids(tmp_path: Path) -
     assert layout.evolved_root != layout.baseline_root
     assert layout.core_root not in {layout.evolved_root, layout.baseline_root}
     assert len(set(layout.all_run_ids)) == 4
+
+
+def test_fresh_run_root_is_owner_private_under_permissive_umask(
+    tmp_path: Path,
+) -> None:
+    runs = tmp_path / "runs"
+    run_root = (runs / "fresh-formal-run").resolve()
+    previous_umask = os.umask(0o022)
+    try:
+        assert _create_fresh_private_run_root(run_root) == run_root
+    finally:
+        os.umask(previous_umask)
+
+    assert stat.S_IMODE(runs.stat().st_mode) == 0o700
+    assert stat.S_IMODE(run_root.stat().st_mode) == 0o700
+    with pytest.raises(
+        TemperatureFormalRunnerError,
+        match="RUNNER_FRESH_RUN_ROOT_EXISTS",
+    ):
+        _create_fresh_private_run_root(run_root)
 
 
 def test_candidate_runner_retries_one_uid_before_admitting_the_next(

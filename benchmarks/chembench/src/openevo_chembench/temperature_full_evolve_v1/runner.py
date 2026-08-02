@@ -1156,16 +1156,16 @@ class TemperatureFullEvolveFormalRunnerV1:
                 if not (root / "evolution.sqlite3").is_file():
                     raise TemperatureFormalRunnerError("RUNNER_ARM_DATABASE_MISSING")
             return
-        if self.layout.run_root.exists():
-            raise TemperatureFormalRunnerError("RUNNER_FRESH_RUN_ROOT_EXISTS")
+        _create_fresh_private_run_root(self.layout.run_root)
         for path in (
             self.layout.private_root,
             self.layout.run_root / "status",
             self.layout.core_root,
+            self.layout.run_root / "arms",
             self.layout.evolved_root,
             self.layout.baseline_root,
         ):
-            path.mkdir(parents=True, mode=0o700, exist_ok=True)
+            path.mkdir(mode=0o700, exist_ok=False)
             path.chmod(0o700)
         self._started_at_utc = _utc_seconds()
         manifest["started_at_utc"] = self._started_at_utc
@@ -1351,6 +1351,31 @@ def _validated_admission_roots(
     if stat.S_IMODE((private / "private").stat().st_mode) != 0o700:
         raise TemperatureFormalRunnerError("RUNNER_PRIVATE_SPLIT_DIRECTORY_NOT_OWNER_ONLY")
     return public, private
+
+
+def _create_fresh_private_run_root(path: Path) -> Path:
+    """Create one non-reusable owner-private run root without implicit parents."""
+
+    if not isinstance(path, Path) or not path.is_absolute():
+        raise TypeError("fresh run root must be an absolute Path")
+    parent = path.parent
+    parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+    parent.chmod(0o700)
+    if path.exists() or path.is_symlink():
+        raise TemperatureFormalRunnerError("RUNNER_FRESH_RUN_ROOT_EXISTS")
+    try:
+        path.mkdir(mode=0o700, exist_ok=False)
+        path.chmod(0o700)
+    except FileExistsError as exc:
+        raise TemperatureFormalRunnerError("RUNNER_FRESH_RUN_ROOT_EXISTS") from exc
+    metadata = path.stat(follow_symlinks=False)
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != os.geteuid()
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+    ):
+        raise TemperatureFormalRunnerError("RUNNER_FRESH_RUN_ROOT_NOT_PRIVATE")
+    return path
 
 
 def _load_and_verify_admission(
