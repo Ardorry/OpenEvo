@@ -1,0 +1,38 @@
+rollout:
+  host: 127.0.0.1
+  port: 8080
+  public_url: http://127.0.0.1:8080
+  save_dir: __TEMPERATURE_COMPLETION_ROOT_HOST__
+  dispatch_poll_interval_seconds: 0.25
+  callback_grace_seconds: 120
+
+gateway:
+  heartbeat_interval_seconds: 5
+  completion_persistence:
+    enabled: true
+    max_field_bytes: 16777216
+    queue_size: 128
+  nodes:
+    - id: core-gateway
+      host: 127.0.0.1
+      port: 8100
+      public_url: http://127.0.0.1:8100
+      max_init_workers: 1
+      max_run_workers: 1
+      max_postrun_workers: 1
+      model_served: ""
+      inference:
+        engine: vllm
+        base_url: http://127.0.0.1:8000
+
+evolution:
+  enabled: false
+  backend_url: http://127.0.0.1:8200
+  context:
+    target_dir: /openevo/session/evolution
+    timeout_seconds: 10
+    fail_open: false
+  event_export:
+    enabled: false
+    timeout_seconds: 10
+    fail_open: false

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import shlex
 import subprocess
 import sys
 import tomllib
+from pathlib import Path
 
 import pytest
 
@@ -148,7 +148,7 @@ async def test_codex_setup_accepts_empty_skill_directory(tmp_path):
             self.commands.append(command)
             if ".agents/skills" not in command:
                 return ExecResult(return_code=0)
-            completed = subprocess.run(
+            completed = subprocess.run(  # noqa: ASYNC221 - synchronous fake runtime
                 command,
                 shell=True,
                 check=False,
@@ -455,6 +455,26 @@ def test_codex_run_steps_subscription_auth_mode_uses_existing_login_state():
     assert "PIPESTATUS" in step.command
     assert "turn.completed" in step.command
     assert "turn.failed" in step.command
+
+
+def test_codex_subscription_completion_only_run_has_no_model_visible_tools():
+    harness = CodexHarness(
+        AgentSpec(
+            harness="codex",
+            model_name="gpt-5.5",
+            settings={
+                "auth_mode": "subscription",
+                "capture_mode": "transcript",
+                "tool_policy": "disabled",
+            },
+        )
+    )
+
+    command = harness.run_steps("Return one answer.")[0].command
+    assert "network.enabled=true" in command
+    assert 'web_search="disabled"' in command
+    assert "features.shell_tool=false" in command
+    assert "features.unified_exec=false" in command
 
 
 @pytest.mark.parametrize(

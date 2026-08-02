@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 import hashlib
 import json
 import secrets
 import shlex
+from collections.abc import Mapping, Sequence
 from typing import Final
 
 from openevo.runtime.managed import (
@@ -21,13 +21,14 @@ from openevo.runtime.managed import (
     MANAGED_WORKSPACE,
 )
 
-
 CODEX_SUBSCRIPTION_POLICY_ID: Final[str] = "openevo.codex-subscription-credential-isolation.v1"
 CODEX_SUBSCRIPTION_PERMISSION_PROFILE: Final[str] = "openevo_codex_subscription_v1"
 CODEX_SUBSCRIPTION_CODEX_VERSION: Final[str] = MANAGED_CODEX_VERSION
 CODEX_SUBSCRIPTION_SANDBOX_BACKEND: Final[str] = "linux-bubblewrap"
 CODEX_SUBSCRIPTION_CONTRACT_KEY: Final[str] = "credential_isolation"
 CODEX_SUBSCRIPTION_READINESS_KEY: Final[str] = "credential_isolation_receipt"
+CODEX_SUBSCRIPTION_TOOL_POLICY_KEY: Final[str] = "tool_policy"
+CODEX_SUBSCRIPTION_TOOL_POLICY_DISABLED: Final[str] = "disabled"
 CODEX_SUBSCRIPTION_CANARY_OK: Final[str] = "openevo-codex-subscription-real-exec-ready-v1"
 CODEX_SUBSCRIPTION_REFRESH_PERSISTENCE: Final[str] = "unsupported_read_only_auth_overlay"
 CODEX_SUBSCRIPTION_CANARY_CWD: Final[str] = MANAGED_CODEX_READINESS_WORKSPACE
@@ -50,6 +51,7 @@ _ALLOWED_SUBSCRIPTION_SETTINGS: Final[frozenset[str]] = frozenset(
         "native_memory_policy",
         "reasoning_effort",
         "reasoning_summary",
+        CODEX_SUBSCRIPTION_TOOL_POLICY_KEY,
     }
 )
 _FILESYSTEM_POLICY: Final[tuple[tuple[str, str], ...]] = (
@@ -205,6 +207,9 @@ def validate_codex_subscription_surface(
     supplied = settings.get(CODEX_SUBSCRIPTION_CONTRACT_KEY)
     if supplied is not None and supplied != codex_subscription_contract():
         raise ValueError("Codex subscription credential-isolation identity is invalid")
+    tool_policy = settings.get(CODEX_SUBSCRIPTION_TOOL_POLICY_KEY)
+    if tool_policy not in {None, CODEX_SUBSCRIPTION_TOOL_POLICY_DISABLED}:
+        raise ValueError("Codex subscription tool_policy must be omitted or 'disabled'")
 
 
 def validate_codex_subscription_version(version_output: str) -> None:
@@ -217,11 +222,14 @@ def validate_codex_subscription_version(version_output: str) -> None:
 def codex_subscription_cli_overrides(
     *,
     allow_internet: bool,
+    tools_enabled: bool = True,
 ) -> tuple[str, ...]:
     """Return final, highest-precedence Codex 0.144.1 config overrides."""
 
     if not isinstance(allow_internet, bool):
-        raise ValueError("Codex subscription network policy must be Core-owned")
+        raise TypeError("Codex subscription network policy must be Core-owned")
+    if not isinstance(tools_enabled, bool):
+        raise TypeError("Codex subscription tool policy must be Core-owned")
     filesystem = ",".join(
         f"{json.dumps(path)}={json.dumps(access)}" for path, access in _FILESYSTEM_POLICY
     )
@@ -234,7 +242,10 @@ def codex_subscription_cli_overrides(
             *_EVOLUTION_SHELL_ENV,
         )
     )
-    web_search = "live" if allow_internet else "disabled"
+    # Subscription provider transport still requires network access.  A
+    # completion-only run independently removes every model-visible execution
+    # and search surface while retaining that provider transport.
+    web_search = "live" if allow_internet and tools_enabled else "disabled"
     overrides = [
         f"default_permissions={json.dumps(CODEX_SUBSCRIPTION_PERMISSION_PROFILE)}",
         (f"permissions.{CODEX_SUBSCRIPTION_PERMISSION_PROFILE}.filesystem={{{filesystem}}}"),
@@ -257,8 +268,8 @@ def codex_subscription_cli_overrides(
         "plugins={}",
         "marketplaces={}",
         "profiles={}",
-        "features.shell_tool=true",
-        "features.unified_exec=true",
+        f"features.shell_tool={str(tools_enabled).lower()}",
+        f"features.unified_exec={str(tools_enabled).lower()}",
     ]
     overrides.extend(f"features.{feature}=false" for feature in _DISABLED_EXECUTION_FEATURES)
     return tuple(overrides)
@@ -267,6 +278,7 @@ def codex_subscription_cli_overrides(
 def codex_subscription_cli_flags(
     *,
     allow_internet: bool,
+    tools_enabled: bool = True,
 ) -> tuple[str, ...]:
     """Render the closed CLI and config profile as shell-safe arguments."""
 
@@ -276,7 +288,10 @@ def codex_subscription_cli_flags(
         "--ignore-rules",
         *(
             f"-c {shlex.quote(override)}"
-            for override in codex_subscription_cli_overrides(allow_internet=allow_internet)
+            for override in codex_subscription_cli_overrides(
+                allow_internet=allow_internet,
+                tools_enabled=tools_enabled,
+            )
         ),
     )
 
@@ -889,8 +904,8 @@ def _require_cli_value(value: str, *, owner: str) -> str:
 
 
 __all__ = [
-    "CODEX_SUBSCRIPTION_CANARY_OK",
     "CODEX_SUBSCRIPTION_CANARY_CWD",
+    "CODEX_SUBSCRIPTION_CANARY_OK",
     "CODEX_SUBSCRIPTION_CODEX_VERSION",
     "CODEX_SUBSCRIPTION_CONTRACT_KEY",
     "CODEX_SUBSCRIPTION_PERMISSION_PROFILE",
@@ -899,6 +914,8 @@ __all__ = [
     "CODEX_SUBSCRIPTION_READINESS_KEY",
     "CODEX_SUBSCRIPTION_REFRESH_PERSISTENCE",
     "CODEX_SUBSCRIPTION_SANDBOX_BACKEND",
+    "CODEX_SUBSCRIPTION_TOOL_POLICY_DISABLED",
+    "CODEX_SUBSCRIPTION_TOOL_POLICY_KEY",
     "codex_subscription_cli_flags",
     "codex_subscription_cli_overrides",
     "codex_subscription_contract",

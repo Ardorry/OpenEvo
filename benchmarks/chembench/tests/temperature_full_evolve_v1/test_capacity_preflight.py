@@ -50,11 +50,13 @@ def test_uid_set_digest_is_order_independent_and_newline_bound() -> None:
     assert uid_set_sha256(reversed(values)) == expected
 
 
-def test_live_temperature_capacity_preflight_fails_before_split_or_calls() -> None:
+def test_superseded_strict_capacity_audit_records_shortfall_without_calls() -> None:
     receipt = build_capacity_preflight(REPOSITORY.resolve())
 
     assert receipt["status"] == "BLOCKED"
     assert receipt["finding_code"] == FINDING_CODE
+    assert receipt["formal_admission_authority"] is False
+    assert receipt["current_protocol_scope_applied"] is False
     assert receipt["dataset"]["temperature_test_count"] == 202
     assert receipt["dataset"]["temperature_dev_count"] == 5
     assert receipt["historical_exposure"]["prior_snapshot_actual_count"] == 26

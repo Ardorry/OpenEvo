@@ -1,38 +1,96 @@
 # ChemBench Temperature Full-Evolve v1 实验协议
 
-## 状态与执行边界
+## 协议身份与数据范围
 
-这是一个全新的、仅针对 `Temperature_Prediction` 的探索性监督迁移协议。只有零模型调用的
-容量与历史暴露门槛证明至少存在 100 道从未暴露的 Train 和 100 道从未暴露的 Test，才允许
-创建正式 run。该门槛先于 split、run root、服务、凭据暂存、tmux，以及任何 Candidate、
-Reflector、Core 或 baseline 模型副作用。
+这是独立的、仅针对 `Temperature_Prediction` 的探索性监督演化实验。本协议固定使用
+Temperature 官方 test pool 构造 100 Train + 100 Test，不按历史暴露筛选。因此本实验不声称
+Test 是相对于全部历史运行的 never-exposed holdout；它检验的是
+本次新 split 内、从全新 generation-zero 状态学习后相对于同栈 C0 baseline 的配对收益。
 
-当前冻结数据未通过这一门槛。因此本分支有意只实现并执行 fail-closed preflight，不实现或
-启动正式 runner。这是协议规定的终态，不是未完成的实验。
+这一数据范围不允许继承旧状态。本次 run 必须使用新的 run root、workspace、
+数据库、artifact lineage、Core generation 和 run ID，并从以下完全空的 C0 开始：
 
-## 将来新数据修订通过门槛后的目标协议
+- 无 text memory；
+- 无 skill artifact；
+- 无 agent-system artifact；
+- 无旧 completion、workspace、database、cache 或人工总结导入。
 
-- 使用全新的 generation-zero namespace，不导入历史 completion、数据库、workspace、缓存或
-  artifact。
-- 按 200、175、150、125、100 的顺序选择可行的最大等量 Train/Test 档位。
-- 在任何模型调用前冻结确定性的 group-aware split。
-- Train 按固定顺序每 25 题一个批次：25 次 pre-evolve Candidate、一次逻辑 Reflector
-  synthesis、三个 Core target job、25 次 post-evolve 诊断。Post 结果不触发第二次演化。
-- 保存结构化累计 rule/evidence index：事实只投影到 text memory，可执行流程只投影到
-  skill，稳定行为和输出纪律只投影到 agent system。
-- 按真实序列化注入字节执行 6 KiB 目标与 8 KiB 硬上限，并分别校验三个 target；禁止按字节
-  截断不完整结构。
-- 保留 C0 至 Ck 的全部 checkpoint；Test 前冻结 Ck，先跑 evolved Test，再用同一题序和推理栈
-  跑隔离的 generation-zero baseline。
-- Candidate、Reflector、evolved Test 与 baseline 都经过 OpenEvo 正式 managed harness；Test
-  阶段 feedback、Reflector、Core job 和 artifact update 均为零。
-- 逐题证据只保存在 owner-private run state；公开报告只含聚合指标和 digest。
+历史目录只读。公开报告必须如实标注
+`historical_exposure_policy=fixed_official_temperature_pool_fresh_c0`。
 
-## 将来正式启动前必须补齐的实现
+## 固定数据与调用栈
 
-现有 STV3 是逐题演化，不能静默冒充 batch 协议。未来通过数据门槛的分支必须在 benchmark
-层新增 closed Batch25 packet、canonical rule evidence、确定性的三目标投影、原子 batch
-ledger、跨 Candidate/Core 边界的 exactly-once recovery、harness-backed Reflector、8 KiB
-组合预算、600 秒监控，以及 aggregate-only paired reporting。
+- 数据源：仓库 pin 的 ChemBench4K revision。
+- 类别：`Temperature_Prediction`。
+- split：100 Train / 100 Test / 2 reserve；固定 namespace 下 group-aware SHA-256 排序。
+- batch：Train 固定顺序连续四批，每批 25 题。
+- 模型：`gpt-5.5`，reasoning `medium`。
+- Candidate、Reflector、evolved Test 与 baseline 全部走正式
+  `TaskRequest -> Rollout -> Gateway -> CodexHarness -> managed_science` 路径。
+- Candidate 与 Reflector 的正式推理命令使用 completion-only subscription policy：容器保留
+  provider transport 所需网络，但 Codex 的 `web_search`、`shell_tool`、`unified_exec`、MCP、
+  插件、apps 与 subagent 能力在模型可见层关闭；transcript 的零工具审计作为第二道 fail-closed
+  约束，任何工具事件都会使该 immutable completion 无效。
+- Candidate 与 baseline 使用同一 prompt renderer、parser、evaluator、timeout 与 retry policy。
 
-本次审查未发现必须修改 `src/openevo/**` 的理由。所有历史 run tree 保持不可变、只读。
+任何模型调用前必须冻结 split、配置、源码 commit、managed executable/image、framework
+registry、runtime-services identity 和 owner-private持久化根；零调用 preflight 必须通过。
+
+## 每批 Full-Evolve 状态机
+
+设 `C0` 为空状态，`Ci` 为第 i 批完整提交后的三目标状态。每批严格执行：
+
+1. 使用 `C(i-1)` 对当前 25 题各做一次 pre-evolve Candidate 推理。
+2. 25 个 accepted completion 与私有评估全部闭合后，构造一个 Train-only batch packet。
+3. 只做一次逻辑 Reflector synthesis；它可看本批 GT、pre completion、累计 evidence、当前三
+   artifact 和此前 aggregate diagnostics，但看不到 Test。
+4. Controller 将 closed JSON 合并为 canonical rule/evidence index。普通长期规则至少需两个
+   独立 Train UID 支持；反例、适用范围、置信度与 retired reason 必须保留。单题答案、选项
+   字母、题面映射不得投影。
+5. 确定性地按职责投影三个 candidate artifact：类别知识进 `text_memory`，可执行流程进
+   `skill_bundle`，长期行为和输出纪律进 `agent_system`。
+6. 通过 verified registry 创建并执行三个正式 plan-bound Core jobs。只有三个 Core-owned
+   payload 全部通过 lineage、schema、职责、泄漏与实际字节预算验证，才能原子提交 `Ci`。
+7. 使用 `Ci` 对同一 25 题各重跑一次 post-evolve Candidate；该结果仅为同题训练诊断，不再
+   触发本批 evolution。
+
+上下文预算按最终实际注入 UTF-8 bytes 验证：text memory 4096、skill 1536、agent system
+1024，三目标目标上限 6144、硬上限 8192。只能按规则支持度确定性压缩，禁止字节截断或生成
+不完整 schema。
+
+## 冻结 Test 与 baseline
+
+四批完成后固定冻结 `C4`、Test 顺序、源码、配置和 runtime identity，并关闭 feedback、
+Reflector 和 Core job。先以 `C4` 单次运行全部 100 道 evolved Test，再以独立空上下文 C0 按
+同一顺序单次运行 100 道 baseline Test。Test 不得在线读取 GT、重跑、checkpoint sweep 或据
+结果修改任何 inference/evaluation 语义。
+
+若两臂之间出现可能影响 prompt、harness、timeout、retry、parser、evaluator、artifact
+injection 或 accepted-completion 选择的代码修复，则旧 evolved Test 作废，保留失败证据，并在
+同一新源码版本上从新 run ID 重跑两个完整 Test arm。
+
+## Exactly-once、恢复与监控
+
+每个逻辑调用在提交前写入 fsync-backed `CALL_CLAIMED`。同步持久化的 Rollout
+`SessionResult` 是 crash recovery 的权威 completion 证据；Gateway completion record 只作辅助。
+已存在 accepted completion 的逻辑调用永不替换。仅在 terminal no-completion 和相关持久化
+闭包均被证明时允许 infrastructure retry；缺失、部分、多个或不合法的结果一律记为 ambiguous
+并停止新副作用。
+
+正式 runner 使用持久 tmux。独立 monitor 每 600 秒写一个结构化 snapshot，检查 phase、batch、
+题号、accepted/call/Reflector/Core 数量、lease/staged/failed side effects、最近进度、PID、tmux、
+数据库、磁盘、credential 元数据和 runtime health。连续两个周期无进度自动触发保全、分类、
+回归测试、最小修复和闭合 checkpoint recovery。
+
+## 统计与公开输出
+
+Train 每批报告 pre/post accuracy、paired transitions、negative flips、McNemar exact p、累计曲线、
+rule evidence、artifact bytes、parser、调用与失败；必须注明 post 是同题监督后诊断。
+
+Test 主比较固定为 `C4 evolved - C0 baseline`，报告 Wilson 95% CI、paired delta、四格 flips、
+negative-flip rate、McNemar exact p 与 deterministic paired bootstrap 95% CI。一次单类别探索性
+结果不能被表述为已证明 full-evolve 普遍有效。
+
+公开包只含 aggregate metrics、redacted manifest、图表和 SHA-256；题目、选项、GT、UID、
+逐题 prediction/completion/transcript 和凭据只保存在 owner-private run evidence 中，不进入 Git
+或桌面报告包。

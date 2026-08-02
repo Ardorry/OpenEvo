@@ -1,9 +1,11 @@
-"""Aggregate-only capacity gate for a fresh Temperature full-evolve run.
+"""Aggregate-only audit of the superseded strict-never-exposed capacity gate.
 
 The gate reads private historical ledgers, but its returned payload contains
 only counts, source identities, and set digests. It never emits benchmark
 questions, options, labels, per-item results, completions, transcripts, or UID
-values.
+values.  The current fixed protocol does not use historical exposure for item
+selection, so this module remains useful evidence but is not the formal admission
+authority; :mod:`temperature_full_evolve_v1.preflight` owns that decision.
 """
 
 from __future__ import annotations
@@ -151,6 +153,8 @@ def build_capacity_preflight(repository_root: Path) -> dict[str, object]:
         "protocol_id": PROTOCOL_ID,
         "status": status,
         "finding_code": finding_code,
+        "formal_admission_authority": False,
+        "current_protocol_scope_applied": False,
         "evidence_level": "AUTHORITATIVE_LOCAL_MANIFEST_AND_PRIVATE_EVENT_LEDGER",
         "dataset": {
             "repository": "AI4Chem/ChemBench4K",

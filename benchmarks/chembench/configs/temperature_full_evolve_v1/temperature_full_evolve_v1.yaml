@@ -1,0 +1,96 @@
+schema_version: chembench_temperature_full_evolve_config_v1
+protocol_id: chembench_temperature_full_evolve_v1
+classification:
+  - RESEARCH_ONLY_SUPERVISED_EVOLUTION
+  - TEMPERATURE_PREDICTION_ONLY
+  - FRESH_GENERATION_ZERO_CONTEXT
+  - CURRENT_RUN_PAIRED_HOLDOUT
+  - HISTORICAL_EXPOSURE_NOT_USED_FOR_SELECTION
+  - NOT_STRICT_NEVER_EXPOSED_GENERALIZATION
+  - NOT_A_STANDARD_CHEMBENCH4K_LEADERBOARD_RUN
+protocol_scope:
+  protocol_fixed_at_local_date: "2026-08-02"
+  historical_exposure_policy: fixed_official_temperature_pool_fresh_c0
+  prior_artifact_import: forbidden
+  prior_completion_import: forbidden
+  prior_database_import: forbidden
+dataset:
+  repository: AI4Chem/ChemBench4K
+  revision: f8ad41a980170f4c5d0cc97e57722d06887c8f53
+  root: data/chembench4k/AI4Chem_ChemBench4K/f8ad41a980170f4c5d0cc97e57722d06887c8f53
+  category: Temperature_Prediction
+  source_split: test
+split:
+  namespace: chembench-temperature-full-evolve-v1-split-v1-20260802
+  train_count: 100
+  test_count: 100
+  reserve_count: 2
+  batch_size: 25
+  group_policy: temperature_public_fields_grouping_v1
+roots:
+  results: results/chembench_temperature_full_evolve_v1
+  state: state/chembench_temperature_full_evolve_v1
+  reports: reports/chembench_temperature_full_evolve_v1
+model:
+  name: gpt-5.5
+  reasoning_effort: medium
+codex_runtime:
+  source: openevo_core_managed_codex_v1
+  shared_verified_runtime_protocol: chembench_supervised_transfer_v2
+  npm_package: "@openai/codex@0.144.1"
+  cli_version: codex-cli 0.144.1
+  executable_sha256: a96f944d1a596dbfb7fdd84f482be5c50e34b04bb371126840d873e4ebf26902
+  candidate_image_id: sha256:7a0079f9cb1bce5768cff5bce3d1181811c6a231ad800cac8fb503d66852c81b
+executor:
+  rollout_url: http://127.0.0.1:8080
+  runtime_services_state_root: state/chembench_temperature_full_evolve_v1/runtime_services
+  runtime_services_identity_required: true
+  timeout_seconds: 1200
+  runtime_profile: managed_science
+  auth_mode: subscription
+  capture_mode: transcript
+  reasoning_effort: medium
+  approval_policy: never
+  tool_policy: zero_tool_transcript_audit
+  network_policy: model_transport_with_zero_tool_fail_closed
+  allow_internet: true
+  mcp_servers: []
+  infrastructure_retry_limit: 3
+reflector:
+  execution_path: TaskRequest_Rollout_Gateway_CodexHarness
+  timeout_seconds: 1800
+  model: gpt-5.5
+  reasoning_effort: medium
+  auth_mode: subscription
+  capture_mode: transcript
+  approval_policy: never
+  tool_policy: zero_tool_transcript_audit
+  network_policy: model_transport_with_zero_tool_fail_closed
+  mcp_servers: []
+  logical_calls_per_batch: 1
+core:
+  framework_lock: state/chembench_supervised_transfer_v2/framework/framework-lock.json
+  jobs_per_batch: 3
+  targets:
+    - text_memory
+    - skill_bundle
+    - agent_system
+  target_methods:
+    text_memory: text_memory
+    skill_bundle: skill_bundle
+    agent_system: agent_system
+parser_evaluator:
+  official_parser: first_uppercase_opencompass_compatible
+  strict_parser: strict_single_letter_parser
+  evaluator: ChemBench4KPrivateEvaluator
+limits:
+  text_memory_max_utf8_bytes: 4096
+  skill_bundle_max_utf8_bytes: 1536
+  agent_system_max_utf8_bytes: 1024
+  target_total_utf8_bytes: 6144
+  hard_total_utf8_bytes: 8192
+  reflector_response_max_utf8_bytes: 65536
+  evidence_rule_limit: 64
+monitor:
+  interval_seconds: 600
+  stagnant_poll_limit: 2

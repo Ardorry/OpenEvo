@@ -221,6 +221,14 @@ shadow it. Core also fixes `CODEX_HOME=/openevo/credentials/codex`, a separate
 private bind mount outside `/openevo/session`. Caller `agent.env`, `runtime.env`,
 and prepare-action env cannot override any of these three values.
 
+Subscription agents may opt into the closed `tool_policy="disabled"` setting.
+The credential-isolation readiness probe remains unchanged, but the subsequent
+agent turn receives final, Core-owned Codex overrides with web search, shell and
+unified exec disabled. This is distinct from `RuntimeSpec.allow_internet`: a
+subscription turn can retain provider transport while exposing no network or
+execution tool to the model. MCP servers, environment overrides and all other
+subscription execution extensions remain rejected.
+
 Host-user startup, upload, stop, and failed-start cleanup never invoke the
 legacy recursive `a+rwX` compatibility path. Gateway teardown instead pins the
 session root device/inode/owner at dispatch, restores only owner directory

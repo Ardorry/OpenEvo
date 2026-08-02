@@ -16,13 +16,15 @@ from openevo.harness.presets._subscription import (
 )
 from openevo.runtime.base import (
     LOCAL_COMMAND_CAPTURE_MAX_BYTES,
-    BaseRuntime,
     RUNTIME_AGENT_LOG_DIR,
     RUNTIME_SESSION_DIR,
+    BaseRuntime,
 )
 from openevo.runtime.codex_isolation import (
     CODEX_SUBSCRIPTION_CANARY_CWD,
     CODEX_SUBSCRIPTION_CANARY_OK,
+    CODEX_SUBSCRIPTION_TOOL_POLICY_DISABLED,
+    CODEX_SUBSCRIPTION_TOOL_POLICY_KEY,
     codex_subscription_cli_flags,
     codex_subscription_exec_canary_command,
     codex_subscription_readiness_receipt,
@@ -34,7 +36,6 @@ from openevo.runtime.managed import (
     MANAGED_CODEX_HOME,
 )
 from openevo.runtime.models import ExecInput
-
 
 _NATIVE_MEMORY_POLICY_PRESERVE = "preserve"
 _NATIVE_MEMORY_POLICY_CLEAR = "clear"
@@ -323,7 +324,13 @@ class CodexHarness(BaseHarness):
             # These are deliberately final so no caller-controlled option can
             # supersede the credential-isolation profile.
             flags.extend(
-                codex_subscription_cli_flags(allow_internet=self._subscription_allow_internet)
+                codex_subscription_cli_flags(
+                    allow_internet=self._subscription_allow_internet,
+                    tools_enabled=(
+                        self.settings.get(CODEX_SUBSCRIPTION_TOOL_POLICY_KEY)
+                        != CODEX_SUBSCRIPTION_TOOL_POLICY_DISABLED
+                    ),
+                )
             )
 
         flags_str = " ".join(flags)
@@ -431,7 +438,7 @@ def _native_memory_policy(settings: dict[str, object]) -> str:
     if raw_policy is None:
         return _NATIVE_MEMORY_POLICY_PRESERVE
     if not isinstance(raw_policy, str):
-        raise ValueError("native_memory_policy must be 'preserve' or 'clear'")
+        raise TypeError("native_memory_policy must be 'preserve' or 'clear'")
     if raw_policy not in _NATIVE_MEMORY_POLICIES:
         raise ValueError("native_memory_policy must be 'preserve' or 'clear'")
     return raw_policy

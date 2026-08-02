@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import re
 import shlex
 import subprocess
 import tomllib
+from pathlib import Path
 
 import pytest
 
@@ -29,7 +29,6 @@ from openevo.runtime.managed import (
     MANAGED_CODEX_PACKAGE_ROOT,
     MANAGED_CODEX_VERSION,
 )
-
 
 _NONCE = "0123456789abcdef0123456789abcdef"
 _SCRIPT_PATH = "/openevo/session/workspace/.openevo-test-canary-probe.sh"
@@ -106,8 +105,40 @@ def test_codex_subscription_network_policy_is_core_owned() -> None:
     assert 'web_search="disabled"' in disabled
     assert '"/openevo/credentials/codex"="deny"' in enabled
     assert '"/openevo/credentials/codex"="deny"' in disabled
-    with pytest.raises(ValueError, match="Core-owned"):
+    with pytest.raises(TypeError, match="Core-owned"):
         codex_subscription_cli_overrides(allow_internet=1)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="Core-owned"):
+        codex_subscription_cli_overrides(
+            allow_internet=True,
+            tools_enabled=1,  # type: ignore[arg-type]
+        )
+
+
+def test_codex_subscription_completion_only_keeps_provider_network_but_removes_tools() -> None:
+    rendered = "\n".join(
+        codex_subscription_cli_overrides(
+            allow_internet=True,
+            tools_enabled=False,
+        )
+    )
+
+    assert "network.enabled=true" in rendered
+    assert 'web_search="disabled"' in rendered
+    assert "features.shell_tool=false" in rendered
+    assert "features.unified_exec=false" in rendered
+
+
+def test_codex_subscription_rejects_unknown_tool_policy() -> None:
+    with pytest.raises(ValueError, match="tool_policy"):
+        validate_codex_subscription_surface(
+            settings={
+                "auth_mode": "subscription",
+                "capture_mode": "transcript",
+                "tool_policy": "arbitrary",
+            },
+            env={},
+            mcp_servers=(),
+        )
 
 
 def test_codex_subscription_canary_uses_real_exec_and_validates_boundaries() -> None:
