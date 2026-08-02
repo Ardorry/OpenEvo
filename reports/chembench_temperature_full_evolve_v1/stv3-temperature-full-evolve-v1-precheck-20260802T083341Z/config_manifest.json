@@ -1,0 +1,22 @@
+{
+  "audit_id": "stv3-temperature-full-evolve-v1-precheck-20260802T083341Z",
+  "batch_size": 25,
+  "branch": "chembench-temperature-full-evolve-v1",
+  "candidate_tool_policy": "zero_tool_transcript_audit",
+  "feedback_on_test": false,
+  "finding_code": "INSUFFICIENT_NEVER_EXPOSED_TEMPERATURE_DATA",
+  "hard_context_budget_bytes": 8192,
+  "model": "gpt-5.5",
+  "model_calls_before_gate": 0,
+  "protocol_id": "chembench_temperature_full_evolve_v1",
+  "reasoning_effort": "medium",
+  "schema_version": "TemperatureFullEvolveConfigIntentV1",
+  "source_code_commit": "273d0be384abe0075eef92f2a897c045259c328f",
+  "status": "NOT_FROZEN_FOR_FORMAL_RUN",
+  "target_context_budget_bytes": 6144,
+  "targets": [
+    "text_memory",
+    "skill_bundle",
+    "agent_system"
+  ]
+}

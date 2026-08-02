@@ -1,0 +1,95 @@
+{
+  "actual_exposed_uid_set_sha256": "e24f8a3413c612a7df67f15b801e4e1e850fb70bfedfab0b6c1b1e7770b57873",
+  "category": "Temperature_Prediction",
+  "contains_private_item_content": false,
+  "contains_uid_values": false,
+  "current_actual_exposed_union_count": 121,
+  "event_scan": {
+    "attempted_but_never_evaluated_uid_count": 0,
+    "byte_count": 15027532,
+    "file_count": 72,
+    "inventory_sha256": "46d07a1e5324230a8a0c9372ec09069767516192d51530f8ddc14c2380e54be0",
+    "malformed_record_count": 0,
+    "named_run_crosscheck": {
+      "stv3-composed-final-test-20260731T155440Z": {
+        "event_file_sha256": "2c10d1e7990d5fd4d3e66dc6cd30756ec6b90f7015765d8ba44e41324d36066a",
+        "temperature_uid_count": 0
+      },
+      "stv3-composed-final-test-recovery-20260801T031645Z": {
+        "event_file_sha256": "d3883527de1f39d92e2b73ca1fdadcedc09162393a8ca874f72e7526af60b402",
+        "temperature_uid_count": 50
+      },
+      "stv3-control-final-test-baseline-dockerfix-20260801T190638Z": {
+        "event_file_sha256": "b5babdfebefab404987cef07071ae5cbb7605bc883e0da1d231075c25c3a6a17",
+        "temperature_uid_count": 0
+      },
+      "stv3-control-final-test-baseline-recovery-20260802T033900Z": {
+        "event_file_sha256": "c0411d169e653456e111184c995f6d3df7e2048cb4ae7e1c4b780aec82fbd06a",
+        "temperature_uid_count": 50
+      },
+      "stv3-temperature-controlfix-recovery-20260731T105523Z": {
+        "event_file_sha256": "d7e5b4458c8a9d504d265622bd2be38a60941a8c94f5d339da4807e015cc0f61",
+        "temperature_uid_count": 50
+      }
+    },
+    "per_protocol": {
+      "v1": {
+        "by_v2_partition": {
+          "reserve": 21,
+          "test": 9,
+          "train": 30
+        },
+        "event_ledger_count": 15,
+        "temperature_uid_count": 60
+      },
+      "v2": {
+        "by_v2_partition": {
+          "reserve": 0,
+          "test": 0,
+          "train": 50
+        },
+        "event_ledger_count": 21,
+        "temperature_uid_count": 50
+      },
+      "v3": {
+        "by_v2_partition": {
+          "reserve": 0,
+          "test": 50,
+          "train": 50
+        },
+        "event_ledger_count": 36,
+        "temperature_uid_count": 100
+      }
+    },
+    "unknown_temperature_uid_count": 0
+  },
+  "maximum_remaining_count": 81,
+  "maximum_remaining_uid_set_sha256": "f5be563006b3874903c828dd1cff4b6cd4340825b205bea0cc6e78d4aae8968b",
+  "prior_snapshot_actual_count": 26,
+  "schema_version": "TemperatureHistoricalExclusionAggregateV1",
+  "status": "CLOSED_FOR_CAPACITY_HARD_STOP",
+  "taxonomy_actual_labels": [
+    "HUMAN_ITEM_REVIEWED",
+    "PRIVATE_EVALUATED",
+    "REFLECTOR_SUPERVISED",
+    "TASK_MODEL_ATTEMPTED",
+    "TASK_MODEL_EXECUTED"
+  ],
+  "v2_partition_crosscheck": {
+    "exposed_union_by_partition": {
+      "reserve": 21,
+      "test": 50,
+      "train": 50
+    },
+    "partition_counts": {
+      "reserve": 102,
+      "test": 50,
+      "train": 50
+    },
+    "remaining_by_partition": {
+      "reserve": 81,
+      "test": 0,
+      "train": 0
+    }
+  }
+}
