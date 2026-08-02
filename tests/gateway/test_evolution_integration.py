@@ -1914,6 +1914,93 @@ async def test_subscription_postrun_retries_runtime_absence_within_a_bound(
 
 
 @pytest.mark.asyncio
+async def test_subscription_primary_and_reconciler_construct_one_terminal_timing_digest(
+    tmp_path: Path,
+) -> None:
+    manager = _postrun_manager(calls=[])
+    managed = _managed_postrun_session(
+        tmp_path,
+        _session_result(session_id="one-terminal-timing-digest"),
+    )
+    managed.request.agent = AgentSpec(
+        harness="codex",
+        settings={"auth_mode": "subscription", "capture_mode": "transcript"},
+    )
+    managed.runtime = FakeRuntime()
+    primary_waiting_for_runtime = asyncio.Event()
+    release_primary_runtime_stop = asyncio.Event()
+    background_finalizer_entered = asyncio.Event()
+    release_background_finalizer = asyncio.Event()
+    ownership = object()
+    finalization_count = 0
+    runtime_absence_count = 0
+
+    def register_cleanup(captured: ManagedSession, **_: object) -> None:
+        assert captured is managed
+        manager._cleanup_retries[managed.session_id] = ownership
+
+    async def block_primary_runtime_stop(
+        captured: ManagedSession,
+        *,
+        subscription_retry: bool,
+    ) -> tuple[bool, list[BaseException]]:
+        assert captured is managed
+        assert subscription_retry is True
+        primary_waiting_for_runtime.set()
+        await release_primary_runtime_stop.wait()
+        return True, []
+
+    def record_runtimes_absent(captured: ManagedSession) -> None:
+        nonlocal runtime_absence_count
+        assert captured is managed
+        assert manager._cleanup_reconcile_guard().locked()
+        runtime_absence_count += 1
+        captured.runtime = None
+        captured.eval_runtime = None
+
+    async def reconcile_ownership(captured: object) -> None:
+        assert captured is ownership
+        manager._record_cleanup_runtimes_absent(managed)
+        await manager._finalize_subscription_after_runtime_absence(
+            managed,
+            result=managed.final_result,
+        )
+
+    async def finalize_once(
+        captured: ManagedSession,
+        *,
+        result: SessionResult | None,
+    ) -> None:
+        nonlocal finalization_count
+        assert captured is managed
+        assert result is managed.final_result
+        assert manager._cleanup_reconcile_lock.locked()
+        background_finalizer_entered.set()
+        await release_background_finalizer.wait()
+        finalization_count += 1
+        manager._cleanup_retries.pop(managed.session_id)
+
+    manager._register_cleanup_retry = register_cleanup
+    manager._drain_and_stop_postrun_runtimes = block_primary_runtime_stop
+    manager._record_cleanup_runtimes_absent = record_runtimes_absent
+    manager._reconcile_cleanup_ownership = reconcile_ownership
+    manager._finalize_subscription_after_runtime_absence = finalize_once
+    primary = asyncio.create_task(manager._handle_postrun(managed))
+    await primary_waiting_for_runtime.wait()
+    retry = asyncio.create_task(manager._reconcile_cleanup_retries())
+    await asyncio.wait_for(background_finalizer_entered.wait(), timeout=1)
+    release_primary_runtime_stop.set()
+    await asyncio.sleep(0)
+    assert not primary.done()
+    release_background_finalizer.set()
+    await asyncio.gather(primary, retry)
+
+    assert finalization_count == 1
+    assert runtime_absence_count == 1
+    assert managed.session_id not in manager._cleanup_retries
+
+
+@pytest.mark.asyncio
 async def test_cleanup_retry_reconciliation_retries_owned_runtime_and_roots(
     tmp_path: Path,
 ) -> None:

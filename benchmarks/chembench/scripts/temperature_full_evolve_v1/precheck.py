@@ -366,6 +366,10 @@ _INTEGRATION_TESTS = (
     "tests/evolution/test_context_materialization.py",
     "tests/runtime/test_codex_isolation.py",
     "tests/test_evolution_agent_harnesses.py",
+    (
+        "tests/gateway/test_evolution_integration.py::"
+        "test_subscription_primary_and_reconciler_construct_one_terminal_timing_digest"
+    ),
 )
 
 

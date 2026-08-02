@@ -1,7 +1,7 @@
 """Immutable formal Python/wheel authority for Temperature full-evolve v1.
 
-The previous STV2 runtime remains immutable evidence.  This module creates a
-new experiment-local environment from the audited dependency installation,
+Previous STV2 and Temperature formal runtimes remain immutable evidence.  This
+module creates a new experiment-local environment from the audited dependency installation,
 then replaces both editable/old project distributions with wheels built from
 the exact clean Git commit.  No model, credential content, or benchmark item is
 read while preparing or validating this bundle.
@@ -39,7 +39,7 @@ from openevo_chembench.supervised_transfer_v1.common import (
 
 FORMAL_RUNTIME_SCHEMA: Final[str] = "TemperatureFormalRuntimeReceiptV1"
 FORMAL_RUNTIME_ROOT_RELATIVE: Final[str] = (
-    "state/chembench_temperature_full_evolve_v1/formal_runtime_v3"
+    "state/chembench_temperature_full_evolve_v1/formal_runtime_v4"
 )
 FORMAL_RUNTIME_PYTHON_RELATIVE: Final[str] = (
     f"{FORMAL_RUNTIME_ROOT_RELATIVE}/runtime_venv/bin/python"
@@ -51,7 +51,7 @@ FORMAL_RUNTIME_RECEIPT_RELATIVE: Final[str] = (
     f"{FORMAL_RUNTIME_ROOT_RELATIVE}/formal_runtime_receipt_v1.json"
 )
 FORMAL_RUNTIME_FAILURE_ROOT_RELATIVE: Final[str] = (
-    "state/chembench_temperature_full_evolve_v1/formal_runtime_v3_failures"
+    "state/chembench_temperature_full_evolve_v1/formal_runtime_v4_failures"
 )
 BASE_RUNTIME_ROOT_RELATIVE: Final[str] = (
     "state/chembench_supervised_transfer_v2/runtime_venv"

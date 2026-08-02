@@ -3278,9 +3278,7 @@ class GatewayNodeManager:
                     subscription_retry=True,
                 )
                 managed.timer.mark("teardown", "finished")
-                if runtimes_removed:
-                    self._record_cleanup_runtimes_absent(managed)
-                else:
+                if not runtimes_removed:
                     self._register_cleanup_retry(
                         managed,
                         eval_runtime=eval_runtime or managed.eval_runtime,
@@ -3301,7 +3299,14 @@ class GatewayNodeManager:
 
         if not runtimes_removed:
             return
-        await self._finalize_subscription_after_runtime_absence(managed, result=result)
+        # Cleanup ownership is visible to the background retry loop before runtime
+        # shutdown completes.  Route terminal construction through the reconciler's
+        # lock so the primary and background paths cannot normalize two timing
+        # snapshots for the same durable terminal result.
+        await self._reconcile_cleanup_retry_for_session(
+            managed.session_id,
+            runtimes_proven_absent=managed,
+        )
 
     async def _stop_subscription_runtimes_with_retry(
         self,
@@ -6561,15 +6566,53 @@ class GatewayNodeManager:
             await asyncio.sleep(_CLEANUP_RETRY_INTERVAL_SECONDS)
             await self._reconcile_cleanup_retries()
 
-    async def _reconcile_cleanup_retries(self) -> None:
-        retries = getattr(self, "_cleanup_retries", None)
-        if not retries:
-            return
+    def _cleanup_reconcile_guard(self) -> asyncio.Lock:
         lock = getattr(self, "_cleanup_reconcile_lock", None)
         if lock is None:
             lock = asyncio.Lock()
             self._cleanup_reconcile_lock = lock
-        async with lock:
+        return lock
+
+    async def _reconcile_cleanup_retry_for_session(
+        self,
+        session_id: str,
+        *,
+        runtimes_proven_absent: ManagedSession | None = None,
+    ) -> None:
+        retries = getattr(self, "_cleanup_retries", None)
+        if not retries:
+            if runtimes_proven_absent is not None:
+                runtimes_proven_absent.runtime = None
+                runtimes_proven_absent.eval_runtime = None
+            return
+        async with self._cleanup_reconcile_guard():
+            ownership = retries.get(session_id)
+            if ownership is None:
+                if runtimes_proven_absent is not None:
+                    runtimes_proven_absent.runtime = None
+                    runtimes_proven_absent.eval_runtime = None
+                return
+            try:
+                if runtimes_proven_absent is not None:
+                    self._record_cleanup_runtimes_absent(runtimes_proven_absent)
+                    ownership = retries.get(session_id)
+                    if ownership is None:
+                        return
+                await self._reconcile_cleanup_ownership(ownership)
+            except Exception as exc:
+                self._log_credential_safe_exception(
+                    ownership.managed or runtimes_proven_absent,
+                    "Cleanup reconciliation failed",
+                    exc,
+                    session_id=session_id,
+                    level=logging.WARNING,
+                )
+
+    async def _reconcile_cleanup_retries(self) -> None:
+        retries = getattr(self, "_cleanup_retries", None)
+        if not retries:
+            return
+        async with self._cleanup_reconcile_guard():
             for session_id, ownership in list(retries.items()):
                 try:
                     await self._reconcile_cleanup_ownership(ownership)

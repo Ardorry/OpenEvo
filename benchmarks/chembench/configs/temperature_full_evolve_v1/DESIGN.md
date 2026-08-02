@@ -40,17 +40,21 @@ plan、worker claim、typed artifact registration、validation、promotion 和 c
 
 正式服务和付费 runner 使用本实验独立的固定 Python bundle。该 bundle 在源码提交冻结后离线
 构建当前 OpenEvo Core 与 ChemBench wheel，逐个核对 wheel 中 Python 文件与源码，安装到
-`state/chembench_temperature_full_evolve_v1/formal_runtime_v3`，并验证两个 distribution 均为
+`state/chembench_temperature_full_evolve_v1/formal_runtime_v4`，并验证两个 distribution 均为
 non-editable、framework registry 与 wheel/lock 匹配。旧 STV2 runtime 只作为依赖版本来源；其中
 旧 Core、可编辑 ChemBench 包、数据库、completion 和 artifact 均不进入新的正式解释器。所有
 正式入口以 `-I` 启动且重新核验 formal-runtime receipt、源码提交和安装 inventory。
 
-`formal_runtime_v3` 与 `formal_runtime_v3_failures` 是不可覆盖的新 namespace；已有 v2 runtime
-及其 failure evidence 保持只读。升级 namespace 的直接原因是 Candidate formal execution 已从
-并行准入改为全局串行：前一任务必须先形成 Rollout durable terminal result 与 audit，下一任务
-才可进入自己的 credential-readiness setup。该约束消除多个 Candidate 的并行准入，但不把它
-表述为对全部 Gateway 后台 cleanup 的独立闭合证明，也不把历史 credential-readiness 失败归因于
-某个未经证明的 provider-call overlap；同时不会把旧 v2 receipt 错当作包含该编排修复的新 runtime。
+`formal_runtime_v4` 与 `formal_runtime_v4_failures` 是不可覆盖的新 namespace；已有 v2/v3 runtime
+及其 failure evidence 保持只读。v3 已把 Candidate formal execution 从并行准入改为全局串行，
+并修正宿主 Rollout 到 Gateway 容器的 callback route。正式运行随后暴露出另一条彼此独立的
+Gateway 终态竞态：subscription 主 POSTRUN 在注册 durable cleanup ownership 后等待 runtime
+停止，后台 cleanup reconciler 可在这段窗口先构造终态；主路径随后又以略晚的 timer snapshot
+构造第二份终态，从而触发严格 result identity mismatch。v4 不放宽 digest、CAS 或终态校验，
+而是让主路径在 runtime absence 后也只能通过同一个 cleanup reconciler lock 执行终态构造；
+确定性并发回归要求 primary 与 background 同时到达时 finalizer 恰好执行一次。该修复只改变
+cleanup 编排与幂等性，不改变 split、prompt、artifact、模型、reasoning、parser、evaluator、
+retry 选择或 feedback 可见性；v3 completion 不导入 v4 的 fresh C0 run。
 
 订阅 transport 需要容器网络连接 provider，因此不能把 `allow_internet=true` 误写成模型拥有
 网页或 shell 能力。本实验在通用 Codex subscription harness 上选择 closed
