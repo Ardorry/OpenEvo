@@ -34,7 +34,7 @@ def test_live_config_is_closed_and_generation_zero_provenance_is_explicit() -> N
     )
     assert config.payload["protocol_scope"]["prior_artifact_import"] == "forbidden"
     assert config.framework_lock_relative == (
-        "state/chembench_temperature_full_evolve_v1/formal_runtime_v5/framework/"
+        "state/chembench_temperature_full_evolve_v1/formal_runtime_v6/framework/"
         "framework-lock.json"
     )
     assert config.candidate_max_workers == CANDIDATE_MAX_WORKERS == 1

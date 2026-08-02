@@ -30,10 +30,29 @@ CODEX_SUBSCRIPTION_READINESS_KEY: Final[str] = "credential_isolation_receipt"
 CODEX_SUBSCRIPTION_TOOL_POLICY_KEY: Final[str] = "tool_policy"
 CODEX_SUBSCRIPTION_TOOL_POLICY_DISABLED: Final[str] = "disabled"
 CODEX_SUBSCRIPTION_CANARY_OK: Final[str] = "openevo-codex-subscription-real-exec-ready-v1"
+CODEX_SUBSCRIPTION_CANARY_ATTEMPTS: Final[int] = 2
+CODEX_SUBSCRIPTION_CANARY_RETRY_DELAY_SECONDS: Final[int] = 15
+CODEX_SUBSCRIPTION_CANARY_FAILURE_PREFIX: Final[str] = (
+    "openevo-codex-subscription-canary-failure-v1:"
+)
 CODEX_SUBSCRIPTION_REFRESH_PERSISTENCE: Final[str] = "unsupported_read_only_auth_overlay"
 CODEX_SUBSCRIPTION_CANARY_CWD: Final[str] = MANAGED_CODEX_READINESS_WORKSPACE
 _CANARY_RESULT: Final[str] = "isolated"
 _CANARY_NONCE_BYTES: Final[int] = 16
+_CANARY_FAILURE_CODES: Final[frozenset[str]] = frozenset(
+    {
+        "CLEAN_REFUSAL_EXHAUSTED",
+        "CLEANUP_FAILED",
+        "EVIDENCE_INVALID",
+        "INTERRUPTED",
+        "LOCAL_PRECONDITION_FAILED",
+        "NONZERO_CLI_WITH_EXACT_EVIDENCE",
+        "PROBE_OUTPUT_INVALID",
+        "REFUSAL_INVENTORY_INVALID",
+        "RETRY_DELAY_INTERRUPTED",
+        "SCRIPT_AUTHORITY_INVALID",
+    }
+)
 _EVOLUTION_ROOT: Final[str] = "/openevo/session/evolution"
 _EVOLUTION_SHELL_ENV: Final[tuple[tuple[str, str], ...]] = (
     ("OPENEVO_EVOLUTION_CONTEXT", f"{_EVOLUTION_ROOT}/context.json"),
@@ -128,6 +147,11 @@ _POLICY_SPEC: Final[dict[str, object]] = {
     "credential_tool_filesystem_access": "deny",
     "credential_refresh_persistence": CODEX_SUBSCRIPTION_REFRESH_PERSISTENCE,
     "readiness_command": "codex exec",
+    "readiness_attempts": CODEX_SUBSCRIPTION_CANARY_ATTEMPTS,
+    "readiness_clean_refusal_retry_delay_seconds": (
+        CODEX_SUBSCRIPTION_CANARY_RETRY_DELAY_SECONDS
+    ),
+    "readiness_retry_class": "exact_completed_turn_without_tool",
     "readiness_context": {
         "working_directory": CODEX_SUBSCRIPTION_CANARY_CWD,
         "project_instructions": "absent",
@@ -181,6 +205,21 @@ def codex_subscription_readiness_receipt() -> dict[str, object]:
         "canary": CODEX_SUBSCRIPTION_CANARY_OK,
         "evidence": "completed_command_execution_event",
     }
+
+
+def codex_subscription_canary_failure_code(stderr: str | None) -> str:
+    """Return one closed failure code without surfacing raw canary output."""
+
+    if not isinstance(stderr, str):
+        return "UNKNOWN"
+    matches = [
+        line.removeprefix(CODEX_SUBSCRIPTION_CANARY_FAILURE_PREFIX)
+        for line in stderr.splitlines()
+        if line.startswith(CODEX_SUBSCRIPTION_CANARY_FAILURE_PREFIX)
+    ]
+    if len(matches) != 1 or matches[0] not in _CANARY_FAILURE_CODES:
+        return "UNKNOWN"
+    return matches[0]
 
 
 def validate_codex_subscription_surface(
@@ -433,7 +472,10 @@ def codex_subscription_exec_canary_command(
     auth_file = f"{MANAGED_CODEX_HOME}/auth.json"
     profile_flags = " ".join(codex_subscription_cli_flags(allow_internet=allow_internet))
     attempts: list[dict[str, str]] = []
-    for attempt_number, attempt_nonce in enumerate((checked_nonce, retry_nonce), start=1):
+    attempt_nonces = (checked_nonce, retry_nonce)
+    if len(attempt_nonces) != CODEX_SUBSCRIPTION_CANARY_ATTEMPTS:
+        raise RuntimeError("Codex subscription canary attempt policy is invalid")
+    for attempt_number, attempt_nonce in enumerate(attempt_nonces, start=1):
         script_id = hashlib.sha256(f"{attempt_nonce}:script".encode()).hexdigest()[:24]
         prefix = f".openevo-{script_id}"
         expected_output = _canary_expected_output(attempt_nonce, marker)
@@ -475,8 +517,18 @@ def codex_subscription_exec_canary_command(
     lines = [
         "set -eu",
         "umask 077",
-        f"cleanup() {{ rm -f -- {cleanup_paths}; }}",
-        "trap cleanup EXIT HUP INT TERM",
+        "failure_code=LOCAL_PRECONDITION_FAILED",
+        (
+            "cleanup() { cleanup_status=$?; trap - EXIT HUP INT TERM; "
+            f"if ! rm -f -- {cleanup_paths} 2>/dev/null; then "
+            "failure_code=CLEANUP_FAILED; cleanup_status=1; fi; "
+            'if test "$cleanup_status" -ne 0; then '
+            f"printf '%s%s\\n' {shlex.quote(CODEX_SUBSCRIPTION_CANARY_FAILURE_PREFIX)} "
+            '"$failure_code" >&2; fi; exit "$cleanup_status"; }'
+        ),
+        "on_signal() { failure_code=INTERRUPTED; trap - HUP INT TERM; exit 1; }",
+        "trap cleanup EXIT",
+        "trap on_signal HUP INT TERM",
         (
             f'test "$({shlex.quote(MANAGED_CODEX_BINARY)} --version)" = '
             f"{shlex.quote(f'codex-cli {CODEX_SUBSCRIPTION_CODEX_VERSION}')}"
@@ -554,6 +606,7 @@ def codex_subscription_exec_canary_command(
         lines.extend(
             [
                 'if test "$canary_passed" -eq 0; then',
+                "  failure_code=SCRIPT_AUTHORITY_INVALID",
                 (
                     "  script_evidence=$("
                     f"python3 -c {shlex.quote(_CANARY_SCRIPT_AUTHORITY_SOURCE)} "
@@ -565,6 +618,7 @@ def codex_subscription_exec_canary_command(
                     f"{shlex.quote(attempt['home_read'])}"
                 ),
                 "  set +e",
+                "  failure_code=EVIDENCE_INVALID",
                 (
                     f"  {shlex.quote(MANAGED_CODEX_BINARY)} exec "
                     "--skip-git-repo-check --json --ephemeral "
@@ -575,17 +629,23 @@ def codex_subscription_exec_canary_command(
                 ),
                 "  codex_rc=$?",
                 "  set -e",
+                "  failure_code=SCRIPT_AUTHORITY_INVALID",
                 (
                     '  test "$script_evidence" = "$('
                     f"python3 -c {shlex.quote(_CANARY_SCRIPT_AUTHORITY_SOURCE)} "
                     f'verify {shlex.quote(attempt["script"])})"'
                 ),
-                '  test "$codex_rc" -eq 0',
                 "  set +e",
+                "  failure_code=EVIDENCE_INVALID",
                 f"  {validator}",
                 "  validator_rc=$?",
                 "  set -e",
                 '  if test "$validator_rc" -eq 0; then',
+                '    if test "$codex_rc" -ne 0; then',
+                "      failure_code=NONZERO_CLI_WITH_EXACT_EVIDENCE",
+                "      exit 1",
+                "    fi",
+                "    failure_code=PROBE_OUTPUT_INVALID",
                 (
                     f'    test "$(/bin/cat {shlex.quote(attempt["workspace"])})" = '
                     f"{shlex.quote(attempt['nonce'])}"
@@ -598,16 +658,29 @@ def codex_subscription_exec_canary_command(
                 f"    {success_inventory}",
                 "    canary_passed=1",
                 '  elif test "$validator_rc" -ne 42; then',
+                "    failure_code=EVIDENCE_INVALID",
                 "    exit 1",
                 "  else",
+                "    failure_code=REFUSAL_INVENTORY_INVALID",
                 f"    {refusal_inventory}",
-                f"    if test {attempt['number']} -eq 2; then exit 1; fi",
+                *(
+                    [
+                        "    failure_code=CLEAN_REFUSAL_EXHAUSTED",
+                        "    exit 1",
+                    ]
+                    if int(attempt["number"]) == CODEX_SUBSCRIPTION_CANARY_ATTEMPTS
+                    else [
+                        "    failure_code=RETRY_DELAY_INTERRUPTED",
+                        f"    sleep {CODEX_SUBSCRIPTION_CANARY_RETRY_DELAY_SECONDS}",
+                    ]
+                ),
                 "  fi",
                 "fi",
             ]
         )
     lines.extend(
         [
+            "failure_code=EVIDENCE_INVALID",
             'test "$canary_passed" -eq 1',
             f"printf '%s\\n' {shlex.quote(marker)}",
         ]
@@ -904,8 +977,11 @@ def _require_cli_value(value: str, *, owner: str) -> str:
 
 
 __all__ = [
+    "CODEX_SUBSCRIPTION_CANARY_ATTEMPTS",
     "CODEX_SUBSCRIPTION_CANARY_CWD",
+    "CODEX_SUBSCRIPTION_CANARY_FAILURE_PREFIX",
     "CODEX_SUBSCRIPTION_CANARY_OK",
+    "CODEX_SUBSCRIPTION_CANARY_RETRY_DELAY_SECONDS",
     "CODEX_SUBSCRIPTION_CODEX_VERSION",
     "CODEX_SUBSCRIPTION_CONTRACT_KEY",
     "CODEX_SUBSCRIPTION_PERMISSION_PROFILE",
@@ -916,6 +992,7 @@ __all__ = [
     "CODEX_SUBSCRIPTION_SANDBOX_BACKEND",
     "CODEX_SUBSCRIPTION_TOOL_POLICY_DISABLED",
     "CODEX_SUBSCRIPTION_TOOL_POLICY_KEY",
+    "codex_subscription_canary_failure_code",
     "codex_subscription_cli_flags",
     "codex_subscription_cli_overrides",
     "codex_subscription_contract",

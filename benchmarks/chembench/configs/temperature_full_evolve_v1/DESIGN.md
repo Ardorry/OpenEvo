@@ -40,12 +40,12 @@ plan、worker claim、typed artifact registration、validation、promotion 和 c
 
 正式服务和付费 runner 使用本实验独立的固定 Python bundle。该 bundle 在源码提交冻结后离线
 构建当前 OpenEvo Core 与 ChemBench wheel，逐个核对 wheel 中 Python 文件与源码，安装到
-`state/chembench_temperature_full_evolve_v1/formal_runtime_v5`，并验证两个 distribution 均为
+`state/chembench_temperature_full_evolve_v1/formal_runtime_v6`，并验证两个 distribution 均为
 non-editable、framework registry 与 wheel/lock 匹配。旧 STV2 runtime 只作为依赖版本来源；其中
 旧 Core、可编辑 ChemBench 包、数据库、completion 和 artifact 均不进入新的正式解释器。所有
 正式入口以 `-I` 启动且重新核验 formal-runtime receipt、源码提交和安装 inventory。
 
-`formal_runtime_v5` 与 `formal_runtime_v5_failures` 是不可覆盖的新 namespace；已有 v2/v3/v4
+`formal_runtime_v6` 与 `formal_runtime_v6_failures` 是不可覆盖的新 namespace；已有 v2/v3/v4/v5
 runtime 及其 failure evidence 保持只读。v3 已把 Candidate formal execution 从并行准入改为全局串行，
 并修正宿主 Rollout 到 Gateway 容器的 callback route。正式运行随后暴露出另一条彼此独立的
 Gateway 终态竞态：subscription 主 POSTRUN 在注册 durable cleanup ownership 后等待 runtime
@@ -74,13 +74,31 @@ UID 上执行闭集内的 bounded retry，不会继续消耗该批其他 UID。�
 cooldown 只出现在前一 terminal outcome 已 durable audit、下一 claim 尚未写入的边界；v4
 completion、artifact 与数据库不导入 v5 的 fresh C0 run。
 
+v5 的 fresh C0 健康门在 4 个逻辑 Candidate 调用内记录了 3 个 accepted completion 和 3 个
+credential-isolation no-completion physical outcome；Train 的首个 25 题批次未闭合，Reflector、
+Core evolution 和 Test 均未开始。为避免扩大失败，runner 在当前逻辑 UID 的 bounded retry 闭合后
+停止，服务也完成无 active session 的受控清理。v5 canary 会在运行结构化 evidence validator 前
+先检查 Codex CLI return code；因此“完整 no-tool turn 且 CLI 非零”无法进入唯一允许的 bounded
+retry。v5 的临时 event/stderr 已按安全 cleanup contract 删除，不能从聚合日志反推每个历史失败
+是否恰好命中该分支；报告必须把它表述为代码审查确认的确定性可靠性 bug，而不是伪造历史 provider
+根因。
+
+v6 保持 canary prompt、模型、reasoning、split、Candidate/Reflector prompt、parser、evaluator、
+artifact 规则和反馈边界不变，只收紧 readiness 编排：先验证结构化 evidence；仅当 validator 证明
+完整 turn、零 tool side effect 且 refusal inventory 精确时，才在 15 秒后允许一次重试，即使该
+no-tool attempt 的 CLI return code 非零。其他 evidence、exact command evidence 与非零 CLI 的
+矛盾、inventory 异常全部 fail closed。独立 EXIT cleanup 与 signal handler 不再吞掉终止信号；
+cleanup 失败也不能发布 readiness；对外错误只保留 allowlisted code，不泄露 provider stderr。
+v5 的 run、completion、数据库和任何中间状态均不导入 v6 的 fresh C0 run。
+
 订阅 transport 需要容器网络连接 provider，因此不能把 `allow_internet=true` 误写成模型拥有
 网页或 shell 能力。本实验在通用 Codex subscription harness 上选择 closed
 `tool_policy=disabled`：正式 Candidate/Reflector 推理命令固定为 `web_search=disabled`、
 `features.shell_tool=false`、`features.unified_exec=false`，同时保留 provider transport。MCP、
 plugins、apps、browser、computer-use 与 subagent 继续由既有 closed profile 禁用；transcript
 零工具审计提供独立的事后完整性检查。credential-isolation readiness canary 是 harness setup
-的基础设施证明，不属于 Candidate/Reflector 任务指令，仍使用既有受控单次 shell canary。
+的基础设施证明，不属于 Candidate/Reflector 任务指令，使用受控、最多两次且只对零工具拒绝重试的
+shell canary。
 Candidate formal executor 的 closed 配置固定 `candidate_max_workers=1`；executor 拒绝任何
 大于 1 的值，runner 使用同一权威常量。每个 Candidate 必须完成 submit、poll 和 durable audit
 后才准入下一 Candidate；任一 durable terminal outcome 后还必须满足 fixed 15-second pacing
