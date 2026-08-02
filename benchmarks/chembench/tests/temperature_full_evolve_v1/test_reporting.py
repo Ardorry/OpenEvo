@@ -63,6 +63,15 @@ def test_blocked_report_package_is_closed_and_checksum_verified(tmp_path: Path) 
         },
         preflight_tool_failures=1,
         preflight_tool_repairs=1,
+        regression_summary={
+            "schema_version": "TemperatureFullEvolveRegressionSummaryV1",
+            "status": "FOCUSED_PASS",
+            "focused_passed": 17,
+            "focused_failed": 0,
+            "full_passed": 1023,
+            "full_failed": 39,
+            "full_subtests_passed": 58,
+        },
     )
 
     assert payload["status"] == "HARD_BLOCKED"
@@ -76,6 +85,7 @@ def test_blocked_report_package_is_closed_and_checksum_verified(tmp_path: Path) 
     call_summary = (destination / "call_and_failure_summary.json").read_text(encoding="utf-8")
     assert '"preflight_tool_failures": 1' in call_summary
     assert '"preflight_tool_repairs": 1' in call_summary
+    assert '"focused_passed": 17' in (destination / "TEST_REPORT.json").read_text(encoding="utf-8")
 
 
 def test_result_metrics_are_explicitly_not_run(tmp_path: Path) -> None:

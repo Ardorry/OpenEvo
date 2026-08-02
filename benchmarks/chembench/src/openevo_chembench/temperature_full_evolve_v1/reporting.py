@@ -82,6 +82,7 @@ def write_blocked_report_package(
     managed_runtime_identity: Mapping[str, object],
     preflight_tool_failures: int = 0,
     preflight_tool_repairs: int = 0,
+    regression_summary: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Write the closed aggregate package after the capacity gate blocks launch."""
 
@@ -181,6 +182,15 @@ def write_blocked_report_package(
     _write_json(destination / "model_identity_receipt.json", dict(model_identity))
     _write_json(destination / "managed_runtime_receipt.json", dict(managed_runtime_identity))
     _write_json(destination / "capacity_preflight_receipt.json", receipt)
+    public_regression_summary = (
+        dict(regression_summary)
+        if regression_summary is not None
+        else {
+            "schema_version": "TemperatureFullEvolveRegressionSummaryV1",
+            "status": "NOT_EXECUTED",
+        }
+    )
+    _write_json(destination / "TEST_REPORT.json", public_regression_summary)
 
     not_run = {
         "status": "NOT_RUN",
@@ -314,6 +324,7 @@ def write_blocked_report_package(
         managed_runtime_identity=managed_runtime_identity,
         preflight_tool_failures=preflight_tool_failures,
         preflight_tool_repairs=preflight_tool_repairs,
+        regression_summary=public_regression_summary,
     )
     handoff_markdown = _handoff_markdown(
         receipt=receipt,
@@ -332,6 +343,7 @@ def write_blocked_report_package(
             {
                 "EXPERIMENT_PROTOCOL.md",
                 "PRECHECK_REPORT.md",
+                "TEST_REPORT.json",
                 "split_manifest.json",
                 "historical_exclusion_manifest.json",
                 "near_duplicate_group_manifest.json",
@@ -365,6 +377,7 @@ def write_blocked_report_package(
         "source_code_commit": source_code_commit,
         "branch": branch,
         "formal_run_ids": [],
+        "regression_status": public_regression_summary.get("status"),
         "expected_files_excluding_sha256sums": list(expected_files),
         "public_scope": "AGGREGATE_ONLY",
     }
@@ -461,6 +474,7 @@ def _final_report_markdown(
     managed_runtime_identity: Mapping[str, object],
     preflight_tool_failures: int,
     preflight_tool_repairs: int,
+    regression_summary: Mapping[str, object],
 ) -> str:
     dataset = receipt["dataset"]
     historical = receipt["historical_exposure"]
@@ -523,6 +537,17 @@ Train 50 与 Test 50 全部题目。
 - Managed candidate image：
   `{managed_runtime_identity.get("candidate_image_id")}`。
 - 凭据检查只验证 owner/type/mode 元数据，没有读取或复制凭据内容。
+
+## 测试审计
+
+- 新协议聚焦测试：{regression_summary.get("focused_passed", "未执行")} passed，
+  {regression_summary.get("focused_failed", "未执行")} failed。
+- ChemBench 完整测试：{regression_summary.get("full_passed", "未执行")} passed，
+  {regression_summary.get("full_failed", "未执行")} failed；另有
+  {regression_summary.get("full_subtests_passed", "未执行")} subtests passed。
+- 完整测试中的失败已在 `TEST_REPORT.json` 分类；没有一项来自新 preflight 的聚焦测试，且
+  测试过程模型调用为 0。旧 source-manifest、legacy recovery scope 与缺失旧 checkout/private
+  fixture 保持 fail closed，没有为追求全绿而改写历史证据。
 
 ## 代码审查
 

@@ -33,6 +33,11 @@ def main() -> int:
     parser.add_argument("--generated-at-utc")
     parser.add_argument("--preflight-tool-failures", type=int, default=0)
     parser.add_argument("--preflight-tool-repairs", type=int, default=0)
+    parser.add_argument("--focused-passed", type=int)
+    parser.add_argument("--focused-failed", type=int)
+    parser.add_argument("--full-passed", type=int)
+    parser.add_argument("--full-failed", type=int)
+    parser.add_argument("--full-subtests-passed", type=int)
     arguments = parser.parse_args()
 
     generated = arguments.generated_at_utc or datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -71,6 +76,60 @@ def main() -> int:
         disk_total_bytes=disk.total,
         disk_free_bytes=disk.free,
     )
+    regression_counts = (
+        arguments.focused_passed,
+        arguments.focused_failed,
+        arguments.full_passed,
+        arguments.full_failed,
+        arguments.full_subtests_passed,
+    )
+    if any(value is None for value in regression_counts) and any(
+        value is not None for value in regression_counts
+    ):
+        parser.error("regression counts must be supplied together")
+    if any(value is not None and value < 0 for value in regression_counts):
+        parser.error("regression counts must be non-negative")
+    regression_summary = None
+    if all(value is not None for value in regression_counts):
+        failure_classification = (
+            [
+                {
+                    "count": 8,
+                    "code": "PRE_EXISTING_V2_SOURCE_MANIFEST_DRIFT",
+                    "new_preflight_defect": False,
+                },
+                {
+                    "count": 1,
+                    "code": "EXPECTED_LEGACY_RECOVERY_SCOPE_REJECTION_ON_NEW_BRANCH",
+                    "new_preflight_defect": False,
+                },
+                {
+                    "count": 30,
+                    "code": "LEGACY_LAYOUT_PRIVATE_FIXTURE_OR_STALE_MANIFEST_UNAVAILABLE",
+                    "new_preflight_defect": False,
+                },
+            ]
+            if arguments.full_failed == 39
+            else [
+                {
+                    "count": arguments.full_failed,
+                    "code": "UNCLASSIFIED_FULL_SUITE_FAILURE",
+                    "new_preflight_defect": None,
+                }
+            ]
+        )
+        regression_summary = {
+            "schema_version": "TemperatureFullEvolveRegressionSummaryV1",
+            "status": "FOCUSED_PASS_FULL_SUITE_HAS_UNRELATED_OR_EXPECTED_FAILURES",
+            "focused_passed": arguments.focused_passed,
+            "focused_failed": arguments.focused_failed,
+            "full_passed": arguments.full_passed,
+            "full_failed": arguments.full_failed,
+            "full_subtests_passed": arguments.full_subtests_passed,
+            "full_suite_model_calls": 0,
+            "failure_classification": failure_classification,
+            "historical_evidence_modified_to_force_green": False,
+        }
     payload = write_blocked_report_package(
         repository_root=repository,
         destination=arguments.destination.resolve(),
@@ -82,6 +141,7 @@ def main() -> int:
         managed_runtime_identity=runtime_identity,
         preflight_tool_failures=arguments.preflight_tool_failures,
         preflight_tool_repairs=arguments.preflight_tool_repairs,
+        regression_summary=regression_summary,
     )
     print(payload)
     return 0
