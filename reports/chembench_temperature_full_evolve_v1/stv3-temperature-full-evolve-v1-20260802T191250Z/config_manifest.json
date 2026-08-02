@@ -1,0 +1,21 @@
+{
+  "batch_count": 4,
+  "batch_size": 25,
+  "branch": "chembench-temperature-full-evolve-v1",
+  "candidate_baseline_stack_equal": true,
+  "config_sha256": "316bbbe84d8fba8e0a1e84294c489c4552d178bbb9d1c931d9088c9af964310c",
+  "model": "gpt-5.5",
+  "protocol_id": "chembench_temperature_full_evolve_v1",
+  "reasoning_effort": "medium",
+  "schema_version": "TemperatureFullEvolveConfigManifestV1",
+  "source_commit": "b625a8ceabc512636a474502d84a93ece1f50929",
+  "split_sha256": "779e1b60098a958519bfe61296b5cb6c28afa2a2db300238876dcb693ccb1100",
+  "test_artifact_updates": 0,
+  "test_core_jobs": 0,
+  "test_feedback_enabled": false,
+  "test_order": [
+    "evolved",
+    "baseline"
+  ],
+  "test_reflector_calls": 0
+}

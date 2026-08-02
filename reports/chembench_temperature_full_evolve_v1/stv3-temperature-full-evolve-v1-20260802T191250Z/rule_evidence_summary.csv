@@ -1,0 +1,5 @@
+batch_index,active_rules,supported_rules,conflicted_rules,retired_rules,support_count_total,contradiction_count_total
+1,5,5,3,0,22,10
+2,9,7,5,0,47,24
+3,10,7,6,0,71,41
+4,10,7,6,0,95,53

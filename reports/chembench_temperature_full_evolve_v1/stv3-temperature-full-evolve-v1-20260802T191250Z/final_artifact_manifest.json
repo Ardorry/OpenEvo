@@ -1,0 +1,17 @@
+{
+  "agent_system_bytes": 492,
+  "agent_system_sha256": "ebf98e210c2c025b9c1f9ebb30b54057823e02ddbfdaab00538c5d5c6bc2a903",
+  "combined_context_bytes": 4731,
+  "combined_context_sha256": "0c2e6272788d36822733c4bb6f3572e605830ba956fb14cbd76cb29c8286f6b4",
+  "core_run_id": "stv3-temperature-full-evolve-v1-20260802T191250Z-core",
+  "final_manifest_sha256": "39eea4b9295d8d40c798d376c5a434f6c99661a5beb00d9fb699d82bda2da1ee",
+  "final_state_id": "C4",
+  "frozen_before_test": true,
+  "lineage_sha256": "702fe93a521c1db079b45465fe237791f3d884cf1a335d87295beeb15c185e82",
+  "schema_version": "TemperatureFullEvolveFinalArtifactManifestV1",
+  "skill_bundle_bytes": 784,
+  "skill_bundle_sha256": "128d771e8399a12bf6c967da8006d252ebb6262ef00de21d15550ca903e62f50",
+  "text_memory_bytes": 3455,
+  "text_memory_sha256": "0cd3998a0f773977b05803b4c482ad70009c3a7027593cb7501e0ba06af23a57",
+  "validation_passed": true
+}

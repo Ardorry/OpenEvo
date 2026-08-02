@@ -1,0 +1,23 @@
+{
+  "batch_count": 4,
+  "batch_size": 25,
+  "contains_item_identities": false,
+  "dataset_sha256": "cb6c17c54d4c0cf103b38f12e9ce05663515b05bfdc342d83e3245d39f3a4b3a",
+  "eligible_pool_count": 202,
+  "group_count": 202,
+  "maximum_group_size": 1,
+  "normalized_option_overlap_count": 0,
+  "normalized_text_overlap_count": 0,
+  "reserve_count": 2,
+  "schema_version": "TemperatureFullEvolveSplitManifestV1",
+  "singleton_group_count": 202,
+  "source_group_fields_available": false,
+  "source_group_overlap_count": null,
+  "split_frozen_before_model_calls": true,
+  "split_sha256": "779e1b60098a958519bfe61296b5cb6c28afa2a2db300238876dcb693ccb1100",
+  "status": "FROZEN_AND_COMPLETED",
+  "test_count": 100,
+  "test_sealed_until_train_complete": true,
+  "train_count": 100,
+  "uid_overlap_count": 0
+}

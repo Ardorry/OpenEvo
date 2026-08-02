@@ -1,0 +1,15 @@
+{
+  "contains_group_members": false,
+  "group_assignment_sha256": "e1ada9af7ff5fc5f23ed0f52314c1ed78f1648b0ed3831effff5b6e9e017b668",
+  "group_count": 202,
+  "group_manifest_sha256": "3458ad8491150e0eb5a1526af947c07426d664697a93d2f063860aba167a17d8",
+  "maximum_group_size": 1,
+  "normalized_option_overlap_count": 0,
+  "normalized_text_overlap_count": 0,
+  "schema_version": "TemperatureNearDuplicateGroupManifestV1",
+  "singleton_group_count": 202,
+  "source_group_fields_available": false,
+  "source_group_overlap_count": null,
+  "status": "PASS",
+  "uid_overlap_count": 0
+}

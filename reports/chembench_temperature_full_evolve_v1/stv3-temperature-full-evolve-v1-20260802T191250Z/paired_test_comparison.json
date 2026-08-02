@@ -1,0 +1,35 @@
+{
+  "baseline_accuracy": 0.93,
+  "baseline_correct": 93,
+  "baseline_only_correct": 11,
+  "baseline_wilson_95": [
+    0.8625048526092651,
+    0.9656807389327273
+  ],
+  "bootstrap_replicates": 100000,
+  "bootstrap_seed": 20260802,
+  "both_correct": 82,
+  "both_wrong": 6,
+  "contains_ordered_correctness_vectors": false,
+  "evolved_accuracy": 0.83,
+  "evolved_correct": 83,
+  "evolved_only_correct": 1,
+  "evolved_wilson_95": [
+    0.7445199523239887,
+    0.8910643388594006
+  ],
+  "mcnemar_exact_p": 0.00634765625,
+  "n": 100,
+  "negative_flip_rate": 0.11,
+  "official_parser_success_difference": 0,
+  "paired_bootstrap_delta_95_percentage_points": [
+    -17.0,
+    -4.0
+  ],
+  "paired_delta_percentage_points": -10.0,
+  "primary_comparison": "final_C4_evolved_minus_generation_zero_baseline",
+  "retry_difference": 0,
+  "schema_version": "TemperatureFullEvolvePairedTestComparisonV1",
+  "status": "COMPLETE",
+  "strict_parser_success_difference": 0
+}

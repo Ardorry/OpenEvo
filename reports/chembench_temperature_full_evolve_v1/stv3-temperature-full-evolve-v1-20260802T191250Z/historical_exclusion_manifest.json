@@ -1,0 +1,15 @@
+{
+  "contains_item_identities": false,
+  "disclosure": "The fixed official Temperature pool was split without consulting historical exposure. Historical non-exposure is not claimed, and no prior learned state was imported.",
+  "generation_zero_empty_context": true,
+  "historical_exclusion_applied": false,
+  "historical_exposure_used_for_item_selection": false,
+  "policy": "fixed_official_temperature_pool_fresh_c0",
+  "prior_artifacts_imported": 0,
+  "prior_completions_imported": 0,
+  "prior_databases_imported": 0,
+  "prior_workspaces_imported": 0,
+  "protocol_fixed_at_local_date": "2026-08-02",
+  "schema_version": "TemperatureHistoricalReusePolicyManifestV1",
+  "selected_items_may_have_historical_exposure": true
+}

@@ -1,0 +1,18 @@
+{
+  "chembench_editable": false,
+  "chembench_wheel_sha256": "be65e4c27d22e3c1d1dc81d9e885876ca6a073db5a36a0919031953db157ad7e",
+  "core_editable": false,
+  "core_wheel_sha256": "55c39f5f5696ca7984787de0994574c90642703a31c880ddf4f0ccc81eff8e79",
+  "formal_runtime_identity_sha256": "3ee72fc62662b5e09c64734d02f94275351a30a31bd2b891b20fabdb01cb2f2d",
+  "formal_runtime_receipt_sha256": "fdc7899b75d1e4c45a1fb4630435cc6ca5e3ad48dc65c9e510058682085e4772",
+  "framework_lock_sha256": "da6231a0702fe74d056ed0e28b0476588351404509af8fcb11046be7f5bf8761",
+  "managed_candidate_image_id": "sha256:7a0079f9cb1bce5768cff5bce3d1181811c6a231ad800cac8fb503d66852c81b",
+  "managed_codex_executable_sha256": "a96f944d1a596dbfb7fdd84f482be5c50e34b04bb371126840d873e4ebf26902",
+  "receipt_sha256": "cc48d3287f8f0f9baf3b75d339cdc102a48aed1bda09a09fddbd0a3b5c696b02",
+  "runtime_services_identity_sha256": "242a9cd474b2b7543e61835ebb141ba5643e6bc35c6bd2faebbca6d349b87002",
+  "schema_version": "TemperatureFullEvolveManagedRuntimeReceiptV1",
+  "service_run_id": "stv3-temperature-services-20260802T190719Z-b625a8ce",
+  "source_commit": "b625a8ceabc512636a474502d84a93ece1f50929",
+  "source_tree_sha256": "3aed3aaabee3c2e9a900749de434c26612e93d2e22a72dd6f7c4f2914201159a",
+  "status": "PASS"
+}

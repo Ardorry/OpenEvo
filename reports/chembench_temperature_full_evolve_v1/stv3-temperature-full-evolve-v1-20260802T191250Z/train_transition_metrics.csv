@@ -1,0 +1,5 @@
+batch_index,both_correct,pre_only_correct,post_only_correct,both_wrong,negative_flip_rate,mcnemar_exact_p
+1,21,0,0,4,0.0,1.0
+2,21,0,2,2,0.0,0.5
+3,22,1,1,1,0.04,1.0
+4,23,0,0,2,0.0,1.0

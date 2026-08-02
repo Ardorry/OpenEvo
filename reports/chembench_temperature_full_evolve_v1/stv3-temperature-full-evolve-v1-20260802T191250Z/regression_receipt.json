@@ -1,0 +1,9 @@
+{
+  "focused_failed": 0,
+  "focused_passed": 203,
+  "integration_failed": 0,
+  "integration_passed": 272,
+  "model_calls_during_tests": 0,
+  "test_command_sha256": "623275d7bd0044899c21ec90ee528fe5dd2c22d58bad5949201f49a0b57bbb15",
+  "test_output_sha256": "ea7e4c3499a1447b927acfa10555419c6a97b8d25f44e18c16558a7f8b5d0d52"
+}

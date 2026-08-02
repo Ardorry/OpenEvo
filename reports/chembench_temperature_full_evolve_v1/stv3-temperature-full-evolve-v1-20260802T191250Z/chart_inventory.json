@@ -1,0 +1,15 @@
+{
+  "aggregate_only": true,
+  "chart_count": 8,
+  "charts": [
+    "artifact_size_by_batch.png",
+    "call_and_failure_summary.png",
+    "rule_evidence_curve.png",
+    "test_baseline_vs_evolved_accuracy.png",
+    "test_paired_flips.png",
+    "train_batch_pre_post_accuracy.png",
+    "train_correctness_transitions.png",
+    "train_cumulative_pre_post_curve.png"
+  ],
+  "schema_version": "TemperatureFullEvolveChartInventoryV1"
+}

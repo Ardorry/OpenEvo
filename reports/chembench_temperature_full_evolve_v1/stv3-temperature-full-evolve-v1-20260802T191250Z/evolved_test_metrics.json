@@ -1,0 +1,28 @@
+{
+  "accepted_completion_count": 100,
+  "accuracy": 0.83,
+  "arm": "evolved",
+  "artifact_updates": 0,
+  "contains_ordered_correctness_vector": false,
+  "context_bytes": 4731,
+  "context_sha256": "0c2e6272788d36822733c4bb6f3572e605830ba956fb14cbd76cb29c8286f6b4",
+  "core_jobs": 0,
+  "correct": 83,
+  "failed_attempts": 0,
+  "failure_rate": 0.0,
+  "feedback_enabled": false,
+  "logical_candidate_calls": 100,
+  "model_attempts": 100,
+  "n": 100,
+  "official_parser_success_count": 100,
+  "reflector_calls": 0,
+  "rejected_attempts": 0,
+  "retries": 0,
+  "schema_version": "TemperatureFullEvolveTestArmMetricsV1",
+  "status": "COMPLETE",
+  "strict_parser_success_count": 100,
+  "wilson_95": [
+    0.7445199523239887,
+    0.8910643388594006
+  ]
+}

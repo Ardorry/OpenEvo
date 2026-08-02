@@ -1,0 +1,113 @@
+{
+  "campaign_attempt_count": 8,
+  "campaign_attempts": [
+    {
+      "candidate_calls": 75,
+      "controller_run_id": "stv3-temperature-full-evolve-v1-20260802T120511Z",
+      "core_jobs": 3,
+      "evidence_status": "NOT_COMPLETE_IMMUTABLE_EVIDENCE",
+      "last_recorded_phase": "TRAIN_REFLECTOR",
+      "reflector_calls": 2,
+      "runtime_service_run_id": "stv3-temperature-services-20260802T120246Z-64881f34",
+      "source_commit": "64881f347c4b925b115587cdddcf3b8e86fd2a05"
+    },
+    {
+      "candidate_calls": 25,
+      "controller_run_id": "stv3-temperature-full-evolve-v1-20260802T143306Z",
+      "core_jobs": 0,
+      "evidence_status": "NOT_COMPLETE_IMMUTABLE_EVIDENCE",
+      "last_recorded_phase": "TRAIN_PRE",
+      "reflector_calls": 0,
+      "runtime_service_run_id": "stv3-temperature-services-20260802T143046Z-b30bb186",
+      "source_commit": "b30bb1861d32acc6f29fe7123bf1df048d58a1d8"
+    },
+    {
+      "candidate_calls": 15,
+      "controller_run_id": "stv3-temperature-full-evolve-v1-20260802T153015Z",
+      "core_jobs": 0,
+      "evidence_status": "NOT_COMPLETE_IMMUTABLE_EVIDENCE",
+      "last_recorded_phase": "TRAIN_PRE",
+      "reflector_calls": 0,
+      "runtime_service_run_id": "stv3-temperature-services-20260802T152704Z-3bc95ee3",
+      "source_commit": "3bc95ee3c854760f59a2f773b87565956483730a"
+    },
+    {
+      "candidate_calls": 8,
+      "controller_run_id": "stv3-temperature-full-evolve-v1-20260802T160424Z",
+      "core_jobs": 0,
+      "evidence_status": "NOT_COMPLETE_IMMUTABLE_EVIDENCE",
+      "last_recorded_phase": "TRAIN_PRE",
+      "reflector_calls": 0,
+      "runtime_service_run_id": "stv3-temperature-services-20260802T160149Z-44c484cc",
+      "source_commit": "44c484cca65c879e1f4e718c39ca119c10126cc6"
+    },
+    {
+      "candidate_calls": 3,
+      "controller_run_id": "stv3-temperature-full-evolve-v1-20260802T164402Z",
+      "core_jobs": 0,
+      "evidence_status": "NOT_COMPLETE_IMMUTABLE_EVIDENCE",
+      "last_recorded_phase": "TRAIN_PRE",
+      "reflector_calls": 0,
+      "runtime_service_run_id": "stv3-temperature-services-20260802T164110Z-38491627",
+      "source_commit": "3849162779c5af8ce7bd258767aacb86a5140cc4"
+    },
+    {
+      "candidate_calls": 5,
+      "controller_run_id": "stv3-temperature-full-evolve-v1-20260802T171657Z",
+      "core_jobs": 0,
+      "evidence_status": "INVALID_IMMUTABLE_FAILURE_EVIDENCE",
+      "invalidation_reason": "CANARY_EVIDENCE_INVALID_SUBTYPE_NOT_DURABLY_CLASSIFIED",
+      "last_recorded_phase": "TRAIN_PRE",
+      "reflector_calls": 0,
+      "runtime_service_run_id": "stv3-temperature-services-20260802T171415Z-283e2cc6",
+      "source_commit": "283e2cc65e6626b0002236304680970921749dff"
+    },
+    {
+      "candidate_calls": 75,
+      "controller_run_id": "stv3-temperature-full-evolve-v1-20260802T175041Z",
+      "core_jobs": 3,
+      "evidence_status": "INVALID_IMMUTABLE_FAILURE_EVIDENCE",
+      "invalidation_reason": "BATCH2_REFLECTOR_PACKET_SEQUENCE_REJECTION_EXHAUSTED",
+      "last_recorded_phase": "FAILED",
+      "reflector_calls": 2,
+      "runtime_service_run_id": "stv3-temperature-services-20260802T174826Z-cea4534a",
+      "source_commit": "cea4534ad56bad0ed827431c0a5548dfc9c39f4d"
+    },
+    {
+      "candidate_calls": 400,
+      "controller_run_id": "stv3-temperature-full-evolve-v1-20260802T191250Z",
+      "core_jobs": 12,
+      "evidence_status": "COMPLETE",
+      "last_recorded_phase": "COMPLETE",
+      "reflector_calls": 4,
+      "runtime_service_run_id": "stv3-temperature-services-20260802T190719Z-b625a8ce",
+      "source_commit": "b625a8ceabc512636a474502d84a93ece1f50929"
+    }
+  ],
+  "campaign_prior_noncomplete_attempt_count": 7,
+  "contains_answers_or_predictions": false,
+  "contains_benchmark_content": false,
+  "contains_completions_or_transcripts": false,
+  "contains_item_identities": false,
+  "formal_closure_receipt_sha256": "ae90a2657c5ed3eb0a810a028f0aeae362f80fdc911d5537d6715f182bc4bfc1",
+  "formal_inference_source_commit": "b625a8ceabc512636a474502d84a93ece1f50929",
+  "formal_report_sha256s_sha256": "bd1a5b1d0e556586cd310e8907b9a68c31750858c2e60bc258a640d57e7ccd20",
+  "postrun_code_commit": "2cf53173a20d0a275ccf5b008d05af2b5c5409d2",
+  "postrun_corrections": [
+    {
+      "classification": "PERMISSION_METADATA_ONLY",
+      "description": "The completed run root mode was tightened from 0755 to 0700 before formal report closure. No file bytes, inference state, prompt, parser, evaluator, artifact, split, retry decision, or accepted completion changed."
+    },
+    {
+      "classification": "FUTURE_ORCHESTRATION_HARDENING",
+      "description": "Commit 2cf53173 creates future run roots and the arms parent explicitly as owner-private 0700 directories. The formal result remains bound to b625a8ce."
+    },
+    {
+      "classification": "REPORT_SCOPE_CLARIFICATION",
+      "description": "call_and_failure_summary.json reports zero invalidated runs within the successful controller run. It does not count seven earlier non-complete campaign attempts, which are enumerated in this receipt."
+    }
+  ],
+  "schema_version": "TemperatureFullEvolvePostrunCompatibilityReceiptV1",
+  "semantic_compatibility": "PASS_REPORTING_PERMISSION_ONLY",
+  "successful_formal_result_status": "COMPLETE"
+}

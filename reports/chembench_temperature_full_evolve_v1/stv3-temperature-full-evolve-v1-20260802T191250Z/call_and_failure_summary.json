@@ -1,0 +1,28 @@
+{
+  "canary_provider_attempts": {
+    "lower_bound": 404,
+    "status": "NOT_MEASURED"
+  },
+  "candidate_logical_calls": 400,
+  "core_jobs": 12,
+  "experimental_model_logical_calls": 404,
+  "failed_attempts": 0,
+  "failure_category_total": 0,
+  "failures": {
+    "artifact_or_schema": 0,
+    "data_integrity": 0,
+    "duplicate_or_lease": 0,
+    "infrastructure_no_completion": 0,
+    "orchestration": 0,
+    "parser_or_evaluator": 0,
+    "runtime_or_credential": 0
+  },
+  "invalidated_formal_runs": 0,
+  "managed_runtime_session_attempts": 404,
+  "readiness_passed_for_accepted_calls": 404,
+  "recoveries": 0,
+  "reflector_logical_calls": 4,
+  "rejected_attempts": 0,
+  "retries": 0,
+  "schema_version": "TemperatureFullEvolveCallAndFailureSummaryV1"
+}

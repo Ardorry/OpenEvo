@@ -1,0 +1,5 @@
+batch_index,task_count,pre_correct,post_correct,pre_accuracy,post_accuracy,delta_percentage_points,cumulative_pre_correct,cumulative_post_correct,cumulative_pre_accuracy,cumulative_post_accuracy,mcnemar_exact_p,pre_parser_success,post_parser_success,candidate_calls,reflector_calls,core_jobs,failed_attempts,retries,rejected_attempts
+1,25,21,21,0.84,0.84,0.0,21,21,0.84,0.84,1.0,25,25,50,1,3,0,0,0
+2,25,21,23,0.84,0.92,8.0,42,44,0.84,0.88,0.5,25,25,50,1,3,0,0,0
+3,25,23,23,0.92,0.92,0.0,65,67,0.8666666666666667,0.8933333333333333,1.0,25,25,50,1,3,0,0,0
+4,25,23,23,0.92,0.92,0.0,88,90,0.88,0.9,1.0,25,25,50,1,3,0,0,0

@@ -1,0 +1,9 @@
+{
+  "candidate_baseline_stack_equal": true,
+  "capture_mode": "transcript",
+  "model": "gpt-5.5",
+  "reasoning_effort": "medium",
+  "receipt_sha256": "e3128671d0f279d66e17d89b6653379a93437c10d21e5d36df8ee94d63aafbd3",
+  "schema_version": "TemperatureFullEvolveModelIdentityReceiptV1",
+  "status": "PASS"
+}
