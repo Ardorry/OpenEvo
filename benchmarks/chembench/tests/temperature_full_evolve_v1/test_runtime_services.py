@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Self
@@ -23,6 +25,42 @@ REPOSITORY = Path(__file__).resolve().parents[4]
 SERVICE_RUN_ID = "stv3-temperature-services-20990101T000000Z-deadbeef"
 TASK_ID = "temperature-pre-b01-i001"
 SESSION_ID = "sk-openevo-11111111-2222-3333-4444-555555555555"
+RUNTIME_SERVICES_SCRIPT = (
+    REPOSITORY
+    / "benchmarks/chembench/scripts/temperature_full_evolve_v1/runtime_services.py"
+)
+
+
+def _runtime_services_cli_module():
+    spec = importlib.util.spec_from_file_location(
+        "temperature_full_evolve_runtime_services_cli",
+        RUNTIME_SERVICES_SCRIPT,
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_runtime_services_cli_redacts_typed_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _runtime_services_cli_module()
+
+    def fail(**_values: object) -> object:
+        raise TemperatureRuntimeServicesError("TEMPERATURE_RUNTIME_STATE_MISSING")
+
+    monkeypatch.setattr(module, "temperature_runtime_services_status_v1", fail)
+    monkeypatch.setattr(sys, "argv", [os.fspath(RUNTIME_SERVICES_SCRIPT), "status"])
+
+    assert module._entrypoint() == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "status": "FAIL_CLOSED",
+        "finding_code": "TEMPERATURE_RUNTIME_STATE_MISSING",
+    }
 
 
 def _completion_identity(repository: Path, root: Path) -> CompletionRootIdentityV1:

@@ -29,9 +29,11 @@ _SCHEMA = "TemperatureFullEvolveGatewayBootstrapReceiptV1"
 _ROLLOUT_CONTROL_URL = "http://host.docker.internal:8080"
 _GATEWAY_BIND_HOST = "0.0.0.0"
 _GATEWAY_PUBLIC_URL = "http://127.0.0.1:8100"
+_CONTAINER_RUNTIME_ROOT = "/openevo-temperature-runtime"
 _CONTAINER_COMPLETION_ROOT = "/openevo-temperature-completions"
 _ROOT_MARKER_NAME = ".openevo-completion-root.json"
 _SHA256_RE_LENGTH = 64
+_MAX_DOCKER_INSPECT_BYTES = 256 * 1024
 
 
 def main() -> int:
@@ -68,9 +70,11 @@ def main() -> int:
     )
     authority.verify()
     mapping = discover_docker_host_path(
-        inspected.stdout,
+        _runtime_mount_inspect_evidence(inspected.stdout),
         namespace=arguments.namespace,
     )
+    if mapping.mount_destination != _CONTAINER_RUNTIME_ROOT:
+        raise RuntimeError("GATEWAY_BOOTSTRAP_RUNTIME_MOUNT_INVALID")
     topology = _effective_topology(
         base,
         mapping.model_dump(mode="json"),
@@ -159,6 +163,65 @@ def _effective_topology(
     node["host"] = _GATEWAY_BIND_HOST
     node["docker_host_path"] = docker_host_path
     return loaded
+
+
+def _runtime_mount_inspect_evidence(payload: bytes) -> bytes:
+    """Select the one managed-runtime bind from full self-inspect evidence.
+
+    This Gateway also has a separate writable completion-persistence bind.  The
+    generic Core host-path authority intentionally rejects multiple writable
+    data roots, so the experiment bootstrap must first select its fixed runtime
+    destination.  The generic verifier still validates the selected mount and
+    later revalidates it against full Docker self-inspect evidence.
+    """
+
+    if not isinstance(payload, bytes) or len(payload) > _MAX_DOCKER_INSPECT_BYTES:
+        raise RuntimeError("GATEWAY_BOOTSTRAP_DOCKER_INSPECT_INVALID")
+
+    def unique_object(values: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in values:
+            if key in result:
+                raise ValueError("duplicate JSON key")
+            result[key] = value
+        return result
+
+    try:
+        observed = json.loads(
+            payload,
+            object_pairs_hook=unique_object,
+            parse_constant=lambda _value: (_ for _ in ()).throw(
+                ValueError("non-finite JSON value")
+            ),
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise RuntimeError("GATEWAY_BOOTSTRAP_DOCKER_INSPECT_INVALID") from exc
+    if not isinstance(observed, dict) or set(observed) != {
+        "id",
+        "hostname",
+        "running",
+        "mounts",
+    }:
+        raise RuntimeError("GATEWAY_BOOTSTRAP_DOCKER_INSPECT_INVALID")
+    mounts = observed.get("mounts")
+    if not isinstance(mounts, list) or len(mounts) > 128:
+        raise RuntimeError("GATEWAY_BOOTSTRAP_DOCKER_INSPECT_INVALID")
+    selected = [
+        mount
+        for mount in mounts
+        if isinstance(mount, dict)
+        and mount.get("Destination") == _CONTAINER_RUNTIME_ROOT
+    ]
+    if len(selected) != 1:
+        raise RuntimeError("GATEWAY_BOOTSTRAP_RUNTIME_MOUNT_INVALID")
+    filtered = {**observed, "mounts": selected}
+    return json.dumps(
+        filtered,
+        ensure_ascii=True,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("ascii")
 
 
 def _validated_host_path(path: Path) -> Path:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 from pathlib import Path
 
@@ -82,6 +83,77 @@ def test_effective_topology_rewrites_only_container_view(tmp_path: Path) -> None
     assert effective["gateway"]["nodes"][0]["docker_host_path"] == mapping
     persisted = yaml.safe_load(base.read_text(encoding="utf-8"))
     assert persisted["rollout"]["save_dir"] == os.fspath(host_root)
+
+
+def test_runtime_mount_evidence_excludes_separate_writable_completion_bind() -> None:
+    module = _module()
+    observed = {
+        "id": "a" * 64,
+        "hostname": "a" * 12,
+        "running": True,
+        "mounts": [
+            {
+                "Type": "bind",
+                "Source": "/host/runtime",
+                "Destination": "/openevo-temperature-runtime",
+                "RW": True,
+            },
+            {
+                "Type": "bind",
+                "Source": "/host/completions",
+                "Destination": "/openevo-temperature-completions",
+                "RW": True,
+            },
+        ],
+    }
+
+    selected = json.loads(
+        module._runtime_mount_inspect_evidence(
+            json.dumps(observed, separators=(",", ":")).encode("ascii")
+        )
+    )
+
+    assert selected == {**observed, "mounts": [observed["mounts"][0]]}
+
+
+@pytest.mark.parametrize(
+    "mounts",
+    (
+        [],
+        [
+            {
+                "Type": "bind",
+                "Source": "/host/other",
+                "Destination": "/somewhere-else",
+                "RW": True,
+            }
+        ],
+        [
+            {
+                "Type": "bind",
+                "Source": f"/host/runtime-{index}",
+                "Destination": "/openevo-temperature-runtime",
+                "RW": True,
+            }
+            for index in range(2)
+        ],
+    ),
+)
+def test_runtime_mount_evidence_fails_closed_without_one_exact_runtime_bind(
+    mounts: list[dict[str, object]],
+) -> None:
+    module = _module()
+    observed = {
+        "id": "a" * 64,
+        "hostname": "a" * 12,
+        "running": True,
+        "mounts": mounts,
+    }
+
+    with pytest.raises(RuntimeError, match="RUNTIME_MOUNT_INVALID"):
+        module._runtime_mount_inspect_evidence(
+            json.dumps(observed, separators=(",", ":")).encode("ascii")
+        )
 
 
 def test_effective_topology_rejects_unbound_or_disabled_persistence(

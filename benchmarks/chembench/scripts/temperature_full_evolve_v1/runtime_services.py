@@ -13,6 +13,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PACKAGE_ROOT / "src"))
 
 from openevo_chembench.temperature_full_evolve_v1.runtime_services import (
+    TemperatureRuntimeServicesError,
     start_temperature_runtime_services_v1,
     stop_temperature_runtime_services_v1,
     temperature_runtime_services_status_v1,
@@ -53,5 +54,20 @@ def main() -> int:
     return 0
 
 
+def _entrypoint() -> int:
+    try:
+        return main()
+    except TemperatureRuntimeServicesError as exc:
+        print(
+            json.dumps(
+                {"status": "FAIL_CLOSED", "finding_code": exc.finding_code},
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            file=sys.stderr,
+        )
+        return 2
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(_entrypoint())
