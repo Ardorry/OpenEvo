@@ -1,0 +1,11 @@
+{
+  "candidate_baseline_stack_equal": true,
+  "candidate_codex_executable_sha256": "a96f944d1a596dbfb7fdd84f482be5c50e34b04bb371126840d873e4ebf26902",
+  "managed_candidate_image_id": "sha256:7a0079f9cb1bce5768cff5bce3d1181811c6a231ad800cac8fb503d66852c81b",
+  "model": "gpt-5.5",
+  "model_calls": 0,
+  "reasoning_effort": "medium",
+  "reflector_codex_executable_sha256": "a96f944d1a596dbfb7fdd84f482be5c50e34b04bb371126840d873e4ebf26902",
+  "schema_version": "TemperatureSafeModelIdentityReceiptV2",
+  "status": "PASS_ZERO_MODEL_CALLS"
+}

@@ -78,6 +78,8 @@ from openevo_chembench.temperature_full_evolve_v1.runtime_services import (
 MAX_CANDIDATE_WORKERS = CANDIDATE_MAX_WORKERS
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 DEFAULT_MAX_POLL_ATTEMPTS = 2400
+PRECLAIM_HEALTH_ATTEMPTS = 5
+PRECLAIM_HEALTH_RETRY_INTERVAL_SECONDS = 1.0
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _SAFE_ID = re.compile(r"[a-z0-9][a-z0-9._-]{7,191}\Z", re.ASCII)
 
@@ -452,7 +454,7 @@ class TemperatureFormalExecutorV1:
             # post-claim transport ambiguity is intentionally fail-closed and
             # recovered only by exact task identity; it never authorizes a
             # replacement model call.
-            self._runtime.require_current()
+            self._require_preclaim_health()
             self._ledger.append("CALL_CLAIMED", dict(envelope.claim_payload))
             try:
                 submitted = client.submit_task(_task_payload(envelope.task_request))
@@ -465,6 +467,33 @@ class TemperatureFormalExecutorV1:
         if submitted != envelope.task_request.task_id:
             raise TemperatureFormalExecutionError("FORMAL_SUBMITTED_TASK_ID_MISMATCH")
         return _AdmittedCallV1(envelope=envelope, recovered_after_restart=False)
+
+    def _require_preclaim_health(self) -> None:
+        """Bound a transient health retry strictly before the durable claim.
+
+        No retry is permitted after ``CALL_CLAIMED`` because submission may then
+        be ambiguous.  Before that boundary the check is reversible, so a short
+        service-health observation race may be retried without creating a model
+        call, changing an attempt identity, or weakening exactly-once semantics.
+        """
+
+        last_error: Exception | None = None
+        for attempt in range(PRECLAIM_HEALTH_ATTEMPTS):
+            try:
+                self._runtime.require_current()
+                return
+            except Exception as exc:  # noqa: BLE001 - external health boundary
+                last_error = exc
+            if attempt + 1 < PRECLAIM_HEALTH_ATTEMPTS:
+                time.sleep(
+                    min(
+                        PRECLAIM_HEALTH_RETRY_INTERVAL_SECONDS,
+                        self._poll_interval,
+                    )
+                )
+        raise TemperatureFormalExecutionError(
+            "FORMAL_PRECLAIM_RUNTIME_HEALTH_UNAVAILABLE"
+        ) from last_error
 
     def _await_durable_terminal(self, admitted: _AdmittedCallV1) -> DurableFormalOutcomeV1:
         envelope = admitted.envelope

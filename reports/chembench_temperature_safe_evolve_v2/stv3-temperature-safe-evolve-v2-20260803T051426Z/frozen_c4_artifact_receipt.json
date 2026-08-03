@@ -1,0 +1,42 @@
+{
+  "artifacts": [
+    {
+      "artifact_id": "art_1f28380f89c44adb",
+      "job_id": "job_a4d94aa5d3a94385",
+      "lineage_sha256": "db3ef767fbf1c2311cee7bff05a0efd4f8950553130fd58ef6642de2f569d925",
+      "manifest_sha256": "05f45b05b6efb483cf5912d9f78c37e049d5de9b002383a9e56d485cab6969d2",
+      "sha256": "0cd3998a0f773977b05803b4c482ad70009c3a7027593cb7501e0ba06af23a57",
+      "target_id": "text_memory",
+      "utf8_bytes": 3455
+    },
+    {
+      "artifact_id": "art_347db74a406d450a",
+      "job_id": "job_517f072e7d8c42f3",
+      "lineage_sha256": "2613ed2c6ef2bba60e2c3a1587d39cbc69fde087360f3ad50d84855ec2fbe0ee",
+      "manifest_sha256": "34ad9f05e246e1d3df8afa6a32b405e89646147dca34b353945eaadb5fd5ec48",
+      "sha256": "128d771e8399a12bf6c967da8006d252ebb6262ef00de21d15550ca903e62f50",
+      "target_id": "skill_bundle",
+      "utf8_bytes": 784
+    },
+    {
+      "artifact_id": "art_0950674da2194f8d",
+      "job_id": "job_f7bd6abcdcf54d7d",
+      "lineage_sha256": "f3f860ab22443302db65419436c83dc54b1483703ca1d5b84c98164791877e73",
+      "manifest_sha256": "1e6e468d8faf1fe8f50778df7d9214119ce0f7d6cee8f84975d43cd454f0bbe0",
+      "sha256": "ebf98e210c2c025b9c1f9ebb30b54057823e02ddbfdaab00538c5d5c6bc2a903",
+      "target_id": "agent_system",
+      "utf8_bytes": 492
+    }
+  ],
+  "checkpoint_sha256": "8ef9bf908e18fa94113acf302ecad4705aa2f26e6cc957a6ab787c4a0c1c7957",
+  "combined_context_bytes": 4731,
+  "combined_context_sha256": "0c2e6272788d36822733c4bb6f3572e605830ba956fb14cbd76cb29c8286f6b4",
+  "database_integrity": "ok",
+  "final_artifact_manifest_sha256": "39eea4b9295d8d40c798d376c5a434f6c99661a5beb00d9fb699d82bda2da1ee",
+  "payloads_reconstructed_from_report": false,
+  "payloads_recovered_from_formal_store": true,
+  "prior_run_id": "stv3-temperature-full-evolve-v1-20260802T191250Z",
+  "schema_version": "TemperatureSafeEvolveFrozenC4ReceiptV2",
+  "state_sha256": "a3c7ed81b84671533f26ebd78cf91980025ea385f3e6abbf81f87ebccfaafabc",
+  "status": "PASS"
+}

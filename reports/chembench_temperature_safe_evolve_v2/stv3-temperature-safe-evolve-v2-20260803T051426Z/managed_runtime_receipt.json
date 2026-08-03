@@ -1,0 +1,33 @@
+{
+  "capture_mode": "transcript",
+  "credential_content_read": false,
+  "credential_metadata_passed": true,
+  "empty_inventory_after_sha256": "9bb5fdd4015307780c6c03277205304aa2812fcb4455f0ca82e90af6833ddbc0",
+  "empty_inventory_before_sha256": "9bb5fdd4015307780c6c03277205304aa2812fcb4455f0ca82e90af6833ddbc0",
+  "framework_lock_sha256": "9d1865eaf61201e99f846cd44038fab63b0440ca55a1ea9d358001728822cd87",
+  "framework_registry_digest": "eb4153f59fc7ea53e2d4d307e111f105e219ee54eef5e2267a512a9b1edeeabd",
+  "model_calls": 0,
+  "model_visible_tools_enabled": false,
+  "phase_a_runtime_services_run_id": "stv3-temperature-safe-services-20260803T051426Z-cae3b81b57b2",
+  "prior_runtime_v8": {
+    "chembench_wheel_sha256": "be65e4c27d22e3c1d1dc81d9e885876ca6a073db5a36a0919031953db157ad7e",
+    "core_wheel_sha256": "55c39f5f5696ca7984787de0994574c90642703a31c880ddf4f0ccc81eff8e79",
+    "framework_lock_sha256": "da6231a0702fe74d056ed0e28b0476588351404509af8fcb11046be7f5bf8761",
+    "runtime_v8_identity_sha256": "3ee72fc62662b5e09c64734d02f94275351a30a31bd2b891b20fabdb01cb2f2d",
+    "schema_version": "TemperatureSafePriorRuntimeV8CompatibilityReceiptV2",
+    "source_commit": "b625a8ceabc512636a474502d84a93ece1f50929",
+    "status": "PASS_IMMUTABLE_PRIOR_RUNTIME_VERIFIED",
+    "used_as_compatibility_reference": true,
+    "used_as_v2_executable_bundle": false
+  },
+  "provider_transport_network_enabled": true,
+  "runtime_services_health_sha256": "4936c0107e18334799d45954544668828eb83015c75784d21e87a898fd353b99",
+  "runtime_services_identity_sha256": "843c93986f1be3460224d031f876b244c4b3728d2903b39138dc4ba25629df03",
+  "schema_version": "TemperatureSafeRuntimeIdentityReceiptV2",
+  "status": "PASS_ZERO_MODEL_CALLS",
+  "v2_chembench_wheel_sha256": "c8ddf0db26b488200e74330c343966d9fc23a1d5acf5a1d091aeaf212224d414",
+  "v2_core_wheel_sha256": "c43763a7377bbfba97344175ae184cdfc87d1dfc4bbe196cb0d1c34ce08fe6b0",
+  "v2_formal_runtime_identity_sha256": "0c0f168af00794286ac5bdc32debd13eb852b589909c61c21f367009e28dc9c1",
+  "v2_formal_runtime_receipt_sha256": "a5cf696ea2d8043a5706eb538e5ceac8fd3e6c9cf75990c42b56e8c332038d65",
+  "v2_formal_runtime_source_commit": "cae3b81b57b26bed2eed418af99869c84843b1d4"
+}

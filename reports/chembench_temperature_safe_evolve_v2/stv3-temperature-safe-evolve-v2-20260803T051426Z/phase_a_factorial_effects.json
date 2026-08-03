@@ -1,0 +1,12 @@
+{
+  "agent_system_main_effect_pp": -1.25,
+  "half_assignment_sha256": "6ab91ddc6983aadba28267d3250779988fabddb1bd1f8f982b397e0c5839e4ed",
+  "memory_x_agent_pp": 0.25,
+  "memory_x_skill_pp": 0.75,
+  "memory_x_skill_x_agent_pp": -0.75,
+  "schema_version": "TemperatureSafePhaseAFactorialEffectsV2",
+  "skill_bundle_main_effect_pp": 1.25,
+  "skill_x_agent_pp": -0.25,
+  "status": "DESCRIPTIVE_REUSED_TEST_MECHANISM_DIAGNOSTIC",
+  "text_memory_main_effect_pp": -6.25
+}

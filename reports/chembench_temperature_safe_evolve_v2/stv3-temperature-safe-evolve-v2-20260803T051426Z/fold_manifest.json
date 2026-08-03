@@ -1,0 +1,28 @@
+{
+  "classification": "reused_official_temperature_pool_independent_state_mechanism_experiment",
+  "dataset_sha256": "cb6c17c54d4c0cf103b38f12e9ce05663515b05bfdc342d83e3245d39f3a4b3a",
+  "fold_counts": {
+    "F0": 50,
+    "F1": 50,
+    "F2": 50,
+    "F3": 50
+  },
+  "fold_sha256": "3912df5d3cd32cfe44bafb87232eeabe36d08dcca559bc0ff571658cff9dc0fa",
+  "group_count": 202,
+  "group_manifest_sha256": "d2b2c8bd26c020ff0ff4bc7d2fe0ce8fb2a981c510436554860543dc4f5a2c9f",
+  "group_size_histogram": {
+    "1": 202
+  },
+  "grouping_algorithm": "temperature_reaction_lexical_union_find_v1",
+  "maximum_group_size": 1,
+  "namespace": "chembench-temperature-safe-evolve-v2-folds-v1",
+  "public_manifest_contains_target": false,
+  "public_manifest_contains_task_content": false,
+  "public_manifest_contains_uid": false,
+  "public_pool_sha256": "c4e2d624335b2d09b2796ba747dd7b9444fe6a4f831abd8f6acdda52ac2b9a2c",
+  "reserve_count": 2,
+  "schema_version": "TemperatureSafeEvolveFoldManifestV2",
+  "singleton_group_count": 202,
+  "status": "PASS",
+  "whole_group_assignment": true
+}

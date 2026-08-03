@@ -1,0 +1,21 @@
+{
+  "campaign_run_id": "stv3-temperature-safe-evolve-v2-20260803T051426Z",
+  "candidate_baseline_stack_equal": true,
+  "distinct_core_store_identity_per_fold": true,
+  "distinct_runtime_services_identity_per_fold": true,
+  "fold_runtime_and_core_identities": [],
+  "managed_codex_executable_sha256": "a96f944d1a596dbfb7fdd84f482be5c50e34b04bb371126840d873e4ebf26902",
+  "model": "gpt-5.5",
+  "parser_evaluator_equal": true,
+  "phase_a_runtime_services_run_id": "stv3-temperature-safe-services-20260803T051426Z-cae3b81b57b2",
+  "prior_runtime_v8_identity_sha256": "3ee72fc62662b5e09c64734d02f94275351a30a31bd2b891b20fabdb01cb2f2d",
+  "prior_runtime_v8_reused_as_mutable_v2_runtime": false,
+  "prior_runtime_v8_used_as_compatibility_reference": true,
+  "reasoning_effort": "medium",
+  "schema_version": "TemperatureSafeCompatibilityReceiptV2",
+  "semantic_repairs_between_test_arms": 0,
+  "source_commit": "cae3b81b57b26bed2eed418af99869c84843b1d4",
+  "status": "PASS",
+  "timeout_retry_policy_equal": true,
+  "v2_source_bound_formal_runtime_identity_sha256": "0c0f168af00794286ac5bdc32debd13eb852b589909c61c21f367009e28dc9c1"
+}

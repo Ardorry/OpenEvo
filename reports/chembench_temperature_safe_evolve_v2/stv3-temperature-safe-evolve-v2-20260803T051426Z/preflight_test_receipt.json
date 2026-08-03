@@ -1,0 +1,12 @@
+{
+  "command_sha256": "dbd0d9e5ef8a0f0b98e23589dbe86a17091128de52c63ab8825ae964fdd78eb5",
+  "failure_count": 0,
+  "focused_test_count": 18,
+  "model_calls": 0,
+  "output_sha256": "4a8510aa6b01d21be800357c9eb77819a4f29d49b384a57f149039cf02e74176",
+  "paid_call_gates": "CLOSED",
+  "regression_test_count": 93,
+  "schema_version": "TemperatureSafePreflightTestReceiptV2",
+  "status": "PASS",
+  "total_test_count": 111
+}

@@ -1,0 +1,10 @@
+{
+  "branch": "chembench-temperature-safe-evolve-v2",
+  "config_sha256": "4671c1ad974e3c293f238126ef980da8545d98f43c8490b079a36f865734fff4",
+  "experiment_paths_tracked_and_clean": true,
+  "formal_runtime_source_tree_sha256": "976ff0956832e4a9d7d53833fef399c220f88f2f53578d6c59e634a562812240",
+  "schema_version": "TemperatureSafeSourceCodeReceiptV2",
+  "source_commit": "cae3b81b57b26bed2eed418af99869c84843b1d4",
+  "status": "PASS_FROZEN",
+  "tracked_tree_clean": true
+}

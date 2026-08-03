@@ -298,6 +298,143 @@ def test_client_construction_failure_leaves_no_owned_claim(tmp_path: Path) -> No
         assert ledger.events == ()
 
 
+def test_transient_runtime_health_retries_only_before_claim(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_id = "formal-run-preclaim-health-0001"
+    service_digest = "8" * 64
+    submitted: list[str] = []
+    sleeps: list[float] = []
+
+    class _TransientRuntime:
+        repository_root = tmp_path.resolve()
+        service_run_id = "runtime-service-preclaim-001"
+        digest = service_digest
+
+        def __init__(self) -> None:
+            self.health_checks = 0
+
+        def require_current(self) -> dict[str, object]:
+            self.health_checks += 1
+            if self.health_checks <= 2:
+                raise RuntimeError("transient pre-claim health observation")
+            return {"runtime_services_identity_sha256": self.digest}
+
+    runtime = _TransientRuntime()
+    with TemperatureExperimentLedgerV1(
+        path=(tmp_path / "preclaim-health-ledger.jsonl").resolve(),
+        run_id=run_id,
+    ) as ledger:
+        plan = prepare_candidate_call_v1(
+            task=_task(),
+            prompt=_prompt(),
+            context=None,
+            context_workspace=None,
+            phase="baseline_test",
+            task_ordinal=0,
+            batch_index=None,
+            ledger=ledger,
+            run_id=run_id,
+            service_identity_sha256=service_digest,
+        )
+        status = _status(plan.task_request.task_id)
+        executor = TemperatureFormalExecutorV1(
+            runtime_services=runtime,
+            ledger=ledger,
+            client_factory=lambda: _Client(status=status, submitted=submitted),
+            audit_function=lambda **_kwargs: _audit(status),
+            no_completion_audit_function=_dual_proof,
+            post_durable_terminal_cooldown_seconds=0,
+            poll_interval_seconds=0.25,
+            max_poll_attempts=1,
+        )
+        monkeypatch.setattr(
+            "openevo_chembench.temperature_full_evolve_v1.execution.time.sleep",
+            sleeps.append,
+        )
+
+        outcome = executor.run_many_to_durable_terminal(
+            (FormalCallEnvelopeV1.from_candidate(plan),),
+            max_workers=1,
+        )[0]
+
+        assert outcome.state == "completion"
+        assert runtime.health_checks == 4  # Three admission checks plus one observation check.
+        assert submitted == [plan.task_request.task_id]
+        assert sleeps == [0.25, 0.25]
+        assert sum(event["kind"] == "CALL_CLAIMED" for event in ledger.events) == 1
+
+
+def test_persistent_preclaim_health_failure_never_claims_or_submits(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_id = "formal-run-preclaim-health-failure-0001"
+    service_digest = "6" * 64
+    submitted: list[str] = []
+
+    class _UnavailableRuntime:
+        repository_root = tmp_path.resolve()
+        service_run_id = "runtime-service-preclaim-failure-001"
+        digest = service_digest
+
+        def __init__(self) -> None:
+            self.health_checks = 0
+
+        def require_current(self) -> dict[str, object]:
+            self.health_checks += 1
+            raise RuntimeError("persistent pre-claim health failure")
+
+    runtime = _UnavailableRuntime()
+    with TemperatureExperimentLedgerV1(
+        path=(tmp_path / "preclaim-health-failure-ledger.jsonl").resolve(),
+        run_id=run_id,
+    ) as ledger:
+        plan = prepare_candidate_call_v1(
+            task=_task(),
+            prompt=_prompt(),
+            context=None,
+            context_workspace=None,
+            phase="baseline_test",
+            task_ordinal=0,
+            batch_index=None,
+            ledger=ledger,
+            run_id=run_id,
+            service_identity_sha256=service_digest,
+        )
+        status = _status(plan.task_request.task_id)
+        executor = TemperatureFormalExecutorV1(
+            runtime_services=runtime,
+            ledger=ledger,
+            client_factory=lambda: _Client(status=status, submitted=submitted),
+            audit_function=lambda **_kwargs: (_ for _ in ()).throw(
+                AssertionError("unclaimed call must not be audited")
+            ),
+            no_completion_audit_function=_dual_proof,
+            post_durable_terminal_cooldown_seconds=0,
+            poll_interval_seconds=0,
+            max_poll_attempts=1,
+        )
+        monkeypatch.setattr(
+            "openevo_chembench.temperature_full_evolve_v1.execution.time.sleep",
+            lambda _seconds: None,
+        )
+
+        with pytest.raises(
+            TemperatureFormalExecutionError,
+            match="FORMAL_PRECLAIM_RUNTIME_HEALTH_UNAVAILABLE",
+        ):
+            executor.run_many_to_durable_terminal(
+                (FormalCallEnvelopeV1.from_candidate(plan),),
+                max_workers=1,
+            )
+
+        assert runtime.health_checks == 5
+        assert submitted == []
+        assert ledger.events == ()
+
+
 def test_executor_closes_first_durable_terminal_before_second_admission(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

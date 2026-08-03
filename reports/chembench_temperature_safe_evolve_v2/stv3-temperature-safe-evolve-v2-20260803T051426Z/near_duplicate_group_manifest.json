@@ -1,0 +1,12 @@
+{
+  "algorithm": "temperature_reaction_lexical_union_find_v1",
+  "contains_item_identities": false,
+  "contains_task_content": false,
+  "group_count": 202,
+  "group_manifest_sha256": "d2b2c8bd26c020ff0ff4bc7d2fe0ce8fb2a981c510436554860543dc4f5a2c9f",
+  "maximum_group_size": 1,
+  "schema_version": "TemperatureSafeNearDuplicateGroupingManifestV2",
+  "singleton_group_count": 202,
+  "status": "PASS",
+  "whole_group_assignment": true
+}

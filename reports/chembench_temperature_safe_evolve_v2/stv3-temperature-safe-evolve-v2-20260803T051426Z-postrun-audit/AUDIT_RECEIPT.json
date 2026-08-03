@@ -1,0 +1,15 @@
+{
+  "campaign_run_id": "stv3-temperature-safe-evolve-v2-20260803T051426Z",
+  "formal_candidate_calls": 800,
+  "formal_core_jobs": 0,
+  "formal_reflector_calls": 0,
+  "formal_result_sha256sums_sha256": "475a2244c5eabc3191b31ac303a9c8ccc0c710d37f12babc018f75bfab618a54",
+  "formal_source_commit": "cae3b81b57b26bed2eed418af99869c84843b1d4",
+  "item_level_content_included": false,
+  "postrun_changes_affect_formal_results": false,
+  "postrun_review_classification": "aggregate_only_non_confirmatory_mechanism_audit",
+  "r0_r3_status": "NOT_RUN_BY_PREREGISTERED_STOP_RULE",
+  "schema_version": "TemperatureSafePostrunAuditReceiptV1",
+  "selected_target": null,
+  "status": "NO_GO_ABLATION_NO_SAFE_SINGLE_TARGET"
+}
