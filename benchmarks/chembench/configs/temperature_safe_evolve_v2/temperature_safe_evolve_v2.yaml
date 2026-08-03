@@ -1,0 +1,175 @@
+schema_version: chembench_temperature_safe_evolve_config_v2
+protocol_id: chembench_temperature_safe_evolve_v2
+experiment_name: ChemBench Temperature Safe-Evolve V2
+classification: reused_official_temperature_pool_independent_state_mechanism_experiment
+scope_disclaimers:
+  - current_run_train_validation_test_isolated
+  - fresh_state_database_artifact_lineage_and_model_calls
+  - repeated_official_pool_mechanism_evidence_only
+  - not_historical_never_exposed
+  - not_external_independent_generalization
+prior_run:
+  run_id: stv3-temperature-full-evolve-v1-20260802T191250Z
+  evolved_test_run_id: stv3-temperature-full-evolve-v1-20260802T191250Z-evolved-test
+  baseline_test_run_id: stv3-temperature-full-evolve-v1-20260802T191250Z-baseline-test
+  inference_commit: b625a8ceabc512636a474502d84a93ece1f50929
+  report_commit: 8f8a2d4729c09ecec7afd308bac4a712b29d6a65
+  permission_fix_commit: 2cf53173a20d0a275ccf5b008d05af2b5c5409d2
+  final_artifact_manifest_sha256: 39eea4b9295d8d40c798d376c5a434f6c99661a5beb00d9fb699d82bda2da1ee
+  artifacts:
+    text_memory:
+      utf8_bytes: 3455
+      sha256: 0cd3998a0f773977b05803b4c482ad70009c3a7027593cb7501e0ba06af23a57
+    skill_bundle:
+      utf8_bytes: 784
+      sha256: 128d771e8399a12bf6c967da8006d252ebb6262ef00de21d15550ca903e62f50
+    agent_system:
+      utf8_bytes: 492
+      sha256: ebf98e210c2c025b9c1f9ebb30b54057823e02ddbfdaab00538c5d5c6bc2a903
+    combined:
+      utf8_bytes: 4731
+      sha256: 0c2e6272788d36822733c4bb6f3572e605830ba956fb14cbd76cb29c8286f6b4
+dataset:
+  repository: AI4Chem/ChemBench4K
+  revision: f8ad41a980170f4c5d0cc97e57722d06887c8f53
+  root: data/chembench4k/AI4Chem_ChemBench4K/f8ad41a980170f4c5d0cc97e57722d06887c8f53
+  category: Temperature_Prediction
+  source_split: test
+  expected_pool_count: 202
+phase_a:
+  test_count: 100
+  half_count: 50
+  half_namespace: chembench-temperature-safe-evolve-v2-ablation-halves-v1
+  arms:
+    A0: []
+    A1: [text_memory]
+    A2: [skill_bundle]
+    A3: [agent_system]
+    A4: [text_memory, skill_bundle]
+    A5: [text_memory, agent_system]
+    A6: [skill_bundle, agent_system]
+    A7: [text_memory, skill_bundle, agent_system]
+  expected_candidate_accepted_calls: 800
+  eligible_targets: [text_memory, skill_bundle]
+  selection_gate:
+    utility_strictly_positive: true
+    positive_flips_gt_negative_flips: true
+    negative_flips_max: 2
+    both_half_accuracy_delta_min_pp: 0
+    both_half_utility_min: 0
+    infrastructure_parity_required: true
+  tie_break: [utility_desc, negative_flips_asc, accuracy_desc, injected_bytes_asc, skill_bundle]
+folds:
+  namespace: chembench-temperature-safe-evolve-v2-folds-v1
+  fold_sizes: [50, 50, 50, 50]
+  reserve_count: 2
+  train_count: 100
+  validation_count: 50
+  test_count: 50
+  batch_size: 25
+  validation_part_size: 25
+  grouping_algorithm: temperature_reaction_lexical_union_find_v1
+  runs:
+    R0: {train: [F0, F1], validation: F2, test: F3}
+    R1: {train: [F1, F2], validation: F3, test: F0}
+    R2: {train: [F2, F3], validation: F0, test: F1}
+    R3: {train: [F3, F0], validation: F1, test: F2}
+model:
+  name: gpt-5.5
+  reasoning_effort: medium
+managed_runtime:
+  source: openevo_core_managed_codex_v1
+  npm_package: "@openai/codex@0.144.1"
+  cli_version: codex-cli 0.144.1
+  executable_sha256: a96f944d1a596dbfb7fdd84f482be5c50e34b04bb371126840d873e4ebf26902
+  candidate_image_id: sha256:7a0079f9cb1bce5768cff5bce3d1181811c6a231ad800cac8fb503d66852c81b
+  expected_runtime_v8_identity: 3ee72fc62662b5e09c64734d02f94275351a30a31bd2b891b20fabdb01cb2f2d
+executor:
+  rollout_url: http://127.0.0.1:8080
+  timeout_seconds: 1200
+  infrastructure_retry_limit: 3
+  candidate_max_workers: 1
+  post_durable_terminal_cooldown_seconds: 15
+  runtime_profile: managed_science
+  auth_mode: subscription
+  capture_mode: transcript
+  approval_policy: never
+  tool_policy: zero_tool_transcript_audit
+  model_visible_tools_enabled: false
+  provider_transport_network_enabled: true
+  mcp_servers: []
+reflector:
+  timeout_seconds: 1800
+  attempts_max: 3
+  logical_calls_per_train_batch: 1
+  closed_schema_required: true
+  required_response_bindings: true
+core:
+  framework_lock: state/chembench_temperature_safe_evolve_v2/formal_runtime_v1/framework/framework-lock.json
+  jobs_per_train_batch: 1
+  selected_targets_allowed: [text_memory, skill_bundle]
+  agent_system_always_empty: true
+parser_evaluator:
+  official_parser: first_uppercase_opencompass_compatible
+  strict_parser: strict_single_letter_parser
+  evaluator: ChemBench4KPrivateEvaluator
+retrieval:
+  algorithm: deterministic_temperature_lexical_retrieval_v1
+  active_entry_limit: 6
+  text_memory: {top_k: 2, target_bytes: 1000, hard_bytes: 1200}
+  skill_bundle: {top_k: 1, target_bytes: 500, hard_bytes: 700}
+promotion_gate:
+  incremental_utility_strictly_positive: true
+  incremental_positive_gt_negative: true
+  incremental_negative_max: 1
+  candidate_accuracy_gte_active: true
+  baseline_utility_min: 0
+  candidate_accuracy_gte_g0: true
+  infrastructure_parity_required: true
+  schema_lineage_leakage_budget_required: true
+retirement_gate:
+  negative_flips_min: 2
+  positive_not_gt_negative: true
+  contradiction_support_ratio_gt: 0.5
+  consecutive_nonpositive_utility_blocks: 2
+  stale_supported_blocks: 2
+  retire_on_stronger_unconditional_conflict: true
+  retire_on_safety_failure: true
+deployment_gate:
+  utility_strictly_positive: true
+  positive_gt_negative: true
+  negative_max: 1
+  evolved_accuracy_gte_g0: true
+  cumulative_promoted_forward_utility_strictly_positive: true
+  promotion_min: 1
+  infrastructure_parity_required: true
+  audit_required: true
+r0_continue_gate:
+  v2_deployed_real_evolved_required: true
+  promotion_min: 1
+  raw_test_accuracy_gte_g0: true
+  raw_test_positive_gte_negative: true
+  raw_test_negative_max: 2
+  raw_test_utility_min: 0
+  infrastructure_parity_required: true
+  integrity_required: true
+budgets:
+  phase_a_candidate_accepted: 800
+  fold_candidate_logical_context_max: 500
+  fold_reflector_logical_max: 4
+  fold_core_job_max: 4
+  campaign_candidate_max_if_r0_stops: 1300
+  campaign_candidate_max_if_four_folds: 2800
+  campaign_reflector_max_if_r0_stops: 4
+  campaign_reflector_max_if_four_folds: 16
+  campaign_core_max_if_r0_stops: 4
+  campaign_core_max_if_four_folds: 16
+roots:
+  state: state/chembench_temperature_safe_evolve_v2
+  results: results/chembench_temperature_safe_evolve_v2
+  reports: reports/chembench_temperature_safe_evolve_v2
+  desktop_parent: /mnt/c/Users/lhy-h/Desktop/ChemBench_STV3_final_feasibility_20260801
+monitor:
+  interval_seconds: 600
+  stagnant_poll_limit: 2
+  tmux_session: temperature-safe-evolve-v2

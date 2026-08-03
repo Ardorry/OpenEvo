@@ -247,7 +247,7 @@ def prepare_temperature_formal_runtime_v1(
             "provider_transport_network_enabled": True,
             "model_calls": 0,
         }
-        receipt_path = temporary / "formal_runtime_receipt_v1.json"
+        receipt_path = temporary / Path(FORMAL_RUNTIME_RECEIPT_RELATIVE).name
         write_private_file(
             receipt_path,
             canonical_pretty_json_bytes(receipt),
