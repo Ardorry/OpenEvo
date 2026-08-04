@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "experiment": "ResearchClawBench Community17 Dev17",
+  "publication_status": "PARTIAL_BLOCKED_WITH_VALID_INTERMEDIATE_EVIDENCE",
+  "generated_at": "2026-08-04T07:33:29.726333+00:00",
+  "repository": {
+    "branch": "fix/researchclaw-dev17-successor-recovery",
+    "head": "d8a3826a802314cc26b14704ecc8b03be12e3980",
+    "fork_remote": "git@github.com:Ardorry/OpenEvo.git"
+  },
+  "runs": {
+    "v39_energy_gate": {
+      "status": "PASSED",
+      "scope": "isolated Energy_004 end-to-end gate",
+      "complete_dev17_result": false
+    },
+    "v40_successor_recovery": {
+      "status": "FAILED_CLOSED",
+      "failure_phase": "Energy_004 transition after method execution"
+    },
+    "v41_completed_prefix": {
+      "verification": "PASS",
+      "continuation_status": "BLOCKED",
+      "attempt_receipts": 13,
+      "reflector_cycles": 9,
+      "core_evolution_jobs": 27,
+      "candidate_calls": 13,
+      "judge_calls": 13,
+      "reflector_calls": 45
+    },
+    "v42_fresh": {
+      "status": "BLOCKED",
+      "verification": "PASS",
+      "failed_side_effects": 0,
+      "pending_side_effects": 1,
+      "completed_task_attempt_sets": [
+        "Astronomy_004",
+        "Chemistry_004"
+      ],
+      "next_task_started": "Earth_004",
+      "official40_completed": false
+    }
+  },
+  "excluded_from_git": [
+    "credentials and environment secrets",
+    "raw status logs containing provider material",
+    "supervisor databases",
+    "evaluator-private data",
+    "complete workspaces",
+    "managed runtime copies",
+    "model output collections"
+  ]
+}

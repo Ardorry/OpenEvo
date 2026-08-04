@@ -146,3 +146,9 @@ desktop/src-tauri/binaries/openevo-desktop-sidecar-*
 desktop/src-tauri/binaries/openevo-ssh-askpass-*
 desktop/src-tauri/gen/
 desktop/src-tauri/target/
+
+# Public result package: researchclaw-dev17-202608
+!docs/experiments/
+docs/experiments/*
+!docs/experiments/researchclaw-dev17-202608/
+!docs/experiments/researchclaw-dev17-202608/**
