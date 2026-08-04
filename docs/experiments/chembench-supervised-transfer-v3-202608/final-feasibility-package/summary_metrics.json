@@ -1,0 +1,100 @@
+{
+  "schema_version": "ChemBenchSTV3FinalPairedAuditSummaryV2",
+  "evidence_cutoff_utc": "2026-08-02T06:44:21.965303Z",
+  "verdict": "ENGINEERING_FEASIBLE_EFFECTIVENESS_NOT_DEMONSTRATED",
+  "verdict_zh": "工程闭环可行；进化有效性未证明，本版本设计不应晋升",
+  "comparison_classification": "PAIRED_DESCRIPTIVE_RECOVERY_COMPARISON_NOT_REPLICATED_CAUSAL_TRIAL",
+  "primary_result": {
+    "tasks": 450,
+    "baseline_correct": 388,
+    "baseline_accuracy": 0.8622222222222222,
+    "baseline_wilson_95_ci": [
+      0.8272984578559772,
+      0.8910140578121819
+    ],
+    "evolved_correct": 382,
+    "evolved_accuracy": 0.8488888888888889,
+    "evolved_wilson_95_ci": [
+      0.8128526382785087,
+      0.879018925892663
+    ],
+    "evolved_minus_baseline": -0.013333333333333334,
+    "evolved_minus_baseline_percentage_points": -1.3333333333333335,
+    "paired_difference_standard_error": 0.014056132387982442,
+    "paired_wald_95_ci": [
+      -0.04088284657570591,
+      0.014216179909039237
+    ],
+    "paired_mcnemar_exact_p": 0.42959050784338615,
+    "both_correct": 365,
+    "baseline_only_correct": 23,
+    "evolved_only_correct": 17,
+    "both_wrong": 45
+  },
+  "temperature_signal": {
+    "baseline_correct": 47,
+    "evolved_correct": 41,
+    "delta_percentage_points": -12.0,
+    "unadjusted_mcnemar_exact_p": 0.03125,
+    "holm_9_adjusted_p": 0.28125,
+    "outside_temperature_baseline_correct": 341,
+    "outside_temperature_evolved_correct": 341
+  },
+  "train": {
+    "accepted_category_shards": 9,
+    "tasks": 450,
+    "candidate_completions": 900,
+    "round_0_correct": 382,
+    "round_0_accuracy": 0.8488888888888889,
+    "round_1_correct": 402,
+    "round_1_accuracy": 0.8933333333333333,
+    "delta_percentage_points": 4.444444444444445,
+    "wrong_to_correct": 29,
+    "correct_to_wrong": 9,
+    "paired_mcnemar_exact_p": 0.0016580525261815637,
+    "reflector_calls_included": 450,
+    "core_jobs_included": 1350,
+    "typed_artifacts_included": 1350
+  },
+  "artifact_design_evidence": {
+    "final_frozen_targets": 27,
+    "all_final_targets_promoted": true,
+    "all_final_target_scores_empty": true,
+    "temperature_total_context_payload_bytes": 17528,
+    "temperature_text_memory_bytes": 14610,
+    "temperature_context_size_rank_descending": 1
+  },
+  "parser": {
+    "baseline_official_parsed": 450,
+    "baseline_strict_parsed": 450,
+    "evolved_official_parsed": 450,
+    "evolved_strict_parsed": 450,
+    "interpretation": "PARSING_SUCCESS_NOT_ACCURACY"
+  },
+  "integrity": {
+    "same_test_order_sha256": "a5759aa9d2c69a184bdbca0ac7385f6dc7450c44a3fd82e439337f2cbf5db347",
+    "same_split_digest": "82eb6582d8af1eaa6a7cb38e3b1cec522ce85d74eb0029bf2598ed315fffd903",
+    "same_config_digest": "655a2b83ca7ced741a24bbd3854eb88216852cf4f529f11ddff51e9078b4e4f9",
+    "same_model_digest": "0d1bbfb917f293308bbd7290199bae14ce0d659db17e874e38b91233da07d3b2",
+    "managed_codex_sha256": "a96f944d1a596dbfb7fdd84f482be5c50e34b04bb371126840d873e4ebf26902",
+    "frozen_artifact_set_sha256": "46db0c579fe4da2ac03bf3f795b140701fb42ad99dfbd9da3c9faec9f2f2e467",
+    "baseline_generation_zero_context": true,
+    "test_feedback_enabled": false,
+    "duplicate_completions": 0,
+    "security_findings": 0,
+    "context_findings": 0,
+    "artifact_findings": 0,
+    "both_arms_not_single_uninterrupted_runs": true,
+    "baseline_accepted_attempts": 525,
+    "baseline_attempts_without_completion": 75,
+    "evolved_recovery_suffix_attempts": 308,
+    "evolved_recovery_suffix_completions": 292
+  },
+  "runs": {
+    "train_composition_run_id": "stv3-temperature-controlfix-recovery-20260731T105523Z",
+    "evolved_parent_run_id": "stv3-composed-final-test-20260731T155440Z",
+    "evolved_recovery_run_id": "stv3-composed-final-test-recovery-20260801T031645Z",
+    "baseline_parent_run_id": "stv3-control-final-test-baseline-dockerfix-20260801T190638Z",
+    "baseline_recovery_run_id": "stv3-control-final-test-baseline-recovery-20260802T033900Z"
+  }
+}

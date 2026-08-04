@@ -145,3 +145,9 @@ desktop/packaging/core-wheel-dist/
 desktop/src-tauri/binaries/openevo-desktop-sidecar-*
 desktop/src-tauri/gen/
 desktop/src-tauri/target/
+
+# Public result package: chembench-supervised-transfer-v3-202608
+!docs/experiments/
+docs/experiments/*
+!docs/experiments/chembench-supervised-transfer-v3-202608/
+!docs/experiments/chembench-supervised-transfer-v3-202608/**

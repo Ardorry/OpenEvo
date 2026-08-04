@@ -1,0 +1,10 @@
+repository=Ardorry/OpenEvo
+branch=chembench-supervised-transfer-v1
+head=1f1ab81e21d06576bae00c4c78646c11eaf1dab1
+head_time=2026-08-02T11:35:07+08:00
+fork_remote=git@github.com:Ardorry/OpenEvo.git
+upstream_fetch_remote=git@github.com:CompLifeLab-ZJU/OpenEvo.git
+package=ChemBench Supervised Transfer V3 final feasibility report
+git_version=git version 2.34.1
+python_version=Python 3.10.12
+generated_utc=2026-08-04T07:43:00Z

@@ -1,0 +1,10 @@
+﻿category,wrong_wrong,wrong_correct,correct_wrong,correct_correct
+Name_Conversion,1,0,3,46
+Property_Prediction,8,4,5,33
+Mol2caption,0,0,0,50
+Caption2mol,3,2,0,45
+Product_Prediction,0,0,0,50
+Retrosynthesis,0,0,0,50
+Yield_Prediction,21,4,1,24
+Temperature_Prediction,2,10,0,38
+Solvent_Prediction,4,9,0,37

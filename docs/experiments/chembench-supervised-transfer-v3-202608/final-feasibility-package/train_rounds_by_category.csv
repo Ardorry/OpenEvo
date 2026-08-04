@@ -1,0 +1,10 @@
+﻿category,tasks,round_0_correct,round_0_accuracy,round_1_correct,round_1_accuracy,delta_percentage_points,wrong_to_correct,correct_to_wrong
+Name_Conversion,50,49,0.98,46,0.92,-6,0,3
+Property_Prediction,50,38,0.76,37,0.74,-2,4,5
+Mol2caption,50,50,1.0,50,1.0,0,0,0
+Caption2mol,50,45,0.9,47,0.94,4,2,0
+Product_Prediction,50,50,1.0,50,1.0,0,0,0
+Retrosynthesis,50,50,1.0,50,1.0,0,0,0
+Yield_Prediction,50,25,0.5,28,0.56,6,4,1
+Temperature_Prediction,50,38,0.76,48,0.96,20,10,0
+Solvent_Prediction,50,37,0.74,46,0.92,18,9,0

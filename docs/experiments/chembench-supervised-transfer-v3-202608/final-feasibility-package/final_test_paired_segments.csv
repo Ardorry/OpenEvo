@@ -1,0 +1,5 @@
+﻿segment,tasks,baseline_correct,evolved_correct,evolved_minus_baseline_percentage_points,baseline_only_correct,evolved_only_correct,mcnemar_exact_p
+both_parent_prefix,144,127,126,-0.6944444444444444,6,5,1.0
+baseline_suffix_evolved_parent,14,13,13,0.0,0,0,1.0
+both_recovery_suffix,292,248,243,-1.7123287671232876,17,12,0.45825831964612007
+excluding_temperature_prediction,400,341,341,0.0,17,17,1.0

@@ -1,0 +1,10 @@
+﻿category,text_memory_bytes,skill_bundle_bytes,agent_system_bytes,total_context_payload_bytes,final_update_global_ordinal,final_update_packet_chunks,final_update_success_reward_chunks,final_update_failure_reward_chunks,all_three_promoted,all_three_scores_empty
+Name_Conversion,11587,1566,1296,14449,50,63,63,0,True,True
+Property_Prediction,9075,1549,1037,11661,50,61,0,61,True,True
+Mol2caption,12940,1554,984,15478,50,61,61,0,True,True
+Caption2mol,10910,1534,1157,13601,50,68,68,0,True,True
+Product_Prediction,11760,1645,1223,14628,50,81,81,0,True,True
+Retrosynthesis,12686,1533,971,15190,50,72,72,0,True,True
+Yield_Prediction,7173,1522,1176,9871,50,69,0,69,True,True
+Temperature_Prediction,14610,1568,1350,17528,50,76,76,0,True,True
+Solvent_Prediction,6717,1535,909,9161,50,61,61,0,True,True
