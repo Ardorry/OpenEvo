@@ -855,21 +855,35 @@ class PilotV2Runner:
             )
 
         if stage is PilotV2Stage.TASK_PREPARED:
-            self._reserve(
-                category="candidate_model_calls",
-                units=1,
-                limit_units=MAX_CANDIDATE_JOBS,
-                key=f"{task_key}:baseline-candidate",
-            )
-            request = {
-                "task_id": task_id,
-                "run_id": task_state["baseline_run_id"],
-                "pass_name": "baseline",
-                "workspace": task_state["baseline_candidate_workspace"],
-                "evidence_root": str(
-                    self._task_namespace(task_id) / "evidence" / "baseline"
-                ),
-            }
+            try:
+                if not self.dry_run:
+                    judge_used = self.store.budget_usage(self.batch_id)[
+                        "judge_operations"
+                    ]
+                    needed = int(task_state["rubric_count"]) * 2
+                    if judge_used + needed > self._judge_http_limit:
+                        raise PilotBudgetExhausted(
+                            "JUDGE_HTTP_BUDGET_EXHAUSTED",
+                            f"task {task_id} needs {needed} Judge HTTP requests, "
+                            f"remaining budget {self._judge_http_limit - judge_used}",
+                        )
+                self._reserve(
+                    category="candidate_model_calls",
+                    units=1,
+                    limit_units=MAX_CANDIDATE_JOBS,
+                    key=f"{task_key}:baseline-candidate",
+                )
+                request = {
+                    "task_id": task_id,
+                    "run_id": task_state["baseline_run_id"],
+                    "pass_name": "baseline",
+                    "workspace": task_state["baseline_candidate_workspace"],
+                    "evidence_root": str(
+                        self._task_namespace(task_id) / "evidence" / "baseline"
+                    ),
+                }
+            except Exception as exc:
+                return self._blocked(stage, exc)
             return self._transition(
                 stage,
                 PilotV2Stage.TASK_BASELINE_RUNNING,
