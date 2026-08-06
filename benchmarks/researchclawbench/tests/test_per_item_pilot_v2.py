@@ -137,6 +137,7 @@ def _make_runner(
     evolution=None,
     judge=None,
     dry_run: bool = True,
+    adopt_from: str | None = None,
 ) -> PilotV2Runner:
     return PilotV2Runner(
         config=config,
@@ -146,12 +147,14 @@ def _make_runner(
         evolution_port=evolution or PilotV2DryRunEvolution(),
         judge_port=judge or PilotV2DryRunJudge(),
         dry_run=dry_run,
+        adopt_from=adopt_from,
     )
 
 
 def test_pilot_v2_config_is_frozen(tmp_path: Path) -> None:
     config = _make_config(tmp_path)
-    assert config.raw["execution"]["max_judge_http_requests"] == 18
+    assert config.raw["execution"]["max_judge_http_requests"] == MAX_JUDGE_HTTP_REQUESTS
+    assert MAX_JUDGE_HTTP_REQUESTS == 34
     assert config.raw["execution"]["max_retries"] == 0
 
 
@@ -316,6 +319,82 @@ def test_judge_http_budget_is_enforced(tmp_path: Path) -> None:
     assert state["failure_code"] == "JUDGE_HTTP_BUDGET_EXHAUSTED"
     assert state["judge_logical_jobs"] == 2
     assert state["judge_http_requests"] == 6
+
+
+def test_adopt_partial_prior_batch_continues_without_rerunning_completed_task(
+    tmp_path: Path,
+) -> None:
+    config = _make_config(tmp_path)
+    runner_one = _make_runner(config, batch_id="batch-one", dry_run=False)
+    runner_one._judge_http_limit = 10
+    runner_one.initialize()
+    state_one = runner_one.run_until_terminal()
+    assert state_one["stage"] == PilotV2Stage.PILOT_BUDGET_EXHAUSTED.value
+    assert "evolved_judge" in state_one["tasks"]["Astronomy_004"]
+    assert "evolved_judge" not in state_one["tasks"].get("Chemistry_004", {})
+
+    candidate_two = PilotV2DryRunCandidate()
+    evolution_two = PilotV2DryRunEvolution()
+    judge_two = PilotV2DryRunJudge()
+    runner_two = _make_runner(
+        config,
+        batch_id="batch-two",
+        candidate=candidate_two,
+        evolution=evolution_two,
+        judge=judge_two,
+        adopt_from="batch-one",
+    )
+    runner_two.initialize()
+    state_two = runner_two.run_until_terminal()
+    assert state_two["stage"] == PilotV2Stage.PILOT_CLOSED.value
+    assert len(candidate_two.calls) == 4
+    assert len(evolution_two.calls) == 2
+    assert len(judge_two.calls) == 4
+    assert state_two["candidate_jobs"] == 6
+    assert state_two["evolution_jobs"] == 9
+    assert state_two["judge_logical_jobs"] == 6
+    assert state_two["judge_http_requests"] == 18
+    assert set(state_two["tasks"]) == set(PILOT_TASKS)
+    astronomy_calls = [
+        call for call in candidate_two.calls if call["task_id"] == "Astronomy_004"
+    ]
+    assert astronomy_calls == []
+    summary = json.loads(
+        (config.output_root / "pilot_batch_result.json").read_text(encoding="utf-8")
+    )
+    assert [row["task_id"] for row in summary["rows"]] == list(PILOT_TASKS)
+
+
+def test_adopt_prior_completed_batch_closes_without_any_calls(
+    tmp_path: Path,
+) -> None:
+    config = _make_config(tmp_path)
+    runner_one = _make_runner(config, batch_id="batch-one")
+    runner_one.initialize()
+    state_one = runner_one.run_until_terminal()
+    assert state_one["stage"] == PilotV2Stage.PILOT_CLOSED.value
+
+    candidate_two = PilotV2DryRunCandidate()
+    evolution_two = PilotV2DryRunEvolution()
+    judge_two = PilotV2DryRunJudge()
+    runner_two = _make_runner(
+        config,
+        batch_id="batch-two",
+        candidate=candidate_two,
+        evolution=evolution_two,
+        judge=judge_two,
+        adopt_from="batch-one",
+    )
+    runner_two.initialize()
+    state_two = runner_two.run_until_terminal()
+    assert state_two["stage"] == PilotV2Stage.PILOT_CLOSED.value
+    assert candidate_two.calls == []
+    assert evolution_two.calls == []
+    assert judge_two.calls == []
+    assert state_two["candidate_jobs"] == 6
+    assert state_two["evolution_jobs"] == 9
+    assert state_two["judge_logical_jobs"] == 6
+    assert state_two["judge_http_requests"] == 18
 
 
 def test_candidate_evidence_is_persisted_and_redacted(

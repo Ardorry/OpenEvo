@@ -39,6 +39,7 @@ from .minimal_per_item_runner import (
     MinimalPerItemRunner,
 )
 from .per_item_pilot_v2 import (
+    PilotV2Error,
     PilotV2Config,
     PilotV2DryRunCandidate,
     PilotV2DryRunEvolution,
@@ -570,9 +571,15 @@ def command_pilot_v2(args: argparse.Namespace) -> int:
         evolution_port=evolution_port,
         judge_port=judge_port,
         dry_run=dry_run,
+        adopt_from=args.adopt_batch,
     )
     if fresh:
         runner.initialize()
+    elif args.adopt_batch is not None:
+        raise PilotV2Error(
+            "ADOPT_BATCH_EXISTS",
+            "an adopted continuation batch must start from a fresh run ID",
+        )
     state = runner.run_until_terminal()
     print_closed_json(state)
     if state.get("stage") == "PILOT_CLOSED":
@@ -708,6 +715,7 @@ def main(argv: list[str] | None = None) -> int:
     pilot_v2 = sub.add_parser("pilot-v2")
     pilot_v2.add_argument("--config", required=True, type=Path)
     pilot_v2.add_argument("--batch-id", required=True)
+    pilot_v2.add_argument("--adopt-batch", default=None)
     pilot_v2.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
     core_control_authority = None

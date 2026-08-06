@@ -42,7 +42,9 @@ PILOT_V2_PROTOCOL_NAME = "per_item_minimal_deepseek_pilot_v2"
 PILOT_TASKS = ("Astronomy_004", "Chemistry_004", "Information_005")
 DEFAULT_CANDIDATE_MODEL = "deepseek-v4-flash"
 DEFAULT_JUDGE_MODEL = "openai/gpt-5.1"
-MAX_JUDGE_HTTP_REQUESTS = 18
+# Two Judge passes per task and one HTTP request per rubric item, with the
+# locked community manifests at 6+6+5 items: 2 * (6+6+5) = 34 requests.
+MAX_JUDGE_HTTP_REQUESTS = 34
 MAX_CANDIDATE_JOBS = 6
 MAX_EVOLUTION_JOBS = 9
 
@@ -95,7 +97,13 @@ class PilotV2Stage(StrEnum):
 
 
 _ALLOWED: dict[PilotV2Stage, frozenset[PilotV2Stage]] = {
-    PilotV2Stage.PILOT_INIT: frozenset({PilotV2Stage.TASK_PREPARED, PilotV2Stage.PILOT_BLOCKED}),
+    PilotV2Stage.PILOT_INIT: frozenset(
+        {
+            PilotV2Stage.TASK_PREPARED,
+            PilotV2Stage.PILOT_CLOSED,
+            PilotV2Stage.PILOT_BLOCKED,
+        }
+    ),
     PilotV2Stage.TASK_PREPARED: frozenset({PilotV2Stage.TASK_BASELINE_RUNNING, PilotV2Stage.PILOT_BLOCKED, PilotV2Stage.PILOT_BUDGET_EXHAUSTED}),
     PilotV2Stage.TASK_BASELINE_RUNNING: frozenset({PilotV2Stage.TASK_BASELINE_SEALED, PilotV2Stage.PILOT_BLOCKED}),
     PilotV2Stage.TASK_BASELINE_SEALED: frozenset({PilotV2Stage.TASK_BASELINE_SCORED, PilotV2Stage.PILOT_BLOCKED, PilotV2Stage.PILOT_BUDGET_EXHAUSTED}),
@@ -550,6 +558,7 @@ class PilotV2Runner:
         judge_port: PilotJudgePort,
         workspace_builder: Callable[..., WorkspaceReceipt] = build_official_workspace,
         dry_run: bool = False,
+        adopt_from: str | None = None,
     ) -> None:
         self.config = config
         self.batch_id = batch_id
@@ -558,6 +567,7 @@ class PilotV2Runner:
         self.judge_port = judge_port
         self.workspace_builder = workspace_builder
         self.dry_run = dry_run
+        self.adopt_from = adopt_from
         self.store = TrainingStateStore(
             state_root,
             transition_fn=require_pilot_v2_transition,
@@ -573,6 +583,30 @@ class PilotV2Runner:
                 raise PilotV2Error("MANIFEST_MISSING", f"{task_id} manifest missing")
             if not (task_dir / "target_study" / "checklist.json").is_file():
                 raise PilotV2Error("GT_MISSING", f"{task_id} GT missing")
+        needed_judge_http = 2 * sum(
+            _rubric_count(self.config.researchclawbench_root / "tasks" / task_id)
+            for task_id in PILOT_TASKS
+        )
+        if needed_judge_http > MAX_JUDGE_HTTP_REQUESTS:
+            raise PilotV2Error(
+                "JUDGE_HTTP_BUDGET_INSUFFICIENT",
+                f"locked manifests need {needed_judge_http} Judge HTTP requests "
+                f"but the ceiling is {MAX_JUDGE_HTTP_REQUESTS}",
+            )
+        adopted_tasks: dict[str, Any] = {}
+        adopted_counters: dict[str, int] = {
+            "candidate_jobs": 0,
+            "evolution_jobs": 0,
+            "judge_logical_jobs": 0,
+            "judge_http_requests": 0,
+        }
+        task_index = 0
+        if self.adopt_from is not None:
+            (
+                adopted_tasks,
+                adopted_counters,
+                task_index,
+            ) = self._adopt_prior_batch(self.adopt_from)
         self.store.initialize_experiment(
             experiment_id=self.batch_id,
             protocol_sha256=canonical_sha256(self.config.raw),
@@ -580,16 +614,159 @@ class PilotV2Runner:
             adapter_identity_sha256=canonical_sha256({"adapter": "per-item-pilot-v2"}),
             initial_state={
                 "batch_id": self.batch_id,
-                "task_index": 0,
-                "tasks": {},
-                "candidate_jobs": 0,
-                "evolution_jobs": 0,
-                "judge_logical_jobs": 0,
-                "judge_http_requests": 0,
+                "task_index": task_index,
+                "tasks": adopted_tasks,
+                "candidate_jobs": adopted_counters["candidate_jobs"],
+                "evolution_jobs": adopted_counters["evolution_jobs"],
+                "judge_logical_jobs": adopted_counters["judge_logical_jobs"],
+                "judge_http_requests": adopted_counters["judge_http_requests"],
             },
             initial_stage=PilotV2Stage.PILOT_INIT,
         )
+        if self.adopt_from is not None:
+            self._reserve(
+                category="candidate_model_calls",
+                units=adopted_counters["candidate_jobs"],
+                limit_units=MAX_CANDIDATE_JOBS,
+                key="adopt:candidate",
+            )
+            self._reserve(
+                category="reflector_model_calls",
+                units=adopted_counters["evolution_jobs"],
+                limit_units=MAX_EVOLUTION_JOBS,
+                key="adopt:evolution",
+            )
+            self._reserve(
+                category="judge_operations",
+                units=adopted_counters["judge_http_requests"],
+                limit_units=self._judge_http_limit,
+                key="adopt:judge",
+            )
         return self.status()
+
+    def _adopt_prior_batch(
+        self, prior_batch_id: str
+    ) -> tuple[dict[str, Any], dict[str, int], int]:
+        """Adopt fully sealed prior-batch task results without re-running them."""
+
+        prior_state_root = self.config.output_root / "supervisor" / prior_batch_id
+        if not (prior_state_root / "training-supervisor.sqlite3").is_file():
+            raise PilotV2Error("ADOPT_SOURCE_MISSING", "prior batch state is missing")
+        prior_store = TrainingStateStore(
+            prior_state_root,
+            transition_fn=require_pilot_v2_transition,
+        )
+        prior = prior_store.load(prior_batch_id)
+        if prior.get("stage") not in {
+            PilotV2Stage.PILOT_BLOCKED.value,
+            PilotV2Stage.PILOT_BUDGET_EXHAUSTED.value,
+            PilotV2Stage.PILOT_CLOSED.value,
+        }:
+            raise PilotV2Error(
+                "ADOPT_SOURCE_NOT_TERMINAL",
+                "prior batch is not terminal",
+            )
+        if prior.get("_adapter_identity_sha256") != canonical_sha256(
+            {"adapter": "per-item-pilot-v2"}
+        ):
+            raise PilotV2Error(
+                "ADOPT_ADAPTER_IDENTITY_MISMATCH",
+                "prior batch adapter identity differs",
+            )
+        prior_tasks: dict[str, Any] = prior.get("tasks", {})
+        adopted: dict[str, Any] = {}
+        first_pending = 0
+        for index, task_id in enumerate(PILOT_TASKS):
+            task_state = prior_tasks.get(task_id)
+            if not isinstance(task_state, dict):
+                first_pending = index
+                break
+            baseline_judge = task_state.get("baseline_judge")
+            evolved_judge = task_state.get("evolved_judge")
+            evolution_receipt = task_state.get("evolution_receipt")
+            if not (
+                isinstance(baseline_judge, dict)
+                and baseline_judge.get("score_valid") is True
+                and isinstance(evolved_judge, dict)
+                and evolved_judge.get("score_valid") is True
+                and isinstance(evolution_receipt, dict)
+                and isinstance(task_state.get("artifact_hashes"), dict)
+            ):
+                first_pending = index
+                break
+            baseline_root = Path(
+                str(task_state["baseline_receipt"]["candidate_output_root"])
+            ).resolve(strict=True)
+            evolved_root = Path(
+                str(task_state["evolved_receipt"]["candidate_output_root"])
+            ).resolve(strict=True)
+            if candidate_artifact_root_sha256(baseline_root) != task_state[
+                "baseline_sealed_hash"
+            ] or candidate_artifact_root_sha256(evolved_root) != task_state[
+                "evolved_sealed_hash"
+            ]:
+                raise PilotV2Error(
+                    "ADOPT_SEALED_HASH_MISMATCH",
+                    f"{task_id} prior sealed evidence drifted",
+                )
+            for payload_name in (
+                "baseline_score.json",
+                "evolved_score.json",
+                "task_result.json",
+            ):
+                source = (
+                    self.config.output_root
+                    / "items"
+                    / task_id
+                    / "sealed"
+                    / prior_batch_id
+                    / payload_name
+                )
+                if not source.is_file():
+                    raise PilotV2Error(
+                        "ADOPT_SEALED_FILE_MISSING",
+                        f"{task_id} prior sealed file {payload_name} is missing",
+                    )
+            for payload_name in (
+                "baseline_score.json",
+                "evolved_score.json",
+                "task_result.json",
+            ):
+                source = (
+                    self.config.output_root
+                    / "items"
+                    / task_id
+                    / "sealed"
+                    / prior_batch_id
+                    / payload_name
+                )
+                target = (
+                    self.config.output_root
+                    / "items"
+                    / task_id
+                    / "sealed"
+                    / self.batch_id
+                    / payload_name
+                )
+                target.parent.mkdir(parents=True, exist_ok=True)
+                atomic_write_json(
+                    target,
+                    json.loads(source.read_text(encoding="utf-8")),
+                )
+            adopted[task_id] = task_state
+            first_pending = index + 1
+        counters = {
+            "candidate_jobs": int(prior.get("candidate_jobs", 0)),
+            "evolution_jobs": int(prior.get("evolution_jobs", 0)),
+            "judge_logical_jobs": int(prior.get("judge_logical_jobs", 0)),
+            "judge_http_requests": int(prior.get("judge_http_requests", 0)),
+        }
+        if first_pending > 0 and not adopted:
+            raise PilotV2Error(
+                "ADOPT_PARTIAL_INVALID",
+                "prior batch has no adoptable completed task",
+            )
+        return adopted, counters, first_pending
 
     def status(self) -> dict[str, Any]:
         return self.store.load(self.batch_id)
@@ -822,6 +999,19 @@ class PilotV2Runner:
         state = self.status()
         stage = PilotV2Stage(state["stage"])
         task_index = int(state["task_index"])
+        if stage is PilotV2Stage.PILOT_INIT and task_index >= len(PILOT_TASKS):
+            result = self._pilot_summary(state)
+            atomic_write_json(
+                self.config.output_root / "pilot_batch_result.json",
+                result,
+            )
+            return self._transition(
+                stage,
+                PilotV2Stage.PILOT_CLOSED,
+                "pilot-closed",
+                updates={"pilot_result": result},
+                receipt=result,
+            )
         task_id = PILOT_TASKS[task_index]
         task_dir = self._task_dir(task_id)
         task_state = state.setdefault("tasks", {}).setdefault(task_id, {})

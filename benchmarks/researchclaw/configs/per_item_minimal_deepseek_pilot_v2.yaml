@@ -40,7 +40,7 @@ execution:
   max_retries: 0
   max_candidate_jobs: 6
   max_evolution_jobs: 9
-  max_judge_http_requests: 18
+  max_judge_http_requests: 34
   stop_on_infrastructure_failure: true
   leaderboard_eligible: false
   official_protocol: false

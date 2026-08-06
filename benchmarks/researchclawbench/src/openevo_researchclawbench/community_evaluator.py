@@ -1030,7 +1030,9 @@ def _worker(
         api_key=os.environ["RCB_JUDGE_API_KEY"],
         api_base=actual_api_base,
         model=actual_model,
-        max_try=2,
+        # Pilot/rejudge contracts allow no retries: every rubric item is
+        # exactly one HTTP request, all durably pre-reserved before the pass.
+        max_try=1,
         timeout_seconds=120,
     )
 
