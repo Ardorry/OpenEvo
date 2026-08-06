@@ -18,14 +18,28 @@ from openevo_researchclawbench.durable_evaluator_operation import (
 )
 from openevo_researchclawbench.hashing import tree_sha256
 
-PROJECT_ROOT = Path(__file__).resolve().parents[4]
+PROJECT_ROOT = Path("/home/lhy-h/work/researchclaw_openevo")
 
 
 def test_adapter_pins_official_scorer_dependency_exactly() -> None:
+    assert evaluator.CANONICAL_SCORER_SHA256 == (
+        "9492317443acc069744330f27aac693d162f1aa6837d512e40419704197c6022"
+    )
+    assert evaluator.CANONICAL_SCORER_GIT_COMMIT == (
+        "b1175eca3deb78ff8b2c839070874474051d2261"
+    )
+    assert evaluator.CANONICAL_SCORER_RELATIVE_PATH == (
+        "ResearchClawBench/evaluation/score.py"
+    )
+    assert evaluator.OFFICIAL_SCORER_SHA256 == (
+        "a1c3370bc26a28b68ae06de48d333717cc6732ed746c1c0af4464791aeab188c"
+    )
     pyproject = (
-        PROJECT_ROOT / "OpenEvo/benchmarks/researchclawbench/pyproject.toml"
+        Path(__file__).resolve().parents[3]
+        / "benchmarks"
+        / "researchclawbench"
+        / "pyproject.toml"
     ).read_text(encoding="utf-8")
-    assert '"openai==2.50.0"' in pyproject
     assert '"packaging==26.2"' in pyproject
     assert '"structai==0.1.23"' in pyproject
 
@@ -183,7 +197,48 @@ def test_evaluator_child_has_closed_environment_and_private_outputs(
         observed["env"] = kwargs["env"]
         raw = Path(command[command.index("--raw-output") + 1])
         metadata = Path(command[command.index("--execution-metadata") + 1])
-        raw.write_text(json.dumps({"total_score": 25.0}), encoding="utf-8")
+        raw.write_text(
+            json.dumps(
+                {
+                    "run_id": "Astronomy_004_a0_v11",
+                    "task_id": "Astronomy_004",
+                    "agent_name": "Unknown",
+                    "items": [
+                        {
+                            "index": 0,
+                            "type": "text",
+                            "content": "criterion",
+                            "weight": 1.0,
+                            "score": 25.0,
+                            "reasoning": "addresses the criterion",
+                            "score_valid": True,
+                            "judge_completed": True,
+                            "failure_category": None,
+                            "requested_model": "openai/gpt-5.1",
+                            "requested_provider": "azure",
+                            "returned_provider": "Azure",
+                            "http_status": 200,
+                            "response_body_present": True,
+                            "content_present": True,
+                            "json_parse_success": True,
+                            "schema_valid": True,
+                            "http_requests": 1,
+                        }
+                    ],
+                    "total_score": 25.0,
+                    "total_weight": 1.0,
+                    "score_valid": True,
+                    "judge_completed": True,
+                    "failure_category": None,
+                    "requested_model": "openai/gpt-5.1",
+                    "requested_provider": "azure",
+                    "returned_provider": "Azure",
+                    "http_requests": 1,
+                    "usage": None,
+                }
+            ),
+            encoding="utf-8",
+        )
         metadata.write_text(
             json.dumps(
                 {
@@ -193,6 +248,15 @@ def test_evaluator_child_has_closed_environment_and_private_outputs(
                     "model": "openai/gpt-5.1",
                     "provider": "openai_compatible",
                     "request_count": UNAVAILABLE,
+                    "requested_provider": "azure",
+                    "returned_provider": "Azure",
+                    "scorer_source_path": "ResearchClawBench/evaluation/score.py",
+                    "scorer_git_commit": (
+                        "b1175eca3deb78ff8b2c839070874474051d2261"
+                    ),
+                    "scorer_sha256": (
+                        "9492317443acc069744330f27aac693d162f1aa6837d512e40419704197c6022"
+                    ),
                     "secret_recorded": False,
                     "usage": UNAVAILABLE,
                 }
@@ -213,17 +277,32 @@ def test_evaluator_child_has_closed_environment_and_private_outputs(
         expected_provider="openai_compatible",
         expected_artifact_root_sha256=candidate_artifact_sha256,
     )
-    assert result.judge_outcome.raw_score == {"total_score": 25.0}
+    assert result.judge_outcome.raw_score["total_score"] == 25.0
+    assert result.score_valid is True
+    assert result.judge_completed is True
+    assert result.failure_category is None
     child_env = observed["env"]
     assert isinstance(child_env, dict)
-    assert set(child_env) == {
+    required_child = {
         "PATH",
         "PYTHONUNBUFFERED",
         "PYTHONPATH",
-        "JUDGE_API_KEY",
-        "JUDGE_API_BASE",
-        "JUDGE_MODEL_NAME",
+        "RCB_JUDGE_API_KEY",
+        "RCB_JUDGE_BASE_URL",
+        "RCB_JUDGE_MODEL",
     }
+    assert required_child.issubset(child_env)
+    allowed_child = required_child | {
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "no_proxy",
+        "NO_PROXY",
+    }
+    assert set(child_env) <= allowed_child
     assert "OPENEVO_CORE_CONTROL_BEARER" not in child_env
     command = observed["command"]
     assert isinstance(command, list)

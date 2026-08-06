@@ -92,6 +92,66 @@ def _outcome(
     )
 
 
+def _fake_metadata(*, model: str = "openai/gpt-5.1") -> dict:
+    return {
+        "api_base": OPENROUTER_API_BASE,
+        "api_key_present": True,
+        "cost_total_usd": UNAVAILABLE,
+        "model": model,
+        "provider": "openai_compatible",
+        "request_count": UNAVAILABLE,
+        "requested_provider": "azure",
+        "returned_provider": "Azure",
+        "scorer_source_path": "ResearchClawBench/evaluation/score.py",
+        "scorer_git_commit": "b1175eca3deb78ff8b2c839070874474051d2261",
+        "scorer_sha256": (
+            "9492317443acc069744330f27aac693d162f1aa6837d512e40419704197c6022"
+        ),
+        "secret_recorded": False,
+        "usage": UNAVAILABLE,
+    }
+
+
+def _fake_payload(*, total_score: float = 61.0) -> dict:
+    return {
+        "run_id": "Astronomy_004_a0_v11",
+        "task_id": "Astronomy_004",
+        "agent_name": "Unknown",
+        "items": [
+            {
+                "index": 0,
+                "type": "text",
+                "content": "criterion",
+                "weight": 1.0,
+                "score": total_score,
+                "reasoning": "The report addresses the criterion.",
+                "score_valid": True,
+                "judge_completed": True,
+                "failure_category": None,
+                "requested_model": "openai/gpt-5.1",
+                "requested_provider": "azure",
+                "returned_provider": "Azure",
+                "http_status": 200,
+                "response_body_present": True,
+                "content_present": True,
+                "json_parse_success": True,
+                "schema_valid": True,
+                "http_requests": 1,
+            }
+        ],
+        "total_score": total_score,
+        "total_weight": 1.0,
+        "score_valid": True,
+        "judge_completed": True,
+        "failure_category": None,
+        "requested_model": "openai/gpt-5.1",
+        "requested_provider": "azure",
+        "returned_provider": "Azure",
+        "http_requests": 1,
+        "usage": None,
+    }
+
+
 class CountingExecutor:
     def __init__(self, outcome: JudgeExecutionOutcome | None = None) -> None:
         self.calls = 0
@@ -428,9 +488,9 @@ def test_detailed_community_evaluator_preserves_slug_and_marks_metrics_unavailab
     project_root.mkdir()
     workspace.mkdir()
     private.mkdir()
-    monkeypatch.setenv("JUDGE_API_KEY", "not-persisted")
-    monkeypatch.setenv("JUDGE_API_BASE", OPENROUTER_API_BASE)
-    monkeypatch.setenv("JUDGE_MODEL_NAME", "openai/gpt-5.1")
+    monkeypatch.setenv("RCB_JUDGE_API_KEY", "not-persisted")
+    monkeypatch.setenv("RCB_JUDGE_BASE_URL", OPENROUTER_API_BASE)
+    monkeypatch.setenv("RCB_JUDGE_MODEL", "openai/gpt-5.1")
     observed = {}
 
     class Completed:
@@ -443,22 +503,8 @@ def test_detailed_community_evaluator_preserves_slug_and_marks_metrics_unavailab
         observed["env"] = kwargs["env"]
         raw = Path(command[command.index("--raw-output") + 1])
         metadata = Path(command[command.index("--execution-metadata") + 1])
-        raw.write_text(json.dumps({"total_score": 61.0, "items": []}), encoding="utf-8")
-        metadata.write_text(
-            json.dumps(
-                {
-                    "api_base": OPENROUTER_API_BASE,
-                    "api_key_present": True,
-                    "cost_total_usd": UNAVAILABLE,
-                    "model": "openai/gpt-5.1",
-                    "provider": "openai_compatible",
-                    "request_count": UNAVAILABLE,
-                    "secret_recorded": False,
-                    "usage": UNAVAILABLE,
-                }
-            ),
-            encoding="utf-8",
-        )
+        raw.write_text(json.dumps(_fake_payload()), encoding="utf-8")
+        metadata.write_text(json.dumps(_fake_metadata()), encoding="utf-8")
         return Completed()
 
     monkeypatch.setattr(evaluator_module.subprocess, "run", fake_run)
@@ -486,7 +532,7 @@ def test_detailed_community_evaluator_preserves_slug_and_marks_metrics_unavailab
     # The key is passed only to the evaluator child, never written into a
     # command, receipt, or metadata object.
     assert "not-persisted" not in json.dumps(observed["command"])
-    assert observed["env"]["JUDGE_API_KEY"] == "not-persisted"
+    assert observed["env"]["RCB_JUDGE_API_KEY"] == "not-persisted"
 
 
 def test_detailed_community_evaluator_rejects_worker_identity_drift(
@@ -498,9 +544,9 @@ def test_detailed_community_evaluator_rejects_worker_identity_drift(
     project_root.mkdir()
     workspace.mkdir()
     private.mkdir()
-    monkeypatch.setenv("JUDGE_API_KEY", "not-persisted")
-    monkeypatch.setenv("JUDGE_API_BASE", OPENROUTER_API_BASE)
-    monkeypatch.setenv("JUDGE_MODEL_NAME", "openai/gpt-5.1")
+    monkeypatch.setenv("RCB_JUDGE_API_KEY", "not-persisted")
+    monkeypatch.setenv("RCB_JUDGE_BASE_URL", OPENROUTER_API_BASE)
+    monkeypatch.setenv("RCB_JUDGE_MODEL", "openai/gpt-5.1")
 
     class Completed:
         returncode = 0
@@ -510,20 +556,9 @@ def test_detailed_community_evaluator_rejects_worker_identity_drift(
     def fake_run(command, **_kwargs):
         raw = Path(command[command.index("--raw-output") + 1])
         metadata = Path(command[command.index("--execution-metadata") + 1])
-        raw.write_text(json.dumps({"total_score": 61.0}), encoding="utf-8")
+        raw.write_text(json.dumps(_fake_payload()), encoding="utf-8")
         metadata.write_text(
-            json.dumps(
-                {
-                    "api_base": OPENROUTER_API_BASE,
-                    "api_key_present": True,
-                    "cost_total_usd": UNAVAILABLE,
-                    "model": "gpt-5.1",
-                    "provider": "openai_compatible",
-                    "request_count": UNAVAILABLE,
-                    "secret_recorded": False,
-                    "usage": UNAVAILABLE,
-                }
-            ),
+            json.dumps(_fake_metadata(model="gpt-5.1")),
             encoding="utf-8",
         )
         return Completed()

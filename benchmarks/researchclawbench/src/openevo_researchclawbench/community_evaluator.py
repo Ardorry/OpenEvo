@@ -32,9 +32,36 @@ from .durable_evaluator_operation import (
 )
 from .evaluator_dependency_lock import validate_evaluator_dependency_lock
 from .hashing import UnsafePathError, iter_regular_files
+from .openrouter_judge import (
+    JUDGE_FAILURE_CATEGORIES,
+    REQUESTED_JUDGE_PROVIDER,
+    make_judge_client,
+    run_judge_probe,
+)
 
 _ATTEMPT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}\Z")
 _PINNED_STRUCTAI_VERSION = "0.1.23"
+_JUDGE_ENV_NAMES = ("RCB_JUDGE_API_KEY", "RCB_JUDGE_BASE_URL", "RCB_JUDGE_MODEL")
+_LEGACY_JUDGE_ENV_NAMES = ("JUDGE_API_KEY", "JUDGE_API_BASE", "JUDGE_MODEL_NAME")
+_JUDGE_ENV_PAIR = tuple(zip(_LEGACY_JUDGE_ENV_NAMES, _JUDGE_ENV_NAMES))
+_PROXY_ENV_NAMES = (
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "no_proxy",
+    "NO_PROXY",
+)
+OFFICIAL_SCORER_SHA256 = (
+    "a1c3370bc26a28b68ae06de48d333717cc6732ed746c1c0af4464791aeab188c"
+)
+CANONICAL_SCORER_SHA256 = (
+    "9492317443acc069744330f27aac693d162f1aa6837d512e40419704197c6022"
+)
+CANONICAL_SCORER_GIT_COMMIT = "b1175eca3deb78ff8b2c839070874474051d2261"
+CANONICAL_SCORER_RELATIVE_PATH = "ResearchClawBench/evaluation/score.py"
 _EVALUATOR_FORBIDDEN_SOURCE_NAMES = {
     ".codex",
     "checklist.json",
@@ -53,7 +80,10 @@ class CommunityEvaluatorExecution:
     """Private score plus measured-or-unavailable execution accounting."""
 
     raw_score: dict[str, Any]
-    judge_outcome: JudgeExecutionOutcome
+    judge_outcome: JudgeExecutionOutcome | None
+    score_valid: bool = True
+    judge_completed: bool = True
+    failure_category: str | None = None
 
 
 @dataclass(frozen=True)
@@ -99,6 +129,12 @@ class DurableCommunityJudgeExecutor:
             timeout_seconds=self.timeout_seconds,
             judge_env_file=self.judge_env_file,
         )
+        if not result.score_valid:
+            raise EvaluatorError(
+                f"Judge failed closed: {result.failure_category or 'UNKNOWN'}"
+            )
+        if result.judge_outcome is None:
+            raise EvaluatorError("Judge outcome is missing")
         result.judge_outcome.validate(self.policy)
         return result.judge_outcome
 
@@ -312,6 +348,7 @@ def run_community_evaluator(
         expected_model=None,
         expected_api_base=None,
         expected_provider="openai_compatible",
+        expected_requested_provider=REQUESTED_JUDGE_PROVIDER,
     ).raw_score
 
 
@@ -328,8 +365,14 @@ def run_community_evaluator_detailed(
     expected_artifact_root_sha256: str | None = None,
     timeout_seconds: int = 1800,
     judge_env_file: str | Path | None = None,
+    expected_requested_provider: str = REQUESTED_JUDGE_PROVIDER,
 ) -> CommunityEvaluatorExecution:
-    if not expected_model or not expected_api_base or expected_provider != "openai_compatible":
+    if (
+        not expected_model
+        or not expected_api_base
+        or expected_provider != "openai_compatible"
+        or expected_requested_provider != REQUESTED_JUDGE_PROVIDER
+    ):
         raise EvaluatorError("evaluator expected Judge identity is invalid")
     return _run_community_evaluator(
         project_root=project_root,
@@ -342,6 +385,7 @@ def run_community_evaluator_detailed(
         expected_model=expected_model,
         expected_api_base=expected_api_base,
         expected_provider=expected_provider,
+        expected_requested_provider=expected_requested_provider,
         expected_artifact_root_sha256=expected_artifact_root_sha256,
         allowed_task_ids=FROZEN_TASKS,
     )
@@ -361,6 +405,7 @@ def run_official_evaluator_detailed(
     expected_artifact_root_sha256: str | None = None,
     timeout_seconds: int = 1800,
     judge_env_file: str | Path | None = None,
+    expected_requested_provider: str = REQUESTED_JUDGE_PROVIDER,
 ) -> CommunityEvaluatorExecution:
     """Run the same durable Judge worker against an exact official allowlist."""
 
@@ -370,7 +415,12 @@ def run_official_evaluator_detailed(
         or task_id not in official_task_ids
     ):
         raise EvaluatorError("official evaluator task allowlist is invalid")
-    if not expected_model or not expected_api_base or expected_provider != "openai_compatible":
+    if (
+        not expected_model
+        or not expected_api_base
+        or expected_provider != "openai_compatible"
+        or expected_requested_provider != REQUESTED_JUDGE_PROVIDER
+    ):
         raise EvaluatorError("evaluator expected Judge identity is invalid")
     return _run_community_evaluator(
         project_root=project_root,
@@ -383,6 +433,7 @@ def run_official_evaluator_detailed(
         expected_model=expected_model,
         expected_api_base=expected_api_base,
         expected_provider=expected_provider,
+        expected_requested_provider=expected_requested_provider,
         expected_artifact_root_sha256=expected_artifact_root_sha256,
         allowed_task_ids=official_task_ids,
     )
@@ -393,7 +444,12 @@ def _closed_evaluator_subprocess_environment(
     project_root: Path,
     judge_env_file: str | Path | None,
 ) -> dict[str, str]:
-    """Build the evaluator child environment from explicit, importable roots."""
+    """Build the evaluator child environment from explicit, importable roots.
+
+    The child receives the canonical ``RCB_JUDGE_*`` names directly (or the
+    closed ``judge.env`` path).  DeepSeek credentials, Codex profiles and
+    arbitrary parent environment variables are never inherited.
+    """
 
     # The benchmark adapter is intentionally source-loaded by the formal
     # runner, so it is not necessarily installed in the evaluator venv.  The
@@ -415,9 +471,22 @@ def _closed_evaluator_subprocess_environment(
             )
         ),
     }
-    names = ("JUDGE_API_KEY", "JUDGE_API_BASE", "JUDGE_MODEL_NAME")
-    if all(os.environ.get(name) for name in names):
-        env.update({name: os.environ[name] for name in names})
+    env.update(
+        {
+            name: os.environ[name]
+            for name in _PROXY_ENV_NAMES
+            if os.environ.get(name)
+        }
+    )
+    if all(os.environ.get(name) for name in _JUDGE_ENV_NAMES):
+        env.update({name: os.environ[name] for name in _JUDGE_ENV_NAMES})
+    elif all(os.environ.get(name) for name in _LEGACY_JUDGE_ENV_NAMES):
+        env.update(
+            {
+                rcb_name: os.environ[legacy_name]
+                for legacy_name, rcb_name in _JUDGE_ENV_PAIR
+            }
+        )
     elif judge_env_file is not None:
         secret = Path(judge_env_file).resolve(strict=True)
         env["OPENEVO_JUDGE_ENV_FILE"] = os.fspath(secret)
@@ -438,6 +507,7 @@ def _run_community_evaluator(
     expected_model: str | None,
     expected_api_base: str | None,
     expected_provider: str,
+    expected_requested_provider: str,
     expected_artifact_root_sha256: str | None = None,
     allowed_task_ids: tuple[str, ...] = FROZEN_TASKS,
 ) -> CommunityEvaluatorExecution:
@@ -512,6 +582,8 @@ def _run_community_evaluator(
         str(metadata_path),
         "--expected-judge-provider",
         expected_provider,
+        "--expected-requested-provider",
+        expected_requested_provider,
         "--expected-task-id",
         task_id,
         "--expected-attempt-id",
@@ -540,9 +612,28 @@ def _run_community_evaluator(
     if (
         not isinstance(payload, dict)
         or "error" in payload
-        or type(payload.get("total_score")) not in {int, float}
     ):
         raise EvaluatorError("community scorer output is invalid")
+    required_payload_keys = {
+        "failure_category",
+        "http_requests",
+        "items",
+        "judge_completed",
+        "requested_model",
+        "requested_provider",
+        "returned_provider",
+        "score_valid",
+        "total_score",
+    }
+    if not required_payload_keys.issubset(payload):
+        raise EvaluatorError("community scorer output is invalid")
+    if payload["requested_provider"] != REQUESTED_JUDGE_PROVIDER:
+        raise EvaluatorError("Judge requested provider differs from protocol")
+    if (
+        expected_model is not None
+        and payload.get("requested_model") != expected_model
+    ):
+        raise EvaluatorError("Judge requested model differs from protocol")
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     if not isinstance(metadata, dict) or set(metadata) != {
         "api_base",
@@ -551,6 +642,11 @@ def _run_community_evaluator(
         "model",
         "provider",
         "request_count",
+        "requested_provider",
+        "returned_provider",
+        "scorer_source_path",
+        "scorer_git_commit",
+        "scorer_sha256",
         "secret_recorded",
         "usage",
     }:
@@ -559,33 +655,80 @@ def _run_community_evaluator(
         metadata["provider"] != expected_provider
         or metadata["api_key_present"] is not True
         or metadata["secret_recorded"] is not False
+        or metadata["requested_provider"] != REQUESTED_JUDGE_PROVIDER
+        or metadata["scorer_source_path"] != CANONICAL_SCORER_RELATIVE_PATH
+        or metadata["scorer_git_commit"] != CANONICAL_SCORER_GIT_COMMIT
+        or metadata["scorer_sha256"] != CANONICAL_SCORER_SHA256
+        or (
+            metadata["returned_provider"] is not None
+            and (
+                not isinstance(metadata["returned_provider"], str)
+                or not metadata["returned_provider"]
+            )
+        )
         or (expected_model is not None and metadata["model"] != expected_model)
         or (expected_api_base is not None and metadata["api_base"] != expected_api_base)
-        or metadata["request_count"] != UNAVAILABLE
-        or metadata["usage"] != UNAVAILABLE
+        or not (
+            (type(metadata["request_count"]) is int and metadata["request_count"] >= 0)
+            or metadata["request_count"] == UNAVAILABLE
+        )
+        or not (
+            isinstance(metadata["usage"], dict) or metadata["usage"] == UNAVAILABLE
+        )
         or metadata["cost_total_usd"] != UNAVAILABLE
     ):
         raise EvaluatorError("Judge execution identity differs from protocol")
-    outcome = JudgeExecutionOutcome(
+    score_valid = payload["score_valid"] is True
+    judge_completed = payload["judge_completed"] is True
+    failure_category = payload.get("failure_category")
+    if score_valid:
+        total_score = payload.get("total_score")
+        if (
+            type(total_score) not in {int, float}
+            or not 0 <= float(total_score) <= 100
+            or not judge_completed
+            or failure_category is not None
+        ):
+            raise EvaluatorError("community scorer output is invalid")
+        outcome = JudgeExecutionOutcome(
+            raw_score=payload,
+            runtime_identity=JudgeRuntimeIdentity(
+                provider=metadata["provider"],
+                api_base=metadata["api_base"],
+                model=metadata["model"],
+                api_key_present=metadata["api_key_present"],
+            ),
+            request_count=metadata["request_count"],
+            usage=metadata["usage"],
+            cost_total_usd=metadata["cost_total_usd"],
+        )
+    else:
+        if (
+            payload.get("total_score") is not None
+            or judge_completed
+            or failure_category not in JUDGE_FAILURE_CATEGORIES
+        ):
+            raise EvaluatorError("community scorer output is invalid")
+        outcome = None
+    return CommunityEvaluatorExecution(
         raw_score=payload,
-        runtime_identity=JudgeRuntimeIdentity(
-            provider=metadata["provider"],
-            api_base=metadata["api_base"],
-            model=metadata["model"],
-            api_key_present=metadata["api_key_present"],
-        ),
-        # The official scorer/structai boundary currently does not expose
-        # per-request accounting.  Never replace these values with a guessed
-        # checklist length, one request, or zero cost.
-        request_count=metadata["request_count"],
-        usage=metadata["usage"],
-        cost_total_usd=metadata["cost_total_usd"],
+        judge_outcome=outcome,
+        score_valid=score_valid,
+        judge_completed=judge_completed,
+        failure_category=failure_category,
     )
-    return CommunityEvaluatorExecution(raw_score=payload, judge_outcome=outcome)
 
 
 def _load_judge_environment() -> tuple[str, ...]:
-    names = ("JUDGE_API_KEY", "JUDGE_API_BASE", "JUDGE_MODEL_NAME")
+    """Load the closed Judge credential set inside the evaluator child.
+
+    The canonical names are ``RCB_JUDGE_*``.  The legacy ``JUDGE_*`` names are
+    accepted from an existing ``judge.env`` or parent process for backward
+    compatibility and are translated into the canonical names before the
+    scorer imports its configuration.
+    """
+
+    names = _JUDGE_ENV_NAMES
     secret_path = os.environ.get("OPENEVO_JUDGE_ENV_FILE")
     if secret_path:
         source = Path(secret_path)
@@ -605,12 +748,13 @@ def _load_judge_environment() -> tuple[str, ...]:
             raise EvaluatorError("judge environment file is unsafe")
         path = source.resolve(strict=True)
         values: dict[str, str] = {}
+        allowed_names = set(_JUDGE_ENV_NAMES) | set(_LEGACY_JUDGE_ENV_NAMES)
         for line in path.read_text(encoding="utf-8").splitlines():
             stripped = line.strip()
             if not stripped or stripped.startswith("#"):
                 continue
             key, separator, value = stripped.partition("=")
-            if separator != "=" or key not in names or key in values:
+            if separator != "=" or key not in allowed_names or key in values:
                 raise EvaluatorError("judge environment file has an invalid closed key set")
             value = value.strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
@@ -618,11 +762,30 @@ def _load_judge_environment() -> tuple[str, ...]:
             if not value or "\x00" in value or "\n" in value or "\r" in value:
                 raise EvaluatorError("judge environment file contains an invalid value")
             values[key] = value
+        if set(values) == set(_LEGACY_JUDGE_ENV_NAMES):
+            values = {
+                rcb_name: values[legacy_name]
+                for legacy_name, rcb_name in _JUDGE_ENV_PAIR
+            }
         if set(values) != set(names):
             raise EvaluatorError("judge environment file is incomplete")
         os.environ.update(values)
-    if not all(os.environ.get(name) for name in names):
+    if all(os.environ.get(name) for name in names):
+        values = {name: os.environ[name] for name in names}
+    elif all(os.environ.get(name) for name in _LEGACY_JUDGE_ENV_NAMES):
+        values = {
+            rcb_name: os.environ[legacy_name]
+            for legacy_name, rcb_name in _JUDGE_ENV_PAIR
+        }
+    else:
         raise EvaluatorError("judge environment is incomplete")
+    os.environ.update(values)
+    os.environ.update(
+        {
+            legacy_name: values[rcb_name]
+            for legacy_name, rcb_name in _JUDGE_ENV_PAIR
+        }
+    )
     return tuple(os.environ[name] for name in names)
 
 
@@ -718,7 +881,13 @@ def _credential_preflight(
 
 
 def _scorer_installation_authority(project_root: Path) -> dict[str, Any]:
-    """Attest the exact scorer package, hidden task root, and dependency pin."""
+    """Attest the canonical scorer package, hidden task root and dependency pin.
+
+    The canonical scorer is the transport-free ``score.py`` committed in the
+    ResearchClawBench repository.  Its SHA-256 and git commit are pinned; the
+    official upstream scorer SHA-256 remains available in the repository
+    history and is re-verified here.
+    """
 
     parent = str(project_root)
     if parent not in sys.path:
@@ -750,9 +919,46 @@ def _scorer_installation_authority(project_root: Path) -> dict[str, Any]:
         or tasks_dir != expected_tasks_dir
     ):
         raise EvaluatorError("ResearchClawBench scorer or TASKS_DIR authority differs")
+    scorer_sha256 = hashlib.sha256(score_origin.read_bytes()).hexdigest()
+    if scorer_sha256 != CANONICAL_SCORER_SHA256:
+        raise EvaluatorError("canonical scorer SHA differs from the pinned identity")
+    git_result = subprocess.run(
+        ("git", "-C", os.fspath(expected_repository), "rev-parse", "HEAD"),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if (
+        git_result.returncode != 0
+        or git_result.stdout.strip() != CANONICAL_SCORER_GIT_COMMIT
+    ):
+        raise EvaluatorError("canonical scorer git commit differs")
+    official_result = subprocess.run(
+        (
+            "git",
+            "-C",
+            os.fspath(expected_repository),
+            "show",
+            "53ee262:evaluation/score.py",
+        ),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if (
+        official_result.returncode != 0
+        or hashlib.sha256(official_result.stdout.encode("utf-8")).hexdigest()
+        != OFFICIAL_SCORER_SHA256
+    ):
+        raise EvaluatorError("official scorer history differs from the pinned SHA")
     return {
         "score_workspace": scorer_module.score_workspace,
         "scorer_module_origin": score_origin.relative_to(project_root).as_posix(),
+        "scorer_sha256": scorer_sha256,
+        "scorer_git_commit": CANONICAL_SCORER_GIT_COMMIT,
+        "official_scorer_sha256": OFFICIAL_SCORER_SHA256,
         "structai_version": structai_version,
         "tasks_dir": tasks_dir,
         "tasks_dir_relative": tasks_dir.relative_to(project_root).as_posix(),
@@ -797,13 +1003,17 @@ def _worker(
     expected_judge_model: str | None,
     expected_judge_api_base: str | None,
     expected_judge_provider: str,
+    expected_requested_provider: str,
     expected_task_id: str,
     expected_attempt_id: str,
 ) -> int:
     secrets_to_redact = _load_judge_environment()
     actual_api_base = os.environ["JUDGE_API_BASE"]
     actual_model = os.environ["JUDGE_MODEL_NAME"]
-    if expected_judge_provider != "openai_compatible":
+    if (
+        expected_judge_provider != "openai_compatible"
+        or expected_requested_provider != REQUESTED_JUDGE_PROVIDER
+    ):
         raise EvaluatorError("Judge provider differs from the evaluator contract")
     if expected_judge_model is not None and actual_model != expected_judge_model:
         raise EvaluatorError("Judge model differs from protocol")
@@ -815,11 +1025,19 @@ def _worker(
         expected_task_id,
         expected_attempt_id,
     )
+    scorer_authority = _scorer_installation_authority(project_root)
+    judge_client = make_judge_client(
+        api_key=os.environ["RCB_JUDGE_API_KEY"],
+        api_base=actual_api_base,
+        model=actual_model,
+        max_try=2,
+        timeout_seconds=120,
+    )
 
     stdout_buffer = io.StringIO()
     stderr_buffer = io.StringIO()
     with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
-        payload = score_workspace(workspace)
+        payload = score_workspace(workspace, judge_client=judge_client)
 
     def redacted(value: str) -> str:
         for secret in secrets_to_redact:
@@ -829,8 +1047,46 @@ def _worker(
     _write_private_text(worker_stdout, redacted(stdout_buffer.getvalue()))
     _write_private_text(worker_stderr, redacted(stderr_buffer.getvalue()))
     encoded_payload = json.dumps(payload, sort_keys=True, allow_nan=False)
-    if any(secret and secret in encoded_payload for secret in secrets_to_redact):
+    api_key_secret = os.environ.get("RCB_JUDGE_API_KEY", "")
+    if api_key_secret and api_key_secret in encoded_payload:
         raise EvaluatorError("Judge result contains secret material")
+    required_payload_keys = {
+        "failure_category",
+        "http_requests",
+        "items",
+        "judge_completed",
+        "requested_model",
+        "requested_provider",
+        "returned_provider",
+        "score_valid",
+        "total_score",
+    }
+    if (
+        not isinstance(payload, dict)
+        or "error" in payload
+        or not required_payload_keys.issubset(payload)
+        or payload.get("requested_provider") != REQUESTED_JUDGE_PROVIDER
+        or payload.get("requested_model") != actual_model
+    ):
+        return 2
+    score_valid = payload["score_valid"] is True
+    judge_completed = payload["judge_completed"] is True
+    failure_category = payload.get("failure_category")
+    if score_valid:
+        total_score = payload.get("total_score")
+        if (
+            type(total_score) not in {int, float}
+            or not 0 <= float(total_score) <= 100
+            or not judge_completed
+            or failure_category is not None
+        ):
+            return 2
+    elif (
+        payload.get("total_score") is not None
+        or judge_completed
+        or failure_category not in JUDGE_FAILURE_CATEGORIES
+    ):
+        return 2
     raw_output.parent.mkdir(parents=True, exist_ok=True)
     _write_private_json(raw_output, payload)
     _write_private_json(
@@ -841,20 +1097,243 @@ def _worker(
             "cost_total_usd": UNAVAILABLE,
             "model": actual_model,
             "provider": expected_judge_provider,
-            "request_count": UNAVAILABLE,
+            "request_count": (
+                payload["http_requests"]
+                if isinstance(payload["http_requests"], int)
+                and payload["http_requests"] >= 0
+                else UNAVAILABLE
+            ),
+            "requested_provider": payload["requested_provider"],
+            "returned_provider": payload["returned_provider"],
+            "scorer_source_path": scorer_authority["scorer_module_origin"],
+            "scorer_git_commit": scorer_authority["scorer_git_commit"],
+            "scorer_sha256": scorer_authority["scorer_sha256"],
             "secret_recorded": False,
-            "usage": UNAVAILABLE,
+            "usage": (
+                payload["usage"]
+                if isinstance(payload["usage"], dict)
+                else UNAVAILABLE
+            ),
         },
     )
-    return 0 if isinstance(payload, dict) and "error" not in payload else 2
+    return 0
+
+
+def _judge_probe_worker(
+    *,
+    project_root: Path,
+    output: Path,
+    expected_judge_model: str,
+    expected_judge_api_base: str,
+    expected_judge_provider: str,
+    expected_requested_provider: str,
+) -> int:
+    """Run one minimal Judge request through the same closed worker path."""
+
+    _load_judge_environment()
+    actual_api_base = os.environ["JUDGE_API_BASE"]
+    actual_model = os.environ["JUDGE_MODEL_NAME"]
+    if (
+        expected_judge_provider != "openai_compatible"
+        or expected_requested_provider != REQUESTED_JUDGE_PROVIDER
+    ):
+        raise EvaluatorError("Judge provider differs from the evaluator contract")
+    if actual_model != expected_judge_model:
+        raise EvaluatorError("Judge model differs from protocol")
+    if actual_api_base != expected_judge_api_base:
+        raise EvaluatorError("Judge API base differs from protocol")
+    result = run_judge_probe(
+        api_key=os.environ["RCB_JUDGE_API_KEY"],
+        api_base=actual_api_base,
+        model=actual_model,
+    )
+    if not isinstance(result, dict) or result.get("status") not in {
+        "JUDGE_SUBPROCESS_OK",
+        "JUDGE_SUBPROCESS_FAILED",
+    }:
+        raise EvaluatorError("Judge probe output is invalid")
+    api_key_secret = os.environ.get("RCB_JUDGE_API_KEY", "")
+    matching_fields = [
+        field
+        for field, value in result.items()
+        if api_key_secret and api_key_secret in str(value)
+    ]
+    if matching_fields:
+        raise EvaluatorError(
+            "Judge probe contains secret material in fields: "
+            + ",".join(matching_fields)
+        )
+    output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(output.parent, 0o700)
+    _write_private_json(output, result)
+    return 0 if result["status"] == "JUDGE_SUBPROCESS_OK" else 1
+
+
+def _judge_environment_diagnostic_worker(*, output: Path) -> int:
+    """Report only presence plus non-secret Judge identity from the child."""
+
+    _load_judge_environment()
+    diagnostic = {
+        "schema_version": "openevo.researchclawbench.judge_environment_diagnostic.v1",
+        "api_key_present": bool(os.environ.get("RCB_JUDGE_API_KEY")),
+        "api_base_present": bool(os.environ.get("RCB_JUDGE_BASE_URL")),
+        "model_present": bool(os.environ.get("RCB_JUDGE_MODEL")),
+        "api_base": os.environ.get("RCB_JUDGE_BASE_URL"),
+        "model": os.environ.get("RCB_JUDGE_MODEL"),
+        "requested_provider": REQUESTED_JUDGE_PROVIDER,
+        "deepseek_api_key_present": bool(os.environ.get("DEEPSEEK_API_KEY")),
+        "codex_home_present": bool(os.environ.get("CODEX_HOME")),
+        "secret_recorded": False,
+    }
+    output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(output.parent, 0o700)
+    _write_private_json(output, diagnostic)
+    return 0
+
+
+def run_judge_probe_subprocess(
+    *,
+    project_root: str | Path,
+    output_root: str | Path,
+    expected_model: str,
+    expected_api_base: str,
+    timeout_seconds: int = 1800,
+    judge_env_file: str | Path | None = None,
+) -> dict[str, Any]:
+    """Run the minimal Judge probe through the closed evaluator subprocess."""
+
+    output_root_path = Path(output_root).resolve(strict=False)
+    output_root_path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(output_root_path, 0o700)
+    output = output_root_path / "judge_probe_result.json"
+    if output.is_file() and not output.is_symlink():
+        existing = json.loads(output.read_text(encoding="utf-8"))
+        if (
+            isinstance(existing, dict)
+            and existing.get("status")
+            in {"JUDGE_SUBPROCESS_OK", "JUDGE_SUBPROCESS_FAILED"}
+        ):
+            return existing
+        raise EvaluatorError("Judge probe evidence is invalid")
+    resolved_project_root = Path(project_root).resolve(strict=True)
+    env = _closed_evaluator_subprocess_environment(
+        project_root=resolved_project_root,
+        judge_env_file=judge_env_file,
+    )
+    command = [
+        sys.executable,
+        "-m",
+        "openevo_researchclawbench.community_evaluator",
+        "--judge-probe",
+        "--project-root",
+        str(resolved_project_root),
+        "--probe-output",
+        str(output),
+        "--expected-judge-model",
+        expected_model,
+        "--expected-judge-api-base",
+        expected_api_base,
+        "--expected-judge-provider",
+        "openai_compatible",
+        "--expected-requested-provider",
+        REQUESTED_JUDGE_PROVIDER,
+    ]
+    proc = subprocess.run(
+        command,
+        text=True,
+        capture_output=True,
+        env=env,
+        timeout=timeout_seconds,
+        check=False,
+    )
+    if proc.stdout or proc.stderr:
+        raise EvaluatorError("Judge probe bootstrap emitted untrusted output")
+    if proc.returncode not in (0, 1) or not output.is_file():
+        raise EvaluatorError(f"Judge probe failed with exit code {proc.returncode}")
+    result = json.loads(output.read_text(encoding="utf-8"))
+    if (
+        not isinstance(result, dict)
+        or result.get("status") not in {"JUDGE_SUBPROCESS_OK", "JUDGE_SUBPROCESS_FAILED"}
+        or result.get("requested_model") != expected_model
+        or result.get("requested_provider") != REQUESTED_JUDGE_PROVIDER
+        or (
+            result.get("returned_provider") is not None
+            and (
+                not isinstance(result["returned_provider"], str)
+                or not result["returned_provider"]
+            )
+        )
+    ):
+        raise EvaluatorError("Judge probe output is invalid")
+    return result
+
+
+def run_judge_environment_diagnostic(
+    *,
+    project_root: str | Path,
+    output_root: str | Path,
+    timeout_seconds: int = 120,
+    judge_env_file: str | Path | None = None,
+) -> dict[str, Any]:
+    """Run the safe child-side Judge environment diagnostic."""
+
+    output_root_path = Path(output_root).resolve(strict=False)
+    output_root_path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(output_root_path, 0o700)
+    output = output_root_path / "judge_environment_diagnostic.json"
+    resolved_project_root = Path(project_root).resolve(strict=True)
+    env = _closed_evaluator_subprocess_environment(
+        project_root=resolved_project_root,
+        judge_env_file=judge_env_file,
+    )
+    command = [
+        sys.executable,
+        "-m",
+        "openevo_researchclawbench.community_evaluator",
+        "--judge-environment-diagnostic",
+        "--project-root",
+        str(resolved_project_root),
+        "--diagnostic-output",
+        str(output),
+    ]
+    proc = subprocess.run(
+        command,
+        text=True,
+        capture_output=True,
+        env=env,
+        timeout=timeout_seconds,
+        check=False,
+    )
+    if proc.stdout or proc.stderr:
+        raise EvaluatorError("Judge diagnostic emitted untrusted output")
+    if proc.returncode != 0 or not output.is_file():
+        raise EvaluatorError("Judge environment diagnostic failed")
+    diagnostic = json.loads(output.read_text(encoding="utf-8"))
+    if (
+        not isinstance(diagnostic, dict)
+        or diagnostic.get("schema_version")
+        != "openevo.researchclawbench.judge_environment_diagnostic.v1"
+        or diagnostic.get("api_key_present") is not True
+        or diagnostic.get("api_base_present") is not True
+        or diagnostic.get("model_present") is not True
+        or diagnostic.get("deepseek_api_key_present") is not False
+        or diagnostic.get("codex_home_present") is not False
+        or diagnostic.get("secret_recorded") is not False
+    ):
+        raise EvaluatorError("Judge environment diagnostic is invalid")
+    return diagnostic
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--worker", action="store_true")
+    parser.add_argument("--judge-probe", action="store_true")
+    parser.add_argument("--judge-environment-diagnostic", action="store_true")
     parser.add_argument("--credential-preflight-output", type=Path)
     parser.add_argument("--project-root", type=Path)
     parser.add_argument("--workspace", type=Path)
+    parser.add_argument("--probe-output", type=Path)
+    parser.add_argument("--diagnostic-output", type=Path)
     parser.add_argument("--raw-output", type=Path)
     parser.add_argument("--worker-stdout", type=Path)
     parser.add_argument("--worker-stderr", type=Path)
@@ -862,6 +1341,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expected-judge-model")
     parser.add_argument("--expected-judge-api-base")
     parser.add_argument("--expected-judge-provider", default="openai_compatible")
+    parser.add_argument(
+        "--expected-requested-provider",
+        default=REQUESTED_JUDGE_PROVIDER,
+    )
     parser.add_argument("--evaluator-dependency-lock", type=Path)
     parser.add_argument("--expected-task-id")
     parser.add_argument("--expected-attempt-id")
@@ -884,6 +1367,35 @@ def main(argv: list[str] | None = None) -> int:
             evaluator_dependency_lock=args.evaluator_dependency_lock.resolve(
                 strict=True
             ),
+        )
+    if args.judge_probe:
+        if (
+            args.worker
+            or args.judge_environment_diagnostic
+            or args.project_root is None
+            or args.probe_output is None
+            or args.expected_judge_model is None
+            or args.expected_judge_api_base is None
+        ):
+            parser.error("Judge probe requires only the expected identity")
+        return _judge_probe_worker(
+            project_root=args.project_root.resolve(strict=True),
+            output=args.probe_output.resolve(strict=False),
+            expected_judge_model=args.expected_judge_model,
+            expected_judge_api_base=args.expected_judge_api_base,
+            expected_judge_provider=args.expected_judge_provider,
+            expected_requested_provider=args.expected_requested_provider,
+        )
+    if args.judge_environment_diagnostic:
+        if (
+            args.worker
+            or args.judge_probe
+            or args.project_root is None
+            or args.diagnostic_output is None
+        ):
+            parser.error("Judge diagnostic requires only the output path")
+        return _judge_environment_diagnostic_worker(
+            output=args.diagnostic_output.resolve(strict=False),
         )
     if not args.worker or not all(
         (
@@ -908,6 +1420,7 @@ def main(argv: list[str] | None = None) -> int:
         args.expected_judge_model,
         args.expected_judge_api_base,
         args.expected_judge_provider,
+        args.expected_requested_provider,
         args.expected_task_id,
         args.expected_attempt_id,
     )

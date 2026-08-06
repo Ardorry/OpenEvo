@@ -6,12 +6,19 @@ import json
 import os
 import re
 import shutil
+import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
 
+import openevo_researchclawbench.community_evaluator as community_evaluator
+import openevo_researchclawbench.openrouter_judge as openrouter_judge
 from openevo_researchclawbench.community_evaluator import (
     _closed_evaluator_subprocess_environment,
+)
+from openevo_researchclawbench.artifact_validator import (
+    candidate_artifact_root_sha256,
 )
 from openevo_researchclawbench.deepseek_codex_engineering_port import (
     CodexExecutionResult,
@@ -28,10 +35,28 @@ from openevo_researchclawbench.minimal_per_item_runner import (
     MinimalStage,
     _MINIMAL_PNG,
 )
+from openevo_researchclawbench.rejudge_sealed import (
+    RejudgeSealedError,
+    _file_inventory,
+    run_rejudge_sealed,
+)
+from openevo_researchclawbench.training_state_store import TrainingStateStore
 
 
 WORKSPACE = Path(__file__).resolve().parents[4]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 REAL_RCB = Path("/home/lhy-h/work/researchclaw_openevo/ResearchClawBench")
+
+
+def _real_score_module():
+    """Import the canonical ResearchClawBench scorer used by the Judge worker."""
+
+    parent = str(REAL_RCB.parent)
+    if parent not in sys.path:
+        sys.path.insert(0, parent)
+    from ResearchClawBench.evaluation import score
+
+    return score
 
 
 def _make_fake_rcb(tmp_path: Path) -> Path:
@@ -559,6 +584,9 @@ def test_judge_adapter_expected_model_matches_env(
 
     class FakeExecution:
         raw_score = {"total_score": 55.0}
+        score_valid = True
+        judge_completed = True
+        failure_category = None
 
     def fake_detailed(**kwargs):
         captured.update(kwargs)
@@ -585,6 +613,7 @@ def test_judge_adapter_expected_model_matches_env(
     assert captured["expected_model"] == "openai/gpt-5.1"
     assert captured["expected_api_base"] == "https://openrouter.ai/api/v1"
     assert captured["expected_provider"] == "openai_compatible"
+    assert captured["expected_requested_provider"] == "azure"
     assert Path(captured["project_root"]) == config.researchclawbench_root.parent
     assert captured["task_id"] == "Life_005"
     assert captured["attempt_id"] == "Life_005_a0_baseline"
@@ -594,13 +623,16 @@ def test_judge_adapter_expected_model_matches_env(
     assert "JUDGE_API_BASE" not in os.environ
 
 
-def test_judge_subprocess_env_has_no_deepseek_credential(
+def test_judge_subprocess_env_has_rcb_credentials_and_no_deepseek(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-secret")
-    monkeypatch.setenv("JUDGE_API_KEY", "judge-key")
-    monkeypatch.setenv("JUDGE_API_BASE", "https://judge.invalid")
-    monkeypatch.setenv("JUDGE_MODEL_NAME", "gpt-5.1")
+    monkeypatch.setenv("CODEX_HOME", "/home/user/.codex-deepseek")
+    monkeypatch.setenv("https_proxy", "http://proxy.invalid:10809")
+    monkeypatch.setenv("http_proxy", "http://proxy.invalid:10809")
+    monkeypatch.setenv("RCB_JUDGE_API_KEY", "judge-key")
+    monkeypatch.setenv("RCB_JUDGE_BASE_URL", "https://openrouter.ai/api/v1")
+    monkeypatch.setenv("RCB_JUDGE_MODEL", "openai/gpt-5.1")
     import openevo
 
     openevo_source_root = Path(openevo.__file__).resolve(strict=True).parents[1]
@@ -610,7 +642,12 @@ def test_judge_subprocess_env_has_no_deepseek_credential(
     )
     assert "DEEPSEEK_API_KEY" not in env
     assert "CODEX_HOME" not in env
-    assert env["JUDGE_API_KEY"] == "judge-key"
+    assert env["RCB_JUDGE_API_KEY"] == "judge-key"
+    assert env["RCB_JUDGE_BASE_URL"] == "https://openrouter.ai/api/v1"
+    assert env["RCB_JUDGE_MODEL"] == "openai/gpt-5.1"
+    assert "judge-key" not in env["PYTHONPATH"]
+    assert env["https_proxy"] == "http://proxy.invalid:10809"
+    assert env["http_proxy"] == "http://proxy.invalid:10809"
     assert str(openevo_source_root) in env["PYTHONPATH"]
 
 
@@ -622,3 +659,534 @@ def test_non_life_005_rejected(tmp_path: Path) -> None:
 def test_old_runner_modules_still_import() -> None:
     import openevo_researchclawbench.training_supervisor  # noqa: F401
     import openevo_researchclawbench.community_evaluator  # noqa: F401
+
+
+# ---------------------------------------------------------------------------
+# Azure-routed Judge client and failure semantics (adapter transport)
+# ---------------------------------------------------------------------------
+
+
+def _fake_http_response(
+    content: str,
+    *,
+    provider: str = "Azure",
+    status: int = 200,
+) -> tuple[int, dict, str]:
+    body = {
+        "id": "probe",
+        "object": "chat.completion",
+        "created": 1,
+        "model": "openai/gpt-5.1",
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": content},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": None,
+        "provider": provider,
+    }
+    return status, body, json.dumps(body)
+
+
+def test_azure_provider_routing_is_written_to_judge_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    posted: list[dict] = []
+
+    def fake_post(**kwargs):
+        posted.append(kwargs["payload"])
+        return _fake_http_response('{"reasoning":"ok","score":50}')
+
+    monkeypatch.setattr(openrouter_judge, "http_judge_post", fake_post)
+    client = openrouter_judge.make_judge_client(
+        api_key="judge-key",
+        api_base="https://openrouter.ai/api/v1",
+        model="openai/gpt-5.1",
+        max_try=1,
+    )
+    result = client("rubric_0", "Rate this report.")
+    assert result["score_valid"] is True
+    assert len(posted) == 1
+    payload = posted[0]
+    assert payload["model"] == "openai/gpt-5.1"
+    assert payload["stream"] is False
+    assert payload["provider"] == {
+        "only": ["azure"],
+        "allow_fallbacks": False,
+        "require_parameters": True,
+    }
+    assert payload["messages"][0]["role"] == "system"
+    assert payload["messages"][1]["role"] == "user"
+    assert "max_completion_tokens" in payload
+    assert "temperature" not in payload
+    assert result["returned_model"] == "openai/gpt-5.1"
+    assert result["returned_provider"] == "Azure"
+    assert result["request_id"] == "probe"
+    assert result["parse_status"] == "ok"
+    assert result["latency_ms"] >= 0
+    assert result["retry_count"] == 1
+
+
+def test_model_and_provider_are_pinned_across_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    posted: list[dict] = []
+
+    def fake_post(**kwargs):
+        posted.append(kwargs["payload"])
+        if len(posted) == 1:
+            return (
+                503,
+                {"error": {"message": "Azure unavailable", "code": 503}},
+                json.dumps({"error": {"message": "Azure unavailable", "code": 503}}),
+            )
+        return _fake_http_response('{"reasoning":"retry","score":60}')
+
+    monkeypatch.setattr(openrouter_judge, "http_judge_post", fake_post)
+    client = openrouter_judge.make_judge_client(
+        api_key="judge-key",
+        api_base="https://openrouter.ai/api/v1",
+        model="openai/gpt-5.1",
+        max_try=2,
+    )
+    result = client("rubric_0", "Rate this report.")
+    assert result["score_valid"] is True
+    assert len(posted) == 2
+    assert [payload["model"] for payload in posted] == [
+        "openai/gpt-5.1",
+        "openai/gpt-5.1",
+    ]
+    assert [payload["provider"] for payload in posted] == [
+        {"only": ["azure"], "allow_fallbacks": False, "require_parameters": True},
+        {"only": ["azure"], "allow_fallbacks": False, "require_parameters": True},
+    ]
+    assert result["retry_count"] == 2
+
+
+def test_403_region_block_never_becomes_valid_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_post(**kwargs):
+        return (
+            403,
+            {
+                "error": {
+                    "message": "This model is not available in your region.",
+                    "code": 403,
+                }
+            },
+            json.dumps(
+                {
+                    "error": {
+                        "message": "This model is not available in your region.",
+                        "code": 403,
+                    }
+                }
+            ),
+        )
+
+    monkeypatch.setattr(openrouter_judge, "http_judge_post", fake_post)
+    client = openrouter_judge.make_judge_client(
+        api_key="judge-key",
+        api_base="https://openrouter.ai/api/v1",
+        model="openai/gpt-5.1",
+        max_try=1,
+    )
+    result = client("rubric_0", "Rate this report.")
+    assert result["score"] is None
+    assert result["score_valid"] is False
+    assert result["judge_completed"] is False
+    assert result["failure_category"] == "BLOCKED_JUDGE_REGION"
+
+
+@pytest.mark.parametrize(
+    ("status", "message", "expected"),
+    [
+        (401, "Invalid API key", "BLOCKED_JUDGE_AUTH"),
+        (402, "Insufficient credits", "BLOCKED_JUDGE_QUOTA"),
+        (429, "Rate limit exceeded", "BLOCKED_JUDGE_RATE_LIMIT"),
+        (500, "Internal server error", "JUDGE_PROVIDER_FAILED"),
+        (503, "Bad gateway", "JUDGE_PROVIDER_FAILED"),
+        (403, "Forbidden", "JUDGE_PROVIDER_FAILED"),
+    ],
+)
+def test_judge_http_failure_classification(
+    status: int, message: str, expected: str
+) -> None:
+    assert (
+        openrouter_judge.classify_judge_http_status(
+            status,
+            {"error": {"message": message, "code": status}},
+        )
+        == expected
+    )
+
+
+def test_invalid_json_never_becomes_valid_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_post(**kwargs):
+        return _fake_http_response("not-json")
+
+    monkeypatch.setattr(openrouter_judge, "http_judge_post", fake_post)
+    client = openrouter_judge.make_judge_client(
+        api_key="judge-key",
+        api_base="https://openrouter.ai/api/v1",
+        model="openai/gpt-5.1",
+        max_try=1,
+    )
+    result = client("rubric_0", "Rate this report.")
+    assert result["score"] is None
+    assert result["score_valid"] is False
+    assert result["judge_completed"] is False
+    assert result["failure_category"] == "JUDGE_RESPONSE_INVALID"
+
+
+def test_explicit_valid_zero_remains_valid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_post(**kwargs):
+        return _fake_http_response('{"reasoning":"criterion is absent","score":0}')
+
+    monkeypatch.setattr(openrouter_judge, "http_judge_post", fake_post)
+    client = openrouter_judge.make_judge_client(
+        api_key="judge-key",
+        api_base="https://openrouter.ai/api/v1",
+        model="openai/gpt-5.1",
+        max_try=1,
+    )
+    result = client("rubric_0", "Rate this report.")
+    assert result["score"] == 0.0
+    assert result["score_valid"] is True
+    assert result["judge_completed"] is True
+    assert result["failure_category"] is None
+
+
+def test_aggregate_marks_pass_invalid_when_any_rubric_fails() -> None:
+    score = _real_score_module()
+    valid = {
+        "score": 50.0,
+        "weight": 1.0,
+        "score_valid": True,
+        "failure_category": None,
+        "returned_provider": "Azure",
+        "http_requests": 1,
+        "usage": None,
+    }
+    failed = {
+        "score": None,
+        "weight": 1.0,
+        "score_valid": False,
+        "failure_category": "BLOCKED_JUDGE_REGION",
+        "returned_provider": None,
+        "http_requests": 2,
+        "usage": None,
+    }
+    summary = score._aggregate_score([valid, failed])
+    assert summary["score_valid"] is False
+    assert summary["judge_completed"] is False
+    assert summary["total_score"] is None
+    assert summary["failure_category"] == "BLOCKED_JUDGE_REGION"
+    assert summary["http_requests"] == 3
+
+
+# ---------------------------------------------------------------------------
+# rejudge-sealed
+# ---------------------------------------------------------------------------
+
+
+def _valid_pass_payload(
+    score: float,
+    *,
+    run_id: str = "Life_005_a0_baseline",
+) -> dict:
+    return {
+        "run_id": run_id,
+        "task_id": "Life_005",
+        "agent_name": "Unknown",
+        "items": [
+            {
+                "index": 0,
+                "type": "image",
+                "content": "criterion",
+                "weight": 1.0,
+                "score": score,
+                "reasoning": "The report addresses the criterion.",
+                "score_valid": True,
+                "judge_completed": True,
+                "failure_category": None,
+                "requested_model": "openai/gpt-5.1",
+                "requested_provider": "azure",
+                "returned_provider": "Azure",
+                "http_status": 200,
+                "response_body_present": True,
+                "content_present": True,
+                "json_parse_success": True,
+                "schema_valid": True,
+                "http_requests": 1,
+                "usage": None,
+            }
+        ],
+        "total_score": score,
+        "total_weight": 1.0,
+        "score_valid": True,
+        "judge_completed": True,
+        "failure_category": None,
+        "requested_model": "openai/gpt-5.1",
+        "requested_provider": "azure",
+        "returned_provider": "Azure",
+        "http_requests": 1,
+        "usage": None,
+    }
+
+
+def _make_source_experiment(
+    tmp_path: Path,
+    *,
+    baseline_hash: str | None = None,
+    evolved_hash: str | None = None,
+) -> Path:
+    exp = tmp_path / "exp"
+    baseline = exp / "items" / "Life_005" / "runs" / "src" / "baseline_candidate"
+    evolved = exp / "items" / "Life_005" / "runs" / "src" / "evolved_candidate"
+    for root, run_id in (
+        (baseline, "Life_005_a0_baseline"),
+        (evolved, "Life_005_a0_evolved"),
+    ):
+        root.mkdir(parents=True, exist_ok=True)
+        _write_candidate_deliverables(root)
+        (root / "_meta.json").write_text(
+            json.dumps(
+                {
+                    "status": "completed",
+                    "exit_code": 0,
+                    "task_id": "Life_005",
+                    "run_id": run_id,
+                }
+            ),
+            encoding="utf-8",
+        )
+    observed_baseline = candidate_artifact_root_sha256(baseline)
+    observed_evolved = candidate_artifact_root_sha256(evolved)
+    store = TrainingStateStore(exp / "supervisor" / "src")
+    store.initialize_experiment(
+        experiment_id="src",
+        protocol_sha256="0" * 64,
+        core_identity_sha256="1" * 64,
+        adapter_identity_sha256="2" * 64,
+        initial_state={
+            "task_id": "Life_005",
+            "baseline_receipt": {"candidate_output_root": str(baseline)},
+            "evolved_receipt": {"candidate_output_root": str(evolved)},
+            "baseline_sealed_hash": baseline_hash or observed_baseline,
+            "evolved_sealed_hash": evolved_hash or observed_evolved,
+        },
+        initial_stage=MinimalStage.COMPLETE.value,
+    )
+    return exp
+
+
+def _fake_probe_ok(**kwargs) -> dict:
+    return {
+        "status": "JUDGE_SUBPROCESS_OK",
+        "failure_category": None,
+        "http_status": 200,
+        "requested_model": "openai/gpt-5.1",
+        "requested_provider": "azure",
+        "returned_provider": "Azure",
+        "content": "JUDGE_SUBPROCESS_OK",
+    }
+
+
+def test_rejudge_sealed_uses_exactly_two_judge_jobs_and_no_candidate_evolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    exp = _make_source_experiment(tmp_path)
+    (tmp_path / "rcb").mkdir()
+    monkeypatch.setenv("RCB_JUDGE_API_KEY", "judge-key")
+    monkeypatch.setenv("RCB_JUDGE_BASE_URL", "https://openrouter.ai/api/v1")
+    monkeypatch.setenv("RCB_JUDGE_MODEL", "openai/gpt-5.1")
+    judge_calls: list[dict] = []
+    baseline_before = _file_inventory(
+        exp / "items" / "Life_005" / "runs" / "src" / "baseline_candidate"
+    )
+    evolved_before = _file_inventory(
+        exp / "items" / "Life_005" / "runs" / "src" / "evolved_candidate"
+    )
+
+    def fake_judge(**kwargs):
+        judge_calls.append(kwargs)
+        pass_name = (
+            "evolved" if kwargs["attempt_id"].endswith("evolved") else "baseline"
+        )
+        score = 66.0 if pass_name == "evolved" else 62.0
+        return SimpleNamespace(
+            raw_score=_valid_pass_payload(score, run_id=kwargs["attempt_id"])
+        )
+
+    result = run_rejudge_sealed(
+        experiment_root=exp,
+        source_run_id="src",
+        rejudge_id="rejudge-azure-v1",
+        researchclawbench_root=tmp_path / "rcb",
+        judge_executor=fake_judge,
+        probe_executor=_fake_probe_ok,
+    )
+    assert result["status"] == "REJUDGE_SEALED_CLOSED"
+    assert result["candidate_jobs"] == 0
+    assert result["evolution_jobs"] == 0
+    assert result["judge_logical_jobs"] == 2
+    assert result["actual_http_requests"] == 3
+    assert result["baseline_score"] == 62.0
+    assert result["evolved_score"] == 66.0
+    assert result["delta"] == 4.0
+    assert result["score_valid"] is True
+    assert result["paired_score_valid"] is True
+    assert len(judge_calls) == 2
+    identities = [
+        (
+            call["expected_model"],
+            call["expected_api_base"],
+            call["expected_requested_provider"],
+            call["task_id"],
+        )
+        for call in judge_calls
+    ]
+    assert identities == [
+        ("openai/gpt-5.1", "https://openrouter.ai/api/v1", "azure", "Life_005"),
+        ("openai/gpt-5.1", "https://openrouter.ai/api/v1", "azure", "Life_005"),
+    ]
+    baseline_after = _file_inventory(
+        exp / "items" / "Life_005" / "runs" / "src" / "baseline_candidate"
+    )
+    evolved_after = _file_inventory(
+        exp / "items" / "Life_005" / "runs" / "src" / "evolved_candidate"
+    )
+    assert baseline_after == baseline_before
+    assert evolved_after == evolved_before
+    result_path = (
+        exp
+        / "items"
+        / "Life_005"
+        / "rejudges"
+        / "rejudge-azure-v1"
+        / "rejudge_result.json"
+    )
+    assert result_path.is_file()
+    assert result["baseline_sealed_hash_matches"] is True
+    assert result["evolved_sealed_hash_matches"] is True
+    assert (exp / "evaluator_private" / "rejudge-azure-v1").is_dir()
+
+
+def test_rejudge_rejects_sealed_hash_mismatch_before_any_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    exp = _make_source_experiment(tmp_path, baseline_hash="0" * 64)
+    (tmp_path / "rcb").mkdir()
+    monkeypatch.setenv("RCB_JUDGE_API_KEY", "judge-key")
+    monkeypatch.setenv("RCB_JUDGE_BASE_URL", "https://openrouter.ai/api/v1")
+    monkeypatch.setenv("RCB_JUDGE_MODEL", "openai/gpt-5.1")
+    calls: list[str] = []
+
+    def fake_probe(**kwargs):
+        calls.append("probe")
+        return _fake_probe_ok(**kwargs)
+
+    def fake_judge(**kwargs):
+        calls.append("judge")
+        raise AssertionError("judge must not be called")
+
+    with pytest.raises(RejudgeSealedError, match="BASELINE"):
+        run_rejudge_sealed(
+            experiment_root=exp,
+            source_run_id="src",
+            rejudge_id="rejudge-mismatch",
+            researchclawbench_root=tmp_path / "rcb",
+            judge_executor=fake_judge,
+            probe_executor=fake_probe,
+        )
+    assert calls == []
+
+
+def test_rejudge_is_blocked_when_probe_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    exp = _make_source_experiment(tmp_path)
+    (tmp_path / "rcb").mkdir()
+    monkeypatch.setenv("RCB_JUDGE_API_KEY", "judge-key")
+    monkeypatch.setenv("RCB_JUDGE_BASE_URL", "https://openrouter.ai/api/v1")
+    monkeypatch.setenv("RCB_JUDGE_MODEL", "openai/gpt-5.1")
+    judge_calls: list[dict] = []
+
+    def fake_probe(**kwargs) -> dict:
+        return {
+            "status": "JUDGE_SUBPROCESS_FAILED",
+            "failure_category": "BLOCKED_JUDGE_AUTH",
+            "http_status": None,
+            "requested_model": "openai/gpt-5.1",
+            "requested_provider": "azure",
+            "returned_provider": None,
+            "content": None,
+        }
+
+    def fake_judge(**kwargs):
+        judge_calls.append(kwargs)
+        raise AssertionError("judge must not be called")
+
+    result = run_rejudge_sealed(
+        experiment_root=exp,
+        source_run_id="src",
+        rejudge_id="rejudge-probe-fail",
+        researchclawbench_root=tmp_path / "rcb",
+        judge_executor=fake_judge,
+        probe_executor=fake_probe,
+    )
+    assert result["status"] == "REJUDGE_SEALED_BLOCKED"
+    assert result["failure_category"] == "BLOCKED_JUDGE_AUTH"
+    assert result["judge_logical_jobs"] == 0
+    assert judge_calls == []
+
+
+def test_judge_probe_uses_closed_evaluator_subprocess(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RCB_JUDGE_API_KEY", "probe-key")
+    monkeypatch.setenv("RCB_JUDGE_BASE_URL", "https://openrouter.ai/api/v1")
+    monkeypatch.setenv("RCB_JUDGE_MODEL", "openai/gpt-5.1")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-secret")
+    monkeypatch.setenv("CODEX_HOME", "/home/user/.codex-deepseek")
+    observed: dict[str, object] = {}
+
+    class Completed:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(command, **kwargs):
+        observed["command"] = command
+        observed["env"] = kwargs["env"]
+        output = Path(command[command.index("--probe-output") + 1])
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(_fake_probe_ok()), encoding="utf-8")
+        return Completed()
+
+    monkeypatch.setattr(community_evaluator.subprocess, "run", fake_run)
+    result = community_evaluator.run_judge_probe_subprocess(
+        project_root=WORKSPACE,
+        output_root=tmp_path / "probe",
+        expected_model="openai/gpt-5.1",
+        expected_api_base="https://openrouter.ai/api/v1",
+    )
+    assert result["status"] == "JUDGE_SUBPROCESS_OK"
+    command = observed["command"]
+    assert isinstance(command, list)
+    assert "--judge-probe" in command
+    child_env = observed["env"]
+    assert isinstance(child_env, dict)
+    assert child_env["RCB_JUDGE_API_KEY"] == "probe-key"
+    assert child_env["RCB_JUDGE_BASE_URL"] == "https://openrouter.ai/api/v1"
+    assert child_env["RCB_JUDGE_MODEL"] == "openai/gpt-5.1"
+    assert "DEEPSEEK_API_KEY" not in child_env
+    assert "CODEX_HOME" not in child_env

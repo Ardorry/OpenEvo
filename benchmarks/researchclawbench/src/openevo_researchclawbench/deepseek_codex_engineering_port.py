@@ -64,6 +64,82 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _redact_text(value: str, secrets: tuple[str, ...]) -> str:
+    redacted = value
+    for secret in secrets:
+        if secret:
+            redacted = redacted.replace(secret, "[REDACTED]")
+    return redacted
+
+
+def _extract_final_assistant_message(stdout: str) -> dict[str, Any] | None:
+    """Extract the last assistant message from a Codex JSONL event stream."""
+    last: dict[str, Any] | None = None
+    for line in stdout.splitlines():
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        message = payload.get("message")
+        if isinstance(message, str) and message.strip():
+            last = {
+                "type": event.get("type"),
+                "message": message,
+                "timestamp": event.get("timestamp"),
+            }
+    return last
+
+
+def _extract_usage(stdout: str) -> dict[str, Any] | None:
+    usage: dict[str, Any] = {}
+    for line in stdout.splitlines():
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        candidate = payload.get("usage") or payload.get("token_usage")
+        if isinstance(candidate, dict):
+            for key, value in candidate.items():
+                if isinstance(value, (int, float)) and key not in usage:
+                    usage[key] = value
+    return usage or None
+
+
+def _output_manifest(root: Path) -> dict[str, Any]:
+    entries: dict[str, Any] = {}
+    from .hashing import iter_regular_files
+
+    for path in iter_regular_files(root):
+        relative = path.relative_to(root).as_posix()
+        metadata = path.stat()
+        entries[relative] = {
+            "size_bytes": int(metadata.st_size),
+            "sha256": _sha256_file(path),
+        }
+    return dict(sorted(entries.items()))
+
+
+def _evidence_root_sha256(root: Path) -> str:
+    entries = _output_manifest(root)
+    return _sha256_text(
+        json.dumps(entries, sort_keys=True, separators=(",", ":"))
+    )
+
+
 def _run_codex(
     argv: list[str],
     *,
@@ -171,6 +247,7 @@ class DeepSeekCodexEngineeringPort:
         argv = self.command_argv(workspace)
         env = self._environment()
         self.real_calls += 1
+        started_at = datetime.now(UTC).isoformat()
         result = self._executor(
             argv,
             env=env,
@@ -178,6 +255,32 @@ class DeepSeekCodexEngineeringPort:
             prompt=prompt,
             timeout_seconds=self.timeout_seconds,
         )
+        ended_at = datetime.now(UTC).isoformat()
+        secret_values = tuple(
+            value
+            for key, value in os.environ.items()
+            if key
+            in {
+                "DEEPSEEK_API_KEY",
+                "RCB_JUDGE_API_KEY",
+                "OPENAI_API_KEY",
+            }
+            and value
+        )
+        evidence_root = None
+        if request.get("evidence_root"):
+            evidence_root = Path(str(request["evidence_root"])).resolve(strict=False)
+            self._persist_candidate_evidence(
+                workspace=workspace,
+                evidence_root=evidence_root,
+                argv=argv,
+                result=result,
+                prompt=prompt,
+                secret_values=secret_values,
+                started_at=started_at,
+                ended_at=ended_at,
+                env_keys=sorted(env),
+            )
         if result.returncode != 0:
             lowered = (result.stdout + result.stderr).casefold()
             if "authentication" in lowered or "unauthorized" in lowered:
@@ -192,29 +295,36 @@ class DeepSeekCodexEngineeringPort:
                 "BLOCKED_CANDIDATE_RUNTIME",
                 f"DeepSeek Codex exited with {result.returncode}",
             )
+        meta = {
+            "status": "completed",
+            "exit_code": 0,
+            "task_id": request["task_id"],
+            "run_id": request["run_id"],
+        }
+        injected_paths = request.get("injected_artifact_paths")
+        injected_sha256 = request.get("injected_artifact_sha256")
+        if injected_paths is not None or injected_sha256 is not None:
+            meta["injected_artifact_paths"] = injected_paths
+            meta["injected_artifact_sha256"] = injected_sha256
+            meta["artifact_read_requested"] = True
         (workspace / "_meta.json").write_text(
-            json.dumps(
-                {
-                    "status": "completed",
-                    "exit_code": 0,
-                    "task_id": request["task_id"],
-                    "run_id": request["run_id"],
-                },
-                indent=2,
-                sort_keys=True,
-            )
+            json.dumps(meta, indent=2, sort_keys=True)
             + "\n",
             encoding="utf-8",
         )
-        return {
+        receipt: dict[str, Any] = {
             "task_id": request["task_id"],
             "run_id": request["run_id"],
             "pass_name": request["pass_name"],
             "session_id": f"ds-{uuid.uuid4().hex[:12]}",
             "candidate_output_root": str(workspace),
             "exit_status": result.returncode,
-            "stdout_sha256": _sha256_text(result.stdout),
-            "stderr_sha256": _sha256_text(result.stderr),
+            "stdout_sha256": _sha256_text(
+                _redact_text(result.stdout, secret_values)
+            ),
+            "stderr_sha256": _sha256_text(
+                _redact_text(result.stderr, secret_values)
+            ),
             "duration_seconds": result.duration_seconds,
             "provider": "deepseek",
             "model": self.model,
@@ -223,6 +333,69 @@ class DeepSeekCodexEngineeringPort:
             "deepseek_key_present": self.deepseek_key_present,
             "secret_recorded": False,
         }
+        if evidence_root is not None:
+            receipt["evidence_root"] = str(evidence_root)
+            receipt["evidence_sha256"] = _evidence_root_sha256(evidence_root)
+        if injected_paths is not None or injected_sha256 is not None:
+            receipt["injected_artifact_paths"] = injected_paths
+            receipt["injected_artifact_sha256"] = injected_sha256
+            receipt["artifact_read_requested"] = True
+        return receipt
+
+    def _persist_candidate_evidence(
+        self,
+        *,
+        workspace: Path,
+        evidence_root: Path,
+        argv: list[str],
+        result: CodexExecutionResult,
+        prompt: str,
+        secret_values: tuple[str, ...],
+        started_at: str,
+        ended_at: str,
+        env_keys: list[str],
+    ) -> None:
+        """Persist redacted Candidate evidence under the run namespace."""
+        evidence_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        redacted_stdout = _redact_text(result.stdout, secret_values)
+        redacted_stderr = _redact_text(result.stderr, secret_values)
+        (evidence_root / "stdout.log").write_text(
+            redacted_stdout, encoding="utf-8"
+        )
+        (evidence_root / "stderr.log").write_text(
+            redacted_stderr, encoding="utf-8"
+        )
+        (evidence_root / "codex_events.jsonl").write_text(
+            redacted_stdout, encoding="utf-8"
+        )
+        final_message = _extract_final_assistant_message(redacted_stdout)
+        if final_message is not None:
+            (evidence_root / "final_assistant_message.json").write_text(
+                json.dumps(final_message, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+        command = {
+            "argv": list(argv),
+            "cwd": str(workspace),
+            "exit_code": result.returncode,
+            "model": self.model,
+            "provider": "deepseek",
+            "env_keys": env_keys,
+            "started_at": started_at,
+            "ended_at": ended_at,
+            "duration_seconds": result.duration_seconds,
+            "usage": _extract_usage(redacted_stdout),
+            "prompt_sha256": _sha256_text(prompt),
+            "secret_recorded": False,
+        }
+        (evidence_root / "command.json").write_text(
+            json.dumps(command, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (evidence_root / "output_manifest.json").write_text(
+            json.dumps(_output_manifest(workspace), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
 
     def evolve(self, request: Mapping[str, Any]) -> dict[str, Any]:
         artifact_root = Path(str(request["artifact_root"])).resolve(strict=False)

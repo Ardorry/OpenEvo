@@ -23,6 +23,7 @@ from typing import Any, Callable, Mapping, Protocol
 import yaml
 
 from .artifact_validator import freeze_candidate_outputs, validate_workspace
+from .community_evaluator import REQUESTED_JUDGE_PROVIDER
 from .hashing import canonical_json_sha256, iter_regular_files, sha256_file
 from .run_manifest import atomic_write_json
 from .training_state_store import TrainingStateStore, canonical_sha256
@@ -192,6 +193,14 @@ class EvolutionPort(Protocol):
 
 class JudgePort(Protocol):
     def evaluate(self, request: Mapping[str, Any]) -> dict[str, Any]: ...
+
+
+class JudgeFailure(RuntimeError):
+    """A Judge evaluation failed closed with a typed category."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 @dataclass(frozen=True)
@@ -441,8 +450,14 @@ class ExistingJudgeAdapter:
                 expected_model=self.config.judge_model,
                 expected_api_base=rcb_base,
                 expected_provider="openai_compatible",
+                expected_requested_provider=REQUESTED_JUDGE_PROVIDER,
                 timeout_seconds=self.timeout_seconds,
             )
+            if not execution.score_valid:
+                raise JudgeFailure(
+                    execution.failure_category or "BLOCKED_JUDGE_AUTH",
+                    f"Judge failed closed: {execution.failure_category or 'UNKNOWN'}",
+                )
         finally:
             for legacy, value in previous.items():
                 if value is None:
@@ -455,6 +470,9 @@ class ExistingJudgeAdapter:
             "pass_name": request["pass_name"],
             "total_score": float(execution.raw_score["total_score"]),
             "model": self.config.judge_model,
+            "score_valid": True,
+            "judge_completed": True,
+            "failure_category": None,
             "secret_recorded": False,
         }
 
@@ -882,6 +900,11 @@ class MinimalPerItemRunner:
             "BLOCKED_CANDIDATE_QUOTA": MinimalStage.BLOCKED_CANDIDATE_QUOTA,
             "BLOCKED_EVOLUTION_PROVIDER": MinimalStage.BLOCKED_EVOLUTION_PROVIDER,
             "BLOCKED_JUDGE_AUTH": MinimalStage.BLOCKED_JUDGE_AUTH,
+            "BLOCKED_JUDGE_REGION": MinimalStage.FAILED,
+            "BLOCKED_JUDGE_QUOTA": MinimalStage.FAILED,
+            "BLOCKED_JUDGE_RATE_LIMIT": MinimalStage.FAILED,
+            "JUDGE_PROVIDER_FAILED": MinimalStage.FAILED,
+            "JUDGE_RESPONSE_INVALID": MinimalStage.FAILED,
             "BLOCKED_GT_UNAVAILABLE": MinimalStage.BLOCKED_GT_UNAVAILABLE,
             "BLOCKED_DEEPSEEK_CREDENTIAL": MinimalStage.BLOCKED_DEEPSEEK_CREDENTIAL,
         }.get(code, MinimalStage.FAILED)

@@ -38,6 +38,14 @@ from .minimal_per_item_runner import (
     MinimalPerItemConfig,
     MinimalPerItemRunner,
 )
+from .per_item_pilot_v2 import (
+    PilotV2Config,
+    PilotV2DryRunCandidate,
+    PilotV2DryRunEvolution,
+    PilotV2DryRunJudge,
+    PilotV2JudgePort,
+    PilotV2Runner,
+)
 from .official_training_control import (
     OfficialTrainingControl,
     OfficialTrainingOperationsUnavailable,
@@ -52,7 +60,12 @@ from .production_training_operations import (
     judge_identity_preflight,
 )
 from .deepseek_codex_engineering_port import DeepSeekCodexEngineeringPort
+from .community_evaluator import (
+    run_judge_environment_diagnostic,
+    run_judge_probe_subprocess,
+)
 from .reflector_runner import reflector_runtime_audit
+from .rejudge_sealed import RejudgeSealedError, run_rejudge_sealed
 from .run_manifest import atomic_write_json
 from .training_control import (
     DurableTrainingControl,
@@ -519,6 +532,56 @@ def command_minimal_per_item(args: argparse.Namespace) -> int:
     return 0 if state.get("stage") == "COMPLETE" else 5
 
 
+def command_pilot_v2(args: argparse.Namespace) -> int:
+    """Run the three-task per-item pilot v2 (dry-run or live)."""
+
+    config = PilotV2Config.load(args.config)
+    output_root = config.output_root
+    output_root.mkdir(parents=True, exist_ok=True)
+    dry_run = bool(args.dry_run or config.dry_run)
+    if dry_run:
+        candidate_port = PilotV2DryRunCandidate()
+        evolution_port = PilotV2DryRunEvolution()
+        judge_port = PilotV2DryRunJudge()
+    else:
+        candidate_port = DeepSeekCodexEngineeringPort(
+            model=str(config.require("candidate.model")),
+            timeout_seconds=int(config.require("candidate.timeout_seconds")),
+            sandbox=str(config.require("candidate.sandbox")),
+        )
+        evolution_port = DeepSeekCodexEngineeringPort(
+            model=str(config.require("evolution.model")),
+            timeout_seconds=int(config.require("evolution.timeout_seconds")),
+        )
+        judge_port = PilotV2JudgePort(
+            researchclawbench_root=config.researchclawbench_root,
+            evaluator_private_root=(
+                output_root / "evaluator_private" / args.batch_id
+            ),
+            timeout_seconds=int(config.require("judge.timeout_seconds")),
+        )
+    state_root = output_root / "supervisor" / args.batch_id
+    fresh = not (state_root / "training-supervisor.sqlite3").is_file()
+    runner = PilotV2Runner(
+        config=config,
+        batch_id=args.batch_id,
+        state_root=state_root,
+        candidate_port=candidate_port,
+        evolution_port=evolution_port,
+        judge_port=judge_port,
+        dry_run=dry_run,
+    )
+    if fresh:
+        runner.initialize()
+    state = runner.run_until_terminal()
+    print_closed_json(state)
+    if state.get("stage") == "PILOT_CLOSED":
+        return 0
+    if state.get("stage") == "PILOT_BUDGET_EXHAUSTED":
+        return 6
+    return 4
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -629,11 +692,55 @@ def main(argv: list[str] | None = None) -> int:
     minimal.add_argument("--run-id", required=True)
     minimal.add_argument("--dry-run", action="store_true")
     minimal.add_argument("--no-model-calls", action="store_true")
+    judge_probe = sub.add_parser("judge-probe")
+    judge_probe.add_argument("--project-root", required=True, type=Path)
+    judge_probe.add_argument("--output-root", required=True, type=Path)
+    judge_probe.add_argument("--expected-judge-model", required=True)
+    judge_probe.add_argument("--expected-judge-api-base", required=True)
+    judge_env_diagnostic = sub.add_parser("judge-env-diagnostic")
+    judge_env_diagnostic.add_argument("--project-root", required=True, type=Path)
+    judge_env_diagnostic.add_argument("--output-root", required=True, type=Path)
+    rejudge = sub.add_parser("rejudge-sealed")
+    rejudge.add_argument("--experiment-root", required=True, type=Path)
+    rejudge.add_argument("--source-run-id", required=True)
+    rejudge.add_argument("--rejudge-id", required=True)
+    rejudge.add_argument("--researchclawbench-root", required=True, type=Path)
+    pilot_v2 = sub.add_parser("pilot-v2")
+    pilot_v2.add_argument("--config", required=True, type=Path)
+    pilot_v2.add_argument("--batch-id", required=True)
+    pilot_v2.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
     core_control_authority = None
     try:
         if args.command == "minimal-per-item":
             return command_minimal_per_item(args)
+        if args.command == "judge-probe":
+            result = run_judge_probe_subprocess(
+                project_root=args.project_root,
+                output_root=args.output_root,
+                expected_model=args.expected_judge_model,
+                expected_api_base=args.expected_judge_api_base,
+            )
+            print_closed_json(result)
+            return 0 if result.get("status") == "JUDGE_SUBPROCESS_OK" else 4
+        if args.command == "judge-env-diagnostic":
+            result = run_judge_environment_diagnostic(
+                project_root=args.project_root,
+                output_root=args.output_root,
+            )
+            print_closed_json(result)
+            return 0
+        if args.command == "rejudge-sealed":
+            result = run_rejudge_sealed(
+                experiment_root=args.experiment_root,
+                source_run_id=args.source_run_id,
+                rejudge_id=args.rejudge_id,
+                researchclawbench_root=args.researchclawbench_root,
+            )
+            print_closed_json(result)
+            return 0 if result.get("status") == "REJUDGE_SEALED_CLOSED" else 4
+        if args.command == "pilot-v2":
+            return command_pilot_v2(args)
         config = ExperimentConfig.load(args.protocol)
         if (
             getattr(config, "formal_runs_v11", None) is not None
@@ -1009,6 +1116,18 @@ def main(argv: list[str] | None = None) -> int:
                     result = control.resume()
         print_closed_json(result)
         return 0
+    except RejudgeSealedError as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "REJUDGE_SEALED_BLOCKED",
+                    "failure_code": exc.code,
+                    "message": str(exc),
+                },
+                indent=2,
+            )
+        )
+        return 4
     except JudgeCredentialsRequired as exc:
         print(
             json.dumps(

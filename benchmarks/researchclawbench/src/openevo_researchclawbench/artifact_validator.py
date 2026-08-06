@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-import stat
 import struct
 import zlib
 from dataclasses import asdict, dataclass
