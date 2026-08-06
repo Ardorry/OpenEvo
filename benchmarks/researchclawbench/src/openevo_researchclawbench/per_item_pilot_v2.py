@@ -559,6 +559,7 @@ class PilotV2Runner:
         workspace_builder: Callable[..., WorkspaceReceipt] = build_official_workspace,
         dry_run: bool = False,
         adopt_from: str | None = None,
+        mark_nondelivery: tuple[str, ...] = (),
     ) -> None:
         self.config = config
         self.batch_id = batch_id
@@ -568,6 +569,7 @@ class PilotV2Runner:
         self.workspace_builder = workspace_builder
         self.dry_run = dry_run
         self.adopt_from = adopt_from
+        self.mark_nondelivery = tuple(mark_nondelivery)
         self.store = TrainingStateStore(
             state_root,
             transition_fn=require_pilot_v2_transition,
@@ -577,6 +579,17 @@ class PilotV2Runner:
         )
 
     def initialize(self) -> dict[str, Any]:
+        if self.mark_nondelivery and self.adopt_from is None:
+            raise PilotV2Error(
+                "NONDELIVERY_REQUIRES_ADOPT",
+                "marking a task as Candidate nondelivery requires --adopt-batch",
+            )
+        for task_id in self.mark_nondelivery:
+            if task_id not in PILOT_TASKS:
+                raise PilotV2Error(
+                    "NONDELIVERY_TASK_OUTSIDE_PILOT",
+                    f"{task_id} is outside the fixed pilot task list",
+                )
         for task_id in PILOT_TASKS:
             task_dir = self.config.researchclawbench_root / "tasks" / task_id
             if not (task_dir / "task_info.json").is_file():
@@ -606,7 +619,7 @@ class PilotV2Runner:
                 adopted_tasks,
                 adopted_counters,
                 task_index,
-            ) = self._adopt_prior_batch(self.adopt_from)
+            ) = self._adopt_prior_batch(self.adopt_from, self.mark_nondelivery)
         self.store.initialize_experiment(
             experiment_id=self.batch_id,
             protocol_sha256=canonical_sha256(self.config.raw),
@@ -645,7 +658,9 @@ class PilotV2Runner:
         return self.status()
 
     def _adopt_prior_batch(
-        self, prior_batch_id: str
+        self,
+        prior_batch_id: str,
+        mark_nondelivery: tuple[str, ...],
     ) -> tuple[dict[str, Any], dict[str, int], int]:
         """Adopt fully sealed prior-batch task results without re-running them."""
 
@@ -676,7 +691,61 @@ class PilotV2Runner:
         prior_tasks: dict[str, Any] = prior.get("tasks", {})
         adopted: dict[str, Any] = {}
         first_pending = 0
+        nondelivery_candidate_jobs = 0
+        prior_effects = prior_store.side_effects_for_experiment(prior_batch_id)
         for index, task_id in enumerate(PILOT_TASKS):
+            if task_id in mark_nondelivery:
+                task_state = prior_tasks.get(task_id)
+                if not isinstance(task_state, dict) or "evolved_judge" in task_state:
+                    raise PilotV2Error(
+                        "NONDELIVERY_MARK_INVALID",
+                        f"{task_id} cannot be marked as Candidate nondelivery",
+                    )
+                if prior.get("stage") != PilotV2Stage.PILOT_BLOCKED.value or prior.get(
+                    "failure_code"
+                ) != "WORKSPACE_VALIDATION_FAILED":
+                    raise PilotV2Error(
+                        "NONDELIVERY_SOURCE_NOT_SEAL_FAILURE",
+                        f"{task_id} prior block is not a workspace validation failure",
+                    )
+                candidate_effect = next(
+                    (
+                        effect
+                        for effect in prior_effects
+                        if effect["kind"] == "candidate-baseline"
+                        and (effect.get("receipt") or {}).get("task_id") == task_id
+                        and effect["status"] == "completed"
+                    ),
+                    None,
+                )
+                if candidate_effect is None:
+                    raise PilotV2Error(
+                        "NONDELIVERY_CANDIDATE_EFFECT_MISSING",
+                        f"{task_id} prior Candidate side effect is missing",
+                    )
+                record = {
+                    "status": "CANDIDATE_NONDELIVERY",
+                    "task_id": task_id,
+                    "score_valid": False,
+                    "paired_result_valid": False,
+                    "candidate_failure_count": 1,
+                    "failure_code": str(prior.get("failure_code")),
+                    "failure_message": str(prior.get("failure_message")),
+                    "source_batch_id": prior_batch_id,
+                }
+                adopted[task_id] = record
+                namespace = (
+                    self.config.output_root
+                    / "items"
+                    / task_id
+                    / "sealed"
+                    / self.batch_id
+                )
+                namespace.mkdir(parents=True, exist_ok=True)
+                atomic_write_json(namespace / "task_result.json", record)
+                nondelivery_candidate_jobs += 1
+                first_pending = index + 1
+                continue
             task_state = prior_tasks.get(task_id)
             if not isinstance(task_state, dict):
                 first_pending = index
@@ -761,6 +830,7 @@ class PilotV2Runner:
             "judge_logical_jobs": int(prior.get("judge_logical_jobs", 0)),
             "judge_http_requests": int(prior.get("judge_http_requests", 0)),
         }
+        counters["candidate_jobs"] += nondelivery_candidate_jobs
         if first_pending > 0 and not adopted:
             raise PilotV2Error(
                 "ADOPT_PARTIAL_INVALID",
@@ -1447,9 +1517,11 @@ class PilotV2Runner:
 
     def _pilot_summary(self, state: dict[str, Any]) -> dict[str, Any]:
         rows = []
+        completed_tasks: list[str] = []
         for task_id in PILOT_TASKS:
             task = state["tasks"].get(task_id, {})
             if "baseline_judge" in task and "evolved_judge" in task:
+                completed_tasks.append(task_id)
                 rows.append(
                     {
                         "task_id": task_id,
@@ -1493,6 +1565,13 @@ class PilotV2Runner:
         wins = sum(1 for delta in deltas if delta > 0)
         ties = sum(1 for delta in deltas if delta == 0)
         losses = sum(1 for delta in deltas if delta < 0)
+        candidate_jobs = int(state.get("candidate_jobs", 0))
+        candidate_nondelivery_count = sum(
+            1
+            for task_id in PILOT_TASKS
+            if state["tasks"].get(task_id, {}).get("status")
+            == "CANDIDATE_NONDELIVERY"
+        )
         return {
             "schema_version": "openevo.researchclawbench.pilot_v2_batch.v1",
             "status": "PILOT_V2_CLOSED",
@@ -1504,6 +1583,21 @@ class PilotV2Runner:
             "wins": wins,
             "ties": ties,
             "losses": losses,
+            "task_completion_rate": round(
+                len(completed_tasks) / len(PILOT_TASKS), 3
+            ),
+            "candidate_delivery_success_rate": (
+                round(
+                    (candidate_jobs - candidate_nondelivery_count)
+                    / candidate_jobs,
+                    3,
+                )
+                if candidate_jobs > 0
+                else None
+            ),
+            "candidate_nondelivery_count": candidate_nondelivery_count,
+            "infrastructure_failure_count": 0,
+            "blocked_count": 0,
             "candidate_jobs": int(state.get("candidate_jobs", 0)),
             "evolution_jobs": int(state.get("evolution_jobs", 0)),
             "judge_logical_jobs": int(state.get("judge_logical_jobs", 0)),

@@ -572,6 +572,7 @@ def command_pilot_v2(args: argparse.Namespace) -> int:
         judge_port=judge_port,
         dry_run=dry_run,
         adopt_from=args.adopt_batch,
+        mark_nondelivery=tuple(args.mark_nondelivery or ()),
     )
     if fresh:
         runner.initialize()
@@ -716,6 +717,7 @@ def main(argv: list[str] | None = None) -> int:
     pilot_v2.add_argument("--config", required=True, type=Path)
     pilot_v2.add_argument("--batch-id", required=True)
     pilot_v2.add_argument("--adopt-batch", default=None)
+    pilot_v2.add_argument("--mark-nondelivery", action="append", default=[])
     pilot_v2.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
     core_control_authority = None
