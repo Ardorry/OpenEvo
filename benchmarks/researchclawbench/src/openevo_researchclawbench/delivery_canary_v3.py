@@ -28,8 +28,10 @@ from .training_state_store import TrainingStateStore, canonical_sha256
 from .workspace import WorkspaceReceipt, build_official_workspace
 
 CANARY_V3_PROTOCOL_NAME = "per_item_minimal_delivery_canary_v3"
+GPT55_RELIABILITY_PROTOCOL_NAME = "per_item_minimal_gpt55_reliability_v1"
 CANARY_TASKS = ("Chemistry_004", "Information_005")
 DEFAULT_CANDIDATE_MODEL = "deepseek-v4-flash"
+GPT55_CANDIDATE_MODEL = "gpt-5.5"
 MAX_CANDIDATE_JOBS = 2
 
 
@@ -79,12 +81,25 @@ class DeliveryCanaryConfig:
     raw: dict[str, Any]
 
     def __post_init__(self) -> None:
-        if self.raw.get("protocol_name") != CANARY_V3_PROTOCOL_NAME:
-            raise ValueError("unexpected delivery canary v3 protocol_name")
+        if self.raw.get("protocol_name") not in {
+            CANARY_V3_PROTOCOL_NAME,
+            GPT55_RELIABILITY_PROTOCOL_NAME,
+        }:
+            raise ValueError("unexpected delivery canary protocol_name")
         if tuple(self.raw.get("task_ids", ())) != CANARY_TASKS:
             raise ValueError("delivery canary v3 task order differs")
-        if self.raw.get("candidate", {}).get("model") != DEFAULT_CANDIDATE_MODEL:
+        candidate = self.raw.get("candidate", {})
+        if candidate.get("model") not in {
+            DEFAULT_CANDIDATE_MODEL,
+            GPT55_CANDIDATE_MODEL,
+        }:
             raise ValueError("delivery canary v3 candidate model differs")
+        if candidate.get("provider") not in {"deepseek", "native_codex"}:
+            raise ValueError("delivery canary v3 candidate provider differs")
+        if candidate.get("provider") == "native_codex" and not candidate.get(
+            "profile"
+        ):
+            raise ValueError("native Codex candidate requires a profile")
         execution = self.raw.get("execution", {})
         if (
             int(execution.get("max_candidate_jobs", 0)) != MAX_CANDIDATE_JOBS
@@ -332,11 +347,13 @@ class DeliveryCanaryV3Runner:
         state_root: str | Path,
         candidate_port: CanaryCandidatePort,
         workspace_builder: Callable[..., WorkspaceReceipt] = build_official_workspace,
+        dry_run: bool = False,
     ) -> None:
         self.config = config
         self.batch_id = batch_id
         self.candidate_port = candidate_port
         self.workspace_builder = workspace_builder
+        self.dry_run = dry_run
         self.store = TrainingStateStore(
             state_root,
             transition_fn=require_canary_v3_transition,
@@ -391,11 +408,11 @@ class DeliveryCanaryV3Runner:
             receipt=receipt or {},
         )
 
-    def _reserve(self, units: int) -> None:
+    def _reserve(self, units: int, key: str) -> None:
         try:
             self.store.reserve_budget(
                 experiment_id=self.batch_id,
-                idempotency_key=f"{self.batch_id}:candidate",
+                idempotency_key=f"{self.batch_id}:{key}",
                 category="candidate_model_calls",
                 units=units,
                 limit_units=MAX_CANDIDATE_JOBS,
@@ -478,6 +495,8 @@ class DeliveryCanaryV3Runner:
         )
 
     def _summary(self, state: dict[str, Any]) -> dict[str, Any]:
+        budget_usage = self.store.budget_usage(self.batch_id)
+        candidate_jobs = int(budget_usage.get("candidate_model_calls", 0))
         rows = []
         for task_id in CANARY_TASKS:
             task = state["tasks"].get(task_id, {})
@@ -502,6 +521,7 @@ class DeliveryCanaryV3Runner:
                 }
             )
         completed = sum(1 for row in rows if row["seal"] is True)
+        real_candidate_jobs = 0 if self.dry_run else candidate_jobs
         return {
             "schema_version": "openevo.researchclawbench.delivery_canary_v3.v1",
             "status": (
@@ -515,7 +535,8 @@ class DeliveryCanaryV3Runner:
             "candidate_delivery_success_rate": (
                 completed / len(CANARY_TASKS)
             ),
-            "candidate_jobs": int(state.get("candidate_jobs", 0)),
+            "candidate_jobs": candidate_jobs,
+            "real_candidate_jobs": real_candidate_jobs,
             "evolution_jobs": int(state.get("evolution_jobs", 0)),
             "judge_jobs": int(state.get("judge_jobs", 0)),
             "retries": 0,
@@ -551,7 +572,7 @@ class DeliveryCanaryV3Runner:
             task_id = CANARY_TASKS[task_index]
             task_state = state["tasks"][task_id]
             try:
-                self._reserve(1)
+                self._reserve(1, key=f"{task_id}:baseline-candidate")
                 request = {
                     "task_id": task_id,
                     "run_id": task_state["baseline_run_id"],
@@ -564,6 +585,11 @@ class DeliveryCanaryV3Runner:
                     ),
                 }
             except Exception as exc:
+                result = self._summary(state)
+                atomic_write_json(
+                    self.config.output_root / "canary_batch_result.json",
+                    result,
+                )
                 return self._transition(
                     stage,
                     CanaryStage.CANARY_FAILED,
@@ -571,6 +597,7 @@ class DeliveryCanaryV3Runner:
                     updates={
                         "failure_code": getattr(exc, "code", "CANARY_FAILED"),
                         "failure_message": str(exc),
+                        "canary_result": result,
                     },
                     receipt={"failure_classification": getattr(exc, "code", "CANARY_FAILED")},
                 )
@@ -596,6 +623,12 @@ class DeliveryCanaryV3Runner:
                     Path(candidate["candidate_output_root"])
                 )
             except Exception as exc:
+                code = getattr(exc, "code", "WORKSPACE_VALIDATION_FAILED")
+                status = (
+                    "CANDIDATE_NONDELIVERY"
+                    if code == "WORKSPACE_VALIDATION_FAILED"
+                    else "PROVIDER_BLOCKED"
+                )
                 return self._transition(
                     stage,
                     CanaryStage.TASK_NONDELIVERY,
@@ -605,17 +638,15 @@ class DeliveryCanaryV3Runner:
                             **state["tasks"],
                             task_id: {
                                 **task_state,
-                                "status": "CANDIDATE_NONDELIVERY",
-                                "failure_code": getattr(
-                                    exc, "code", "WORKSPACE_VALIDATION_FAILED"
-                                ),
+                                "status": status,
+                                "failure_code": code,
                                 "failure_message": str(exc),
                                 "candidate_exit": 0,
                                 "delivery_evidence": delivery_evidence,
                             },
                         }
                     },
-                    receipt={"failure_classification": "CANDIDATE_NONDELIVERY"},
+                    receipt={"failure_classification": status},
                 )
             delivery_evidence = candidate.get("delivery_evidence")
             return self._transition(

@@ -65,7 +65,10 @@ from .production_training_operations import (
     judge_credential_readiness,
     judge_identity_preflight,
 )
-from .deepseek_codex_engineering_port import DeepSeekCodexEngineeringPort
+from .deepseek_codex_engineering_port import (
+    CodexEngineeringPort,
+    DeepSeekCodexEngineeringPort,
+)
 from .community_evaluator import (
     run_judge_environment_diagnostic,
     run_judge_probe_subprocess,
@@ -605,11 +608,20 @@ def command_delivery_canary_v3(args: argparse.Namespace) -> int:
     if dry_run:
         candidate_port = DeliveryCanaryDryRunCandidate()
     else:
-        candidate_port = DeepSeekCodexEngineeringPort(
-            model=str(config.require("candidate.model")),
-            timeout_seconds=int(config.require("candidate.timeout_seconds")),
-            sandbox=str(config.require("candidate.sandbox")),
-        )
+        provider = str(config.require("candidate.provider"))
+        if provider == "native_codex":
+            candidate_port = CodexEngineeringPort(
+                model=str(config.require("candidate.model")),
+                profile=str(config.require("candidate.profile")),
+                timeout_seconds=int(config.require("candidate.timeout_seconds")),
+                sandbox=str(config.require("candidate.sandbox")),
+            )
+        else:
+            candidate_port = DeepSeekCodexEngineeringPort(
+                model=str(config.require("candidate.model")),
+                timeout_seconds=int(config.require("candidate.timeout_seconds")),
+                sandbox=str(config.require("candidate.sandbox")),
+            )
     state_root = output_root / "supervisor" / args.batch_id
     fresh = not (state_root / "training-supervisor.sqlite3").is_file()
     runner = DeliveryCanaryV3Runner(
@@ -617,6 +629,7 @@ def command_delivery_canary_v3(args: argparse.Namespace) -> int:
         batch_id=args.batch_id,
         state_root=state_root,
         candidate_port=candidate_port,
+        dry_run=dry_run,
     )
     if fresh:
         runner.initialize()

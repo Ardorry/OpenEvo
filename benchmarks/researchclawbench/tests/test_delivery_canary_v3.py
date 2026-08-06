@@ -14,6 +14,7 @@ from openevo_researchclawbench.delivery_canary_v3 import (
     CANARY_V3_PROTOCOL_NAME,
     DeliveryCanaryConfig,
     DeliveryCanaryDryRunCandidate,
+    DeliveryCanaryError,
     DeliveryCanaryV3Runner,
     CanaryStage,
 )
@@ -133,6 +134,7 @@ def _runner(config: DeliveryCanaryConfig, *, batch_id: str = "canary-test", cand
         batch_id=batch_id,
         state_root=config.output_root / "supervisor" / batch_id,
         candidate_port=candidate or DeliveryCanaryDryRunCandidate(),
+        dry_run=True,
     )
 
 
@@ -376,6 +378,7 @@ def test_dry_run_canary_both_tasks_close_with_2_2(tmp_path: Path) -> None:
     state = runner.run_until_terminal()
     assert state["stage"] == CanaryStage.CANARY_CLOSED.value
     assert state["candidate_jobs"] == 2
+    assert state["canary_result"]["real_candidate_jobs"] == 0
     assert state["evolution_jobs"] == 0
     assert state["judge_jobs"] == 0
     assert len(candidate.calls) == 2
@@ -384,6 +387,7 @@ def test_dry_run_canary_both_tasks_close_with_2_2(tmp_path: Path) -> None:
     )
     assert summary["status"] == "DEEPSEEK_DELIVERY_RELIABILITY_PASSED"
     assert summary["candidate_delivery_success_rate"] == 1.0
+    assert summary["candidate_jobs"] == 2
     assert all(row["seal"] is True for row in summary["rows"])
     assert all(
         row["delivery_classification"] == "CANDIDATE_DELIVERY_VALID"
@@ -426,8 +430,162 @@ def test_canary_failure_stops_without_second_task(tmp_path: Path) -> None:
     )
     assert summary["status"] == "DEEPSEEK_DELIVERY_RELIABILITY_FAILED"
     assert summary["candidate_delivery_success_rate"] == 0.0
+    assert summary["candidate_jobs"] == 1
+    assert summary["real_candidate_jobs"] == 0
     assert summary["rows"][0]["result"] == "CANDIDATE_NONDELIVERY"
     assert summary["rows"][1]["result"] is None
+
+
+def test_provider_failure_after_request_counts_candidate_job(
+    tmp_path: Path,
+) -> None:
+    from openevo_researchclawbench.deepseek_codex_engineering_port import (
+        DeepSeekEngineeringError,
+    )
+
+    class QuotaCandidate(DeliveryCanaryDryRunCandidate):
+        def execute(self, request):
+            self.calls.append(dict(request))
+            raise DeepSeekEngineeringError(
+                "BLOCKED_CANDIDATE_QUOTA", "quota exceeded"
+            )
+
+    config = _make_config(tmp_path)
+    candidate = QuotaCandidate()
+    runner = _runner(config, batch_id="canary-quota", candidate=candidate)
+    runner.initialize()
+    state = runner.run_until_terminal()
+    assert state["stage"] == CanaryStage.CANARY_FAILED.value
+    assert state["tasks"]["Chemistry_004"]["status"] == "PROVIDER_BLOCKED"
+    assert state["tasks"]["Chemistry_004"]["failure_code"] == (
+        "BLOCKED_CANDIDATE_QUOTA"
+    )
+    summary = json.loads(
+        (config.output_root / "canary_batch_result.json").read_text(encoding="utf-8")
+    )
+    assert summary["candidate_jobs"] == 1
+    assert summary["rows"][0]["result"] == "PROVIDER_BLOCKED"
+
+
+def test_pre_dispatch_failure_counts_zero_candidate_jobs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _make_config(tmp_path)
+    runner = _runner(config, batch_id="canary-predispatch")
+
+    def failing_reserve(units: int, key: str) -> None:
+        raise DeliveryCanaryError("CANDIDATE_BUDGET_EXHAUSTED", "budget")
+
+    monkeypatch.setattr(runner, "_reserve", failing_reserve)
+    runner.initialize()
+    state = runner.run_until_terminal()
+    assert state["stage"] == CanaryStage.CANARY_FAILED.value
+    summary = json.loads(
+        (config.output_root / "canary_batch_result.json").read_text(encoding="utf-8")
+    )
+    assert summary["candidate_jobs"] == 0
+    assert summary["real_candidate_jobs"] == 0
+
+
+def test_gpt_codex_port_argv_and_environment_isolation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openevo_researchclawbench.deepseek_codex_engineering_port import (
+        CodexExecutionResult,
+        CodexEngineeringPort,
+    )
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-secret")
+    monkeypatch.setenv("RCB_JUDGE_API_KEY", "judge-secret")
+    monkeypatch.setenv("RCB_JUDGE_BASE_URL", "https://judge.invalid")
+    monkeypatch.setenv("RCB_JUDGE_MODEL", "openai/gpt-5.1")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "openrouter-secret")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-secret")
+    state = {"calls": []}
+
+    def fake_executor(argv, *, env, cwd, prompt, timeout_seconds):
+        state["calls"].append((list(argv), dict(env)))
+        workspace = Path(cwd)
+        (workspace / "code").mkdir(exist_ok=True)
+        (workspace / "code" / "run.py").write_text("print('ok')\n", encoding="utf-8")
+        (workspace / "outputs").mkdir(exist_ok=True)
+        (workspace / "outputs" / "summary.json").write_text(
+            '{"ok": true}', encoding="utf-8"
+        )
+        (workspace / "report" / "images").mkdir(parents=True, exist_ok=True)
+        (workspace / "report" / "images" / "f.png").write_bytes(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00"
+            b"\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        (workspace / "report" / "report.md").write_text(
+            "# Report\n\n## Methodology\nok\n\n## Results\nok\n\n"
+            "## Discussion\nok\n\n![f](images/f.png)\n",
+            encoding="utf-8",
+        )
+        return CodexExecutionResult(
+            returncode=0, stdout="", stderr="", duration_seconds=0.1
+        )
+
+    port = CodexEngineeringPort(
+        model="gpt-5.5",
+        profile="~/.codex",
+        executor=fake_executor,
+        dry_run=True,
+    )
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    (workspace / "INSTRUCTIONS.md").write_text("# Task\n", encoding="utf-8")
+    receipt = port.candidate(
+        {
+            "task_id": "Chemistry_004",
+            "run_id": "Chemistry_004_a0_baseline",
+            "pass_name": "baseline",
+            "workspace": str(workspace),
+            "evidence_root": str(tmp_path / "evidence"),
+        }
+    )
+    argv, env = state["calls"][0]
+    assert argv[:3] == ["codex", "exec", "--model"]
+    assert "gpt-5.5" in argv
+    assert "--profile" not in argv
+    assert "--sandbox" in argv and "workspace-write" in argv
+    assert env["CODEX_HOME"] == str(Path("~/.codex").expanduser())
+    for secret_key in (
+        "DEEPSEEK_API_KEY",
+        "RCB_JUDGE_API_KEY",
+        "RCB_JUDGE_BASE_URL",
+        "RCB_JUDGE_MODEL",
+        "OPENROUTER_API_KEY",
+        "OPENAI_API_KEY",
+    ):
+        assert secret_key not in env
+    assert receipt["profile"] == "~/.codex"
+    assert receipt["credential_present"] is True
+    assert receipt["credential_recorded"] is False
+    assert "deepseek_key_present" not in receipt
+
+
+def test_gpt55_reliability_config_is_frozen() -> None:
+    import yaml
+
+    path = (
+        Path(__file__).resolve().parents[3]
+        / "benchmarks"
+        / "researchclaw"
+        / "configs"
+        / "per_item_minimal_gpt55_reliability_v1.yaml"
+    )
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert raw["protocol_name"] == "per_item_minimal_gpt55_reliability_v1"
+    assert raw["task_ids"] == ["Chemistry_004", "Information_005"]
+    assert raw["candidate"]["provider"] == "native_codex"
+    assert raw["candidate"]["model"] == "gpt-5.5"
+    assert raw["candidate"]["profile"] == "~/.codex"
+    assert raw["execution"]["max_candidate_jobs"] == 2
+    assert raw["execution"]["max_evolution_jobs"] == 0
+    assert raw["execution"]["max_judge_jobs"] == 0
+    assert raw["execution"]["max_retries"] == 0
 
 
 def test_v2_and_v3_stats_are_not_merged(tmp_path: Path) -> None:

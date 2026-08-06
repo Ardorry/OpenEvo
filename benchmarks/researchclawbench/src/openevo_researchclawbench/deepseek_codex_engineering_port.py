@@ -490,6 +490,56 @@ class DeepSeekCodexEngineeringPort:
         }
 
 
+class CodexEngineeringPort(DeepSeekCodexEngineeringPort):
+    """Native Codex Candidate/Evolution port (e.g. GPT-5.5, profile ~/.codex).
+
+    Provider/profile/model are configuration parameters.  Credentials live in
+    the native profile (CODEX_HOME) and are never copied into evidence or
+    recorded in receipts.
+    """
+
+    def __init__(
+        self,
+        *,
+        model: str = "gpt-5.5",
+        profile: str = "~/.codex",
+        timeout_seconds: int = 1800,
+        sandbox: str = "workspace-write",
+        executor: Callable[..., CodexExecutionResult] | None = None,
+        dry_run: bool = False,
+    ) -> None:
+        super().__init__(
+            model=model,
+            profile=profile,
+            timeout_seconds=timeout_seconds,
+            sandbox=sandbox,
+            executor=executor,
+            dry_run=dry_run,
+        )
+
+    @property
+    def deepseek_key_present(self) -> bool:
+        return False
+
+    def _environment(self) -> dict[str, str]:
+        source = os.environ
+        env = {
+            key: source[key]
+            for key in _ENV_ALLOWLIST
+            if key in source
+        }
+        env["CODEX_HOME"] = str(Path(self.profile).expanduser())
+        return env
+
+    def candidate(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        receipt = super().candidate(request)
+        receipt["profile"] = self.profile
+        receipt["credential_present"] = True
+        receipt["credential_recorded"] = False
+        receipt.pop("deepseek_key_present", None)
+        return receipt
+
+
 def _evolution_prompt(
     *,
     baseline_root: Path,

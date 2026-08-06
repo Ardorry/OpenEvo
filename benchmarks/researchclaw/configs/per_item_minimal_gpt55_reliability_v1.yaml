@@ -1,0 +1,31 @@
+protocol_name: "per_item_minimal_gpt55_reliability_v1"
+split: "community"
+task_ids:
+  - Chemistry_004
+  - Information_005
+run_purpose: "gpt55_delivery_reliability_canary_v1"
+candidate_backend: "native_codex"
+leaderboard_eligible: false
+official_protocol: false
+native_core_route: false
+
+paths:
+  project_root: "/home/lhy-h/work/researchclaw_openevo"
+  researchclawbench_root: "/home/lhy-h/work/researchclaw_openevo/ResearchClawBench"
+  output_root: "/home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/minimal_per_item_gpt55_reliability_v1"
+
+candidate:
+  provider: "native_codex"
+  model: "gpt-5.5"
+  profile: "~/.codex"
+  timeout_seconds: 1800
+  sandbox: "workspace-write"
+
+execution:
+  max_candidate_jobs: 2
+  max_evolution_jobs: 0
+  max_judge_jobs: 0
+  max_retries: 0
+  leaderboard_eligible: false
+  official_protocol: false
+  dry_run: false

@@ -627,6 +627,7 @@ def test_judge_subprocess_env_has_rcb_credentials_and_no_deepseek(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-secret")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-secret")
     monkeypatch.setenv("CODEX_HOME", "/home/user/.codex-deepseek")
     monkeypatch.setenv("https_proxy", "http://proxy.invalid:10809")
     monkeypatch.setenv("http_proxy", "http://proxy.invalid:10809")
@@ -641,6 +642,7 @@ def test_judge_subprocess_env_has_rcb_credentials_and_no_deepseek(
         judge_env_file=None,
     )
     assert "DEEPSEEK_API_KEY" not in env
+    assert "OPENAI_API_KEY" not in env
     assert "CODEX_HOME" not in env
     assert env["RCB_JUDGE_API_KEY"] == "judge-key"
     assert env["RCB_JUDGE_BASE_URL"] == "https://openrouter.ai/api/v1"
