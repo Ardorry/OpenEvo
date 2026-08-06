@@ -470,6 +470,86 @@ def test_mark_nondelivery_continues_with_information(tmp_path: Path) -> None:
     assert summary["candidate_delivery_success_rate"] == 0.8
     assert summary["infrastructure_failure_count"] == 0
     assert summary["blocked_count"] == 0
+    assert summary["status"] == "PILOT_V2_CLOSED_WITH_CANDIDATE_FAILURE"
+
+
+def test_second_candidate_nondelivery_closes_without_budget_increase(
+    tmp_path: Path,
+) -> None:
+    config = _make_config(tmp_path)
+
+    class FailingBaseline(PilotV2DryRunCandidate):
+        def __init__(self, fail_task: str) -> None:
+            super().__init__()
+            self.fail_task = fail_task
+
+        def execute(self, request):
+            if (
+                request["task_id"] == self.fail_task
+                and request["pass_name"] == "baseline"
+            ):
+                return {
+                    "task_id": request["task_id"],
+                    "run_id": request["run_id"],
+                    "pass_name": request["pass_name"],
+                    "session_id": f"empty-{request['run_id']}",
+                    "candidate_output_root": str(request["workspace"]),
+                    "exit_status": 0,
+                    "provider": "deepseek",
+                    "model": "deepseek-v4-flash",
+                    "deepseek_key_present": False,
+                    "secret_recorded": False,
+                }
+            return super().execute(request)
+
+    runner_one = _make_runner(
+        config,
+        batch_id="batch-one",
+        candidate=FailingBaseline("Chemistry_004"),
+    )
+    runner_one.initialize()
+    state_one = runner_one.run_until_terminal()
+    assert state_one["stage"] == PilotV2Stage.PILOT_BLOCKED.value
+
+    runner_two = _make_runner(
+        config,
+        batch_id="batch-two",
+        candidate=FailingBaseline("Information_005"),
+        adopt_from="batch-one",
+        mark_nondelivery=("Chemistry_004",),
+    )
+    runner_two.initialize()
+    state_two = runner_two.run_until_terminal()
+    assert state_two["stage"] == PilotV2Stage.PILOT_BLOCKED.value
+    assert state_two["failure_code"] == "WORKSPACE_VALIDATION_FAILED"
+
+    candidate_three = PilotV2DryRunCandidate()
+    evolution_three = PilotV2DryRunEvolution()
+    judge_three = PilotV2DryRunJudge()
+    runner_three = _make_runner(
+        config,
+        batch_id="batch-three",
+        candidate=candidate_three,
+        evolution=evolution_three,
+        judge=judge_three,
+        adopt_from="batch-two",
+        mark_nondelivery=("Chemistry_004", "Information_005"),
+    )
+    runner_three.initialize()
+    state_three = runner_three.run_until_terminal()
+    assert state_three["stage"] == PilotV2Stage.PILOT_CLOSED.value
+    assert candidate_three.calls == []
+    assert state_three["candidate_jobs"] == 4
+    assert state_three["tasks"]["Chemistry_004"]["status"] == "CANDIDATE_NONDELIVERY"
+    assert state_three["tasks"]["Information_005"]["status"] == "CANDIDATE_NONDELIVERY"
+    summary = json.loads(
+        (config.output_root / "pilot_batch_result.json").read_text(encoding="utf-8")
+    )
+    assert [row["task_id"] for row in summary["rows"]] == ["Astronomy_004"]
+    assert summary["candidate_nondelivery_count"] == 2
+    assert summary["task_completion_rate"] == round(1 / 3, 3)
+    assert summary["candidate_delivery_success_rate"] == 0.5
+    assert summary["status"] == "PILOT_V2_CLOSED_WITH_CANDIDATE_FAILURE"
 
 
 def test_candidate_evidence_is_persisted_and_redacted(

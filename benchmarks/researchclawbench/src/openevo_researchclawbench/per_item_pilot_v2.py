@@ -696,6 +696,22 @@ class PilotV2Runner:
         for index, task_id in enumerate(PILOT_TASKS):
             if task_id in mark_nondelivery:
                 task_state = prior_tasks.get(task_id)
+                if (
+                    isinstance(task_state, dict)
+                    and task_state.get("status") == "CANDIDATE_NONDELIVERY"
+                ):
+                    adopted[task_id] = task_state
+                    namespace = (
+                        self.config.output_root
+                        / "items"
+                        / task_id
+                        / "sealed"
+                        / self.batch_id
+                    )
+                    namespace.mkdir(parents=True, exist_ok=True)
+                    atomic_write_json(namespace / "task_result.json", task_state)
+                    first_pending = index + 1
+                    continue
                 if not isinstance(task_state, dict) or "evolved_judge" in task_state:
                     raise PilotV2Error(
                         "NONDELIVERY_MARK_INVALID",
@@ -1572,9 +1588,14 @@ class PilotV2Runner:
             if state["tasks"].get(task_id, {}).get("status")
             == "CANDIDATE_NONDELIVERY"
         )
+        summary_status = (
+            "PILOT_V2_CLOSED_WITH_CANDIDATE_FAILURE"
+            if candidate_nondelivery_count > 0
+            else "PILOT_V2_CLOSED"
+        )
         return {
             "schema_version": "openevo.researchclawbench.pilot_v2_batch.v1",
-            "status": "PILOT_V2_CLOSED",
+            "status": summary_status,
             "batch_id": self.batch_id,
             "task_ids": list(PILOT_TASKS),
             "rows": rows,
