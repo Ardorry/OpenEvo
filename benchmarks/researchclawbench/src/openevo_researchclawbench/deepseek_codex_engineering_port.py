@@ -293,13 +293,20 @@ class DeepSeekCodexEngineeringPort:
                 raise DeepSeekEngineeringError(
                     "BLOCKED_CANDIDATE_AUTH", "DeepSeek Codex authentication failed"
                 )
-            if "quota" in lowered or "insufficient" in lowered or "402" in lowered:
+            if (
+                "quota" in lowered
+                or "insufficient" in lowered
+                or "usage limit" in lowered
+                or "credits" in lowered
+                or "billing" in lowered
+                or "402" in lowered
+            ):
                 raise DeepSeekEngineeringError(
                     "BLOCKED_CANDIDATE_QUOTA", "DeepSeek Codex quota exceeded"
                 )
             raise DeepSeekEngineeringError(
                 "BLOCKED_CANDIDATE_RUNTIME",
-                f"DeepSeek Codex exited with {result.returncode}",
+                f"Codex exited with {result.returncode}",
             )
         meta = {
             "status": "completed",

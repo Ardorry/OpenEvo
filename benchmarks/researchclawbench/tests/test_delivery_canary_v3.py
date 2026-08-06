@@ -467,6 +467,41 @@ def test_provider_failure_after_request_counts_candidate_job(
     assert summary["rows"][0]["result"] == "PROVIDER_BLOCKED"
 
 
+def test_usage_limit_is_classified_as_quota(tmp_path: Path) -> None:
+    from openevo_researchclawbench.deepseek_codex_engineering_port import (
+        CodexExecutionResult,
+        CodexEngineeringPort,
+        DeepSeekEngineeringError,
+    )
+
+    def fake_executor(argv, *, env, cwd, prompt, timeout_seconds):
+        return CodexExecutionResult(
+            returncode=1,
+            stdout=(
+                '{"type":"error","message":"You\'ve hit your usage limit. '
+                "Visit https://chatgpt.com/codex/settings/usage to purchase "
+                'more credits or try again at Aug 8th, 2026 11:32 AM."}'
+            ),
+            stderr="",
+            duration_seconds=1.0,
+        )
+
+    port = CodexEngineeringPort(executor=fake_executor, dry_run=True)
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    (workspace / "INSTRUCTIONS.md").write_text("# Task\n", encoding="utf-8")
+    with pytest.raises(DeepSeekEngineeringError) as excinfo:
+        port.candidate(
+            {
+                "task_id": "Chemistry_004",
+                "run_id": "Chemistry_004_a0_baseline",
+                "pass_name": "baseline",
+                "workspace": str(workspace),
+            }
+        )
+    assert excinfo.value.code == "BLOCKED_CANDIDATE_QUOTA"
+
+
 def test_pre_dispatch_failure_counts_zero_candidate_jobs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
