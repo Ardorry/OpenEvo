@@ -9,7 +9,7 @@ import sqlite3
 import stat
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .transition_engine import TrainingStage, require_transition
 
@@ -35,9 +35,15 @@ def _now() -> str:
 class TrainingStateStore:
     """Single-experiment durable state with fenced idempotent transitions."""
 
-    def __init__(self, root: str | Path) -> None:
+    def __init__(
+        self,
+        root: str | Path,
+        *,
+        transition_fn: Callable[[TrainingStage, TrainingStage], None] = require_transition,
+    ) -> None:
         self.root = Path(os.path.abspath(root))
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self._transition_fn = transition_fn
         metadata = os.stat(self.root, follow_symlinks=False)
         if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.geteuid():
             raise ValueError("training state root is not supervisor-owned")
@@ -159,10 +165,12 @@ class TrainingStateStore:
         core_identity_sha256: str,
         adapter_identity_sha256: str,
         initial_state: dict[str, Any],
+        initial_stage: TrainingStage | str | None = None,
     ) -> dict[str, Any]:
         state = dict(initial_state)
         state["experiment_id"] = experiment_id
-        state["stage"] = TrainingStage.INITIALIZED.value
+        stage = TrainingStage.INITIALIZED if initial_stage is None else initial_stage
+        state["stage"] = getattr(stage, "value", str(stage))
         state["last_transition"] = None
         state["updated_at"] = _now()
         digest = canonical_sha256(state)
@@ -192,7 +200,7 @@ class TrainingStateStore:
                     protocol_sha256,
                     core_identity_sha256,
                     adapter_identity_sha256,
-                    TrainingStage.INITIALIZED.value,
+                    state["stage"],
                     payload,
                     digest,
                     state["updated_at"],
@@ -258,7 +266,7 @@ class TrainingStateStore:
         updates: dict[str, Any],
         receipt: dict[str, Any],
     ) -> dict[str, Any]:
-        require_transition(source, target)
+        self._transition_fn(source, target)
         request = {
             "experiment_id": experiment_id,
             "source": source.value,

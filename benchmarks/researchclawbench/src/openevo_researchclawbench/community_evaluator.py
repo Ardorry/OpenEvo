@@ -397,14 +397,22 @@ def _closed_evaluator_subprocess_environment(
 
     # The benchmark adapter is intentionally source-loaded by the formal
     # runner, so it is not necessarily installed in the evaluator venv.  The
-    # child must retain the exact source root that provided this module while
-    # still exposing the repository root needed by ``ResearchClawBench``.
+    # child must retain the exact source root that provided this module, the
+    # same OpenEvo source root already importable in this process, and the
+    # repository root needed by ``ResearchClawBench``.
     adapter_source_root = Path(__file__).resolve(strict=True).parents[1]
+    import openevo
+
+    openevo_source_root = Path(openevo.__file__).resolve(strict=True).parents[1]
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "PYTHONUNBUFFERED": "1",
         "PYTHONPATH": os.pathsep.join(
-            (os.fspath(adapter_source_root), os.fspath(project_root))
+            (
+                os.fspath(adapter_source_root),
+                os.fspath(openevo_source_root),
+                os.fspath(project_root),
+            )
         ),
     }
     names = ("JUDGE_API_KEY", "JUDGE_API_BASE", "JUDGE_MODEL_NAME")

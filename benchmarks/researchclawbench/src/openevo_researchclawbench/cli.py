@@ -30,6 +30,14 @@ from .managed_core_control import (
     acquire_managed_core_control,
     managed_core_host_profile_readiness,
 )
+from .minimal_per_item_runner import (
+    DryRunCandidatePort,
+    DryRunEvolutionPort,
+    DryRunJudgePort,
+    ExistingJudgeAdapter,
+    MinimalPerItemConfig,
+    MinimalPerItemRunner,
+)
 from .official_training_control import (
     OfficialTrainingControl,
     OfficialTrainingOperationsUnavailable,
@@ -43,6 +51,7 @@ from .production_training_operations import (
     judge_credential_readiness,
     judge_identity_preflight,
 )
+from .deepseek_codex_engineering_port import DeepSeekCodexEngineeringPort
 from .reflector_runner import reflector_runtime_audit
 from .run_manifest import atomic_write_json
 from .training_control import (
@@ -466,6 +475,50 @@ def _run_formal_official_transition(
         authority.close()
 
 
+def command_minimal_per_item(args: argparse.Namespace) -> int:
+    """Run the minimal single-task per-item canary (dry-run or live)."""
+
+    config = MinimalPerItemConfig.load(args.protocol)
+    config.output_root.mkdir(parents=True, exist_ok=True)
+    dry_run = bool(args.dry_run or args.no_model_calls)
+    if dry_run:
+        candidate_port = DryRunCandidatePort(model=config.candidate_model)
+        evolution_port = DryRunEvolutionPort()
+        judge_port = DryRunJudgePort(model=config.judge_model)
+    else:
+        candidate_port = DeepSeekCodexEngineeringPort(
+            model=config.candidate_model,
+            timeout_seconds=int(config.require("candidate.timeout_seconds")),
+            sandbox=str(config.require("candidate.sandbox")),
+        )
+        evolution_port = DeepSeekCodexEngineeringPort(
+            model=config.candidate_model,
+            timeout_seconds=int(config.require("evolution.timeout_seconds"))
+            if "timeout_seconds" in config.raw.get("evolution", {})
+            else 1800,
+        )
+        judge_port = ExistingJudgeAdapter(
+            config,
+            evaluator_private_root=config.output_root / "evaluator_private" / args.run_id,
+            timeout_seconds=int(config.require("judge.timeout_seconds")),
+        )
+    state_root = config.output_root / "supervisor" / args.run_id
+    fresh = not (state_root / "training-supervisor.sqlite3").is_file()
+    runner = MinimalPerItemRunner(
+        config=config,
+        state_root=state_root,
+        run_id=args.run_id,
+        candidate_port=candidate_port,
+        evolution_port=evolution_port,
+        judge_port=judge_port,
+    )
+    if fresh:
+        runner.initialize()
+    state = runner.run_until_item_closed()
+    print_closed_json(state)
+    return 0 if state.get("stage") == "COMPLETE" else 5
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -571,9 +624,16 @@ def main(argv: list[str] | None = None) -> int:
             )
         if name in {"training-start", "run-next", "resume"}:
             control.add_argument("--until", choices=tuple(item.value for item in TrainingStage))
+    minimal = sub.add_parser("minimal-per-item")
+    minimal.add_argument("--protocol", required=True, type=Path)
+    minimal.add_argument("--run-id", required=True)
+    minimal.add_argument("--dry-run", action="store_true")
+    minimal.add_argument("--no-model-calls", action="store_true")
     args = parser.parse_args(argv)
     core_control_authority = None
     try:
+        if args.command == "minimal-per-item":
+            return command_minimal_per_item(args)
         config = ExperimentConfig.load(args.protocol)
         if (
             getattr(config, "formal_runs_v11", None) is not None

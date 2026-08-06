@@ -1,0 +1,42 @@
+protocol_name: "researchclaw_per_item_minimal_deepseek_canary_v1"
+task_id: "Life_005"
+run_purpose: "engineering_deepseek_canary"
+candidate_backend: "deepseek"
+evolution_backend: "deepseek"
+judge_backend: "openai_compatible_gpt_5_1"
+native_core_route: false
+leaderboard_eligible: false
+official_protocol: false
+
+paths:
+  project_root: "/home/lhy-h/work/researchclaw_per_item_minimal"
+  researchclawbench_root: "/home/lhy-h/work/researchclaw_openevo/ResearchClawBench"
+  output_root: "/home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/minimal_per_item_deepseek_canary_v1"
+
+candidate:
+  provider: "deepseek"
+  model: "deepseek-v4-flash"
+  profile: "~/.codex-deepseek"
+  timeout_seconds: 1800
+  sandbox: "workspace-write"
+
+evolution:
+  provider: "deepseek"
+  model: "deepseek-v4-flash"
+  generation: 1
+
+judge:
+  provider: "openai_compatible"
+  model: "openai/gpt-5.1"
+  api_key_env: "RCB_JUDGE_API_KEY"
+  base_url_env: "RCB_JUDGE_BASE_URL"
+  model_env: "RCB_JUDGE_MODEL"
+  timeout_seconds: 1800
+
+execution:
+  max_tasks: 1
+  max_provider_jobs: 7
+  max_retries: 0
+  stop_on_first_failure: true
+  leaderboard_eligible: false
+  dry_run: true
