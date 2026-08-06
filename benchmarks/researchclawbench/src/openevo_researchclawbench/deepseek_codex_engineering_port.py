@@ -86,8 +86,12 @@ def _extract_final_assistant_message(stdout: str) -> dict[str, Any] | None:
             continue
         payload = event.get("payload")
         if not isinstance(payload, dict):
-            continue
+            payload = {}
         message = payload.get("message")
+        if not isinstance(message, str) or not message.strip():
+            item = event.get("item")
+            if isinstance(item, dict) and item.get("type") == "agent_message":
+                message = item.get("message") or item.get("text") or ""
         if isinstance(message, str) and message.strip():
             last = {
                 "type": event.get("type"),
