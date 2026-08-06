@@ -1,0 +1,31 @@
+protocol_name: "per_item_minimal_delivery_canary_v3"
+split: "community"
+task_ids:
+  - Chemistry_004
+  - Information_005
+run_purpose: "deepseek_delivery_reliability_canary_v3"
+candidate_backend: "deepseek"
+leaderboard_eligible: false
+official_protocol: false
+native_core_route: false
+
+paths:
+  project_root: "/home/lhy-h/work/researchclaw_openevo"
+  researchclawbench_root: "/home/lhy-h/work/researchclaw_openevo/ResearchClawBench"
+  output_root: "/home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/minimal_per_item_deepseek_delivery_canary_v3"
+
+candidate:
+  provider: "deepseek"
+  model: "deepseek-v4-flash"
+  profile: "~/.codex-deepseek"
+  timeout_seconds: 1800
+  sandbox: "workspace-write"
+
+execution:
+  max_candidate_jobs: 2
+  max_evolution_jobs: 0
+  max_judge_jobs: 0
+  max_retries: 0
+  leaderboard_eligible: false
+  official_protocol: false
+  dry_run: false

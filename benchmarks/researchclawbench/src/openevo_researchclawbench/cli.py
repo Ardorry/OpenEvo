@@ -16,6 +16,11 @@ from .candidate_reconciliation import (
 from .candidate_runner import candidate_source_audit
 from .config import CANARY_TASK, FROZEN_TASKS, ExperimentConfig, ProtocolError
 from .contamination_audit import run_offline_contamination_audit
+from .delivery_canary_v3 import (
+    DeliveryCanaryConfig,
+    DeliveryCanaryDryRunCandidate,
+    DeliveryCanaryV3Runner,
+)
 from .durable_evaluator_operation import OPENROUTER_API_BASE
 from .evolution_loop import FrozenTrainingSchedule
 from .formal_v11 import (
@@ -590,6 +595,38 @@ def command_pilot_v2(args: argparse.Namespace) -> int:
     return 4
 
 
+def command_delivery_canary_v3(args: argparse.Namespace) -> int:
+    """Run the Protocol v3 baseline-only delivery reliability canary."""
+
+    config = DeliveryCanaryConfig.load(args.config)
+    output_root = config.output_root
+    output_root.mkdir(parents=True, exist_ok=True)
+    dry_run = bool(args.dry_run or config.dry_run)
+    if dry_run:
+        candidate_port = DeliveryCanaryDryRunCandidate()
+    else:
+        candidate_port = DeepSeekCodexEngineeringPort(
+            model=str(config.require("candidate.model")),
+            timeout_seconds=int(config.require("candidate.timeout_seconds")),
+            sandbox=str(config.require("candidate.sandbox")),
+        )
+    state_root = output_root / "supervisor" / args.batch_id
+    fresh = not (state_root / "training-supervisor.sqlite3").is_file()
+    runner = DeliveryCanaryV3Runner(
+        config=config,
+        batch_id=args.batch_id,
+        state_root=state_root,
+        candidate_port=candidate_port,
+    )
+    if fresh:
+        runner.initialize()
+    state = runner.run_until_terminal()
+    print_closed_json(state)
+    if state.get("stage") == "CANARY_CLOSED":
+        return 0
+    return 7
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -719,6 +756,10 @@ def main(argv: list[str] | None = None) -> int:
     pilot_v2.add_argument("--adopt-batch", default=None)
     pilot_v2.add_argument("--mark-nondelivery", action="append", default=[])
     pilot_v2.add_argument("--dry-run", action="store_true")
+    delivery_canary_v3 = sub.add_parser("delivery-canary-v3")
+    delivery_canary_v3.add_argument("--config", required=True, type=Path)
+    delivery_canary_v3.add_argument("--batch-id", required=True)
+    delivery_canary_v3.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
     core_control_authority = None
     try:
@@ -751,6 +792,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if result.get("status") == "REJUDGE_SEALED_CLOSED" else 4
         if args.command == "pilot-v2":
             return command_pilot_v2(args)
+        if args.command == "delivery-canary-v3":
+            return command_delivery_canary_v3(args)
         config = ExperimentConfig.load(args.protocol)
         if (
             getattr(config, "formal_runs_v11", None) is not None

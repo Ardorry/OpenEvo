@@ -18,6 +18,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from .delivery_contract import analyze_delivery_evidence
+
 
 DEEPSEEK_MODEL = "deepseek-v4-flash"
 DEEPSEEK_PROFILE = "~/.codex-deepseek"
@@ -316,6 +318,12 @@ class DeepSeekCodexEngineeringPort:
             + "\n",
             encoding="utf-8",
         )
+        delivery_evidence = None
+        if evidence_root is not None:
+            delivery_evidence = analyze_delivery_evidence(
+                evidence_root=evidence_root,
+                workspace=workspace,
+            )
         receipt: dict[str, Any] = {
             "task_id": request["task_id"],
             "run_id": request["run_id"],
@@ -340,6 +348,7 @@ class DeepSeekCodexEngineeringPort:
         if evidence_root is not None:
             receipt["evidence_root"] = str(evidence_root)
             receipt["evidence_sha256"] = _evidence_root_sha256(evidence_root)
+            receipt["delivery_evidence"] = delivery_evidence
         if injected_paths is not None or injected_sha256 is not None:
             receipt["injected_artifact_paths"] = injected_paths
             receipt["injected_artifact_sha256"] = injected_sha256
