@@ -54,12 +54,8 @@ _PROXY_ENV_NAMES = (
     "no_proxy",
     "NO_PROXY",
 )
-OFFICIAL_SCORER_SHA256 = (
-    "a1c3370bc26a28b68ae06de48d333717cc6732ed746c1c0af4464791aeab188c"
-)
-CANONICAL_SCORER_SHA256 = (
-    "9492317443acc069744330f27aac693d162f1aa6837d512e40419704197c6022"
-)
+OFFICIAL_SCORER_SHA256 = "a1c3370bc26a28b68ae06de48d333717cc6732ed746c1c0af4464791aeab188c"
+CANONICAL_SCORER_SHA256 = "9492317443acc069744330f27aac693d162f1aa6837d512e40419704197c6022"
 CANONICAL_SCORER_GIT_COMMIT = "b1175eca3deb78ff8b2c839070874474051d2261"
 CANONICAL_SCORER_RELATIVE_PATH = "ResearchClawBench/evaluation/score.py"
 _EVALUATOR_FORBIDDEN_SOURCE_NAMES = {
@@ -130,9 +126,7 @@ class DurableCommunityJudgeExecutor:
             judge_env_file=self.judge_env_file,
         )
         if not result.score_valid:
-            raise EvaluatorError(
-                f"Judge failed closed: {result.failure_category or 'UNKNOWN'}"
-            )
+            raise EvaluatorError(f"Judge failed closed: {result.failure_category or 'UNKNOWN'}")
         if result.judge_outcome is None:
             raise EvaluatorError("Judge outcome is missing")
         result.judge_outcome.validate(self.policy)
@@ -323,6 +317,14 @@ class DurableCommunityEvaluatorPort:
             expected_sha256=expected_sha256,
         )
 
+    def read_private_evaluation_for_projection(
+        self, *, idempotency_key: str, expected_sha256: str
+    ) -> dict[str, Any]:
+        return self.bundle.operation.read_private_evaluation_for_projection(
+            idempotency_key=idempotency_key,
+            expected_sha256=expected_sha256,
+        )
+
 
 def run_community_evaluator(
     *,
@@ -475,21 +477,12 @@ def _closed_evaluator_subprocess_environment(
             )
         ),
     }
-    env.update(
-        {
-            name: os.environ[name]
-            for name in _PROXY_ENV_NAMES
-            if os.environ.get(name)
-        }
-    )
+    env.update({name: os.environ[name] for name in _PROXY_ENV_NAMES if os.environ.get(name)})
     if all(os.environ.get(name) for name in _JUDGE_ENV_NAMES):
         env.update({name: os.environ[name] for name in _JUDGE_ENV_NAMES})
     elif all(os.environ.get(name) for name in _LEGACY_JUDGE_ENV_NAMES):
         env.update(
-            {
-                rcb_name: os.environ[legacy_name]
-                for legacy_name, rcb_name in _JUDGE_ENV_PAIR
-            }
+            {rcb_name: os.environ[legacy_name] for legacy_name, rcb_name in _JUDGE_ENV_PAIR}
         )
     elif judge_env_file is not None:
         secret = Path(judge_env_file).resolve(strict=True)
@@ -517,10 +510,7 @@ def _run_community_evaluator(
 ) -> CommunityEvaluatorExecution:
     if task_id not in allowed_task_ids:
         raise EvaluatorError("evaluator task is outside the exact task allowlist")
-    if (
-        _ATTEMPT_ID.fullmatch(attempt_id) is None
-        or not attempt_id.startswith(f"{task_id}_a")
-    ):
+    if _ATTEMPT_ID.fullmatch(attempt_id) is None or not attempt_id.startswith(f"{task_id}_a"):
         raise EvaluatorError("evaluator attempt identity is unsafe or mismatched")
     source_input = Path(workspace)
     source_metadata = os.stat(source_input, follow_symlinks=False)
@@ -613,10 +603,7 @@ def _run_community_evaluator(
     if proc.returncode != 0 or not raw_path.is_file() or not metadata_path.is_file():
         raise EvaluatorError(f"community scorer failed with exit code {proc.returncode}")
     payload = json.loads(raw_path.read_text(encoding="utf-8"))
-    if (
-        not isinstance(payload, dict)
-        or "error" in payload
-    ):
+    if not isinstance(payload, dict) or "error" in payload:
         raise EvaluatorError("community scorer output is invalid")
     required_payload_keys = {
         "failure_category",
@@ -633,10 +620,7 @@ def _run_community_evaluator(
         raise EvaluatorError("community scorer output is invalid")
     if payload["requested_provider"] != REQUESTED_JUDGE_PROVIDER:
         raise EvaluatorError("Judge requested provider differs from protocol")
-    if (
-        expected_model is not None
-        and payload.get("requested_model") != expected_model
-    ):
+    if expected_model is not None and payload.get("requested_model") != expected_model:
         raise EvaluatorError("Judge requested model differs from protocol")
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     if not isinstance(metadata, dict) or set(metadata) != {
@@ -676,9 +660,7 @@ def _run_community_evaluator(
             (type(metadata["request_count"]) is int and metadata["request_count"] >= 0)
             or metadata["request_count"] == UNAVAILABLE
         )
-        or not (
-            isinstance(metadata["usage"], dict) or metadata["usage"] == UNAVAILABLE
-        )
+        or not (isinstance(metadata["usage"], dict) or metadata["usage"] == UNAVAILABLE)
         or metadata["cost_total_usd"] != UNAVAILABLE
     ):
         raise EvaluatorError("Judge execution identity differs from protocol")
@@ -767,29 +749,18 @@ def _load_judge_environment() -> tuple[str, ...]:
                 raise EvaluatorError("judge environment file contains an invalid value")
             values[key] = value
         if set(values) == set(_LEGACY_JUDGE_ENV_NAMES):
-            values = {
-                rcb_name: values[legacy_name]
-                for legacy_name, rcb_name in _JUDGE_ENV_PAIR
-            }
+            values = {rcb_name: values[legacy_name] for legacy_name, rcb_name in _JUDGE_ENV_PAIR}
         if set(values) != set(names):
             raise EvaluatorError("judge environment file is incomplete")
         os.environ.update(values)
     if all(os.environ.get(name) for name in names):
         values = {name: os.environ[name] for name in names}
     elif all(os.environ.get(name) for name in _LEGACY_JUDGE_ENV_NAMES):
-        values = {
-            rcb_name: os.environ[legacy_name]
-            for legacy_name, rcb_name in _JUDGE_ENV_PAIR
-        }
+        values = {rcb_name: os.environ[legacy_name] for legacy_name, rcb_name in _JUDGE_ENV_PAIR}
     else:
         raise EvaluatorError("judge environment is incomplete")
     os.environ.update(values)
-    os.environ.update(
-        {
-            legacy_name: values[rcb_name]
-            for legacy_name, rcb_name in _JUDGE_ENV_PAIR
-        }
-    )
+    os.environ.update({legacy_name: values[rcb_name] for legacy_name, rcb_name in _JUDGE_ENV_PAIR})
     return tuple(os.environ[name] for name in names)
 
 
@@ -840,12 +811,8 @@ def _credential_preflight(
     misconfigured ``judge.env`` before the first paid Candidate is started.
     """
 
-    dependency_lock = validate_evaluator_dependency_lock(
-        evaluator_dependency_lock
-    )
-    dependency_file_sha256 = hashlib.sha256(
-        evaluator_dependency_lock.read_bytes()
-    ).hexdigest()
+    dependency_lock = validate_evaluator_dependency_lock(evaluator_dependency_lock)
+    dependency_file_sha256 = hashlib.sha256(evaluator_dependency_lock.read_bytes()).hexdigest()
     scorer = _scorer_installation_authority(project_root)
     _load_judge_environment()
     actual_api_base = os.environ["JUDGE_API_BASE"]
@@ -870,9 +837,7 @@ def _credential_preflight(
             "scorer_module_origin": scorer["scorer_module_origin"],
             "structai_version": scorer["structai_version"],
             "evaluator_dependency_lock_sha256": dependency_file_sha256,
-            "evaluator_dependency_content_sha256": dependency_lock[
-                "content_sha256"
-            ],
+            "evaluator_dependency_content_sha256": dependency_lock["content_sha256"],
             "tasks_dir_authority_matches": True,
             "tasks_dir_relative": scorer["tasks_dir_relative"],
             "scorer_project_root_sha256": hashlib.sha256(
@@ -936,10 +901,7 @@ def _scorer_installation_authority(project_root: Path) -> dict[str, Any]:
         text=True,
         timeout=30,
     )
-    if (
-        git_result.returncode != 0
-        or git_result.stdout.strip() != CANONICAL_SCORER_GIT_COMMIT
-    ):
+    if git_result.returncode != 0 or git_result.stdout.strip() != CANONICAL_SCORER_GIT_COMMIT:
         raise EvaluatorError("canonical scorer git commit differs")
     official_result = subprocess.run(
         (
@@ -1108,8 +1070,7 @@ def _worker(
             "provider": expected_judge_provider,
             "request_count": (
                 payload["http_requests"]
-                if isinstance(payload["http_requests"], int)
-                and payload["http_requests"] >= 0
+                if isinstance(payload["http_requests"], int) and payload["http_requests"] >= 0
                 else UNAVAILABLE
             ),
             "requested_provider": payload["requested_provider"],
@@ -1118,11 +1079,7 @@ def _worker(
             "scorer_git_commit": scorer_authority["scorer_git_commit"],
             "scorer_sha256": scorer_authority["scorer_sha256"],
             "secret_recorded": False,
-            "usage": (
-                payload["usage"]
-                if isinstance(payload["usage"], dict)
-                else UNAVAILABLE
-            ),
+            "usage": (payload["usage"] if isinstance(payload["usage"], dict) else UNAVAILABLE),
         },
     )
     return 0
@@ -1163,14 +1120,11 @@ def _judge_probe_worker(
         raise EvaluatorError("Judge probe output is invalid")
     api_key_secret = os.environ.get("RCB_JUDGE_API_KEY", "")
     matching_fields = [
-        field
-        for field, value in result.items()
-        if api_key_secret and api_key_secret in str(value)
+        field for field, value in result.items() if api_key_secret and api_key_secret in str(value)
     ]
     if matching_fields:
         raise EvaluatorError(
-            "Judge probe contains secret material in fields: "
-            + ",".join(matching_fields)
+            "Judge probe contains secret material in fields: " + ",".join(matching_fields)
         )
     output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(output.parent, 0o700)
@@ -1217,11 +1171,10 @@ def run_judge_probe_subprocess(
     output = output_root_path / "judge_probe_result.json"
     if output.is_file() and not output.is_symlink():
         existing = json.loads(output.read_text(encoding="utf-8"))
-        if (
-            isinstance(existing, dict)
-            and existing.get("status")
-            in {"JUDGE_SUBPROCESS_OK", "JUDGE_SUBPROCESS_FAILED"}
-        ):
+        if isinstance(existing, dict) and existing.get("status") in {
+            "JUDGE_SUBPROCESS_OK",
+            "JUDGE_SUBPROCESS_FAILED",
+        }:
             return existing
         raise EvaluatorError("Judge probe evidence is invalid")
     resolved_project_root = Path(project_root).resolve(strict=True)
@@ -1268,8 +1221,7 @@ def run_judge_probe_subprocess(
         or (
             result.get("returned_provider") is not None
             and (
-                not isinstance(result["returned_provider"], str)
-                or not result["returned_provider"]
+                not isinstance(result["returned_provider"], str) or not result["returned_provider"]
             )
         )
     ):
@@ -1373,9 +1325,7 @@ def main(argv: list[str] | None = None) -> int:
             expected_judge_model=args.expected_judge_model,
             expected_judge_api_base=args.expected_judge_api_base,
             expected_judge_provider=args.expected_judge_provider,
-            evaluator_dependency_lock=args.evaluator_dependency_lock.resolve(
-                strict=True
-            ),
+            evaluator_dependency_lock=args.evaluator_dependency_lock.resolve(strict=True),
         )
     if args.judge_probe:
         if (

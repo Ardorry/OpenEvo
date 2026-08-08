@@ -161,31 +161,57 @@ class TrainingOperations(Protocol):
 
     def evolution_readiness(self, request: dict[str, Any]) -> dict[str, Any]: ...
 
-    def create_candidate_workspace(self, request: dict[str, Any], idempotency_key: str) -> OperationResult: ...
+    def create_candidate_workspace(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> OperationResult: ...
 
-    def start_candidate(self, request: dict[str, Any], idempotency_key: str) -> OperationResult: ...
+    def start_candidate(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> OperationResult: ...
 
-    def recover_candidate(self, request: dict[str, Any], idempotency_key: str) -> OperationResult: ...
+    def recover_candidate(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> OperationResult: ...
 
-    def validate_candidate_artifacts(self, request: dict[str, Any], idempotency_key: str) -> OperationResult: ...
+    def validate_candidate_artifacts(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> OperationResult: ...
 
-    def evaluate_candidate(self, request: dict[str, Any], idempotency_key: str) -> OperationResult: ...
+    def evaluate_candidate(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> OperationResult: ...
 
-    def create_feedback_attachment(self, request: dict[str, Any], idempotency_key: str) -> OperationResult: ...
+    def project_evaluation_feedback(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> OperationResult: ...
 
-    def prepare_successor(self, request: dict[str, Any], idempotency_key: str) -> OperationResult: ...
+    def create_feedback_attachment(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> OperationResult: ...
 
-    def collect_artifact_jobs(self, request: dict[str, Any], idempotency_key: str) -> OperationResult: ...
+    def prepare_successor(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> OperationResult: ...
 
-    def construct_composite(self, request: dict[str, Any], idempotency_key: str) -> OperationResult: ...
+    def collect_artifact_jobs(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> OperationResult: ...
+
+    def construct_composite(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> OperationResult: ...
 
     def prepare_per_item_evolved_workspace(
         self, request: dict[str, Any], idempotency_key: str
     ) -> OperationResult: ...
 
-    def sanitize_cross_task(self, request: dict[str, Any], idempotency_key: str) -> OperationResult: ...
+    def sanitize_cross_task(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> OperationResult: ...
 
-    def freeze_final_artifact(self, request: dict[str, Any], idempotency_key: str) -> OperationResult: ...
+    def freeze_final_artifact(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> OperationResult: ...
 
 
 @dataclass(frozen=True)
@@ -201,6 +227,7 @@ class ProductionPorts:
     freeze: ProductionOperationPort
     reconciliation: ProductionOperationPort | None = None
     per_item_evolved: ProductionOperationPort | None = None
+    feedback_projection: ProductionOperationPort | None = None
 
 
 def _utc_now() -> str:
@@ -260,7 +287,10 @@ class OperationReceiptStore:
             0o600,
         )
         try:
-            data = json.dumps(closed, indent=2, sort_keys=True, allow_nan=False).encode("utf-8") + b"\n"
+            data = (
+                json.dumps(closed, indent=2, sort_keys=True, allow_nan=False).encode("utf-8")
+                + b"\n"
+            )
             view = memoryview(data)
             while view:
                 written = os.write(descriptor, view)
@@ -347,9 +377,7 @@ class OperationReceiptStore:
         )
         try:
             data = (
-                json.dumps(closed, indent=2, sort_keys=True, allow_nan=False).encode(
-                    "utf-8"
-                )
+                json.dumps(closed, indent=2, sort_keys=True, allow_nan=False).encode("utf-8")
                 + b"\n"
             )
             view = memoryview(data)
@@ -458,12 +486,9 @@ class ProductionTrainingOperations:
                 }.items()
             )
             or isolation.get("policy_id") != CODEX_SUBSCRIPTION_POLICY_ID
-            or isolation.get("policy_sha256")
-            != CODEX_SUBSCRIPTION_POLICY_SHA256
+            or isolation.get("policy_sha256") != CODEX_SUBSCRIPTION_POLICY_SHA256
         ):
-            raise ProductionOperationError(
-                "candidate Core-control readiness failed closed"
-            )
+            raise ProductionOperationError("candidate Core-control readiness failed closed")
         return json.loads(canonical_bytes(result))
 
     def current_task_gt_supervision(self, task_id: str) -> dict[str, Any]:
@@ -477,9 +502,7 @@ class ProductionTrainingOperations:
         request = self._require_request(request)
         preflight = getattr(self.ports.evolution, "preflight", None)
         if not callable(preflight):
-            raise ProductionOperationError(
-                "REFLECTOR_CREDENTIAL_MOUNT_NOT_READY"
-            )
+            raise ProductionOperationError("REFLECTOR_CREDENTIAL_MOUNT_NOT_READY")
         result = preflight(request)
         local_pin = self.config.reflector_credential_mount_readiness()
         required_true = (
@@ -501,9 +524,7 @@ class ProductionTrainingOperations:
             or result.get("codex_cli_started") is not False
             or result.get("model_started") is not False
         ):
-            raise ProductionOperationError(
-                "REFLECTOR_CREDENTIAL_MOUNT_NOT_READY"
-            )
+            raise ProductionOperationError("REFLECTOR_CREDENTIAL_MOUNT_NOT_READY")
         if local_pin.get("required") is True and (
             local_pin.get("ready") is not True
             or any(
@@ -518,9 +539,7 @@ class ProductionTrainingOperations:
                 )
             )
         ):
-            raise ProductionOperationError(
-                "REFLECTOR_CREDENTIAL_MOUNT_NOT_READY"
-            )
+            raise ProductionOperationError("REFLECTOR_CREDENTIAL_MOUNT_NOT_READY")
         return json.loads(canonical_bytes(result))
 
     def reconcile_candidate_authority(
@@ -530,9 +549,7 @@ class ProductionTrainingOperations:
 
         port = self.ports.reconciliation
         if port is None:
-            raise ProductionOperationError(
-                "candidate reconciliation authority is unavailable"
-            )
+            raise ProductionOperationError("candidate reconciliation authority is unavailable")
         return self._run(
             kind="candidate_reconciliation",
             port=port,
@@ -594,7 +611,9 @@ class ProductionTrainingOperations:
             recovered = port.recover(request, idempotency_key)
             if recovered is None:
                 if recover_only:
-                    raise ProductionOperationError("external authority cannot prove operation completion")
+                    raise ProductionOperationError(
+                        "external authority cannot prove operation completion"
+                    )
                 output = port.execute(request, idempotency_key)
                 status = OperationStatus.SUCCEEDED
             else:
@@ -602,10 +621,7 @@ class ProductionTrainingOperations:
                 status = OperationStatus.RECOVERED
         except SuccessorRecoveryRequired as exc:
             operation_id = (
-                "op-"
-                + hashlib.sha256(
-                    (kind + ":" + idempotency_key).encode()
-                ).hexdigest()[:24]
+                "op-" + hashlib.sha256((kind + ":" + idempotency_key).encode()).hexdigest()[:24]
             )
             closed = self.receipts.put(
                 {
@@ -624,17 +640,19 @@ class ProductionTrainingOperations:
                     "successor_recovery_checkpoint": exc.checkpoint,
                 }
             )
-            raise SuccessorRecoveryRequired(
-                closed["successor_recovery_checkpoint"]
-            ) from None
+            raise SuccessorRecoveryRequired(closed["successor_recovery_checkpoint"]) from None
         if not isinstance(output, dict):
             raise ProductionOperationError(f"{kind} authority returned a non-object receipt")
         output = json.loads(canonical_bytes(output))
         owned = output.pop("owned_resource_ids", [])
-        if not isinstance(owned, list) or not all(isinstance(item, str) and _IDENTITY.fullmatch(item) for item in owned):
+        if not isinstance(owned, list) or not all(
+            isinstance(item, str) and _IDENTITY.fullmatch(item) for item in owned
+        ):
             raise ProductionOperationError(f"{kind} returned invalid owned resources")
         output_identity = canonical_sha256(output)
-        operation_id = f"op-{hashlib.sha256((kind + ':' + idempotency_key).encode()).hexdigest()[:24]}"
+        operation_id = (
+            f"op-{hashlib.sha256((kind + ':' + idempotency_key).encode()).hexdigest()[:24]}"
+        )
         receipt_path = os.fspath(self.receipts._path(idempotency_key))
         closed = self.receipts.put(
             {
@@ -671,9 +689,7 @@ class ProductionTrainingOperations:
         checkpoint = SuccessorRecoveryRequired(checkpoint).checkpoint
         source_sha256 = source_receipt.get("content_sha256")
         if not isinstance(source_sha256, str) or _SHA256.fullmatch(source_sha256) is None:
-            raise ProductionOperationError(
-                "terminal successor receipt identity is invalid"
-            )
+            raise ProductionOperationError("terminal successor receipt identity is invalid")
         seed = canonical_sha256(
             {
                 "checkpoint_sha256": checkpoint["content_sha256"],
@@ -695,9 +711,7 @@ class ProductionTrainingOperations:
                 or prior.get("input_identity") != input_identity
                 or prior.get("status") != OperationStatus.RECOVERED.value
             ):
-                raise ProductionOperationError(
-                    "terminal successor reconciliation receipt drifted"
-                )
+                raise ProductionOperationError("terminal successor reconciliation receipt drifted")
             return _operation_result_from_dict(prior)
         reconcile = getattr(port, "reconcile_terminal_successor", None)
         if not callable(reconcile):
@@ -716,8 +730,7 @@ class ProductionTrainingOperations:
         output = json.loads(canonical_bytes(output))
         owned = output.pop("owned_resource_ids", [])
         if not isinstance(owned, list) or not all(
-            isinstance(item, str) and _IDENTITY.fullmatch(item)
-            for item in owned
+            isinstance(item, str) and _IDENTITY.fullmatch(item) for item in owned
         ):
             raise ProductionOperationError(
                 "terminal successor reconciliation returned invalid resources"
@@ -740,58 +753,122 @@ class ProductionTrainingOperations:
                 "completed_at": _utc_now(),
                 "input_identity": input_identity,
                 "output_identity": output_identity,
-                "receipt_path": os.fspath(
-                    self.receipts._path(reconciliation_id)
-                ),
+                "receipt_path": os.fspath(self.receipts._path(reconciliation_id)),
                 "owned_resource_ids": owned,
                 "retryable": False,
                 "failure_class": FailureClass.NONE.value,
                 "source_terminal_receipt_sha256": source_sha256,
-                "successor_recovery_checkpoint_sha256": (
-                    checkpoint["content_sha256"]
-                ),
+                "successor_recovery_checkpoint_sha256": (checkpoint["content_sha256"]),
                 **output,
             },
         )
         return _operation_result_from_dict(closed)
 
-    def create_candidate_workspace(self, request: dict[str, Any], idempotency_key: str) -> OperationResult:
-        return self._run(kind="candidate_workspace", port=self.ports.candidate, request={**request, "operation_phase": "workspace"}, idempotency_key=idempotency_key)
+    def create_candidate_workspace(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> OperationResult:
+        return self._run(
+            kind="candidate_workspace",
+            port=self.ports.candidate,
+            request={**request, "operation_phase": "workspace"},
+            idempotency_key=idempotency_key,
+        )
 
     def start_candidate(self, request: dict[str, Any], idempotency_key: str) -> OperationResult:
-        return self._run(kind="candidate", port=self.ports.candidate, request={**request, "operation_phase": "execute"}, idempotency_key=idempotency_key)
+        return self._run(
+            kind="candidate",
+            port=self.ports.candidate,
+            request={**request, "operation_phase": "execute"},
+            idempotency_key=idempotency_key,
+        )
 
     def recover_candidate(self, request: dict[str, Any], idempotency_key: str) -> OperationResult:
-        return self._run(kind="candidate", port=self.ports.candidate, request={**request, "operation_phase": "execute"}, idempotency_key=idempotency_key, recover_only=True)
+        return self._run(
+            kind="candidate",
+            port=self.ports.candidate,
+            request={**request, "operation_phase": "execute"},
+            idempotency_key=idempotency_key,
+            recover_only=True,
+        )
 
-    def validate_candidate_artifacts(self, request: dict[str, Any], idempotency_key: str) -> OperationResult:
-        return self._run(kind="validation", port=self.ports.validation, request=request, idempotency_key=idempotency_key)
+    def validate_candidate_artifacts(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> OperationResult:
+        return self._run(
+            kind="validation",
+            port=self.ports.validation,
+            request=request,
+            idempotency_key=idempotency_key,
+        )
 
     def evaluate_candidate(self, request: dict[str, Any], idempotency_key: str) -> OperationResult:
         readiness = judge_credential_readiness(self.config)
         if not readiness["ready"]:
             raise JudgeCredentialsRequired("JUDGE_CREDENTIALS_REQUIRED")
-        return self._run(kind="evaluation", port=self.ports.evaluation, request=request, idempotency_key=idempotency_key)
+        return self._run(
+            kind="evaluation",
+            port=self.ports.evaluation,
+            request=request,
+            idempotency_key=idempotency_key,
+        )
 
-    def create_feedback_attachment(self, request: dict[str, Any], idempotency_key: str) -> OperationResult:
-        return self._run(kind="feedback_attachment", port=self.ports.attachment, request=request, idempotency_key=idempotency_key)
+    def project_evaluation_feedback(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> OperationResult:
+        if self.ports.feedback_projection is None:
+            raise ProductionOperationError(
+                "sanitized evaluation feedback projection authority is unavailable"
+            )
+        return self._run(
+            kind="feedback_projection",
+            port=self.ports.feedback_projection,
+            request=request,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_feedback_attachment(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> OperationResult:
+        return self._run(
+            kind="feedback_attachment",
+            port=self.ports.attachment,
+            request=request,
+            idempotency_key=idempotency_key,
+        )
 
     def prepare_successor(self, request: dict[str, Any], idempotency_key: str) -> OperationResult:
-        return self._run(kind="successor", port=self.ports.evolution, request={**request, "operation_phase": "prepare"}, idempotency_key=idempotency_key)
+        return self._run(
+            kind="successor",
+            port=self.ports.evolution,
+            request={**request, "operation_phase": "prepare"},
+            idempotency_key=idempotency_key,
+        )
 
-    def collect_artifact_jobs(self, request: dict[str, Any], idempotency_key: str) -> OperationResult:
-        return self._run(kind="evolution", port=self.ports.evolution, request={**request, "operation_phase": "collect"}, idempotency_key=idempotency_key)
+    def collect_artifact_jobs(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> OperationResult:
+        return self._run(
+            kind="evolution",
+            port=self.ports.evolution,
+            request={**request, "operation_phase": "collect"},
+            idempotency_key=idempotency_key,
+        )
 
-    def construct_composite(self, request: dict[str, Any], idempotency_key: str) -> OperationResult:
-        return self._run(kind="composite", port=self.ports.composite, request=request, idempotency_key=idempotency_key)
+    def construct_composite(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> OperationResult:
+        return self._run(
+            kind="composite",
+            port=self.ports.composite,
+            request=request,
+            idempotency_key=idempotency_key,
+        )
 
     def prepare_per_item_evolved_workspace(
         self, request: dict[str, Any], idempotency_key: str
     ) -> OperationResult:
         if self.ports.per_item_evolved is None:
-            raise ProductionOperationError(
-                "per-item evolved workspace authority is unavailable"
-            )
+            raise ProductionOperationError("per-item evolved workspace authority is unavailable")
         return self._run(
             kind="per_item_evolved_workspace",
             port=self.ports.per_item_evolved,
@@ -799,11 +876,22 @@ class ProductionTrainingOperations:
             idempotency_key=idempotency_key,
         )
 
-    def sanitize_cross_task(self, request: dict[str, Any], idempotency_key: str) -> OperationResult:
-        return self._run(kind="sanitizer", port=self.ports.sanitizer, request=request, idempotency_key=idempotency_key)
+    def sanitize_cross_task(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> OperationResult:
+        return self._run(
+            kind="sanitizer",
+            port=self.ports.sanitizer,
+            request=request,
+            idempotency_key=idempotency_key,
+        )
 
-    def freeze_final_artifact(self, request: dict[str, Any], idempotency_key: str) -> OperationResult:
-        return self._run(kind="freeze", port=self.ports.freeze, request=request, idempotency_key=idempotency_key)
+    def freeze_final_artifact(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> OperationResult:
+        return self._run(
+            kind="freeze", port=self.ports.freeze, request=request, idempotency_key=idempotency_key
+        )
 
     # Compatibility surface consumed by CommunityTrainingSupervisor.  The
     # public typed methods above remain the formal Operations protocol.
@@ -815,6 +903,9 @@ class ProductionTrainingOperations:
 
     def evaluate(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
         return self.evaluate_candidate(request, idempotency_key).to_dict()
+
+    def project_feedback(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+        return self.project_evaluation_feedback(request, idempotency_key).to_dict()
 
     def attach_feedback(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
         return self.create_feedback_attachment(request, idempotency_key).to_dict()
@@ -828,12 +919,15 @@ class ProductionTrainingOperations:
     def prepare_evolved_workspace(
         self, request: dict[str, Any], idempotency_key: str
     ) -> dict[str, Any]:
-        return self.prepare_per_item_evolved_workspace(
-            request, idempotency_key
-        ).to_dict()
+        return self.prepare_per_item_evolved_workspace(request, idempotency_key).to_dict()
 
     def destroy_task_local(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
-        return self._run(kind="task_local_destroy", port=self.ports.task_local, request=request, idempotency_key=idempotency_key).to_dict()
+        return self._run(
+            kind="task_local_destroy",
+            port=self.ports.task_local,
+            request=request,
+            idempotency_key=idempotency_key,
+        ).to_dict()
 
     def sanitize_composite(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
         return self.sanitize_cross_task(request, idempotency_key).to_dict()
@@ -844,15 +938,28 @@ class ProductionTrainingOperations:
 
 def _operation_result_from_dict(value: dict[str, Any]) -> OperationResult:
     required = {
-        "operation_id", "idempotency_key", "status", "started_at", "completed_at",
-        "input_identity", "output_identity", "receipt_path", "content_sha256",
-        "owned_resource_ids", "retryable", "failure_class",
+        "operation_id",
+        "idempotency_key",
+        "status",
+        "started_at",
+        "completed_at",
+        "input_identity",
+        "output_identity",
+        "receipt_path",
+        "content_sha256",
+        "owned_resource_ids",
+        "retryable",
+        "failure_class",
     }
     if not required.issubset(value):
         raise ValueError("operation result is incomplete")
     content = value.get("content_sha256")
     body = {key: item for key, item in value.items() if key != "content_sha256"}
-    if not isinstance(content, str) or not _SHA256.fullmatch(content) or canonical_sha256(body) != content:
+    if (
+        not isinstance(content, str)
+        or not _SHA256.fullmatch(content)
+        or canonical_sha256(body) != content
+    ):
         raise ValueError("operation result hash is invalid")
     return OperationResult(
         operation_id=str(value["operation_id"]),
@@ -861,13 +968,19 @@ def _operation_result_from_dict(value: dict[str, Any]) -> OperationResult:
         started_at=str(value["started_at"]),
         completed_at=None if value["completed_at"] is None else str(value["completed_at"]),
         input_identity=str(value["input_identity"]),
-        output_identity=None if value["output_identity"] is None else str(value["output_identity"]),
+        output_identity=None
+        if value["output_identity"] is None
+        else str(value["output_identity"]),
         receipt_path=str(value["receipt_path"]),
         content_sha256=content,
         owned_resource_ids=tuple(value["owned_resource_ids"]),
         retryable=bool(value["retryable"]),
         failure_class=FailureClass(value["failure_class"]),
-        payload={key: item for key, item in value.items() if key not in required and key != "operation_kind"},
+        payload={
+            key: item
+            for key, item in value.items()
+            if key not in required and key != "operation_kind"
+        },
     )
 
 
@@ -928,11 +1041,9 @@ def judge_identity_preflight(
     except RuntimeError as exc:
         raise JudgeCredentialsRequired("evaluator dependency lock drifted") from exc
     dependency_file_sha256 = hashlib.sha256(dependency_path.read_bytes()).hexdigest()
-    if (
-        dependency_file_sha256 != dependency_claim.get("sha256")
-        or dependency_lock.get("content_sha256")
-        != dependency_claim.get("content_sha256")
-    ):
+    if dependency_file_sha256 != dependency_claim.get("sha256") or dependency_lock.get(
+        "content_sha256"
+    ) != dependency_claim.get("content_sha256"):
         raise JudgeCredentialsRequired("evaluator dependency lock identity drifted")
     scorer_project_root = config.researchclawbench_root.parent
     expected = {
@@ -984,12 +1095,7 @@ def judge_identity_preflight(
         "PYTHONPATH": os.pathsep.join(
             (
                 os.fspath(openevo_root / "src"),
-                os.fspath(
-                    openevo_root
-                    / "benchmarks"
-                    / "researchclawbench"
-                    / "src"
-                ),
+                os.fspath(openevo_root / "benchmarks" / "researchclawbench" / "src"),
             )
         ),
     }

@@ -46,17 +46,27 @@ class TrainingOperations(Protocol):
 
     def evolution_readiness(self, request: dict[str, Any]) -> dict[str, Any]: ...
 
-    def ensure_candidate(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]: ...
+    def ensure_candidate(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> dict[str, Any]: ...
 
-    def validate_artifact(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]: ...
+    def validate_artifact(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> dict[str, Any]: ...
 
     def evaluate(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]: ...
+
+    def project_feedback(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> dict[str, Any]: ...
 
     def current_task_gt_supervision(self, task_id: str) -> dict[str, Any]: ...
 
     def attach_feedback(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]: ...
 
-    def evolve_artifacts(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]: ...
+    def evolve_artifacts(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> dict[str, Any]: ...
 
     def admit_composite(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]: ...
 
@@ -64,9 +74,13 @@ class TrainingOperations(Protocol):
         self, request: dict[str, Any], idempotency_key: str
     ) -> dict[str, Any]: ...
 
-    def destroy_task_local(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]: ...
+    def destroy_task_local(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> dict[str, Any]: ...
 
-    def sanitize_composite(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]: ...
+    def sanitize_composite(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> dict[str, Any]: ...
 
     def freeze_final(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]: ...
 
@@ -149,7 +163,9 @@ class CommunityTrainingSupervisor:
                 "per_item_reset" if self.per_item_reset_enabled else "standard_training"
             ),
             "supervision_mode": (
-                "current_task_gt"
+                "sanitized_evaluation_feedback_v1"
+                if self.per_item_reset_enabled
+                else "current_task_gt"
                 if self.current_task_gt_supervision_enabled
                 else "community_evaluator"
             ),
@@ -182,6 +198,7 @@ class CommunityTrainingSupervisor:
             "archived_artifact_ids": [],
             "paired_result": None,
             "item_reset_receipt": None,
+            "active_feedback_projection_receipt": None,
         }
 
     def initialize(self) -> dict[str, Any]:
@@ -352,20 +369,16 @@ class CommunityTrainingSupervisor:
             or source_reference.get("candidate_reexecuted") is not False
             or source_reference.get("additional_candidate_model_calls") != 0
             or not isinstance(preseeded, dict)
-            or preseeded.get("project_id")
-            != source_reference.get("destination_project_id")
-            or preseeded.get("seed_request_id")
-            != source_reference.get("recovery_seed_request_id")
-            or preseeded.get("seed_sha256")
-            != source_reference.get("recovery_seed_sha256")
+            or preseeded.get("project_id") != source_reference.get("destination_project_id")
+            or preseeded.get("seed_request_id") != source_reference.get("recovery_seed_request_id")
+            or preseeded.get("seed_sha256") != source_reference.get("recovery_seed_sha256")
             or attachment.get("attachment_id") is None
             or attachment.get("resolved_view_sha256") is None
             or not isinstance(jobs, list)
             or len(jobs) != 3
             or {item.get("artifact_type") for item in jobs if isinstance(item, dict)}
             != set(ARTIFACT_TYPES)
-            or admission.get("core_project_id")
-            != source_reference.get("destination_project_id")
+            or admission.get("core_project_id") != source_reference.get("destination_project_id")
             or admission.get("composite_id") is None
             or len(admission.get("registry_artifact_ids", [])) != 3
         ):
@@ -450,9 +463,7 @@ class CommunityTrainingSupervisor:
                 "active_admission_receipt": admission,
                 "core_project_id": admission["core_project_id"],
                 "preseeded_workspace_authority": preseeded,
-                "current_task_local_overlay_id": attachment.get(
-                    "task_local_overlay_id"
-                ),
+                "current_task_local_overlay_id": attachment.get("task_local_overlay_id"),
                 "current_task_local_overlay_scope_id": attachment.get(
                     "task_local_overlay_scope_id"
                 ),
@@ -540,20 +551,22 @@ class CommunityTrainingSupervisor:
             for key, value in rebased_successor_workspace_authority.items()
             if key != "content_sha256"
         }
-        workspace_unchanged = {
-            key: value
-            for key, value in source_workspace.items()
-            if key not in {"workspace_root", "content_sha256"}
-        } if isinstance(source_workspace, dict) else None
+        workspace_unchanged = (
+            {
+                key: value
+                for key, value in source_workspace.items()
+                if key not in {"workspace_root", "content_sha256"}
+            }
+            if isinstance(source_workspace, dict)
+            else None
+        )
         rebased_unchanged = {
             key: value
             for key, value in rebased_successor_workspace_authority.items()
             if key not in {"workspace_root", "content_sha256"}
         }
         flattened_attempts = [
-            item
-            for task in self.task_ids
-            for item in attempts_by_task.get(task, [])
+            item for task in self.task_ids for item in attempts_by_task.get(task, [])
         ]
         effect_counts: dict[str, int] = {}
         for effect in completed_side_effects:
@@ -568,10 +581,8 @@ class CommunityTrainingSupervisor:
         }
         if (
             source_reference.get("source_stage") != "NEXT_ATTEMPT_READY"
-            or source_reference.get("source_state_sha256")
-            != source_state.get("_state_sha256")
-            or source_reference.get("source_state_sha256")
-            != canonical_sha256(source_state_body)
+            or source_reference.get("source_state_sha256") != source_state.get("_state_sha256")
+            or source_reference.get("source_state_sha256") != canonical_sha256(source_state_body)
             or source_reference.get("source_protocol_sha256")
             != source_state.get("_protocol_sha256")
             or source_reference.get("source_core_identity_sha256")
@@ -584,16 +595,11 @@ class CommunityTrainingSupervisor:
             or source_state.get("current_attempt") != attempt_index
             or not 0 <= task_index < len(self.task_ids)
             or attempt_index not in {0, 1}
-            or source_reference.get("source_attempts_consumed")
-            != expected_attempts
-            or source_reference.get("source_candidate_model_calls")
-            != expected_attempts
-            or source_reference.get("source_judge_operations")
-            != expected_attempts
-            or source_reference.get("source_reflector_cycles_consumed")
-            != expected_cycles
-            or source_reference.get("source_evolution_jobs_consumed")
-            != expected_cycles * 3
+            or source_reference.get("source_attempts_consumed") != expected_attempts
+            or source_reference.get("source_candidate_model_calls") != expected_attempts
+            or source_reference.get("source_judge_operations") != expected_attempts
+            or source_reference.get("source_reflector_cycles_consumed") != expected_cycles
+            or source_reference.get("source_evolution_jobs_consumed") != expected_cycles * 3
             or source_reference.get("source_reflector_model_calls")
             != expected_budget["reflector_model_calls"]
             or source_reference.get("source_active_resources") != 0
@@ -606,12 +612,8 @@ class CommunityTrainingSupervisor:
             or len(flattened_attempts) != expected_attempts
             or effect_counts.get("evolution") != expected_cycles
             or any(effect.get("status") != "completed" for effect in completed_side_effects)
-            or len(
-                {
-                    effect.get("idempotency_key")
-                    for effect in completed_side_effects
-                }
-            ) != len(completed_side_effects)
+            or len({effect.get("idempotency_key") for effect in completed_side_effects})
+            != len(completed_side_effects)
             or source_budget_usage != expected_budget
             or not isinstance(source_jobs, list)
             or len(source_jobs) != expected_cycles * 3
@@ -634,8 +636,7 @@ class CommunityTrainingSupervisor:
             )
             if (
                 len(records) != expected_count
-                or [item.get("attempt_index") for item in records]
-                != list(range(expected_count))
+                or [item.get("attempt_index") for item in records] != list(range(expected_count))
                 or any(item.get("task_id") != task for item in records)
             ):
                 raise ValueError("completed-prefix attempt inventory is not contiguous")
@@ -650,10 +651,7 @@ class CommunityTrainingSupervisor:
             )
             if isinstance(job, dict)
         ]
-        if (
-            len(evolution_jobs) != expected_cycles * 3
-            or set(evolution_jobs) != set(source_jobs)
-        ):
+        if len(evolution_jobs) != expected_cycles * 3 or set(evolution_jobs) != set(source_jobs):
             raise ValueError("completed-prefix evolution authority is incomplete")
 
         initial = self._initial_state()
@@ -683,8 +681,7 @@ class CommunityTrainingSupervisor:
             return state
         if (
             state["stage"] != TrainingStage.INITIALIZED.value
-            or state.get("namespace_type")
-            != "append_only_completed_prefix_continuation"
+            or state.get("namespace_type") != "append_only_completed_prefix_continuation"
             or state.get("completed_prefix_source") != source_reference
         ):
             raise ValueError("completed-prefix continuation initialization conflicts")
@@ -779,9 +776,7 @@ class CommunityTrainingSupervisor:
             rebased_successor_workspace_authority
         )
         destination_candidate.pop("content_sha256", None)
-        destination_candidate["content_sha256"] = canonical_sha256(
-            destination_candidate
-        )
+        destination_candidate["content_sha256"] = canonical_sha256(destination_candidate)
         imported_state.update(
             {
                 "active_candidate_receipt": destination_candidate,
@@ -833,9 +828,7 @@ class CommunityTrainingSupervisor:
         prior = next(
             (
                 item
-                for item in self.store.transition_receipts_for_experiment(
-                    self.experiment_id
-                )
+                for item in self.store.transition_receipts_for_experiment(self.experiment_id)
                 if item.get("reconciliation_operation_id") == operation_id
             ),
             None,
@@ -891,9 +884,7 @@ class CommunityTrainingSupervisor:
             or reconciliation.get("model_execution_allowed") is not False
             or reconciliation.get("model_calls_started") != 0
             or reconciliation.get("successor_transition_id")
-            != state["active_attachment_receipt"].get(
-                "successor_transition_id"
-            )
+            != state["active_attachment_receipt"].get("successor_transition_id")
             or not isinstance(jobs, list)
             or len(jobs) != 3
             or {item.get("artifact_type") for item in jobs if isinstance(item, dict)}
@@ -1097,7 +1088,9 @@ class CommunityTrainingSupervisor:
         """
 
         if not self.experiment_id.endswith("_reconcile"):
-            raise ValueError("candidate continuation reconciliation requires a reconciliation namespace")
+            raise ValueError(
+                "candidate continuation reconciliation requires a reconciliation namespace"
+            )
         source_namespace = source.get("namespace")
         source_key = source.get("source_key")
         if (
@@ -1115,12 +1108,9 @@ class CommunityTrainingSupervisor:
             request.get("task_id") != task
             or request.get("source_task_id") != task
             or request.get("source_attempt_index") != attempt
-            or request.get("source_input_composite_id")
-            != state.get("current_composite_id")
+            or request.get("source_input_composite_id") != state.get("current_composite_id")
             or request.get("source_input_project_head_id")
-            != state.get("active_admission_receipt", {}).get(
-                "core_project_head_id"
-            )
+            != state.get("active_admission_receipt", {}).get("core_project_head_id")
             or request.get("source_task_local_overlay_id")
             != state.get("current_task_local_overlay_id")
         ):
@@ -1182,8 +1172,7 @@ class CommunityTrainingSupervisor:
                 or reconciled.get("candidate_reexecuted") is not False
                 or reconciled.get("additional_candidate_model_calls") != 0
                 or reconciled.get("completed") is not True
-                or reconciled.get("input_composite_id")
-                != state.get("current_composite_id")
+                or reconciled.get("input_composite_id") != state.get("current_composite_id")
                 or reconciled.get("input_project_head_id")
                 != request.get("source_input_project_head_id")
                 or reconciled.get("task_local_overlay_id")
@@ -1251,9 +1240,7 @@ class CommunityTrainingSupervisor:
             existing = next(
                 (
                     item
-                    for item in self.store.transition_receipts_for_experiment(
-                        self.experiment_id
-                    )
+                    for item in self.store.transition_receipts_for_experiment(self.experiment_id)
                     if item.get("idempotency_key") == key
                 ),
                 None,
@@ -1341,8 +1328,7 @@ class CommunityTrainingSupervisor:
     def verify(self) -> dict[str, Any]:
         state = self.status()
         attempts_by_task = {
-            task: self.store.attempts_for_task(self.experiment_id, task)
-            for task in self.task_ids
+            task: self.store.attempts_for_task(self.experiment_id, task) for task in self.task_ids
         }
         attempts = sum(len(items) for items in attempts_by_task.values())
         resources = self.store.active_resources(self.experiment_id)
@@ -1374,13 +1360,9 @@ class CommunityTrainingSupervisor:
             for item in records
             if item.get("dataset_id")
         ]
-        if len(session_ids) != len(set(session_ids)) or len(dataset_ids) != len(
-            set(dataset_ids)
-        ):
+        if len(session_ids) != len(set(session_ids)) or len(dataset_ids) != len(set(dataset_ids)):
             raise ValueError("training attempt authority is duplicated")
-        if len(state.get("evolution_job_ids", [])) != len(
-            set(state.get("evolution_job_ids", []))
-        ):
+        if len(state.get("evolution_job_ids", [])) != len(set(state.get("evolution_job_ids", []))):
             raise ValueError("training evolution job identity is duplicated")
         evolution_effects = [item for item in effects if item["kind"] == "evolution"]
         for item in evolution_effects:
@@ -1422,32 +1404,27 @@ class CommunityTrainingSupervisor:
                 raise ValueError("final frozen task-best inventory is incomplete")
             if state.get("current_task_local_overlay_id") is not None:
                 raise ValueError("final frozen state retains a task-local overlay")
-        if (
-            state["stage"] == TrainingStage.ITEM_RESET.value
-            and (
-                not self.per_item_reset_enabled
-                or len(self.task_ids) != 1
-                or attempts != 2
-                or len(evolution_effects) != 1
-                or len(state.get("evolution_job_ids", [])) != 3
-                or pending
-                or resources
-                or not isinstance(state.get("paired_result"), dict)
-                or state.get("active_artifact_ids") != []
-                or len(state.get("archived_artifact_ids", [])) != 3
-                or state.get("current_composite_id") is not None
-                or state.get("core_project_id") is not None
-                or state.get("preseeded_workspace_authority") is not None
-                or state.get("current_task_local_overlay_id") is not None
-                or state.get("current_task_local_overlay_scope_id") is not None
-                or not isinstance(state.get("item_reset_receipt"), dict)
-            )
+        if state["stage"] == TrainingStage.ITEM_RESET.value and (
+            not self.per_item_reset_enabled
+            or len(self.task_ids) != 1
+            or attempts != 2
+            or len(evolution_effects) != 1
+            or len(state.get("evolution_job_ids", [])) != 3
+            or pending
+            or resources
+            or not isinstance(state.get("paired_result"), dict)
+            or state.get("active_artifact_ids") != []
+            or len(state.get("archived_artifact_ids", [])) != 3
+            or state.get("current_composite_id") is not None
+            or state.get("core_project_id") is not None
+            or state.get("preseeded_workspace_authority") is not None
+            or state.get("current_task_local_overlay_id") is not None
+            or state.get("current_task_local_overlay_scope_id") is not None
+            or not isinstance(state.get("item_reset_receipt"), dict)
         ):
             raise ValueError("per-item reset terminal inventory is incomplete")
         terminal_failure = state.get("active_terminal_failure")
-        terminal_failure = (
-            terminal_failure if isinstance(terminal_failure, dict) else {}
-        )
+        terminal_failure = terminal_failure if isinstance(terminal_failure, dict) else {}
         core_failure = terminal_failure.get("core_failure")
         core_failure = core_failure if isinstance(core_failure, dict) else {}
         if state["stage"] == TrainingStage.CANDIDATE_SETUP_BLOCKED.value:
@@ -1479,13 +1456,9 @@ class CommunityTrainingSupervisor:
             "pending_side_effects": len(pending),
             "failed_side_effects": len(failed_effects),
             "pending_side_effect_status": (
-                "planned"
-                if pending
-                else ("failed" if failed_effects else "none")
+                "planned" if pending else ("failed" if failed_effects else "none")
             ),
-            "underlying_session_status": core_failure.get(
-                "underlying_session_status"
-            ),
+            "underlying_session_status": core_failure.get("underlying_session_status"),
             "model_started": core_failure.get("model_started"),
             "benchmark_started": core_failure.get("benchmark_started"),
             "completed_reflector_cycles": sum(
@@ -1505,9 +1478,7 @@ class CommunityTrainingSupervisor:
     def _completed_runtime_seconds(effects: list[dict[str, Any]]) -> float:
         total = 0.0
         for item in effects:
-            if item.get("status") != "completed" or not isinstance(
-                item.get("receipt"), dict
-            ):
+            if item.get("status") != "completed" or not isinstance(item.get("receipt"), dict):
                 continue
             receipt = item["receipt"]
             runtime = receipt.get("runtime_seconds")
@@ -1540,9 +1511,7 @@ class CommunityTrainingSupervisor:
     ) -> dict[str, Any]:
         return self.store.reserve_budget(
             experiment_id=self.experiment_id,
-            idempotency_key=(
-                f"{self.experiment_id}:{task}:a{attempt}:{operation}:budget"
-            ),
+            idempotency_key=(f"{self.experiment_id}:{task}:a{attempt}:{operation}:budget"),
             category=category,
             units=units,
             limit_units=limit,
@@ -1586,7 +1555,11 @@ class CommunityTrainingSupervisor:
         receipt: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         state = self.status()
-        task = self.task_ids[state["current_task_index"]] if state["current_task_index"] < len(self.task_ids) else "complete"
+        task = (
+            self.task_ids[state["current_task_index"]]
+            if state["current_task_index"] < len(self.task_ids)
+            else "complete"
+        )
         key = f"{self.experiment_id}:{task}:a{state['current_attempt']}:{suffix}"
         return self.store.transition(
             experiment_id=self.experiment_id,
@@ -1624,10 +1597,7 @@ class CommunityTrainingSupervisor:
             if kind == "candidate" and isinstance(receipt, dict):
                 raise CandidateAuthorityUnavailable(
                     "candidate side effect is already terminal",
-                    reason_code=str(
-                        receipt.get("reason_code")
-                        or "candidate_terminal_failure"
-                    ),
+                    reason_code=str(receipt.get("reason_code") or "candidate_terminal_failure"),
                     terminal_proven=True,
                     failure_receipt=receipt,
                 )
@@ -1677,7 +1647,11 @@ class CommunityTrainingSupervisor:
     def run_next(self) -> dict[str, Any]:
         state = self.status()
         stage = TrainingStage(state["stage"])
-        task = self.task_ids[state["current_task_index"]] if state["current_task_index"] < len(self.task_ids) else None
+        task = (
+            self.task_ids[state["current_task_index"]]
+            if state["current_task_index"] < len(self.task_ids)
+            else None
+        )
         attempt = state["current_attempt"]
         run_suffix = (
             str(self.validator_failure_policy["run_id_suffix"])
@@ -1697,8 +1671,7 @@ class CommunityTrainingSupervisor:
             raise TrainingPaused(f"supervisor is terminal at {stage.value}")
         if (
             stage is TrainingStage.INITIALIZED
-            and state.get("namespace_type")
-            == "append_only_completed_prefix_continuation"
+            and state.get("namespace_type") == "append_only_completed_prefix_continuation"
             and state.get("completed_prefix_import_complete") is not True
         ):
             raise TrainingPaused("COMPLETED_PREFIX_IMPORT_PENDING")
@@ -1725,9 +1698,7 @@ class CommunityTrainingSupervisor:
                 TrainingStage.NEXT_ATTEMPT_READY,
                 "recovery-seeded-next-attempt",
                 updates={
-                    "current_composite_id": state["active_admission_receipt"][
-                        "composite_id"
-                    ]
+                    "current_composite_id": state["active_admission_receipt"]["composite_id"]
                 },
                 receipt={
                     "recovery_id": state["successor_recovery_source"]["recovery_id"],
@@ -1760,9 +1731,7 @@ class CommunityTrainingSupervisor:
                 )
             return self._transition(stage, TrainingStage.TASK_ATTEMPT_READY, "initialize")
         if stage is TrainingStage.TASK_ATTEMPT_READY:
-            preseeded_workspace_authority = state.get(
-                "preseeded_workspace_authority"
-            )
+            preseeded_workspace_authority = state.get("preseeded_workspace_authority")
             successor_workspace_authority = None
             if attempt in {1, 2} and preseeded_workspace_authority is None:
                 active_candidate = state.get("active_candidate_receipt")
@@ -1781,13 +1750,9 @@ class CommunityTrainingSupervisor:
                 "core_project_id": state.get("core_project_id"),
                 "input_composite_id": state["current_composite_id"],
                 "task_local_overlay_id": state["current_task_local_overlay_id"],
-                "task_local_overlay_scope_id": state[
-                    "current_task_local_overlay_scope_id"
-                ],
+                "task_local_overlay_scope_id": state["current_task_local_overlay_scope_id"],
                 "preseeded_workspace_authority": preseeded_workspace_authority,
-                "successor_workspace_authority": (
-                    successor_workspace_authority
-                ),
+                "successor_workspace_authority": (successor_workspace_authority),
                 "fresh_workspace": True,
                 "resume_in_place": False,
             }
@@ -1843,9 +1808,7 @@ class CommunityTrainingSupervisor:
                 **request,
                 "core_control_generation": readiness["generation"],
                 "core_control_release_identity": readiness["release_identity"],
-                "core_control_service_identity_id": readiness.get(
-                    "service_identity_id"
-                ),
+                "core_control_service_identity_id": readiness.get("service_identity_id"),
             }
             workspace_binding = readiness.get("candidate_workspace_binding")
             workspace_authority_required = (
@@ -1868,13 +1831,9 @@ class CommunityTrainingSupervisor:
                     stage,
                     TrainingStage.BLOCKED,
                     "candidate-workspace-preflight-blocked",
-                    updates={
-                        "failure_reason": "CANDIDATE_WORKSPACE_PREFLIGHT_FAILED"
-                    },
+                    updates={"failure_reason": "CANDIDATE_WORKSPACE_PREFLIGHT_FAILED"},
                     receipt={
-                        "failure_classification": (
-                            "CANDIDATE_WORKSPACE_PREFLIGHT_FAILED"
-                        ),
+                        "failure_classification": ("CANDIDATE_WORKSPACE_PREFLIGHT_FAILED"),
                         "candidate_intent_persisted": False,
                         "model_started": False,
                         "secret_recorded": False,
@@ -1951,9 +1910,7 @@ class CommunityTrainingSupervisor:
                 )
             except CandidateAuthorityUnavailable as exc:
                 terminal_failure = (
-                    exc.failure_receipt
-                    if isinstance(exc.failure_receipt, dict)
-                    else {}
+                    exc.failure_receipt if isinstance(exc.failure_receipt, dict) else {}
                 )
                 core_failure = terminal_failure.get("core_failure")
                 core_failure = core_failure if isinstance(core_failure, dict) else {}
@@ -1971,9 +1928,7 @@ class CommunityTrainingSupervisor:
                             "core_failure_code": exc.reason_code,
                             "candidate_intent_persisted": True,
                             "model_started": core_failure.get("model_started"),
-                            "benchmark_started": core_failure.get(
-                                "benchmark_started"
-                            ),
+                            "benchmark_started": core_failure.get("benchmark_started"),
                             "underlying_session_status": core_failure.get(
                                 "underlying_session_status"
                             ),
@@ -1992,17 +1947,24 @@ class CommunityTrainingSupervisor:
                         "core_failure_code": exc.reason_code,
                         "candidate_intent_persisted": True,
                         "model_started": core_failure.get("model_started"),
-                        "benchmark_started": core_failure.get(
-                            "benchmark_started"
-                        ),
+                        "benchmark_started": core_failure.get("benchmark_started"),
                         "secret_recorded": False,
                     },
                 )
             required = {
-                "session_id", "dataset_id", "dataset_revision", "completed",
-                "run_id", "runtime_seconds", "core_project_id", "core_task_id",
-                "core_attempt_id", "workspace_binding_id", "task_request_id",
-                "session_result_id", "transcript_receipt",
+                "session_id",
+                "dataset_id",
+                "dataset_revision",
+                "completed",
+                "run_id",
+                "runtime_seconds",
+                "core_project_id",
+                "core_task_id",
+                "core_attempt_id",
+                "workspace_binding_id",
+                "task_request_id",
+                "session_result_id",
+                "transcript_receipt",
                 "successor_workspace_authority",
             }
             if not required.issubset(candidate):
@@ -2100,14 +2062,10 @@ class CommunityTrainingSupervisor:
                     "task_id": task,
                     "attempt_index": attempt,
                     "dataset_id": state["active_candidate_receipt"]["dataset_id"],
-                    "dataset_revision": state["active_candidate_receipt"][
-                        "dataset_revision"
-                    ],
+                    "dataset_revision": state["active_candidate_receipt"]["dataset_revision"],
                     "session_id": state["active_candidate_receipt"]["session_id"],
                     "core_task_id": state["active_candidate_receipt"]["core_task_id"],
-                    "core_attempt_id": state["active_candidate_receipt"][
-                        "core_attempt_id"
-                    ],
+                    "core_attempt_id": state["active_candidate_receipt"]["core_attempt_id"],
                     "successor_transition_id": state["active_candidate_receipt"].get(
                         "successor_transition_id"
                     ),
@@ -2135,9 +2093,7 @@ class CommunityTrainingSupervisor:
                         attachment["attachment_id"],
                     ],
                     "active_attachment_receipt": attachment,
-                    "current_task_local_overlay_id": attachment.get(
-                        "task_local_overlay_id"
-                    ),
+                    "current_task_local_overlay_id": attachment.get("task_local_overlay_id"),
                     "current_task_local_overlay_scope_id": attachment.get(
                         "task_local_overlay_scope_id"
                     ),
@@ -2173,17 +2129,13 @@ class CommunityTrainingSupervisor:
                         "task_id": task,
                         "attempt_index": attempt,
                         "dataset_id": state["active_candidate_receipt"]["dataset_id"],
-                        "dataset_revision": state["active_candidate_receipt"][
-                            "dataset_revision"
-                        ],
+                        "dataset_revision": state["active_candidate_receipt"]["dataset_revision"],
                         "session_id": state["active_candidate_receipt"]["session_id"],
                         "core_task_id": state["active_candidate_receipt"]["core_task_id"],
-                        "core_attempt_id": state["active_candidate_receipt"][
-                            "core_attempt_id"
-                        ],
-                        "successor_transition_id": state[
-                            "active_candidate_receipt"
-                        ].get("successor_transition_id"),
+                        "core_attempt_id": state["active_candidate_receipt"]["core_attempt_id"],
+                        "successor_transition_id": state["active_candidate_receipt"].get(
+                            "successor_transition_id"
+                        ),
                         "candidate": state["active_candidate_receipt"],
                         "validation": state["active_validation_receipt"],
                         "feedback_source": "current_task_gt",
@@ -2198,8 +2150,7 @@ class CommunityTrainingSupervisor:
                     or attachment.get("feedback_class") != "HARD_GT"
                     or attachment.get("feedback_source") != "current_task_gt"
                     or attachment.get("judge_calls") != 0
-                    or attachment.get("ground_truth_sha256")
-                    != gt["ground_truth_sha256"]
+                    or attachment.get("ground_truth_sha256") != gt["ground_truth_sha256"]
                     or attachment.get("judge_feedback_included") is not False
                 ):
                     raise ValueError("current-task GT attachment receipt is incomplete")
@@ -2213,9 +2164,7 @@ class CommunityTrainingSupervisor:
                             attachment["attachment_id"],
                         ],
                         "active_attachment_receipt": attachment,
-                        "current_task_local_overlay_id": attachment.get(
-                            "task_local_overlay_id"
-                        ),
+                        "current_task_local_overlay_id": attachment.get("task_local_overlay_id"),
                         "current_task_local_overlay_scope_id": attachment.get(
                             "task_local_overlay_scope_id"
                         ),
@@ -2270,41 +2219,33 @@ class CommunityTrainingSupervisor:
                 "dataset_id": state["active_candidate_receipt"]["dataset_id"],
                 "completed": state["active_candidate_receipt"]["completed"],
                 "artifact_valid": state["active_validation_receipt"]["artifact_valid"],
-                "validator_completeness": state["active_validation_receipt"].get("completeness", 0),
+                "validator_completeness": state["active_validation_receipt"].get(
+                    "completeness", 0
+                ),
                 "score": float(evaluation["total_score"]),
                 "score_status": "SCORED",
                 "evaluator_status": "COMPLETED",
                 "runtime_seconds": state["active_candidate_receipt"]["runtime_seconds"],
                 "cost_total_usd": state["active_candidate_receipt"].get("cost_total_usd"),
-                "composite_size_bytes": state["active_candidate_receipt"].get("composite_size_bytes", 0),
-                "output_artifact_hash": state["active_validation_receipt"].get("artifact_root_sha256"),
-                "core_project_id": state["active_candidate_receipt"].get(
-                    "core_project_id"
+                "composite_size_bytes": state["active_candidate_receipt"].get(
+                    "composite_size_bytes", 0
                 ),
-                "core_task_id": state["active_candidate_receipt"].get(
-                    "core_task_id"
+                "output_artifact_hash": state["active_validation_receipt"].get(
+                    "artifact_root_sha256"
                 ),
-                "core_attempt_id": state["active_candidate_receipt"].get(
-                    "core_attempt_id"
-                ),
-                "task_request_id": state["active_candidate_receipt"].get(
-                    "task_request_id"
-                ),
-                "session_result_id": state["active_candidate_receipt"].get(
-                    "session_result_id"
-                ),
+                "core_project_id": state["active_candidate_receipt"].get("core_project_id"),
+                "core_task_id": state["active_candidate_receipt"].get("core_task_id"),
+                "core_attempt_id": state["active_candidate_receipt"].get("core_attempt_id"),
+                "task_request_id": state["active_candidate_receipt"].get("task_request_id"),
+                "session_result_id": state["active_candidate_receipt"].get("session_result_id"),
                 "candidate_output_root": state["active_candidate_receipt"].get(
                     "candidate_output_root"
                 ),
                 "input_project_head_id": state["active_candidate_receipt"].get(
                     "input_project_head_id"
                 ),
-                "runtime_injection": state["active_candidate_receipt"].get(
-                    "runtime_injection"
-                ),
-                "evaluation_receipt_id": evaluation.get(
-                    "evaluation_receipt_id"
-                ),
+                "runtime_injection": state["active_candidate_receipt"].get("runtime_injection"),
+                "evaluation_receipt_id": evaluation.get("evaluation_receipt_id"),
             }
             self.store.record_attempt(self.experiment_id, attempt_receipt)
             return self._transition(
@@ -2317,13 +2258,9 @@ class CommunityTrainingSupervisor:
         if stage is TrainingStage.EVALUATED:
             if self.per_item_reset_enabled:
                 if attempt == 1:
-                    records = self.store.attempts_for_task(
-                        self.experiment_id, str(task)
-                    )
+                    records = self.store.attempts_for_task(self.experiment_id, str(task))
                     if [item.get("attempt_index") for item in records] != [0, 1]:
-                        raise ValueError(
-                            "per-item pair requires exactly baseline and evolved"
-                        )
+                        raise ValueError("per-item pair requires exactly baseline and evolved")
                     baseline, evolved = records
                     baseline_runtime = baseline.get("runtime_injection")
                     evolved_runtime = evolved.get("runtime_injection")
@@ -2354,14 +2291,10 @@ class CommunityTrainingSupervisor:
                         }
                         != set(ARTIFACT_TYPES)
                     ):
-                        raise ValueError(
-                            "per-item Candidate artifact consumption is incomplete"
-                        )
+                        raise ValueError("per-item Candidate artifact consumption is incomplete")
                     distinct = {
-                        "session": baseline.get("session_id")
-                        != evolved.get("session_id"),
-                        "core_task": baseline.get("core_task_id")
-                        != evolved.get("core_task_id"),
+                        "session": baseline.get("session_id") != evolved.get("session_id"),
+                        "core_task": baseline.get("core_task_id") != evolved.get("core_task_id"),
                         "core_attempt": baseline.get("core_attempt_id")
                         != evolved.get("core_attempt_id"),
                         "workspace": baseline.get("candidate_output_root")
@@ -2377,11 +2310,13 @@ class CommunityTrainingSupervisor:
                         "evolved": evolved,
                         "baseline_score": float(baseline["score"]),
                         "evolved_score": float(evolved["score"]),
-                        "delta": float(evolved["score"])
-                        - float(baseline["score"]),
+                        "delta": float(evolved["score"]) - float(baseline["score"]),
                         "candidate_identity_distinct": distinct,
                         "one_evolution_cycle": True,
                         "judge_feedback_in_evolution": False,
+                        "judge_reasoning_in_evolution": False,
+                        "sanitized_evaluation_feedback_in_evolution": True,
+                        "raw_gt_in_evolution_prompt": False,
                         "gt_visible_to_baseline": False,
                         "gt_visible_to_evolved": False,
                         "artifact_consumption": {
@@ -2402,76 +2337,17 @@ class CommunityTrainingSupervisor:
                     )
                 if attempt != 0:
                     raise ValueError("per-item protocol permits only two Candidate passes")
-                gt = self.operations.current_task_gt_supervision(str(task))
-                if (
-                    not isinstance(gt, dict)
-                    or gt.get("task_id") != task
-                    or gt.get("feedback_class") != "HARD_GT"
-                    or gt.get("judge_feedback_included") is not False
-                    or not isinstance(gt.get("ground_truth_sha256"), str)
-                ):
-                    raise ValueError("current-task GT supervision authority is invalid")
-                attachment = self._effect(
-                    kind="feedback-attachment",
-                    request={
-                        "task_id": task,
-                        "attempt_index": attempt,
-                        "dataset_id": state["active_candidate_receipt"]["dataset_id"],
-                        "dataset_revision": state["active_candidate_receipt"][
-                            "dataset_revision"
-                        ],
-                        "session_id": state["active_candidate_receipt"]["session_id"],
-                        "core_task_id": state["active_candidate_receipt"][
-                            "core_task_id"
-                        ],
-                        "core_attempt_id": state["active_candidate_receipt"][
-                            "core_attempt_id"
-                        ],
-                        "successor_transition_id": state[
-                            "active_candidate_receipt"
-                        ].get("successor_transition_id"),
-                        "candidate": state["active_candidate_receipt"],
-                        "validation": state["active_validation_receipt"],
-                        "feedback_source": "current_task_gt",
-                        "gt_supervision": gt,
-                        "authority": "evaluator_only",
-                        "judge_feedback": None,
-                    },
-                    execute=self.operations.attach_feedback,
-                )
-                if (
-                    not attachment.get("attachment_id")
-                    or not attachment.get("resolved_view_sha256")
-                    or attachment.get("feedback_class") != "HARD_GT"
-                    or attachment.get("feedback_source") != "current_task_gt"
-                    or attachment.get("judge_calls") != 0
-                    or attachment.get("ground_truth_sha256")
-                    != gt["ground_truth_sha256"]
-                    or attachment.get("judge_feedback_included") is not False
-                ):
-                    raise ValueError("current-task GT attachment receipt is incomplete")
                 return self._transition(
                     stage,
-                    TrainingStage.ATTACHMENT_SEALED,
-                    "per-item-current-task-gt-attachment-sealed",
-                    updates={
-                        "attachment_ids": [
-                            *state["attachment_ids"],
-                            attachment["attachment_id"],
-                        ],
-                        "active_attachment_receipt": attachment,
-                        # Raw GT is private evolution input.  Its Core
-                        # task-local overlay is deliberately never activated
-                        # for either Candidate pass.
-                        "current_task_local_overlay_id": None,
-                        "current_task_local_overlay_scope_id": None,
-                        "training_signal_status": "ATTACHED_FROM_CURRENT_TASK_GT",
-                        "judge_feedback_included": False,
-                    },
+                    TrainingStage.FEEDBACK_PROJECTION_PENDING,
+                    "sanitized-evaluation-feedback-projection-pending",
                     receipt={
-                        **attachment,
-                        "candidate_overlay_activated": False,
-                        "judge_evaluation_receipt_consumed": False,
+                        "task_id": task,
+                        "evaluation_receipt_id": state["active_evaluation_receipt"].get(
+                            "evaluation_receipt_id"
+                        ),
+                        "evaluation_frozen": True,
+                        "openevo_state_mutations": 0,
                     },
                 )
             if attempt == 2:
@@ -2488,7 +2364,9 @@ class CommunityTrainingSupervisor:
                     "session_id": state["active_candidate_receipt"]["session_id"],
                     "core_task_id": state["active_candidate_receipt"]["core_task_id"],
                     "core_attempt_id": state["active_candidate_receipt"]["core_attempt_id"],
-                    "successor_transition_id": state["active_candidate_receipt"].get("successor_transition_id"),
+                    "successor_transition_id": state["active_candidate_receipt"].get(
+                        "successor_transition_id"
+                    ),
                     "evaluation": state["active_evaluation_receipt"],
                     "authority": "evaluator_only",
                 },
@@ -2510,6 +2388,130 @@ class CommunityTrainingSupervisor:
                 },
                 receipt=attachment,
             )
+        if stage is TrainingStage.FEEDBACK_PROJECTION_PENDING:
+            if not self.per_item_reset_enabled or attempt != 0:
+                raise ValueError("feedback projection is outside baseline per-item evaluation")
+            gt = self.operations.current_task_gt_supervision(str(task))
+            if (
+                not isinstance(gt, dict)
+                or gt.get("task_id") != task
+                or gt.get("feedback_class") != "HARD_GT"
+                or gt.get("judge_feedback_included") is not False
+                or not isinstance(gt.get("ground_truth_sha256"), str)
+            ):
+                raise ValueError("current-task GT supervision authority is invalid")
+            projection = self._effect(
+                kind="feedback-projection",
+                request={
+                    "task_id": task,
+                    "attempt_index": attempt,
+                    "candidate": state["active_candidate_receipt"],
+                    "validation": state["active_validation_receipt"],
+                    "evaluation": state["active_evaluation_receipt"],
+                    "gt_supervision": gt,
+                    "authority": "evaluator_private_projection_only",
+                },
+                execute=self.operations.project_feedback,
+            )
+            admission = projection.get("admission")
+            quality = projection.get("quality_contract")
+            if (
+                projection.get("task_id") != task
+                or projection.get("ground_truth_sha256") != gt["ground_truth_sha256"]
+                or projection.get("feedback_projector_model_calls") != 0
+                or projection.get("openevo_state_mutations") != 0
+                or projection.get("evaluation_frozen") is not True
+                or projection.get("raw_gt_projected") is not False
+                or projection.get("judge_reasoning_projected") is not False
+                or projection.get("target_image_projected") is not False
+                or not isinstance(admission, dict)
+                or admission.get("status") != "ADMITTED"
+                or not isinstance(quality, dict)
+                or quality.get("generic_only_advice") is not False
+                or quality.get("candidate_specific_references_present") is not True
+                or quality.get("preserve_strength_guidance_present") is not True
+                or quality.get("targeted_improvement_guidance_present") is not True
+                or quality.get("gt_leakage") is not False
+            ):
+                raise ValueError("sanitized evaluation feedback admission is incomplete")
+            return self._transition(
+                stage,
+                TrainingStage.FEEDBACK_ADMITTED,
+                "sanitized-evaluation-feedback-admitted",
+                updates={"active_feedback_projection_receipt": projection},
+                receipt=projection,
+            )
+        if stage is TrainingStage.FEEDBACK_ADMITTED:
+            if not self.per_item_reset_enabled or attempt != 0:
+                raise ValueError("admitted feedback is outside baseline per-item evolution")
+            gt = self.operations.current_task_gt_supervision(str(task))
+            projection = state.get("active_feedback_projection_receipt")
+            if (
+                not isinstance(gt, dict)
+                or not isinstance(projection, dict)
+                or projection.get("ground_truth_sha256") != gt.get("ground_truth_sha256")
+            ):
+                raise ValueError("sanitized feedback and GT authority binding differs")
+            attachment = self._effect(
+                kind="feedback-attachment",
+                request={
+                    "task_id": task,
+                    "attempt_index": attempt,
+                    "dataset_id": state["active_candidate_receipt"]["dataset_id"],
+                    "dataset_revision": state["active_candidate_receipt"]["dataset_revision"],
+                    "session_id": state["active_candidate_receipt"]["session_id"],
+                    "core_task_id": state["active_candidate_receipt"]["core_task_id"],
+                    "core_attempt_id": state["active_candidate_receipt"]["core_attempt_id"],
+                    "successor_transition_id": state["active_candidate_receipt"].get(
+                        "successor_transition_id"
+                    ),
+                    "candidate": state["active_candidate_receipt"],
+                    "validation": state["active_validation_receipt"],
+                    "feedback_source": "sanitized_evaluation_feedback_v1",
+                    "gt_supervision": gt,
+                    "feedback_projection": projection,
+                    "authority": "evaluator_sanitized_projection_only",
+                    "judge_feedback": None,
+                },
+                execute=self.operations.attach_feedback,
+            )
+            if (
+                not attachment.get("attachment_id")
+                or not attachment.get("resolved_view_sha256")
+                or attachment.get("feedback_class") != "HARD_GT"
+                or attachment.get("feedback_source") != "sanitized_evaluation_feedback_v1"
+                or attachment.get("judge_calls") != 0
+                or attachment.get("ground_truth_sha256") != gt["ground_truth_sha256"]
+                or attachment.get("sanitized_feedback_sha256")
+                != projection.get("sanitized_feedback_sha256")
+                or attachment.get("sanitized_feedback_included") is not True
+                or attachment.get("judge_feedback_included") is not False
+                or attachment.get("raw_gt_projected") is not False
+                or attachment.get("judge_reasoning_projected") is not False
+                or attachment.get("target_image_projected") is not False
+            ):
+                raise ValueError("sanitized evaluation feedback attachment is incomplete")
+            return self._transition(
+                stage,
+                TrainingStage.ATTACHMENT_SEALED,
+                "sanitized-evaluation-feedback-attachment-sealed",
+                updates={
+                    "attachment_ids": [
+                        *state["attachment_ids"],
+                        attachment["attachment_id"],
+                    ],
+                    "active_attachment_receipt": attachment,
+                    "current_task_local_overlay_id": None,
+                    "current_task_local_overlay_scope_id": None,
+                    "training_signal_status": ("ATTACHED_FROM_SANITIZED_EVALUATION_FEEDBACK"),
+                    "judge_feedback_included": False,
+                },
+                receipt={
+                    **attachment,
+                    "candidate_overlay_activated": False,
+                    "raw_evaluation_consumed_by_core": False,
+                },
+            )
         if stage is TrainingStage.ATTACHMENT_SEALED:
             return self._transition(stage, TrainingStage.EVOLUTION_PENDING, "evolution-pending")
         if stage is TrainingStage.EVOLUTION_PENDING:
@@ -2520,9 +2522,14 @@ class CommunityTrainingSupervisor:
                 or state.get("judge_feedback_included") is not False
                 or state.get("current_task_local_overlay_id") is not None
                 or state.get("current_task_local_overlay_scope_id") is not None
-                or state.get("active_attachment_receipt", {}).get(
-                    "judge_feedback_included"
-                )
+                or state.get("active_attachment_receipt", {}).get("judge_feedback_included")
+                is not False
+                or state.get("active_attachment_receipt", {}).get("feedback_source")
+                != "sanitized_evaluation_feedback_v1"
+                or state.get("active_attachment_receipt", {}).get("sanitized_feedback_included")
+                is not True
+                or state.get("active_attachment_receipt", {}).get("raw_gt_projected") is not False
+                or state.get("active_attachment_receipt", {}).get("judge_reasoning_projected")
                 is not False
             ):
                 raise ValueError("per-item evolution input boundary is invalid")
@@ -2534,13 +2541,9 @@ class CommunityTrainingSupervisor:
                 "artifact_types": list(ARTIFACT_TYPES),
             }
             try:
-                reflector_readiness = self.operations.evolution_readiness(
-                    evolution_request
-                )
+                reflector_readiness = self.operations.evolution_readiness(evolution_request)
             except RuntimeError as exc:
-                raise TrainingPaused(
-                    "REFLECTOR_CREDENTIAL_MOUNT_NOT_READY"
-                ) from exc
+                raise TrainingPaused("REFLECTOR_CREDENTIAL_MOUNT_NOT_READY") from exc
             required_mount = {
                 "authority_issued",
                 "docker_mount_created",
@@ -2554,10 +2557,7 @@ class CommunityTrainingSupervisor:
             if (
                 not isinstance(reflector_readiness, dict)
                 or reflector_readiness.get("ready") is not True
-                or any(
-                    reflector_readiness.get(field) is not True
-                    for field in required_mount
-                )
+                or any(reflector_readiness.get(field) is not True for field in required_mount)
                 or reflector_readiness.get("identity_matches") is not True
                 or reflector_readiness.get("secret_recorded") is not False
                 or reflector_readiness.get("codex_cli_started") is not False
@@ -2653,7 +2653,10 @@ class CommunityTrainingSupervisor:
                 },
                 execute=self.operations.admit_composite,
             )
-            if not admitted.get("composite_id") or len(admitted.get("registry_artifact_ids", [])) != 3:
+            if (
+                not admitted.get("composite_id")
+                or len(admitted.get("registry_artifact_ids", [])) != 3
+            ):
                 raise ValueError("admitted composite receipt is incomplete")
             return self._transition(
                 stage,
@@ -2679,9 +2682,9 @@ class CommunityTrainingSupervisor:
                         "source_core_project_id": state["core_project_id"],
                         "source_candidate": state["active_candidate_receipt"],
                         "admitted_composite": state["active_admission_receipt"],
-                        "ground_truth_sha256": state[
-                            "active_attachment_receipt"
-                        ].get("ground_truth_sha256"),
+                        "ground_truth_sha256": state["active_attachment_receipt"].get(
+                            "ground_truth_sha256"
+                        ),
                         "judge_feedback": None,
                         "fresh_workspace": True,
                         "same_task_only": True,
@@ -2711,16 +2714,10 @@ class CommunityTrainingSupervisor:
                     or set(expected) != required_true
                     or prepared.get("task_id") != task
                     or not isinstance(prepared.get("core_project_id"), str)
-                    or not isinstance(
-                        prepared.get("preseeded_workspace_authority"), dict
-                    )
+                    or not isinstance(prepared.get("preseeded_workspace_authority"), dict)
                     or len(prepared.get("artifact_ids", [])) != 3
                     or set(prepared.get("artifact_ids", []))
-                    != set(
-                        state["active_admission_receipt"].get(
-                            "registry_artifact_ids", []
-                        )
-                    )
+                    != set(state["active_admission_receipt"].get("registry_artifact_ids", []))
                     or prepared.get("recovery_command_used") is not False
                     or prepared.get("recovery_path_used") is not False
                 ):
@@ -2732,9 +2729,7 @@ class CommunityTrainingSupervisor:
                     updates={
                         "current_composite_id": prepared["composite_id"],
                         "core_project_id": prepared["core_project_id"],
-                        "preseeded_workspace_authority": prepared[
-                            "preseeded_workspace_authority"
-                        ],
+                        "preseeded_workspace_authority": prepared["preseeded_workspace_authority"],
                         "active_artifact_ids": prepared["artifact_ids"],
                         "current_task_local_overlay_id": None,
                         "current_task_local_overlay_scope_id": None,
@@ -2746,7 +2741,9 @@ class CommunityTrainingSupervisor:
                 stage,
                 TrainingStage.NEXT_ATTEMPT_READY,
                 "next-attempt-prepared",
-                updates={"current_composite_id": state["active_admission_receipt"]["composite_id"]},
+                updates={
+                    "current_composite_id": state["active_admission_receipt"]["composite_id"]
+                },
             )
         if stage is TrainingStage.EVOLVED_WORKSPACE_PREPARED:
             if not self.per_item_reset_enabled or attempt != 0:
@@ -2882,9 +2879,7 @@ class CommunityTrainingSupervisor:
                 "cross-task-sanitized",
                 updates={
                     "current_composite_id": sanitized["composite_id"],
-                    "core_project_id": sanitized.get(
-                        "core_project_id", state["core_project_id"]
-                    ),
+                    "core_project_id": sanitized.get("core_project_id", state["core_project_id"]),
                 },
                 receipt=sanitized,
             )
@@ -2923,12 +2918,13 @@ class CommunityTrainingSupervisor:
                 "core_identity_sha256": self.identity.core_identity_sha256,
                 "adapter_identity_sha256": self.identity.adapter_identity_sha256,
                 "active_task_local_overlay": state["current_task_local_overlay_id"],
-                "active_task_local_overlay_scope": state[
-                    "current_task_local_overlay_scope_id"
-                ],
+                "active_task_local_overlay_scope": state["current_task_local_overlay_scope_id"],
             }
             if (
-                sum(len(self.store.attempts_for_task(self.experiment_id, item)) for item in self.task_ids)
+                sum(
+                    len(self.store.attempts_for_task(self.experiment_id, item))
+                    for item in self.task_ids
+                )
                 != expected_attempts
                 or len(state["evolution_job_ids"]) != expected_cycles * 3
                 or state["current_task_local_overlay_id"] is not None
@@ -2975,6 +2971,7 @@ class CommunityTrainingSupervisor:
                 "active_reflector_session": None,
                 "active_workspace": None,
                 "active_gt_supervision": None,
+                "active_evaluation_feedback": None,
                 "cross_project_fork_to_next_task": False,
             }
             return self._transition(
@@ -2994,6 +2991,7 @@ class CommunityTrainingSupervisor:
                     "active_candidate_receipt": None,
                     "active_validation_receipt": None,
                     "active_evaluation_receipt": None,
+                    "active_feedback_projection_receipt": None,
                     "active_attachment_receipt": None,
                     "active_evolution_receipt": None,
                     "active_admission_receipt": None,

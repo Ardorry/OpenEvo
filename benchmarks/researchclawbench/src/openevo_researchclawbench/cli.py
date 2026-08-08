@@ -325,9 +325,7 @@ def command_formal_community_live_preflight(
             receipt_path=run_root / "evaluator_private" / "judge-preflight.json",
         )
         readiness = authority.public_readiness()
-        native_feedback = native_teacher_attachment_capability(
-            config.openevo_root
-        )
+        native_feedback = native_teacher_attachment_capability(config.openevo_root)
         required_core = (
             "service_reachable",
             "bearer_present",
@@ -335,9 +333,7 @@ def command_formal_community_live_preflight(
             "generation_matches",
             "candidate_port_authorized",
         )
-        candidate_isolation = candidate.get(
-            "managed_candidate_subscription_isolation"
-        )
+        candidate_isolation = candidate.get("managed_candidate_subscription_isolation")
         candidate_isolation_ready = isinstance(candidate_isolation, dict) and all(
             candidate_isolation.get(field) is expected
             for field, expected in {
@@ -357,10 +353,8 @@ def command_formal_community_live_preflight(
             }.items()
         )
         capability_receipt = {
-            "candidate_core_capabilities": candidate.get("project_configuration_valid")
-            is True,
-            "candidate_generation_matches": candidate.get("generation")
-            == authority.generation,
+            "candidate_core_capabilities": candidate.get("project_configuration_valid") is True,
+            "candidate_generation_matches": candidate.get("generation") == authority.generation,
             "candidate_release_identity_matches": candidate.get("release_identity")
             == authority.release_identity,
             "managed_candidate_credential_adoption": all(
@@ -377,9 +371,7 @@ def command_formal_community_live_preflight(
                 }.items()
             )
             and candidate.get("managed_candidate_codex_cli_version") == "0.144.1",
-            "managed_candidate_subscription_isolation": (
-                candidate_isolation_ready
-            ),
+            "managed_candidate_subscription_isolation": (candidate_isolation_ready),
             "managed_reflector_credential_adoption": reflector.get("ready") is True
             and reflector.get("identity_matches") is True,
             "judge_identity_ready": judge["ready"] is True
@@ -394,12 +386,9 @@ def command_formal_community_live_preflight(
                 "production_evolution_http_transport"
             )
             is True,
-            "successor_capability": native_feedback.get(
-                "production_science_successor_hook"
-            )
+            "successor_capability": native_feedback.get("production_science_successor_hook")
             is True,
-            "triple_registry_capability": candidate.get("project_configuration_valid")
-            is True,
+            "triple_registry_capability": candidate.get("project_configuration_valid") is True,
             "final_freeze_capability": hasattr(ports.freeze, "execute")
             and hasattr(ports.freeze, "recover"),
         }
@@ -574,8 +563,9 @@ def _print_per_item_runner_summary(
             "    - memory",
             "    - skill",
             "    - agent-system",
-            "  supervision: current-task GT",
-            "  judge_feedback: excluded",
+            "  supervision: sanitized evaluator feedback",
+            "  raw GT: excluded from reflector",
+            "  Judge reasoning: excluded",
         )
     )
     judge_lines = (
@@ -592,7 +582,8 @@ def _print_per_item_runner_summary(
         if baseline_only
         else (
             "  judge baseline",
-            "  evolve once with current-task GT",
+            "  project and admit sanitized evaluation feedback",
+            "  evolve once with sanitized feedback",
             "  evolved",
             "  judge evolved",
             "  paired result",
@@ -629,7 +620,8 @@ def _print_per_item_runner_summary(
                 "  fresh Codex per pass",
                 "  fresh state per task",
                 "  GT hidden from Candidate",
-                "  Judge feedback excluded from Evolution",
+                "  raw GT and Judge reasoning excluded from Evolution",
+                "  sanitized evaluation feedback visible only to Reflector",
                 "  cross-task artifacts excluded",
                 "",
                 "Output:",
@@ -649,19 +641,13 @@ def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> 
     if task_id not in FROZEN_TASKS:
         raise ProtocolError("run-per-item task is outside the frozen Community inventory")
     if config.per_item_reset is None:
-        raise ProtocolError(
-            "run-per-item requires the canonical per-item reset protocol"
-        )
+        raise ProtocolError("run-per-item requires the canonical per-item reset protocol")
     dry_run = bool(args.dry_run or args.no_model_calls)
     baseline_only = bool(args.baseline_only)
     if baseline_only != bool(args.previous_closed_run_id):
-        raise ProtocolError(
-            "--baseline-only requires exactly one --previous-closed-run-id"
-        )
+        raise ProtocolError("--baseline-only requires exactly one --previous-closed-run-id")
     if baseline_only != bool(args.previous_closed_task):
-        raise ProtocolError(
-            "--baseline-only requires exactly one --previous-closed-task"
-        )
+        raise ProtocolError("--baseline-only requires exactly one --previous-closed-task")
     _print_per_item_runner_summary(
         config,
         task_id=task_id,
@@ -685,7 +671,9 @@ def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> 
             "fresh-generation-zero",
             "fresh-codex-baseline",
             "baseline-judge",
-            "current-task-gt-native-evolve-once",
+            "sanitized-evaluation-feedback-projection",
+            "feedback-admission",
+            "native-evolve-once-with-sanitized-feedback",
             "fresh-codex-evolved",
             "evolved-judge",
             "paired-result",
@@ -707,8 +695,11 @@ def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> 
                 "provider_calls": 0,
                 "managed_runtime_ready": host_profile["ready"],
                 "managed_runtime_reason_code": host_profile["reason_code"],
-                "supervision": "current_task_gt",
+                "supervision": "sanitized_evaluation_feedback_v1",
                 "judge_feedback_in_evolution": False,
+                "judge_reasoning_in_evolution": False,
+                "raw_gt_in_reflector": False,
+                "sanitized_feedback_in_reflector": True,
                 "gt_visible_to_candidate": False,
                 "one_evolution_cycle": not baseline_only,
                 "fresh_codex_per_pass": True,
@@ -790,9 +781,7 @@ def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> 
             ):
                 raise ProtocolError("previous per-item state is not closed and reset")
             isolation_receipt = {
-                "schema_version": (
-                    "openevo.researchclawbench.pre_dispatch_isolation.v1"
-                ),
+                "schema_version": ("openevo.researchclawbench.pre_dispatch_isolation.v1"),
                 "task_id": task_id,
                 "run_id": args.run_id,
                 "previous_task_id": str(args.previous_closed_task),
@@ -822,8 +811,7 @@ def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> 
         )
         result = control.initialize()
         while result["stage"] not in _FORMAL_TERMINAL_STAGES and not (
-            baseline_only
-            and result["stage"] == TrainingStage.ARTIFACT_VALIDATED.value
+            baseline_only and result["stage"] == TrainingStage.ARTIFACT_VALIDATED.value
         ):
             result = control.run_next()
     finally:
@@ -845,9 +833,7 @@ def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> 
                 "active_artifact_ids": result.get("active_artifact_ids"),
                 "judge_executed": False,
                 "evolution_executed": False,
-                "pre_dispatch_isolation_receipt": str(
-                    output_root / "pre_dispatch_isolation.json"
-                ),
+                "pre_dispatch_isolation_receipt": str(output_root / "pre_dispatch_isolation.json"),
             }
         )
         return 0
@@ -890,9 +876,7 @@ def _per_item_community_root(config: ExperimentConfig, run_id: str) -> Path:
     return resolved
 
 
-def _per_item_community_plan(
-    config: ExperimentConfig, run_id: str
-) -> list[dict[str, object]]:
+def _per_item_community_plan(config: ExperimentConfig, run_id: str) -> list[dict[str, object]]:
     return [
         {
             "index": index,
@@ -941,9 +925,7 @@ def _paired_statistics(
     }
 
 
-def command_run_per_item_community(
-    config: ExperimentConfig, args: argparse.Namespace
-) -> int:
+def command_run_per_item_community(config: ExperimentConfig, args: argparse.Namespace) -> int:
     """Run independent per-task controls; never carry an active head forward."""
 
     if config.per_item_reset is None:
@@ -1015,10 +997,7 @@ def command_run_per_item_community(
     judge_identity_preflight(
         config,
         receipt_path=(
-            config.experiment_root
-            / "per_item_preflight"
-            / args.run_id
-            / "judge-preflight.json"
+            config.experiment_root / "per_item_preflight" / args.run_id / "judge-preflight.json"
         ),
     )
     if root.exists():
@@ -1034,9 +1013,7 @@ def command_run_per_item_community(
             item_root = root / "items" / f"{int(item['index']):02d}_{task_id}"
             item_root.mkdir(parents=True, mode=0o700)
             isolation = {
-                "schema_version": (
-                    "openevo.researchclawbench.pre_dispatch_isolation.v1"
-                ),
+                "schema_version": ("openevo.researchclawbench.pre_dispatch_isolation.v1"),
                 "task_id": task_id,
                 "run_id": item_run_id,
                 "fresh_generation_zero": True,
@@ -1122,9 +1099,7 @@ def command_run_per_item_community(
     return 0
 
 
-def command_per_item_community_inspect(
-    config: ExperimentConfig, args: argparse.Namespace
-) -> int:
+def command_per_item_community_inspect(config: ExperimentConfig, args: argparse.Namespace) -> int:
     root = _per_item_community_root(config, args.run_id)
     progress = root / "progress.json"
     if not progress.is_file():
@@ -1214,9 +1189,7 @@ def command_recover_native_evolution(
                     "task_id": prepared["task_id"],
                     "source_run_id": prepared["source_run_id"],
                     "recovery_run_id": prepared["recovery_run_id"],
-                    "source_state_sha256": prepared[
-                        "supervisor_state_sha256"
-                    ],
+                    "source_state_sha256": prepared["supervisor_state_sha256"],
                     "source_tree_sha256": prepared["supervisor_tree_sha256"],
                     "execution_identity": prepared["execution_identity"],
                     "provider_calls": 0,
@@ -1258,9 +1231,7 @@ def command_pilot_v2(args: argparse.Namespace) -> int:
         )
         judge_port = PilotV2JudgePort(
             researchclawbench_root=config.researchclawbench_root,
-            evaluator_private_root=(
-                output_root / "evaluator_private" / args.batch_id
-            ),
+            evaluator_private_root=(output_root / "evaluator_private" / args.batch_id),
             timeout_seconds=int(config.require("judge.timeout_seconds")),
         )
     state_root = output_root / "supervisor" / args.batch_id
@@ -1387,17 +1358,13 @@ def main(argv: list[str] | None = None) -> int:
     formal_prepare.add_argument("--framework-lock", required=True, type=Path)
     formal_prepare.add_argument("--daemon-bundle", required=True, type=Path)
     formal_prepare.add_argument("--daemon-manifest", required=True, type=Path)
-    formal_prepare.add_argument(
-        "--reflector-readiness-receipt", required=True, type=Path
-    )
+    formal_prepare.add_argument("--reflector-readiness-receipt", required=True, type=Path)
     formal_prepare.add_argument(
         "--reflector-credential-mount-readiness-receipt",
         required=True,
         type=Path,
     )
-    formal_prepare.add_argument(
-        "--evaluator-dependency-lock", required=True, type=Path
-    )
+    formal_prepare.add_argument("--evaluator-dependency-lock", required=True, type=Path)
     formal_validate = sub.add_parser("formal-community-validate")
     formal_validate.add_argument("--protocol", required=True, type=Path)
     formal_validate.add_argument("--run-id", required=True)
@@ -1559,10 +1526,11 @@ def main(argv: list[str] | None = None) -> int:
             return command_per_item_community_inspect(config, args)
         if args.command == "recover-native-evolution":
             return command_recover_native_evolution(config, args)
-        if (
-            getattr(config, "formal_runs_v11", None) is not None
-            and args.command in {"training-start", "run-next", "resume"}
-        ):
+        if getattr(config, "formal_runs_v11", None) is not None and args.command in {
+            "training-start",
+            "run-next",
+            "resume",
+        }:
             raise ProtocolError(
                 "formal v11 mutations require the formal-community command surface"
             )
@@ -1742,13 +1710,18 @@ def main(argv: list[str] | None = None) -> int:
                         operation="resume",
                     )
             print_closed_json(result)
-            return 5 if result.get("stage") in {
-                TrainingStage.BUDGET_EXHAUSTED.value,
-                TrainingStage.BLOCKED.value,
-                TrainingStage.FAILED.value,
-                TrainingStage.TASK_NO_VALID_ATTEMPT.value,
-                TrainingStage.CANDIDATE_SETUP_BLOCKED.value,
-            } else 0
+            return (
+                5
+                if result.get("stage")
+                in {
+                    TrainingStage.BUDGET_EXHAUSTED.value,
+                    TrainingStage.BLOCKED.value,
+                    TrainingStage.FAILED.value,
+                    TrainingStage.TASK_NO_VALID_ATTEMPT.value,
+                    TrainingStage.CANDIDATE_SETUP_BLOCKED.value,
+                }
+                else 0
+            )
         if args.command in official_commands:
             if args.command in {"official-frozen-init", "official-frozen-start"}:
                 control = OfficialTrainingControl(

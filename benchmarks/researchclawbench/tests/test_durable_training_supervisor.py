@@ -67,9 +67,7 @@ class SyntheticOperations:
                 "byte_size": 128,
             }
             result["candidate_workspace_binding"] = {
-                "schema_version": (
-                    "openevo.researchclawbench.candidate_workspace_binding.v1"
-                ),
+                "schema_version": ("openevo.researchclawbench.candidate_workspace_binding.v1"),
                 "workspace_snapshot_match": True,
                 "expected_workspace_snapshot": snapshot,
                 "actual_workspace_snapshot": snapshot,
@@ -99,8 +97,7 @@ class SyntheticOperations:
         attempt = request["attempt_index"]
         project_id = request.get("core_project_id") or "project-synthetic"
         injected = [
-            f"artifact-{request['task_id']}-0-{kind}"
-            for kind in ("system", "memory", "skills")
+            f"artifact-{request['task_id']}-0-{kind}" for kind in ("system", "memory", "skills")
         ]
         artifact_types = ("agent_system", "text_memory", "skill_bundle")
         runtime_injection = {
@@ -124,21 +121,15 @@ class SyntheticOperations:
             ),
         }
         workspace_authority = {
-            "schema_version": (
-                "openevo.researchclawbench.successor_workspace_authority.v2"
-            ),
+            "schema_version": ("openevo.researchclawbench.successor_workspace_authority.v2"),
             "task_id": request["task_id"],
             "source_attempt_index": attempt,
             "source_run_id": request["run_id"],
             "project_id": "project-synthetic",
-            "successor_transition_id": (
-                f"successor-{request['task_id']}-{attempt}"
-            ),
+            "successor_transition_id": (f"successor-{request['task_id']}-{attempt}"),
             "workspace_root": f"/synthetic/{request['task_id']}/{attempt}",
         }
-        workspace_authority["content_sha256"] = canonical_sha256(
-            workspace_authority
-        )
+        workspace_authority["content_sha256"] = canonical_sha256(workspace_authority)
         return self._once(
             idempotency_key,
             {
@@ -153,20 +144,14 @@ class SyntheticOperations:
                 "workspace_binding_id": f"workspace-{request['task_id']}-{attempt}",
                 "task_request_id": f"request-{request['task_id']}-{attempt}",
                 "session_result_id": f"result-{request['task_id']}-{attempt}",
-                "candidate_output_root": (
-                    f"/synthetic/{request['task_id']}/candidate-{attempt}"
-                ),
-                "input_project_head_id": (
-                    f"head-{request['task_id']}-{attempt}"
-                ),
+                "candidate_output_root": (f"/synthetic/{request['task_id']}/candidate-{attempt}"),
+                "input_project_head_id": (f"head-{request['task_id']}-{attempt}"),
                 "runtime_injection": runtime_injection,
                 "transcript_receipt": {"sha256": "f" * 64},
                 "runtime_seconds": 10 + attempt,
                 "cost_total_usd": None,
                 "composite_size_bytes": 100 + attempt,
-                "successor_transition_id": workspace_authority[
-                    "successor_transition_id"
-                ],
+                "successor_transition_id": workspace_authority["successor_transition_id"],
                 "successor_workspace_authority": workspace_authority,
             },
         )
@@ -188,6 +173,37 @@ class SyntheticOperations:
             {"total_score": (0.2, 0.5, 0.4)[attempt]},
         )
 
+    def project_feedback(self, request, idempotency_key):
+        feedback_sha256 = canonical_sha256(
+            {"status": "available_for_evolution", "task": request["task_id"]}
+        )
+        return self._once(
+            idempotency_key,
+            {
+                "task_id": request["task_id"],
+                "ground_truth_sha256": "7" * 64,
+                "sanitized_feedback_sha256": feedback_sha256,
+                "admission": {
+                    "status": "ADMITTED",
+                    "feedback_sha256": feedback_sha256,
+                },
+                "quality_contract": {
+                    "generic_only_advice": False,
+                    "candidate_specific_references_present": True,
+                    "candidate_evidence_refs_present": True,
+                    "preserve_strength_guidance_present": True,
+                    "targeted_improvement_guidance_present": True,
+                    "gt_leakage": False,
+                },
+                "feedback_projector_model_calls": 0,
+                "openevo_state_mutations": 0,
+                "evaluation_frozen": True,
+                "raw_gt_projected": False,
+                "judge_reasoning_projected": False,
+                "target_image_projected": False,
+            },
+        )
+
     def attach_feedback(self, request, idempotency_key):
         attempt = request["attempt_index"]
         result = {
@@ -204,6 +220,23 @@ class SyntheticOperations:
                     "judge_calls": 0,
                     "ground_truth_sha256": gt["ground_truth_sha256"],
                     "judge_feedback_included": False,
+                }
+            )
+        if request.get("feedback_source") == "sanitized_evaluation_feedback_v1":
+            gt = request["gt_supervision"]
+            projection = request["feedback_projection"]
+            result.update(
+                {
+                    "feedback_class": "HARD_GT",
+                    "feedback_source": "sanitized_evaluation_feedback_v1",
+                    "judge_calls": 0,
+                    "ground_truth_sha256": gt["ground_truth_sha256"],
+                    "sanitized_feedback_sha256": projection["sanitized_feedback_sha256"],
+                    "sanitized_feedback_included": True,
+                    "judge_feedback_included": False,
+                    "raw_gt_projected": False,
+                    "judge_reasoning_projected": False,
+                    "target_image_projected": False,
                 }
             )
         return self._once(
@@ -303,9 +336,7 @@ def _supervisor(tmp_path: Path, operations: SyntheticOperations, tasks=("Life_00
     return supervisor
 
 
-def _per_item_supervisor(
-    tmp_path: Path, operations: SyntheticOperations, task: str = "Life_005"
-):
+def _per_item_supervisor(tmp_path: Path, operations: SyntheticOperations, task: str = "Life_005"):
     store = TrainingStateStore(tmp_path / "per-item-state")
     supervisor = CommunityTrainingSupervisor(
         store=store,
@@ -387,15 +418,9 @@ def test_per_item_reset_closes_exact_pair_and_clears_active_state(
     assert state["current_task_local_overlay_scope_id"] is None
     assert state["item_reset_receipt"]["cross_project_fork_to_next_task"] is False
     assert verified["execution_status"] == "COMPLETED"
-    assert operations.calls[
-        "synthetic-per-item:Life_005:a0:evaluation"
-    ] == 1
-    assert operations.calls[
-        "synthetic-per-item:Life_005:a1:evaluation"
-    ] == 1
-    assert operations.calls[
-        "synthetic-per-item:Life_005:a0:evolution"
-    ] == 1
+    assert operations.calls["synthetic-per-item:Life_005:a0:evaluation"] == 1
+    assert operations.calls["synthetic-per-item:Life_005:a1:evaluation"] == 1
+    assert operations.calls["synthetic-per-item:Life_005:a0:evolution"] == 1
     assert "synthetic-per-item:Life_005:a1:evolution" not in operations.calls
     assert len(operations.candidate_requests) == 2
     baseline_request, evolved_request = operations.candidate_requests
@@ -415,15 +440,38 @@ def test_per_item_reset_closes_exact_pair_and_clears_active_state(
     assert len(operations.evaluation_requests) == 2
     assert len(operations.attachment_requests) == 1
     attachment = operations.attachment_requests[0]
-    assert attachment["feedback_source"] == "current_task_gt"
+    assert attachment["feedback_source"] == "sanitized_evaluation_feedback_v1"
     assert attachment["judge_feedback"] is None
     assert attachment["gt_supervision"]["ground_truth_sha256"] == "7" * 64
+    assert attachment["feedback_projection"]["raw_gt_projected"] is False
+    assert attachment["feedback_projection"]["judge_reasoning_projected"] is False
+    assert state["active_feedback_projection_receipt"] is None
     assert len(operations.evolution_requests) == 1
-    assert operations.evolution_requests[0]["attachment"][
-        "judge_feedback_included"
-    ] is False
+    assert operations.evolution_requests[0]["attachment"]["judge_feedback_included"] is False
     assert len(operations.evolved_workspace_requests) == 1
     assert operations.evolved_workspace_requests[0]["judge_feedback"] is None
+
+
+def test_evaluation_is_frozen_before_feedback_projection(tmp_path: Path) -> None:
+    operations = SyntheticOperations()
+    supervisor = _per_item_supervisor(tmp_path, operations)
+    _drive_to(supervisor, "EVALUATED")
+
+    assert not any(":feedback-projection" in key for key in operations.calls)
+    assert not any(":feedback-attachment" in key for key in operations.calls)
+    assert not any(":evolution" in key for key in operations.calls)
+
+    state = supervisor.run_next()
+    assert state["stage"] == "FEEDBACK_PROJECTION_PENDING"
+    assert not any(":feedback-projection" in key for key in operations.calls)
+
+    state = supervisor.run_next()
+    assert state["stage"] == "FEEDBACK_ADMITTED"
+    assert operations.calls["synthetic-per-item:Life_005:a0:feedback-projection"] == 1
+    receipt = state["active_feedback_projection_receipt"]
+    assert receipt["evaluation_frozen"] is True
+    assert receipt["openevo_state_mutations"] == 0
+    assert receipt["feedback_projector_model_calls"] == 0
 
 
 def test_next_per_item_namespace_starts_clean_after_prior_item_reset(
@@ -455,6 +503,7 @@ def test_next_per_item_namespace_starts_clean_after_prior_item_reset(
     assert initial["active_artifact_ids"] == []
     assert initial["archived_artifact_ids"] == []
     assert initial["current_task_local_overlay_id"] is None
+    assert initial["active_feedback_projection_receipt"] is None
     assert initial["preseeded_workspace_authority"] is None
     _drive_to(chemistry, "CANDIDATE_SEALED")
 
@@ -470,6 +519,7 @@ def test_next_per_item_namespace_starts_clean_after_prior_item_reset(
     chemistry_session = chemistry.status()["session_ids"][0]
     assert chemistry_session not in life_state["session_ids"]
     assert life_state["active_artifact_ids"] == []
+    assert life_state["active_feedback_projection_receipt"] is None
     assert life_state["core_project_id"] is None
 
 
@@ -649,9 +699,7 @@ def test_append_only_recovery_continuation_consumes_a0_without_candidate_replay(
         ],
     }
     preseeded_workspace_authority = {
-        "schema_version": (
-            "openevo.researchclawbench.preseeded_workspace_authority.v1"
-        ),
+        "schema_version": ("openevo.researchclawbench.preseeded_workspace_authority.v1"),
         "project_id": "project-destination",
         "project_head_id": "project-head-destination",
         "project_head_manifest_sha256": "f" * 64,
@@ -688,9 +736,12 @@ def test_append_only_recovery_continuation_consumes_a0_without_candidate_replay(
         admission=admission,
     )
     assert state["stage"] == "RECOVERY_SEEDED_CONTINUATION"
-    assert store.attempts_for_task(
-        "synthetic-recovery-continuation", "Astronomy_004"
-    )[0]["attempt_status"] == "CONSUMED_INVALID_ARTIFACT"
+    assert (
+        store.attempts_for_task("synthetic-recovery-continuation", "Astronomy_004")[0][
+            "attempt_status"
+        ]
+        == "CONSUMED_INVALID_ARTIFACT"
+    )
     assert operations.calls == {}
     assert supervisor.verify()["completed_reflector_cycles"] == 1
 
@@ -716,10 +767,7 @@ def test_next_attempt_intent_binds_sealed_successor_workspace_authority(
     supervisor = _supervisor(tmp_path, operations)
     for _ in range(100):
         state = supervisor.status()
-        if (
-            state["stage"] == "CANDIDATE_RUNNING"
-            and state["current_attempt"] == 1
-        ):
+        if state["stage"] == "CANDIDATE_RUNNING" and state["current_attempt"] == 1:
             break
         supervisor.run_next()
     else:
@@ -728,10 +776,7 @@ def test_next_attempt_intent_binds_sealed_successor_workspace_authority(
     intent = supervisor.status()["active_candidate_intent"]
     assert intent["successor_workspace_authority"]["source_attempt_index"] == 0
     assert intent["candidate_workspace_binding"]["workspace_snapshot_match"] is True
-    assert (
-        intent["expected_workspace_snapshot"]["workspace_snapshot_id"]
-        == "workspace-Life_005-1"
-    )
+    assert intent["expected_workspace_snapshot"]["workspace_snapshot_id"] == "workspace-Life_005-1"
 
 
 def test_completed_successor_failure_reconciles_once_without_candidate_replay(
@@ -783,9 +828,7 @@ def test_completed_successor_failure_reconciles_once_without_candidate_replay(
     )
     assert reconciled["stage"] == "EVOLUTION_COMPLETED"
     assert len(reconciled["evolution_job_ids"]) == 3
-    assert operations.calls[
-        "synthetic-training:Life_005:a0:evolution"
-    ] == 1
+    assert operations.calls["synthetic-training:Life_005:a0:evolution"] == 1
 
     assert supervisor.run_next()["stage"] == "COMPOSITE_ADMITTED"
     closed = supervisor.run_next()
@@ -801,9 +844,7 @@ def test_completed_successor_failure_reconciles_once_without_candidate_replay(
         executor_readiness_sha256="8" * 64,
     )
     assert replayed == closed
-    assert operations.calls[
-        "synthetic-training:Life_005:a0:evolution"
-    ] == 1
+    assert operations.calls["synthetic-training:Life_005:a0:evolution"] == 1
 
 
 def test_completed_prefix_continuation_import_is_idempotent_and_model_free(
@@ -833,15 +874,10 @@ def test_completed_prefix_continuation_import_is_idempotent_and_model_free(
         raise AssertionError("source prefix did not reach the Energy a0 boundary")
 
     source_state = source.status()
-    attempts = {
-        task: source.store.attempts_for_task("source-prefix", task)
-        for task in tasks
-    }
+    attempts = {task: source.store.attempts_for_task("source-prefix", task) for task in tasks}
     effects = source.store.side_effects_for_experiment("source-prefix")
     budget = source.store.budget_usage("source-prefix")
-    source_workspace = source_state["active_candidate_receipt"][
-        "successor_workspace_authority"
-    ]
+    source_workspace = source_state["active_candidate_receipt"]["successor_workspace_authority"]
     rebased_workspace = {
         **source_workspace,
         "workspace_root": "/synthetic-destination/Energy_004/0",
@@ -854,13 +890,9 @@ def test_completed_prefix_continuation_import_is_idempotent_and_model_free(
         "source_database_sha256": "4" * 64,
         "source_protocol_sha256": source_state["_protocol_sha256"],
         "source_core_identity_sha256": source_state["_core_identity_sha256"],
-        "source_adapter_identity_sha256": source_state[
-            "_adapter_identity_sha256"
-        ],
+        "source_adapter_identity_sha256": source_state["_adapter_identity_sha256"],
         "source_reconciliation_receipt_sha256": "5" * 64,
-        "source_successor_transition_id": source_workspace[
-            "successor_transition_id"
-        ],
+        "source_successor_transition_id": source_workspace["successor_transition_id"],
         "source_successor_commit_sha256": "6" * 64,
         "source_stage": "NEXT_ATTEMPT_READY",
         "current_task_index": 4,
@@ -963,12 +995,7 @@ def test_core_auth_preflight_blocks_before_candidate_intent(tmp_path: Path) -> N
     assert blocked["stage"] == "BLOCKED"
     assert blocked["failure_reason"] == "CORE_CONTROL_PREFLIGHT_FAILED"
     assert "active_candidate_intent" not in blocked
-    assert (
-        supervisor.store.side_effect(
-            "synthetic-training:Life_005:a0:candidate"
-        )
-        is None
-    )
+    assert supervisor.store.side_effect("synthetic-training:Life_005:a0:candidate") is None
 
 
 def test_reflector_mount_preflight_blocks_before_evolution_intent(
@@ -987,12 +1014,7 @@ def test_reflector_mount_preflight_blocks_before_evolution_intent(
         supervisor.run_next()
 
     assert supervisor.status()["stage"] == "EVOLUTION_PENDING"
-    assert (
-        supervisor.store.side_effect(
-            "synthetic-training:Life_005:a0:evolution"
-        )
-        is None
-    )
+    assert supervisor.store.side_effect("synthetic-training:Life_005:a0:evolution") is None
 
 
 def test_candidate_authority_race_moves_running_intent_to_blocked(tmp_path: Path) -> None:
@@ -1009,9 +1031,7 @@ def test_candidate_authority_race_moves_running_intent_to_blocked(tmp_path: Path
     blocked = supervisor.run_next()
     assert blocked["stage"] == "BLOCKED"
     assert blocked["failure_reason"] == "CANDIDATE_OPERATION_FAILED_BEFORE_SEAL"
-    planned = supervisor.store.side_effect(
-        "synthetic-training:Life_005:a0:candidate"
-    )
+    planned = supervisor.store.side_effect("synthetic-training:Life_005:a0:candidate")
     assert planned is not None and planned["status"] == "planned"
 
 
@@ -1033,9 +1053,7 @@ def test_terminal_candidate_setup_failure_closes_effect_and_supervisor(
                     "model_started": False,
                     "benchmark_started": False,
                     "retryable": False,
-                    "core_failure_code": (
-                        "candidate_subscription_isolation_not_ready"
-                    ),
+                    "core_failure_code": ("candidate_subscription_isolation_not_ready"),
                     "terminal_proven": True,
                 },
             )
@@ -1045,9 +1063,7 @@ def test_terminal_candidate_setup_failure_closes_effect_and_supervisor(
     assert supervisor.run_next()["stage"] == "CANDIDATE_RUNNING"
     blocked = supervisor.run_next()
     assert blocked["stage"] == "CANDIDATE_SETUP_BLOCKED"
-    effect = supervisor.store.side_effect(
-        "synthetic-training:Life_005:a0:candidate"
-    )
+    effect = supervisor.store.side_effect("synthetic-training:Life_005:a0:candidate")
     assert effect is not None and effect["status"] == "failed"
     assert effect["receipt"]["terminal_proven"] is True
     assert supervisor.store.budget_usage("synthetic-training") == {
@@ -1165,9 +1181,7 @@ def test_candidate_budget_exhaustion_is_terminal_before_second_candidate_intent(
     exhausted = supervisor.run_next()
     assert exhausted["stage"] == "BUDGET_EXHAUSTED"
     assert exhausted["failure_reason"] == "BUDGET_EXHAUSTED"
-    assert (
-        store.side_effect("bounded-training:Life_005:a1:candidate") is None
-    )
+    assert store.side_effect("bounded-training:Life_005:a1:candidate") is None
     assert operations.calls["bounded-training:Life_005:a0:candidate"] == 1
 
 

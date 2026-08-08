@@ -55,6 +55,7 @@ from .community_evaluator import (
     build_production_community_evaluator,
 )
 from .config import ARTIFACT_TYPES, FROZEN_TASKS, ExperimentConfig
+from .evaluation_feedback import EvaluationFeedbackProjectionPort
 from .managed_core_control import ManagedCoreControlAuthority
 from .production_training_operations import (
     ProductionOperationPort,
@@ -139,14 +140,18 @@ def _closed_core_control_error_code(body: object, *, path: str = "") -> str:
     detail = body.get("detail")
     if isinstance(detail, str) and detail in recovery_codes:
         return recovery_codes[detail]
-    if isinstance(detail, str) and detail.startswith(
-        (
-            "recovery ",
-            "failed recovery ",
-            "carried recovery ",
-            "only one terminal failed recovery ",
+    if (
+        isinstance(detail, str)
+        and detail.startswith(
+            (
+                "recovery ",
+                "failed recovery ",
+                "carried recovery ",
+                "only one terminal failed recovery ",
+            )
         )
-    ) and re.fullmatch(r"[A-Za-z ]{3,160}", detail):
+        and re.fullmatch(r"[A-Za-z ]{3,160}", detail)
+    ):
         normalized = re.sub(r"[^A-Za-z0-9]+", "_", detail).strip("_").upper()
         if 2 <= len(normalized) <= 95:
             return normalized
@@ -204,9 +209,7 @@ def _successor_workspace_projection_authority(
     """
 
     normalized = json.loads(canonical_bytes(stripped_entries))
-    if not isinstance(normalized, list) or any(
-        not isinstance(item, dict) for item in normalized
-    ):
+    if not isinstance(normalized, list) or any(not isinstance(item, dict) for item in normalized):
         raise ValueError("successor workspace projection entry is invalid")
     normalized.sort(key=lambda item: str(item.get("relative_path")))
     seen: set[str] = set()
@@ -221,8 +224,7 @@ def _successor_workspace_projection_authority(
         seen.add(path)
         if kind == "empty_runtime_scaffold":
             if set(item) != {"kind", "relative_path", "size_bytes"} or (
-                path not in {".agents", ".codex", ".git"}
-                or item.get("size_bytes") != 0
+                path not in {".agents", ".codex", ".git"} or item.get("size_bytes") != 0
             ):
                 raise ValueError("successor workspace projection entry is invalid")
             continue
@@ -237,8 +239,7 @@ def _successor_workspace_projection_authority(
                     "size_bytes",
                 }
                 or path != "AGENTS.md"
-                or item.get("runtime_receipt_path")
-                != "agent_system_targets/AGENTS.md"
+                or item.get("runtime_receipt_path") != "agent_system_targets/AGENTS.md"
                 or isinstance(item.get("size_bytes"), bool)
                 or not isinstance(item.get("size_bytes"), int)
                 or item["size_bytes"] < 0
@@ -251,8 +252,7 @@ def _successor_workspace_projection_authority(
         raise ValueError("successor workspace projection entry is invalid")
     if (
         core_archive.entry_count - sanitized_archive.entry_count != len(normalized)
-        or core_archive.extracted_byte_size
-        - sanitized_archive.extracted_byte_size
+        or core_archive.extracted_byte_size - sanitized_archive.extracted_byte_size
         != stripped_bytes
         or core_archive.entry_count < sanitized_archive.entry_count
         or core_archive.extracted_byte_size < sanitized_archive.extracted_byte_size
@@ -261,9 +261,7 @@ def _successor_workspace_projection_authority(
     if not normalized and core_archive != sanitized_archive:
         raise ValueError("successor workspace projection changed an unstripped archive")
     body = {
-        "schema_version": (
-            "openevo.researchclawbench.successor_workspace_projection.v1"
-        ),
+        "schema_version": ("openevo.researchclawbench.successor_workspace_projection.v1"),
         "core_output_archive": core_archive.model_dump(mode="json"),
         "sanitized_output_archive": sanitized_archive.model_dump(mode="json"),
         "stripped_entry_count": len(normalized),
@@ -448,9 +446,7 @@ def _candidate_workspace_binding_receipt(
         )
 
     body = {
-        "schema_version": (
-            "openevo.researchclawbench.candidate_workspace_binding.v2"
-        ),
+        "schema_version": ("openevo.researchclawbench.candidate_workspace_binding.v2"),
         "task_id": task_id,
         "attempt_index": attempt_index,
         "workspace_source": workspace_source,
@@ -464,9 +460,7 @@ def _candidate_workspace_binding_receipt(
         "workspace_projection": workspace_projection,
         "expected_workspace_snapshot": expected_snapshot,
         "actual_workspace_snapshot": project_head.get("workspace_snapshot"),
-        "workspace_snapshot_match": (
-            project_head.get("workspace_snapshot") == expected_snapshot
-        ),
+        "workspace_snapshot_match": (project_head.get("workspace_snapshot") == expected_snapshot),
         "task_local_overlay_id": task_local_overlay_id,
         "model_started": False,
         "core_task_created": False,
@@ -555,11 +549,7 @@ class CoreControlV2Client:
         self._client = httpx.Client(
             timeout=httpx.Timeout(60.0, connect=10.0),
             trust_env=False,
-            headers={
-                "Authorization": (
-                    f"Bearer {authority.bearer_value_for_core_client()}"
-                )
-            },
+            headers={"Authorization": (f"Bearer {authority.bearer_value_for_core_client()}")},
         )
 
     def close(self) -> None:
@@ -641,8 +631,7 @@ class CoreControlV2Client:
     def _require_generation(self, response: httpx.Response) -> None:
         if (
             response.headers.get("X-OpenEvo-Core-Generation") != self._generation
-            or response.headers.get("X-OpenEvo-Core-Release-Identity")
-            != self._release_identity
+            or response.headers.get("X-OpenEvo-Core-Release-Identity") != self._release_identity
         ):
             raise CoreControlError("CORE_CONTROL_GENERATION_MISMATCH")
 
@@ -684,14 +673,11 @@ def require_managed_candidate_isolation_readiness(
     if (
         candidate_runtime.get("core_generation")
         != (
-            runtime_receipt.get("generation_digest")
-            if isinstance(runtime_receipt, dict)
-            else None
+            runtime_receipt.get("generation_digest") if isinstance(runtime_receipt, dict) else None
         )
         or candidate_runtime.get("daemon_release_identity")
         != core_readiness.get("release_identity")
-        or candidate_runtime.get("release_registry_digest")
-        != expected_registry_digest
+        or candidate_runtime.get("release_registry_digest") != expected_registry_digest
         or candidate_runtime.get("candidate_runtime_ready") is not True
         or candidate_runtime.get("credential_mount_adopted") is not True
         or candidate_runtime.get("codex_cli_started") is not True
@@ -711,10 +697,8 @@ def require_managed_candidate_isolation_readiness(
         or runtime_receipt.get("generation_matches") is not True
         or runtime_receipt.get("image_digest_matches") is not True
         or runtime_receipt.get("isolation_probe_no_model") is not True
-        or runtime_receipt.get("isolation_policy_id")
-        != CODEX_SUBSCRIPTION_POLICY_ID
-        or runtime_receipt.get("isolation_policy_sha256")
-        != CODEX_SUBSCRIPTION_POLICY_SHA256
+        or runtime_receipt.get("isolation_policy_id") != CODEX_SUBSCRIPTION_POLICY_ID
+        or runtime_receipt.get("isolation_policy_sha256") != CODEX_SUBSCRIPTION_POLICY_SHA256
     ):
         raise CoreControlError(failure_code)
     return runtime_receipt
@@ -751,11 +735,7 @@ def require_nonterminal_candidate_lifecycle(
             "candidate Core Attempt reached a terminal failure",
             reason_code=(
                 lifecycle.error_code
-                or (
-                    failure.failure_code
-                    if failure is not None
-                    else "candidate_cancelled"
-                )
+                or (failure.failure_code if failure is not None else "candidate_cancelled")
             ),
             terminal_proven=True,
             failure_receipt={
@@ -769,8 +749,7 @@ def require_nonterminal_candidate_lifecycle(
                 "benchmark_started": lifecycle.benchmark_started,
                 "retryable": lifecycle.retryable,
                 "core_failure_code": (
-                    lifecycle.error_code
-                    or (failure.failure_code if failure is not None else None)
+                    lifecycle.error_code or (failure.failure_code if failure is not None else None)
                 ),
                 "terminal_proven": True,
             },
@@ -802,7 +781,9 @@ class _AuthorityJournal:
         atomic_write_json(path, value)
 
 
-def _project_config(config: ExperimentConfig, task_id: str, objective: str) -> ScienceProjectConfigV2:
+def _project_config(
+    config: ExperimentConfig, task_id: str, objective: str
+) -> ScienceProjectConfigV2:
     targets = {
         artifact_type: {
             "enabled": True,
@@ -819,7 +800,10 @@ def _project_config(config: ExperimentConfig, task_id: str, objective: str) -> S
     return ScienceProjectConfigV2.model_validate(
         {
             "task": {"title": task_id, "objective": objective},
-            "workspace": {"kind": "native_folder_snapshot", "display_name": f"{task_id} sanitized workspace"},
+            "workspace": {
+                "kind": "native_folder_snapshot",
+                "display_name": f"{task_id} sanitized workspace",
+            },
             "execution": {
                 "mode": "codex_subscription_transcript",
                 "capture_mode": "transcript",
@@ -909,7 +893,11 @@ def _safe_export_result(payload: bytes, destination: Path, expected_sha256: str)
     with tarfile.open(fileobj=io.BytesIO(payload), mode="r:") as archive:
         for member in archive.getmembers():
             relative = PurePosixPath(member.name)
-            if relative.is_absolute() or not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
+            if (
+                relative.is_absolute()
+                or not relative.parts
+                or any(part in {"", ".", ".."} for part in relative.parts)
+            ):
                 raise ValueError("Core workspace result contains an unsafe path")
             if relative.parts[0] not in allowed_roots:
                 continue
@@ -930,9 +918,13 @@ def _safe_export_result(payload: bytes, destination: Path, expected_sha256: str)
             target.parent.mkdir(parents=True, exist_ok=True)
             if target.exists():
                 if target.is_symlink() or not target.is_file() or target.read_bytes() != data:
-                    raise ValueError("recovered Core workspace result conflicts with sealed output")
+                    raise ValueError(
+                        "recovered Core workspace result conflicts with sealed output"
+                    )
                 continue
-            descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
+            descriptor = os.open(
+                target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600
+            )
             try:
                 os.write(descriptor, data)
                 os.fsync(descriptor)
@@ -1017,8 +1009,7 @@ def _materialize_successor_workspace(
             or not isinstance(runtime_agent_system.get("size_bytes"), int)
             or runtime_agent_system["size_bytes"] < 0
             or not isinstance(runtime_agent_system.get("sha256"), str)
-            or re.fullmatch(r"[0-9a-f]{64}", runtime_agent_system["sha256"])
-            is None
+            or re.fullmatch(r"[0-9a-f]{64}", runtime_agent_system["sha256"]) is None
         ):
             raise ValueError("successor workspace runtime receipt is invalid")
 
@@ -1082,8 +1073,7 @@ def _materialize_successor_workspace(
                 data = source.read()
                 if (
                     len(data) != member.size
-                    or hashlib.sha256(data).hexdigest()
-                    != runtime_agent_system["sha256"]
+                    or hashlib.sha256(data).hexdigest() != runtime_agent_system["sha256"]
                 ):
                     raise ValueError("successor workspace contains an unsafe path")
                 stripped_entries += 1
@@ -1092,9 +1082,7 @@ def _materialize_successor_workspace(
                     {
                         "kind": "runtime_agent_system",
                         "relative_path": "AGENTS.md",
-                        "runtime_receipt_path": (
-                            "agent_system_targets/AGENTS.md"
-                        ),
+                        "runtime_receipt_path": ("agent_system_targets/AGENTS.md"),
                         "sha256": runtime_agent_system["sha256"],
                         "size_bytes": len(data),
                     }
@@ -1136,11 +1124,7 @@ def _materialize_successor_workspace(
                 target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
                 descriptor = os.open(
                     target,
-                    os.O_WRONLY
-                    | os.O_CREAT
-                    | os.O_EXCL
-                    | os.O_CLOEXEC
-                    | os.O_NOFOLLOW,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
                     expected_mode,
                 )
                 try:
@@ -1161,8 +1145,7 @@ def _materialize_successor_workspace(
     if stripped_entries:
         if (
             observed.entry_count != expected.entry_count - stripped_entries
-            or observed.extracted_byte_size
-            != expected.extracted_byte_size - stripped_bytes
+            or observed.extracted_byte_size != expected.extracted_byte_size - stripped_bytes
         ):
             raise ValueError("successor workspace canonical archive changed")
     elif observed != expected:
@@ -1228,14 +1211,10 @@ def _require_successor_workspace_authority(
         or attempt_index not in {1, 2}
         or authority.get("project_id") != project_id
         or not all(
-            isinstance(authority.get(field), str) and authority[field]
-            for field in scalar_fields
+            isinstance(authority.get(field), str) and authority[field] for field in scalar_fields
         )
-        or not str(authority["source_run_id"]).startswith(
-            f"{task_id}_a{attempt_index - 1}_"
-        )
-        or re.fullmatch(r"[0-9a-f]{64}", str(authority["session_result_sha256"]))
-        is None
+        or not str(authority["source_run_id"]).startswith(f"{task_id}_a{attempt_index - 1}_")
+        or re.fullmatch(r"[0-9a-f]{64}", str(authority["session_result_sha256"])) is None
         or authority.get("content_sha256") != canonical_sha256(closed)
     ):
         raise CoreControlError(
@@ -1303,9 +1282,7 @@ def _require_successor_core_workspace_projection(
             reason_code="candidate_successor_workspace_authority_invalid",
         )
     try:
-        if authority.get("output_archive") != sanitized_archive.model_dump(
-            mode="json"
-        ):
+        if authority.get("output_archive") != sanitized_archive.model_dump(mode="json"):
             raise ValueError("sanitized successor archive changed")
         core_archive = WorkspaceArchiveDeclarationV2.model_validate(
             authority["core_output_archive"]
@@ -1378,8 +1355,7 @@ def _candidate_runtime_injection_authority(
     if (
         openevo.get("project_id") != head.project_id
         or openevo.get("project_head_id") != head.project_head_id
-        or openevo.get("evolution_revision_id")
-        != head.evolution_revision.evolution_revision_id
+        or openevo.get("evolution_revision_id") != head.evolution_revision.evolution_revision_id
         or openevo.get("runtime_context_snapshot_id")
         != head.runtime_context_snapshot.runtime_context_snapshot_id
     ):
@@ -1468,8 +1444,7 @@ def _candidate_runtime_injection_authority(
         set(receipt) != required_receipt_fields
         or receipt.get("schema_version") != "4"
         or receipt.get("context_id") != evolution.get("context_id")
-        or receipt.get("revision_id")
-        != head.evolution_revision.evolution_revision_id
+        or receipt.get("revision_id") != head.evolution_revision.evolution_revision_id
         or receipt.get("runtime_context_snapshot_id")
         != head.runtime_context_snapshot.runtime_context_snapshot_id
         or receipt.get("project_head_id") != head.project_head_id
@@ -1520,8 +1495,7 @@ def _candidate_runtime_injection_authority(
         total_bytes > 128 * 1024 * 1024
         or paths != sorted(paths)
         or len(paths) != len(set(paths))
-        or receipt["runtime_tree_sha256"]
-        != canonical_sha256({"files": validated_files})
+        or receipt["runtime_tree_sha256"] != canonical_sha256({"files": validated_files})
         or files_by_path.get("evolution/instruction.txt", {}).get("sha256")
         != receipt["instruction_sha256"]
     ):
@@ -1557,9 +1531,7 @@ def _candidate_runtime_injection_authority(
                 for name in ("content_sha256", "runtime_tree_sha256")
             )
             or item["runtime_tree_sha256"]
-            != canonical_sha256(
-                {"files": [files_by_path[path] for path in runtime_paths]}
-            )
+            != canonical_sha256({"files": [files_by_path[path] for path in runtime_paths]})
             or artifact_type in observed_by_type
         ):
             raise ValueError("candidate runtime injection artifact authority is invalid")
@@ -1567,9 +1539,7 @@ def _candidate_runtime_injection_authority(
         validated_artifacts.append(dict(item))
     if observed_by_type != expected_by_type:
         raise ValueError("candidate runtime injection differs from selected composite")
-    if context_ids is not None and context_ids != [
-        item["artifact_id"] for item in artifacts
-    ]:
+    if context_ids is not None and context_ids != [item["artifact_id"] for item in artifacts]:
         raise ValueError("candidate context metadata differs from injection receipt")
 
     normalized_receipt = {**receipt, "files": validated_files, "artifacts": validated_artifacts}
@@ -1614,19 +1584,15 @@ def _wait_for_completed_dataset(
         sealed = [
             item
             for item in timeline.get("items", [])
-            if item.get("event_type") == "dataset_sealed"
-            and item.get("attempt_id") == attempt_id
+            if item.get("event_type") == "dataset_sealed" and item.get("attempt_id") == attempt_id
         ]
         if len(sealed) > 1:
-            raise CoreControlError(
-                "Core published multiple completed datasets for one attempt"
-            )
+            raise CoreControlError("Core published multiple completed datasets for one attempt")
         if len(sealed) == 1:
             try:
                 dataset = client.json(
                     "GET",
-                    "/v2/internal/training-feedback/datasets/"
-                    + str(sealed[0]["dataset_id"]),
+                    "/v2/internal/training-feedback/datasets/" + str(sealed[0]["dataset_id"]),
                 )
             except CoreControlError as exc:
                 if exc.status_code != 404:
@@ -1641,25 +1607,17 @@ def _wait_for_completed_dataset(
         if task.get("state") in {"failed", "cancelled"}:
             successor = task.get("successor_transition")
             transition_id = (
-                successor.get("successor_transition_id")
-                if isinstance(successor, dict)
-                else None
+                successor.get("successor_transition_id") if isinstance(successor, dict) else None
             )
             if isinstance(transition_id, str) and transition_id:
                 authority = client.json(
                     "GET",
-                    "/v2/internal/training-successors/"
-                    + quote(transition_id, safe=""),
+                    "/v2/internal/training-successors/" + quote(transition_id, safe=""),
                 )
                 transition = authority.get("transition")
-                if (
-                    isinstance(transition, dict)
-                    and transition.get("state") == "failed"
-                ):
+                if isinstance(transition, dict) and transition.get("state") == "failed":
                     failure = transition.get("error")
-                    predecessor = transition.get("transition", {}).get(
-                        "predecessor_project_head"
-                    )
+                    predecessor = transition.get("transition", {}).get("predecessor_project_head")
                     if (
                         pre_dataset_retry_idempotency_key is not None
                         and not pre_dataset_retry_attempted
@@ -1671,26 +1629,15 @@ def _wait_for_completed_dataset(
                     ):
                         client.json(
                             "POST",
-                            "/v2/transitions/"
-                            + quote(transition_id, safe="")
-                            + "/retry",
-                            payload={
-                                "expected_project_head_id": predecessor[
-                                    "project_head_id"
-                                ]
-                            },
-                            headers={
-                                "Idempotency-Key": (
-                                    pre_dataset_retry_idempotency_key
-                                )
-                            },
+                            "/v2/transitions/" + quote(transition_id, safe="") + "/retry",
+                            payload={"expected_project_head_id": predecessor["project_head_id"]},
+                            headers={"Idempotency-Key": (pre_dataset_retry_idempotency_key)},
                         )
                         pre_dataset_retry_attempted = True
                         continue
                     raise CoreControlError(
                         (
-                            "Core successor retry failed before dataset "
-                            "publication"
+                            "Core successor retry failed before dataset publication"
                             if pre_dataset_retry_attempted
                             else "Core successor reached a terminal failure "
                             "before dataset publication"
@@ -1860,9 +1807,7 @@ class CoreV2CandidatePort(ProductionOperationPort):
                 archive=core_archive,
             )
             source = (
-                "successor_workspace"
-                if successor_authority is not None
-                else "cross_task_genesis"
+                "successor_workspace" if successor_authority is not None else "cross_task_genesis"
             )
         binding = _candidate_workspace_binding_receipt(
             task_id=str(request["task_id"]),
@@ -1942,30 +1887,22 @@ class CoreV2CandidatePort(ProductionOperationPort):
             "managed_candidate_subscription_isolation": {
                 "authority_issued": runtime_receipt["authority_issued"],
                 "mount_adopted": runtime_receipt["adoption_verified"],
-                "codex_cli_auth_visible": runtime_receipt[
-                    "codex_cli_auth_visible"
-                ],
+                "codex_cli_auth_visible": runtime_receipt["codex_cli_auth_visible"],
                 "host_source_hidden": runtime_receipt["host_source_hidden"],
                 "tool_sandbox_credential_hidden": runtime_receipt[
                     "tool_sandbox_credential_hidden"
                 ],
-                "tool_environment_clean": runtime_receipt[
-                    "tool_environment_clean"
-                ],
+                "tool_environment_clean": runtime_receipt["tool_environment_clean"],
                 "parent_process_secret_unreadable": runtime_receipt[
                     "parent_process_secret_unreadable"
                 ],
                 "generation_matches": runtime_receipt["generation_matches"],
                 "release_identity_matches": True,
-                "image_digest_matches": runtime_receipt[
-                    "image_digest_matches"
-                ],
+                "image_digest_matches": runtime_receipt["image_digest_matches"],
                 "cli_version_matches": True,
                 "cleanup_verified": runtime_receipt["cleanup_verified"],
                 "policy_id": runtime_receipt["isolation_policy_id"],
-                "policy_sha256": runtime_receipt[
-                    "isolation_policy_sha256"
-                ],
+                "policy_sha256": runtime_receipt["isolation_policy_sha256"],
                 "model_started": False,
             },
             "service_identity_id": self.core_authority.service_identity_id,
@@ -2039,10 +1976,7 @@ class CoreV2CandidatePort(ProductionOperationPort):
             config=project_config,
         ).model_dump(mode="json")
         archive_path = (
-            self.run_root
-            / "control"
-            / run_id
-            / "successor-recovery-destination-workspace.tar"
+            self.run_root / "control" / run_id / "successor-recovery-destination-workspace.tar"
         )
         archive_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         archive_output = archive_path
@@ -2124,9 +2058,7 @@ class CoreV2CandidatePort(ProductionOperationPort):
             deadline = time.monotonic() + 30.0
             while project.get("state") != "ready" and time.monotonic() < deadline:
                 time.sleep(0.25)
-                project = client.json(
-                    "GET", f"/v2/projects/{project['project_id']}"
-                )
+                project = client.json("GET", f"/v2/projects/{project['project_id']}")
         head = project.get("active_project_head")
         if (
             project.get("state") != "ready"
@@ -2234,7 +2166,11 @@ class CoreV2CandidatePort(ProductionOperationPort):
         journal: dict[str, Any],
         recovery: bool,
     ) -> dict[str, Any]:
-        if request.get("operation_phase") not in {"workspace", "execute"} or request.get("fresh_workspace") is not True or request.get("resume_in_place") is not False:
+        if (
+            request.get("operation_phase") not in {"workspace", "execute"}
+            or request.get("fresh_workspace") is not True
+            or request.get("resume_in_place") is not False
+        ):
             raise ValueError("candidate operation requires a fresh non-resumed attempt")
         task_id = str(request["task_id"])
         run_id = str(request["run_id"])
@@ -2283,7 +2219,12 @@ class CoreV2CandidatePort(ProductionOperationPort):
             ).model_dump(mode="json")
             expected_project = request.get("core_project_id")
             if expected_project is None:
-                project = client.json("POST", "/v2/projects", payload=project_request, headers={"Idempotency-Key": f"{key}:project"})
+                project = client.json(
+                    "POST",
+                    "/v2/projects",
+                    payload=project_request,
+                    headers={"Idempotency-Key": f"{key}:project"},
+                )
             else:
                 project = client.json("GET", f"/v2/projects/{expected_project}")
                 if project.get("project_id") != expected_project:
@@ -2295,7 +2236,9 @@ class CoreV2CandidatePort(ProductionOperationPort):
                 selected_composite_id=selected_composite_id,
                 active_project_head=selected_before_upload,
             )
-            if project.get("active_project_head") is not None and project.get("config") != project_config.model_dump(mode="json"):
+            if project.get("active_project_head") is not None and project.get(
+                "config"
+            ) != project_config.model_dump(mode="json"):
                 head = project["active_project_head"]
                 project = client.json(
                     "PATCH",
@@ -2307,10 +2250,15 @@ class CoreV2CandidatePort(ProductionOperationPort):
                         "display_name": project["display_name"],
                         "config": project_config.model_dump(mode="json"),
                     },
-                    headers={"If-Match": project["etag"], "Idempotency-Key": f"{key}:project-update"},
+                    headers={
+                        "If-Match": project["etag"],
+                        "Idempotency-Key": f"{key}:project-update",
+                    },
                 )
                 update_deadline = time.monotonic() + 120
-                while project.get("state") == "transitioning" and time.monotonic() < update_deadline:
+                while (
+                    project.get("state") == "transitioning" and time.monotonic() < update_deadline
+                ):
                     time.sleep(0.25)
                     project = client.json("GET", f"/v2/projects/{project['project_id']}")
                 if project.get("state") not in {"ready", "not_ready"}:
@@ -2323,7 +2271,9 @@ class CoreV2CandidatePort(ProductionOperationPort):
                 archive_output = archive_path.with_name(
                     f".{archive_path.name}.{secrets.token_hex(4)}.verify"
                 )
-            descriptor = os.open(archive_output, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o600)
+            descriptor = os.open(
+                archive_output, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o600
+            )
             try:
                 archive = write_workspace_archive(workspace.candidate_workspace, descriptor)
             finally:
@@ -2336,20 +2286,19 @@ class CoreV2CandidatePort(ProductionOperationPort):
             head = project.get("active_project_head")
             upload_request = WorkspaceUploadCreateV2(
                 expected_project_head_id=None if head is None else head["project_head_id"],
-                expected_project_head_manifest_sha256=None if head is None else head["manifest_sha256"],
+                expected_project_head_manifest_sha256=None
+                if head is None
+                else head["manifest_sha256"],
                 expected_project_config_sha256=project["project_config_sha256"],
                 archive=archive,
                 chunk_byte_size=min(8 * 1024 * 1024, archive.byte_size),
-                chunk_count=(archive.byte_size + min(8 * 1024 * 1024, archive.byte_size) - 1) // min(8 * 1024 * 1024, archive.byte_size),
+                chunk_count=(archive.byte_size + min(8 * 1024 * 1024, archive.byte_size) - 1)
+                // min(8 * 1024 * 1024, archive.byte_size),
             )
             if head is not None:
-                preseeded_authority = request.get(
-                    "preseeded_workspace_authority"
-                )
+                preseeded_authority = request.get("preseeded_workspace_authority")
                 if preseeded_authority is None:
-                    successor_authority = request.get(
-                        "successor_workspace_authority"
-                    )
+                    successor_authority = request.get("successor_workspace_authority")
                     if successor_authority is None:
                         core_archive = archive
                         workspace_projection = None
@@ -2378,12 +2327,8 @@ class CoreV2CandidatePort(ProductionOperationPort):
                             "request_sha256": canonical_sha256(
                                 {
                                     "project_head_id": head["project_head_id"],
-                                    "core_archive": core_archive.model_dump(
-                                        mode="json"
-                                    ),
-                                    "sanitized_archive": archive.model_dump(
-                                        mode="json"
-                                    ),
+                                    "core_archive": core_archive.model_dump(mode="json"),
+                                    "sanitized_archive": archive.model_dump(mode="json"),
                                     "workspace_projection": workspace_projection,
                                 }
                             ),
@@ -2403,9 +2348,7 @@ class CoreV2CandidatePort(ProductionOperationPort):
                     self.journal.write(
                         key + ":preseeded-workspace",
                         {
-                            "request_sha256": canonical_sha256(
-                                preseeded_authority
-                            ),
+                            "request_sha256": canonical_sha256(preseeded_authority),
                             "result": expected_snapshot,
                         },
                     )
@@ -2436,7 +2379,8 @@ class CoreV2CandidatePort(ProductionOperationPort):
                 )
             else:
                 upload = client.json(
-                    "POST", f"/v2/projects/{project['project_id']}/workspace-uploads",
+                    "POST",
+                    f"/v2/projects/{project['project_id']}/workspace-uploads",
                     payload=upload_request.model_dump(mode="json"),
                     headers={"If-Match": project["etag"], "Idempotency-Key": f"{key}:upload"},
                 )
@@ -2444,7 +2388,8 @@ class CoreV2CandidatePort(ProductionOperationPort):
                     for index in range(upload_request.chunk_count):
                         chunk = stream.read(upload_request.chunk_byte_size)
                         upload = client.json(
-                            "PUT", f"/v2/projects/{project['project_id']}/workspace-uploads/{upload['upload_id']}/chunks/{index}",
+                            "PUT",
+                            f"/v2/projects/{project['project_id']}/workspace-uploads/{upload['upload_id']}/chunks/{index}",
                             content=chunk,
                             headers={
                                 "Content-Type": "application/octet-stream",
@@ -2455,7 +2400,8 @@ class CoreV2CandidatePort(ProductionOperationPort):
                             },
                         )
                 client.json(
-                    "POST", f"/v2/projects/{project['project_id']}/workspace-uploads/{upload['upload_id']}/finalize",
+                    "POST",
+                    f"/v2/projects/{project['project_id']}/workspace-uploads/{upload['upload_id']}/finalize",
                     payload={"expected_content_sha256": archive.content_sha256},
                     headers={"If-Match": upload["etag"], "Idempotency-Key": f"{key}:finalize"},
                 )
@@ -2473,7 +2419,8 @@ class CoreV2CandidatePort(ProductionOperationPort):
                     project_head=head,
                 )
             task = client.json(
-                "POST", "/v2/tasks",
+                "POST",
+                "/v2/tasks",
                 payload={
                     "project_id": project["project_id"],
                     "expected_project_admission_etag": project["admission_etag"],
@@ -2485,7 +2432,11 @@ class CoreV2CandidatePort(ProductionOperationPort):
             )
             attempt_id = task["attempts"][0]["attempt_id"]
             authority = None
-            deadline = time.monotonic() + float(self.config.require("candidate.attempt_timeout_seconds")) + 300
+            deadline = (
+                time.monotonic()
+                + float(self.config.require("candidate.attempt_timeout_seconds"))
+                + 300
+            )
             while time.monotonic() < deadline:
                 lifecycle = client.json(
                     "GET",
@@ -2499,7 +2450,9 @@ class CoreV2CandidatePort(ProductionOperationPort):
                     time.sleep(1.0)
                     continue
                 try:
-                    authority = client.json("GET", f"/v2/internal/training-attempts/{task['task_id']}/{attempt_id}")
+                    authority = client.json(
+                        "GET", f"/v2/internal/training-attempts/{task['task_id']}/{attempt_id}"
+                    )
                     break
                 except CoreControlError as exc:
                     # A captured authority is intentionally unreadable until
@@ -2522,14 +2475,10 @@ class CoreV2CandidatePort(ProductionOperationPort):
                 task_id=str(task["task_id"]),
                 attempt_id=str(attempt_id),
                 deadline=deadline,
-                pre_dataset_retry_idempotency_key=(
-                    f"{key}:pre-dataset-successor-retry"
-                ),
+                pre_dataset_retry_idempotency_key=(f"{key}:pre-dataset-successor-retry"),
             )
             task = client.json("GET", f"/v2/tasks/{task['task_id']}")
-            admitted_head = task.get("admission", {}).get(
-                "predecessor_project_head"
-            )
+            admitted_head = task.get("admission", {}).get("predecessor_project_head")
             if not isinstance(admitted_head, dict):
                 raise TypeError("sealed candidate lacks admitted project-head authority")
             runtime_injection = _candidate_runtime_injection_authority(
@@ -2542,28 +2491,31 @@ class CoreV2CandidatePort(ProductionOperationPort):
                     else self.composites.get_composite(selected_composite_id)
                 ),
             )
-            result_payload, _result_headers = client.bytes(f"/v2/internal/training-attempts/{task['task_id']}/{attempt_id}/workspace-result")
+            result_payload, _result_headers = client.bytes(
+                f"/v2/internal/training-attempts/{task['task_id']}/{attempt_id}/workspace-result"
+            )
         output_archive = WorkspaceArchiveDeclarationV2.model_validate(
             authority["session_result"]["workspace_result"]["output_archive"]
         )
         expected_archive = output_archive.content_sha256
-        successor_workspace_root = (
-            self.run_root / "successor_workspaces" / task_id / run_id
-        )
-        materialized_archive, workspace_projection = (
-            _materialize_successor_workspace(
-                payload=result_payload,
-                destination=successor_workspace_root,
-                expected_archive=output_archive.model_dump(mode="json"),
-                runtime_injection_receipt=runtime_injection.get(
-                    "runtime_injection_receipt"
-                ),
-            )
+        successor_workspace_root = self.run_root / "successor_workspaces" / task_id / run_id
+        materialized_archive, workspace_projection = _materialize_successor_workspace(
+            payload=result_payload,
+            destination=successor_workspace_root,
+            expected_archive=output_archive.model_dump(mode="json"),
+            runtime_injection_receipt=runtime_injection.get("runtime_injection_receipt"),
         )
         _safe_export_result(result_payload, workspace.workspace, expected_archive)
         meta_path = workspace.workspace / "_meta.json"
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        meta.update({"status": "completed", "exit_code": 0, "native_session_id": dataset["session_id"], "core_task_id": task["task_id"]})
+        meta.update(
+            {
+                "status": "completed",
+                "exit_code": 0,
+                "native_session_id": dataset["session_id"],
+                "core_task_id": task["task_id"],
+            }
+        )
         atomic_write_json(meta_path, meta)
         transcript_path = workspace.workspace / "_agent_output.jsonl"
         transcript_lines = "".join(
@@ -2583,9 +2535,7 @@ class CoreV2CandidatePort(ProductionOperationPort):
         if not isinstance(successor_transition_id, str) or not successor_transition_id:
             raise ValueError("sealed candidate lacks successor transition authority")
         successor_workspace_body = {
-            "schema_version": (
-                "openevo.researchclawbench.successor_workspace_authority.v2"
-            ),
+            "schema_version": ("openevo.researchclawbench.successor_workspace_authority.v2"),
             "task_id": task_id,
             "source_attempt_index": int(request["attempt_index"]),
             "source_run_id": run_id,
@@ -2618,7 +2568,11 @@ class CoreV2CandidatePort(ProductionOperationPort):
             "dataset_revision": dataset["completed_dataset_revision"],
             "successor_transition_id": successor_transition_id,
             "successor_workspace_authority": successor_workspace_authority,
-            "transcript_receipt": {"sha256": execution["session_result_sha256"], "path": os.fspath(transcript_path), "trace_count": len(authority["session_result"]["trajectory"]["traces"])},
+            "transcript_receipt": {
+                "sha256": execution["session_result_sha256"],
+                "path": os.fspath(transcript_path),
+                "trace_count": len(authority["session_result"]["trajectory"]["traces"]),
+            },
             "candidate_output_root": os.fspath(workspace.workspace),
             "completed": True,
             "runtime_seconds": time.monotonic() - candidate_started,
@@ -2645,7 +2599,9 @@ class CoreV2CandidatePort(ProductionOperationPort):
                 }
             ],
         }
-        self.journal.write(key + ":result", {"request_sha256": canonical_sha256(request), "result": result})
+        self.journal.write(
+            key + ":result", {"request_sha256": canonical_sha256(request), "result": result}
+        )
         # A second stable entry is used because the original intent is immutable.
         return result
 
@@ -2690,9 +2646,10 @@ def _copy_reconciliation_inputs(source: Path, destination: Path) -> None:
                     raise ValueError("reconciliation input target is unsafe")
                 if target.stat().st_size != item.stat().st_size:
                     raise ValueError("reconciliation input target size conflicts")
-                if hashlib.sha256(target.read_bytes()).digest() != hashlib.sha256(
-                    item.read_bytes()
-                ).digest():
+                if (
+                    hashlib.sha256(target.read_bytes()).digest()
+                    != hashlib.sha256(item.read_bytes()).digest()
+                ):
                     raise ValueError("reconciliation input target content conflicts")
             else:
                 shutil.copyfile(item, target, follow_symlinks=False)
@@ -2750,9 +2707,7 @@ class CoreV2CandidateReconciliationPort(ProductionOperationPort):
         finally:
             client.close()
 
-    def recover(
-        self, request: dict[str, Any], idempotency_key: str
-    ) -> dict[str, Any] | None:
+    def recover(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any] | None:
         completed = self.journal.read(idempotency_key + ":result")
         if completed is None:
             return None
@@ -2760,9 +2715,7 @@ class CoreV2CandidateReconciliationPort(ProductionOperationPort):
             raise ValueError("candidate reconciliation recovery request drifted")
         return completed["result"]
 
-    def execute(
-        self, request: dict[str, Any], idempotency_key: str
-    ) -> dict[str, Any]:
+    def execute(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
         completed = self.recover(request, idempotency_key)
         if completed is not None:
             return completed
@@ -2819,8 +2772,7 @@ class CoreV2CandidateReconciliationPort(ProductionOperationPort):
             raise ValueError("non-genesis reconciliation lacks composite authority")
         if (
             request["migration_core_generation"] != self.core_authority.generation
-            or request["migration_release_identity"]
-            != self.core_authority.release_identity
+            or request["migration_release_identity"] != self.core_authority.release_identity
         ):
             raise CoreControlError("CORE_CONTROL_GENERATION_MISMATCH")
         source_root = Path(request["source_candidate_output_root"]).resolve(strict=True)
@@ -2838,16 +2790,10 @@ class CoreV2CandidateReconciliationPort(ProductionOperationPort):
         dataset_id = str(request["source_dataset_id"])
         with self._client() as client:
             client.readiness()
-            attempt = client.json(
-                "GET", f"/v2/internal/training-attempts/{task_id}/{attempt_id}"
-            )
+            attempt = client.json("GET", f"/v2/internal/training-attempts/{task_id}/{attempt_id}")
             task = client.json("GET", f"/v2/tasks/{task_id}")
-            project = client.json(
-                "GET", f"/v2/projects/{request['source_core_project_id']}"
-            )
-            dataset = client.json(
-                "GET", f"/v2/internal/training-feedback/datasets/{dataset_id}"
-            )
+            project = client.json("GET", f"/v2/projects/{request['source_core_project_id']}")
+            dataset = client.json("GET", f"/v2/internal/training-feedback/datasets/{dataset_id}")
             timeline = client.json("GET", f"/v2/tasks/{task_id}/timeline?limit=100")
             sealed = [
                 item
@@ -2856,30 +2802,23 @@ class CoreV2CandidateReconciliationPort(ProductionOperationPort):
                 and item.get("attempt_id") == attempt_id
             ]
             attempt_rows = [
-                item
-                for item in task.get("attempts", [])
-                if item.get("attempt_id") == attempt_id
+                item for item in task.get("attempts", []) if item.get("attempt_id") == attempt_id
             ]
             successor = task.get("successor_transition")
             if not isinstance(successor, dict):
                 raise TypeError("sealed candidate lacks successor transition authority")
             successor_authority = client.json(
                 "GET",
-                "/v2/internal/training-successors/"
-                + str(successor["successor_transition_id"]),
+                "/v2/internal/training-successors/" + str(successor["successor_transition_id"]),
             )
             successor_state = successor_authority.get("transition", {}).get("state")
             session_result = attempt.get("session_result", {})
             execution = attempt.get("execution_receipt", {})
-            predecessor_head = task.get("admission", {}).get(
-                "predecessor_project_head"
-            )
+            predecessor_head = task.get("admission", {}).get("predecessor_project_head")
             selected_composite = None
             if source_composite_id != "c000":
                 assert self.composites is not None
-                selected_composite = self.composites.get_composite(
-                    source_composite_id
-                )
+                selected_composite = self.composites.get_composite(source_composite_id)
             agent = session_result.get("metadata", {}).get("agent", {})
             isolation = (
                 session_result.get("metadata", {})
@@ -2888,10 +2827,8 @@ class CoreV2CandidateReconciliationPort(ProductionOperationPort):
             )
             project_task = project.get("config", {}).get("task", {})
             checks = {
-                "project": project.get("project_id")
-                == request["source_core_project_id"],
-                "public_task": project_task.get("title")
-                == request["source_task_id"],
+                "project": project.get("project_id") == request["source_core_project_id"],
+                "public_task": project_task.get("title") == request["source_task_id"],
                 "task": task.get("task_id") == task_id
                 and task.get("authoritative_attempt_id") == attempt_id,
                 "attempt": len(attempt_rows) == 1,
@@ -2915,17 +2852,14 @@ class CoreV2CandidateReconciliationPort(ProductionOperationPort):
                 "dataset": dataset.get("completed_dataset_id") == dataset_id
                 and dataset.get("completed_dataset_revision")
                 == request["source_dataset_revision"],
-                "dataset_unique": len(sealed) == 1
-                and sealed[0].get("dataset_id") == dataset_id,
+                "dataset_unique": len(sealed) == 1 and sealed[0].get("dataset_id") == dataset_id,
                 "session_result": execution.get("session_result_sha256")
                 == request["source_session_result_sha256"],
                 "model": execution.get("model_ref") == request["expected_model"]
                 and agent.get("model_name") == request["expected_model"]
                 and execution.get("harness_id") == request["expected_harness"]
-                and execution.get("capture_mode")
-                == request["expected_capture_mode"]
-                and isolation.get("codex_version")
-                == request["expected_codex_version"],
+                and execution.get("capture_mode") == request["expected_capture_mode"]
+                and isolation.get("codex_version") == request["expected_codex_version"],
                 "terminal_successor": task.get("state") == "failed"
                 and successor_state == "failed"
                 and not isinstance(successor_authority.get("commit"), dict)
@@ -2934,8 +2868,7 @@ class CoreV2CandidateReconciliationPort(ProductionOperationPort):
             if not all(checks.values()):
                 failed = sorted(key for key, value in checks.items() if not value)
                 raise ValueError(
-                    "candidate sealed authority reconciliation failed: "
-                    + ",".join(failed)
+                    "candidate sealed authority reconciliation failed: " + ",".join(failed)
                 )
             runtime_injection = None
             if request["source_attempt_index"] > 0:
@@ -2945,9 +2878,7 @@ class CoreV2CandidateReconciliationPort(ProductionOperationPort):
                     selected_composite_id=source_composite_id,
                     selected_composite=selected_composite,
                 )
-            output_archive = session_result.get("workspace_result", {}).get(
-                "output_archive", {}
-            )
+            output_archive = session_result.get("workspace_result", {}).get("output_archive", {})
             result_payload, _ = client.bytes(
                 f"/v2/internal/training-attempts/{task_id}/{attempt_id}/workspace-result"
             )
@@ -2967,23 +2898,24 @@ class CoreV2CandidateReconciliationPort(ProductionOperationPort):
             "source_session_id": request["source_session_id"],
             "source_dataset_id": dataset_id,
             "source_dataset_revision": request["source_dataset_revision"],
-            "source_session_result_sha256": request[
-                "source_session_result_sha256"
-            ],
+            "source_session_result_sha256": request["source_session_result_sha256"],
             "workspace_result_archive_sha256": expected_archive_sha,
             "candidate_reexecuted": False,
             "additional_candidate_model_calls": 0,
         }
         marker = destination / ".openevo-reconciliation.json"
         if destination.exists():
-            if not marker.is_file() or json.loads(
-                marker.read_text(encoding="utf-8")
-            ) != marker_payload:
+            if (
+                not marker.is_file()
+                or json.loads(marker.read_text(encoding="utf-8")) != marker_payload
+            ):
                 raise ValueError("reconciled candidate destination conflicts")
         else:
-            staging = self.run_root / "reconciliation_staging" / hashlib.sha256(
-                idempotency_key.encode("utf-8")
-            ).hexdigest()
+            staging = (
+                self.run_root
+                / "reconciliation_staging"
+                / hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
+            )
             staging.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             _copy_reconciliation_inputs(source_root, staging)
             _safe_export_result(result_payload, staging, expected_archive_sha)
@@ -3013,9 +2945,7 @@ class CoreV2CandidateReconciliationPort(ProductionOperationPort):
             atomic_write_json(staging / ".openevo-reconciliation.json", marker_payload)
             destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             os.replace(staging, destination)
-            directory = os.open(
-                destination.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
-            )
+            directory = os.open(destination.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
             try:
                 os.fsync(directory)
             finally:
@@ -3035,17 +2965,12 @@ class CoreV2CandidateReconciliationPort(ProductionOperationPort):
             "transcript_receipt": {
                 "sha256": execution["session_result_sha256"],
                 "path": os.fspath(destination / "_agent_output.jsonl"),
-                "trace_count": len(
-                    session_result.get("trajectory", {}).get("traces", [])
-                ),
+                "trace_count": len(session_result.get("trajectory", {}).get("traces", [])),
             },
             "candidate_output_root": os.fspath(destination),
             "candidate_output_tree_sha256": _reconciled_run_sha256(destination),
             "completed": True,
-            "runtime_seconds": float(
-                session_result.get("timing", {}).get("run_ms", 0.0)
-            )
-            / 1000.0,
+            "runtime_seconds": float(session_result.get("timing", {}).get("run_ms", 0.0)) / 1000.0,
             "cost_total_usd": None,
             "candidate_exit_state": "COMPLETED",
             "input_composite_id": source_composite_id,
@@ -3053,24 +2978,16 @@ class CoreV2CandidateReconciliationPort(ProductionOperationPort):
                 "project_head_id"
             ],
             "task_local_overlay_id": request.get("source_task_local_overlay_id"),
-            "task_local_overlay_sha256": request.get(
-                "source_task_local_overlay_sha256"
-            ),
-            "tool_events": len(
-                session_result.get("trajectory", {}).get("traces", [])
-            ),
+            "task_local_overlay_sha256": request.get("source_task_local_overlay_sha256"),
+            "tool_events": len(session_result.get("trajectory", {}).get("traces", [])),
             "seal_origin": "reconciliation",
             "source_namespace": request["source_namespace"],
             "source_state_sha256": request["source_state_sha256"],
             "source_adapter_identity": request["source_adapter_identity"],
             "source_protocol_identity": request["source_protocol_identity"],
             "source_core_identity": request["source_core_identity"],
-            "migration_executor_adapter_identity": request[
-                "migration_executor_adapter_identity"
-            ],
-            "migration_executor_core_identity": request[
-                "migration_executor_core_identity"
-            ],
+            "migration_executor_adapter_identity": request["migration_executor_adapter_identity"],
+            "migration_executor_core_identity": request["migration_executor_core_identity"],
             "migration_protocol_identity": request["migration_protocol_identity"],
             "migration_core_generation": request["migration_core_generation"],
             "migration_release_identity": request["migration_release_identity"],
@@ -3183,6 +3100,49 @@ class CoreFeedbackPort(ProductionOperationPort):
                 "ground_truth_sha256": gt["ground_truth_sha256"],
                 "judge_feedback_included": False,
             }
+        if feedback_source == "sanitized_evaluation_feedback_v1":
+            gt = request.get("gt_supervision")
+            projection = request.get("feedback_projection")
+            sanitized = (
+                projection.get("sanitized_feedback") if isinstance(projection, dict) else None
+            )
+            admission = projection.get("admission") if isinstance(projection, dict) else None
+            if (
+                not isinstance(gt, dict)
+                or gt.get("task_id") != request.get("task_id")
+                or gt.get("feedback_class") != "HARD_GT"
+                or gt.get("global_feedback") != {}
+                or not isinstance(gt.get("task_local_feedback"), dict)
+                or gt.get("judge_feedback_included") is not False
+                or not isinstance(gt.get("ground_truth_sha256"), str)
+                or not _SHA256.fullmatch(gt["ground_truth_sha256"])
+                or not isinstance(projection, dict)
+                or projection.get("task_id") != request.get("task_id")
+                or projection.get("ground_truth_sha256") != gt["ground_truth_sha256"]
+                or projection.get("sanitized_feedback_sha256") != canonical_sha256(sanitized)
+                or not isinstance(admission, dict)
+                or admission.get("status") != "ADMITTED"
+                or admission.get("feedback_sha256") != projection.get("sanitized_feedback_sha256")
+                or projection.get("raw_gt_projected") is not False
+                or projection.get("judge_reasoning_projected") is not False
+                or projection.get("target_image_projected") is not False
+                or not isinstance(sanitized, dict)
+                or sanitized.get("status") != "available_for_evolution"
+                or sanitized.get("feedback_class") != "sanitized_evaluation_feedback_v1"
+            ):
+                raise CoreControlError("sanitized evaluation feedback authority is invalid")
+            return {
+                "feedback_class": "HARD_GT",
+                "feedback_source": feedback_source,
+                "judge_calls": 0,
+                "ground_truth_sha256": gt["ground_truth_sha256"],
+                "sanitized_feedback_sha256": projection["sanitized_feedback_sha256"],
+                "sanitized_feedback_included": True,
+                "judge_feedback_included": False,
+                "raw_gt_projected": False,
+                "judge_reasoning_projected": False,
+                "target_image_projected": False,
+            }
         evaluation = request.get("evaluation")
         if not isinstance(evaluation, dict):
             raise CoreControlError("community evaluator feedback authority is absent")
@@ -3196,9 +3156,7 @@ class CoreFeedbackPort(ProductionOperationPort):
         core_key = self._core_idempotency_key(idempotency_key)
         with self._client() as client:
             dataset_authority = self._completed_dataset_authority(client, request)
-            attachment_id = training_feedback_attachment_id_for_idempotency_key(
-                core_key
-            )
+            attachment_id = training_feedback_attachment_id_for_idempotency_key(core_key)
             try:
                 attachment = client.json(
                     "GET",
@@ -3233,20 +3191,21 @@ class CoreFeedbackPort(ProductionOperationPort):
             global_feedback = gt["global_feedback"]
             task_local_feedback = gt["task_local_feedback"]
             feedback_class = metadata["feedback_class"]
+        elif feedback_source == "sanitized_evaluation_feedback_v1":
+            metadata = self._feedback_receipt_fields(request)
+            gt = request["gt_supervision"]
+            projection = request["feedback_projection"]
+            global_feedback = projection["sanitized_feedback"]
+            task_local_feedback = gt["task_local_feedback"]
+            feedback_class = metadata["feedback_class"]
         else:
             evaluation = request["evaluation"]
             if self.evaluator is None:
-                raise CoreControlError(
-                    "durable evaluator feedback authority is unavailable"
-                )
+                raise CoreControlError("durable evaluator feedback authority is unavailable")
             operation_key = evaluation.get("idempotency_key")
             feedback_sha256 = evaluation.get("private_feedback_sha256")
-            if not isinstance(operation_key, str) or not isinstance(
-                feedback_sha256, str
-            ):
-                raise CoreControlError(
-                    "evaluation receipt lacks private feedback authority"
-                )
+            if not isinstance(operation_key, str) or not isinstance(feedback_sha256, str):
+                raise CoreControlError("evaluation receipt lacks private feedback authority")
             private_feedback = self.evaluator.read_feedback_for_attachment(
                 idempotency_key=operation_key,
                 expected_sha256=feedback_sha256,
@@ -3259,9 +3218,7 @@ class CoreFeedbackPort(ProductionOperationPort):
                 or not isinstance(global_feedback, dict)
                 or not isinstance(task_local_feedback, dict)
             ):
-                raise CoreControlError(
-                    "private evaluator feedback partition is invalid"
-                )
+                raise CoreControlError("private evaluator feedback partition is invalid")
             # The evaluator keeps task/attempt IDs in its private authority so
             # the durable Judge receipt remains self-describing.  They are
             # routing metadata, not evolution feedback, and Core's closed
@@ -3273,16 +3230,11 @@ class CoreFeedbackPort(ProductionOperationPort):
             }
             for key, expected in routing_identity.items():
                 if key in global_feedback and (
-                    not isinstance(expected, str)
-                    or global_feedback[key] != expected
+                    not isinstance(expected, str) or global_feedback[key] != expected
                 ):
-                    raise CoreControlError(
-                        "private evaluator feedback routing identity differs"
-                    )
+                    raise CoreControlError("private evaluator feedback routing identity differs")
             global_feedback = {
-                key: value
-                for key, value in global_feedback.items()
-                if key not in routing_identity
+                key: value for key, value in global_feedback.items() if key not in routing_identity
             }
         if task_local_feedback:
             task_local_feedback = {
@@ -3292,7 +3244,8 @@ class CoreFeedbackPort(ProductionOperationPort):
         with self._client() as client:
             dataset_authority = self._completed_dataset_authority(client, request)
             attachment = client.json(
-                "POST", "/v2/internal/training-feedback/attachments",
+                "POST",
+                "/v2/internal/training-feedback/attachments",
                 payload={
                     "idempotency_key": core_key,
                     "session_id": request["session_id"],
@@ -3359,7 +3312,8 @@ class CoreFeedbackPort(ProductionOperationPort):
             client, request
         )
         resolved = client.json(
-            "POST", "/v2/internal/training-feedback/resolve",
+            "POST",
+            "/v2/internal/training-feedback/resolve",
             payload={
                 "completed_dataset_id": request["dataset_id"],
                 "completed_dataset_revision": request["dataset_revision"],
@@ -3377,13 +3331,9 @@ class CoreFeedbackPort(ProductionOperationPort):
             # not merely a content digest.  It re-reads and validates the sealed
             # attachment before composing the same-task prompt overlay.
             "task_local_overlay_id": (
-                attachment["attachment_id"]
-                if attachment.get("task_local_feedback")
-                else None
+                attachment["attachment_id"] if attachment.get("task_local_feedback") else None
             ),
-            "task_local_overlay_sha256": resolved["dataset_view"].get(
-                "task_local_overlay_sha256"
-            ),
+            "task_local_overlay_sha256": resolved["dataset_view"].get("task_local_overlay_sha256"),
             "task_local_overlay_scope_id": attachment.get("task_scope_id"),
             "authority": "evaluator_only",
             "successor_transition_id": request.get("successor_transition_id"),
@@ -3477,7 +3427,8 @@ class CoreSuccessorPort(ProductionOperationPort):
                     )
                 predecessor = transition["transition"]["predecessor_project_head"]
                 client.json(
-                    "POST", f"/v2/transitions/{transition_id}/retry",
+                    "POST",
+                    f"/v2/transitions/{transition_id}/retry",
                     payload={"expected_project_head_id": predecessor["project_head_id"]},
                     headers={"Idempotency-Key": idempotency_key},
                 )
@@ -3516,14 +3467,11 @@ class CoreSuccessorPort(ProductionOperationPort):
             or checkpoint.get("supervisor_idempotency_key") != idempotency_key
             or checkpoint.get("successor_transition_id")
             != attachment.get("successor_transition_id")
-            or checkpoint.get("model_side_effect_state")
-            != "REQUIRES_CORE_RECOVERY_RESOLUTION"
+            or checkpoint.get("model_side_effect_state") != "REQUIRES_CORE_RECOVERY_RESOLUTION"
             or not isinstance(reconciliation_id, str)
             or not reconciliation_id.startswith("successor-reconcile-")
         ):
-            raise CoreControlError(
-                "completed-method successor reconciliation identity drifted"
-            )
+            raise CoreControlError("completed-method successor reconciliation identity drifted")
         transition_id = checkpoint["successor_transition_id"]
 
         def reconciliation_result(
@@ -3536,17 +3484,12 @@ class CoreSuccessorPort(ProductionOperationPort):
                 "model_calls_started": 0,
                 "completed_methods_reconciliation": {
                     "schema_version": (
-                        "openevo.researchclawbench."
-                        "completed_methods_reconciliation.v1"
+                        "openevo.researchclawbench.completed_methods_reconciliation.v1"
                     ),
                     "reconciliation_id": reconciliation_id,
                     "successor_transition_id": transition_id,
-                    "source_transition_attempt_count": checkpoint[
-                        "transition_attempt_count"
-                    ],
-                    "source_terminal_authority_sha256": checkpoint[
-                        "terminal_authority_sha256"
-                    ],
+                    "source_transition_attempt_count": checkpoint["transition_attempt_count"],
+                    "source_terminal_authority_sha256": checkpoint["terminal_authority_sha256"],
                     "core_generation": self.core_authority.generation,
                     "core_release_identity": self.core_authority.release_identity,
                     "reconciliation_only": True,
@@ -3572,18 +3515,14 @@ class CoreSuccessorPort(ProductionOperationPort):
             transition = authority.get("transition")
             attempts = authority.get("attempts")
             if not isinstance(transition, dict) or not isinstance(attempts, list):
-                raise CoreControlError(
-                    "completed-method successor authority is incomplete"
-                )
+                raise CoreControlError("completed-method successor authority is incomplete")
             if transition.get("state") == "committed":
                 if (
                     not attempts
                     or attempts[-1].get("retry_request_id") != reconciliation_id
                     or attempts[-1].get("reconciliation_only") is not True
                 ):
-                    raise CoreControlError(
-                        "committed successor lacks reconciliation authority"
-                    )
+                    raise CoreControlError("committed successor lacks reconciliation authority")
                 return reconciliation_result(authority, client)
             source_attempt_count = checkpoint.get("transition_attempt_count")
             if (
@@ -3591,9 +3530,7 @@ class CoreSuccessorPort(ProductionOperationPort):
                 or source_attempt_count < 1
                 or len(attempts) < source_attempt_count
             ):
-                raise CoreControlError(
-                    "completed-method successor attempt inventory changed"
-                )
+                raise CoreControlError("completed-method successor attempt inventory changed")
             if len(attempts) == source_attempt_count:
                 terminal_sha256 = canonical_sha256(
                     {
@@ -3609,35 +3546,24 @@ class CoreSuccessorPort(ProductionOperationPort):
                     or authority.get("artifacts") != []
                     or attempts[-1].get("transition_attempt_id")
                     != checkpoint.get("latest_transition_attempt_id")
-                    or terminal_sha256
-                    != checkpoint.get("terminal_authority_sha256")
+                    or terminal_sha256 != checkpoint.get("terminal_authority_sha256")
                 ):
-                    raise CoreControlError(
-                        "completed-method source terminal authority changed"
-                    )
+                    raise CoreControlError("completed-method source terminal authority changed")
             elif (
                 len(attempts) != source_attempt_count + 1
                 or attempts[-1].get("retry_request_id") != reconciliation_id
                 or attempts[-1].get("reconciliation_only") is not True
             ):
-                raise CoreControlError(
-                    "completed-method reconciliation attempt is ambiguous"
-                )
+                raise CoreControlError("completed-method reconciliation attempt is ambiguous")
             client.json(
                 "POST",
-                f"/v2/internal/training-successors/{transition_id}/"
-                "completed-methods-reconcile",
+                f"/v2/internal/training-successors/{transition_id}/completed-methods-reconcile",
                 payload={
                     "schema_version": (
-                        "openevo.completed_methods_successor_"
-                        "reconciliation_request.v1"
+                        "openevo.completed_methods_successor_reconciliation_request.v1"
                     ),
-                    "expected_project_head_id": (
-                        checkpoint["predecessor_project_head_id"]
-                    ),
-                    "expected_terminal_attempt_id": (
-                        checkpoint["latest_transition_attempt_id"]
-                    ),
+                    "expected_project_head_id": (checkpoint["predecessor_project_head_id"]),
+                    "expected_terminal_attempt_id": (checkpoint["latest_transition_attempt_id"]),
                     "expected_terminal_authority_sha256": (
                         checkpoint["terminal_authority_sha256"]
                     ),
@@ -3657,13 +3583,9 @@ class CoreSuccessorPort(ProductionOperationPort):
                 if observed.get("state") == "failed":
                     raise SuccessorRecoveryRequired(checkpoint)
                 if observed.get("state") in {"cancelled", "superseded"}:
-                    raise CoreControlError(
-                        "completed-method successor reconciliation terminated"
-                    )
+                    raise CoreControlError("completed-method successor reconciliation terminated")
                 time.sleep(1.0)
-            raise TimeoutError(
-                "completed-method successor reconciliation exceeded timeout"
-            )
+            raise TimeoutError("completed-method successor reconciliation exceeded timeout")
         finally:
             client.close()
 
@@ -3677,17 +3599,13 @@ class CoreSuccessorPort(ProductionOperationPort):
         """Close only an uncommitted, artifact-free terminal Core authority."""
 
         transition = authority.get("transition")
-        transition_ref = (
-            transition.get("transition") if isinstance(transition, dict) else None
-        )
+        transition_ref = transition.get("transition") if isinstance(transition, dict) else None
         attempts = authority.get("attempts")
         artifacts = authority.get("artifacts")
         attachment = request.get("attachment")
         latest = attempts[-1] if isinstance(attempts, list) and attempts else None
         failure = latest.get("error") if isinstance(latest, dict) else None
-        transition_failure = (
-            transition.get("error") if isinstance(transition, dict) else None
-        )
+        transition_failure = transition.get("error") if isinstance(transition, dict) else None
         commit_absent = "commit" in authority and authority.get("commit") is None
         artifact_free = isinstance(artifacts, list) and not artifacts
         if not commit_absent or not artifact_free:
@@ -3708,9 +3626,7 @@ class CoreSuccessorPort(ProductionOperationPort):
             or failure.get("retryable") is not False
             or not isinstance(attachment, dict)
         ):
-            raise CoreControlError(
-                "Core successor terminal authority is incomplete or retryable"
-            )
+            raise CoreControlError("Core successor terminal authority is incomplete or retryable")
         transition_id = transition_ref.get("successor_transition_id")
         latest_transition_id = latest.get("successor_transition_id")
         request_transition_id = attachment.get("successor_transition_id")
@@ -3729,13 +3645,9 @@ class CoreSuccessorPort(ProductionOperationPort):
             or not isinstance(latest.get("transition_attempt_id"), str)
             or not isinstance(failure.get("code"), str)
         ):
-            raise CoreControlError(
-                "Core successor recovery identity is incomplete or drifted"
-            )
+            raise CoreControlError("Core successor recovery identity is incomplete or drifted")
         checkpoint = {
-            "schema_version": (
-                "openevo.researchclawbench.successor_recovery_checkpoint.v1"
-            ),
+            "schema_version": ("openevo.researchclawbench.successor_recovery_checkpoint.v1"),
             "successor_transition_id": transition_id,
             "transition_attempt_count": len(attempts),
             "latest_transition_attempt_id": latest.get("transition_attempt_id"),
@@ -3768,7 +3680,9 @@ class CoreSuccessorPort(ProductionOperationPort):
         return checkpoint
 
     @staticmethod
-    def _result(authority: dict[str, Any], request: dict[str, Any], client: CoreControlV2Client) -> dict[str, Any]:
+    def _result(
+        authority: dict[str, Any], request: dict[str, Any], client: CoreControlV2Client
+    ) -> dict[str, Any]:
         commit = authority.get("commit")
         manifest = commit.get("manifest") if isinstance(commit, dict) else None
         artifacts = manifest.get("artifacts", []) if isinstance(manifest, dict) else []
@@ -3787,7 +3701,10 @@ class CoreSuccessorPort(ProductionOperationPort):
             artifact = authority_by_id.get(item["artifact_id"])
             if artifact is None or artifact.get("artifact_type") != artifact_type:
                 raise ValueError("Core registry artifact type changed after successor commit")
-            if artifact.get("promoted") is not True or artifact.get("state") not in {"sealed", "active"}:
+            if artifact.get("promoted") is not True or artifact.get("state") not in {
+                "sealed",
+                "active",
+            }:
                 raise ValueError("Core successor artifact lacks sealed promotion authority")
             parent_ids = artifact.get("input_artifact_ids", [])
             action = artifact.get("admission_action")
@@ -3807,8 +3724,7 @@ class CoreSuccessorPort(ProductionOperationPort):
                 or not isinstance(decision_sha256, str)
                 or len(decision_sha256) != 64
                 or not isinstance(proposal_ids, list)
-                or tuple(proposal_ids)
-                != content_admission.proposal_artifact_ids
+                or tuple(proposal_ids) != content_admission.proposal_artifact_ids
                 or (
                     action == "update"
                     and (
@@ -3819,16 +3735,12 @@ class CoreSuccessorPort(ProductionOperationPort):
                 )
                 or (
                     action in {"keep", "reject"}
-                    and (
-                        item.get("origin") != "inherited"
-                        or item["artifact_id"] in proposal_ids
-                    )
+                    and (item.get("origin") != "inherited" or item["artifact_id"] in proposal_ids)
                 )
             ):
                 raise ValueError("Core successor lacks native admission authority")
             successor_sha256 = (
-                artifact.get("payload_manifest_sha256")
-                or artifact["registry_record_sha256"]
+                artifact.get("payload_manifest_sha256") or artifact["registry_record_sha256"]
             )
             jobs.append(
                 {
@@ -3847,9 +3759,7 @@ class CoreSuccessorPort(ProductionOperationPort):
                         if action == "keep"
                         else "rejected"
                     ),
-                    "admission_result": (
-                        "rejected" if action == "reject" else "accepted"
-                    ),
+                    "admission_result": ("rejected" if action == "reject" else "accepted"),
                     "admission_decision_id": decision_id,
                     "admission_decision_sha256": decision_sha256,
                     "content_admission": content_admission.model_dump(mode="json"),
@@ -3860,7 +3770,9 @@ class CoreSuccessorPort(ProductionOperationPort):
             )
         return {
             "jobs": jobs,
-            "successor_transition_id": authority["transition"]["transition"]["successor_transition_id"],
+            "successor_transition_id": authority["transition"]["transition"][
+                "successor_transition_id"
+            ],
             "successor_receipt_id": commit["manifest_sha256"],
             "successor_project_head": {
                 "project_head_id": manifest["successor_project_head_id"],
@@ -3939,9 +3851,7 @@ class LocalCompositePort(ProductionOperationPort):
             "core_project_head_manifest_sha256": project_head["manifest_sha256"],
             "registry_artifacts": selected["registry_artifacts"],
             "admission_receipts": selected.get("admission_receipts", {}),
-            "evolution_decision_receipts": selected.get(
-                "evolution_decision_receipts", {}
-            ),
+            "evolution_decision_receipts": selected.get("evolution_decision_receipts", {}),
             "restore_receipt_id": restore_receipt_id,
             "task_local_overlay_id": None,
         }
@@ -3953,9 +3863,7 @@ class LocalCompositePort(ProductionOperationPort):
             "composite_id": f"composite-{digest[:24]}",
             "parent_composite_id": selected_composite_id,
             "core_project_id": (
-                selected.get("core_project_id")
-                if project_id is None
-                else project_id
+                selected.get("core_project_id") if project_id is None else project_id
             ),
             "core_project_head_id": project_head["project_head_id"],
             "core_project_head_manifest_sha256": project_head["manifest_sha256"],
@@ -3968,9 +3876,7 @@ class LocalCompositePort(ProductionOperationPort):
                 restore_receipt_id,
             ],
             "admission_receipts": selected.get("admission_receipts", {}),
-            "evolution_decision_receipts": selected.get(
-                "evolution_decision_receipts", {}
-            ),
+            "evolution_decision_receipts": selected.get("evolution_decision_receipts", {}),
             "historical_restore_source_composite_id": selected_composite_id,
             "historical_restore_receipt_id": restore_receipt_id,
             "restore_mode": restore_mode,
@@ -3994,19 +3900,13 @@ class LocalCompositePort(ProductionOperationPort):
                 raise ValueError("composite cannot reference an unpromoted update")
             if job["action"] not in {"update", "keep", "reject"}:
                 raise ValueError("composite artifact action is invalid")
-            content = ArtifactContentAdmissionReceipt.model_validate(
-                job.get("content_admission")
-            )
+            content = ArtifactContentAdmissionReceipt.model_validate(job.get("content_admission"))
             if (
                 not isinstance(job.get("admission_decision_id"), str)
                 or not isinstance(job.get("admission_decision_sha256"), str)
                 or job.get("content_admission_sha256") != content.content_sha256
-                or tuple(job.get("proposal_ids", ()))
-                != content.proposal_artifact_ids
-                or (
-                    job["action"] != "reject"
-                    and content.passed is not True
-                )
+                or tuple(job.get("proposal_ids", ())) != content.proposal_artifact_ids
+                or (job["action"] != "reject" and content.passed is not True)
             ):
                 raise ValueError("composite artifact lacks native admission receipt")
         decision_receipts = {
@@ -4032,16 +3932,13 @@ class LocalCompositePort(ProductionOperationPort):
             else:
                 active_receipt = parent_admission_receipts.get(artifact_type)
                 if not isinstance(active_receipt, dict):
-                    raise ValueError(
-                        "inherited composite artifact lacks prior admission receipt"
-                    )
+                    raise ValueError("inherited composite artifact lacks prior admission receipt")
             active_content = ArtifactContentAdmissionReceipt.model_validate(
                 active_receipt.get("content_admission")
             )
             if (
                 active_content.passed is not True
-                or active_receipt.get("content_admission_sha256")
-                != active_content.content_sha256
+                or active_receipt.get("content_admission_sha256") != active_content.content_sha256
             ):
                 raise ValueError("active composite artifact lacks passing admission")
             admission_receipts[artifact_type] = active_receipt
@@ -4051,10 +3948,17 @@ class LocalCompositePort(ProductionOperationPort):
             "core_project_head_id": request["evolution"]["successor_project_head"][
                 "project_head_id"
             ],
-            "core_project_head_manifest_sha256": request["evolution"][
-                "successor_project_head"
-            ]["manifest_sha256"],
-            "registry_artifacts": {item["artifact_type"]: {"registry_id": item["successor_registry_id"], "sha256": item["successor_sha256"], "action": item["action"]} for item in jobs},
+            "core_project_head_manifest_sha256": request["evolution"]["successor_project_head"][
+                "manifest_sha256"
+            ],
+            "registry_artifacts": {
+                item["artifact_type"]: {
+                    "registry_id": item["successor_registry_id"],
+                    "sha256": item["successor_sha256"],
+                    "action": item["action"],
+                }
+                for item in jobs
+            },
             "admission_receipts": admission_receipts,
             "evolution_decision_receipts": decision_receipts,
             "task_local_overlay_id": request.get("task_local_overlay_id"),
@@ -4065,22 +3969,21 @@ class LocalCompositePort(ProductionOperationPort):
             "parent_composite_id": request["parent_composite_id"],
             "core_project_id": manifest["core_project_id"],
             "core_project_head_id": manifest["core_project_head_id"],
-            "core_project_head_manifest_sha256": manifest[
-                "core_project_head_manifest_sha256"
-            ],
+            "core_project_head_manifest_sha256": manifest["core_project_head_manifest_sha256"],
             "registry_artifact_ids": [item["successor_registry_id"] for item in jobs],
             "artifact_hashes": {item["artifact_type"]: item["successor_sha256"] for item in jobs},
             "registry_artifacts": manifest["registry_artifacts"],
             "composite_sha256": digest,
             "admission_receipt_ids": [
-                admission_receipts[item["artifact_type"]]["admission_decision_id"]
-                for item in jobs
+                admission_receipts[item["artifact_type"]]["admission_decision_id"] for item in jobs
             ],
             "admission_receipts": admission_receipts,
             "evolution_decision_receipts": decision_receipts,
             "task_local_overlay_id": manifest["task_local_overlay_id"],
         }
-        self.journal.write(idempotency_key, {"request_sha256": canonical_sha256(request), "result": result})
+        self.journal.write(
+            idempotency_key, {"request_sha256": canonical_sha256(request), "result": result}
+        )
         self.journal.write(
             f"composite:{result['composite_id']}",
             {"request_sha256": canonical_sha256(request), "result": result},
@@ -4124,9 +4027,7 @@ class PerItemEvolvedWorkspacePort(ProductionOperationPort):
         self.root = root
         self.core_authority = core_authority
         self.journal = _AuthorityJournal(root / "per_item_evolved_workspace")
-        destination_composites = LocalCompositePort(
-            root / "per_item_evolved_destination_registry"
-        )
+        destination_composites = LocalCompositePort(root / "per_item_evolved_destination_registry")
         self.destination_candidate = CoreV2CandidatePort(
             config,
             root,
@@ -4134,9 +4035,7 @@ class PerItemEvolvedWorkspacePort(ProductionOperationPort):
             composites=destination_composites,
         )
 
-    def recover(
-        self, request: dict[str, Any], idempotency_key: str
-    ) -> dict[str, Any] | None:
+    def recover(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any] | None:
         prior = self.journal.read(idempotency_key)
         if prior is None:
             return None
@@ -4144,9 +4043,7 @@ class PerItemEvolvedWorkspacePort(ProductionOperationPort):
             raise ValueError("per-item evolved workspace request drifted")
         return prior["result"]
 
-    def execute(
-        self, request: dict[str, Any], idempotency_key: str
-    ) -> dict[str, Any]:
+    def execute(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
         prior = self.recover(request, idempotency_key)
         if prior is not None:
             return prior
@@ -4169,8 +4066,7 @@ class PerItemEvolvedWorkspacePort(ProductionOperationPort):
         if (
             selected.get("composite_id") != admitted.get("composite_id")
             or selected.get("core_project_id") != source_project_id
-            or selected.get("registry_artifact_ids")
-            != admitted.get("registry_artifact_ids")
+            or selected.get("registry_artifact_ids") != admitted.get("registry_artifact_ids")
             or set(selected.get("registry_artifacts", {})) != set(ARTIFACT_TYPES)
             or selected.get("task_local_overlay_id") is not None
         ):
@@ -4196,46 +4092,33 @@ class PerItemEvolvedWorkspacePort(ProductionOperationPort):
         if (
             destination_head.get("generation") != 0
             or destination_head.get("predecessor_project_head_id") is not None
-            or destination_head.get("evolution_revision", {}).get(
-                "artifact_count"
-            )
-            != 0
+            or destination_head.get("evolution_revision", {}).get("artifact_count") != 0
         ):
             raise ValueError("per-item destination is not generation zero")
 
-        restore_key = "per-item-" + hashlib.sha256(
-            f"{idempotency_key}:{task_id}".encode()
-        ).hexdigest()
+        restore_key = (
+            "per-item-" + hashlib.sha256(f"{idempotency_key}:{task_id}".encode()).hexdigest()
+        )
         client = CoreControlV2Client(self.core_authority)
         try:
             source = client.json("GET", f"/v2/projects/{source_project_id}")
             source_head = source.get("active_project_head")
             if (
                 not isinstance(source_head, dict)
-                or source_head.get("project_head_id")
-                != selected.get("core_project_head_id")
+                or source_head.get("project_head_id") != selected.get("core_project_head_id")
                 or source_head.get("manifest_sha256")
                 != selected.get("core_project_head_manifest_sha256")
-                or source_head.get("evolution_revision", {}).get(
-                    "artifact_count"
-                )
-                != 3
+                or source_head.get("evolution_revision", {}).get("artifact_count") != 3
             ):
                 raise ValueError("same-task successor head differs from composite")
             restored = client.json(
                 "POST",
                 f"/v2/internal/projects/{destination['project_id']}/historical-restores",
                 payload={
-                    "expected_project_head_id": destination_head[
-                        "project_head_id"
-                    ],
-                    "expected_project_head_manifest_sha256": destination_head[
-                        "manifest_sha256"
-                    ],
+                    "expected_project_head_id": destination_head["project_head_id"],
+                    "expected_project_head_manifest_sha256": destination_head["manifest_sha256"],
                     "source_project_head_id": source_head["project_head_id"],
-                    "source_project_head_manifest_sha256": source_head[
-                        "manifest_sha256"
-                    ],
+                    "source_project_head_manifest_sha256": source_head["manifest_sha256"],
                     "idempotency_key": restore_key,
                     "mode": "cross_project_fork",
                     "source_project_id": source_project_id,
@@ -4248,10 +4131,8 @@ class PerItemEvolvedWorkspacePort(ProductionOperationPort):
             not isinstance(evolved_head, dict)
             or evolved_head.get("project_id") != destination["project_id"]
             or evolved_head.get("generation") != 1
-            or evolved_head.get("workspace_snapshot")
-            != destination_head.get("workspace_snapshot")
-            or evolved_head.get("evolution_revision", {}).get("artifact_count")
-            != 3
+            or evolved_head.get("workspace_snapshot") != destination_head.get("workspace_snapshot")
+            or evolved_head.get("evolution_revision", {}).get("artifact_count") != 3
         ):
             raise ValueError("per-item same-task artifact binding is invalid")
         rebound = self.composites.register_restored(
@@ -4262,9 +4143,7 @@ class PerItemEvolvedWorkspacePort(ProductionOperationPort):
             project_id=destination["project_id"],
             restore_mode="per_item_same_task_clean_workspace",
         )
-        archive = WorkspaceArchiveDeclarationV2.model_validate(
-            destination["workspace_archive"]
-        )
+        archive = WorkspaceArchiveDeclarationV2.model_validate(destination["workspace_archive"])
         seed_body = {
             "restore_request_id": restored["restore_request_id"],
             "destination_project_id": destination["project_id"],
@@ -4273,18 +4152,12 @@ class PerItemEvolvedWorkspacePort(ProductionOperationPort):
             "source_composite_sha256": selected["composite_sha256"],
         }
         preseeded = {
-            "schema_version": (
-                "openevo.researchclawbench.preseeded_workspace_authority.v1"
-            ),
+            "schema_version": ("openevo.researchclawbench.preseeded_workspace_authority.v1"),
             "project_id": destination["project_id"],
             "project_head_id": evolved_head["project_head_id"],
             "project_head_manifest_sha256": evolved_head["manifest_sha256"],
-            "workspace_snapshot_id": evolved_head["workspace_snapshot"][
-                "workspace_snapshot_id"
-            ],
-            "workspace_manifest_sha256": evolved_head["workspace_snapshot"][
-                "manifest_sha256"
-            ],
+            "workspace_snapshot_id": evolved_head["workspace_snapshot"]["workspace_snapshot_id"],
+            "workspace_manifest_sha256": evolved_head["workspace_snapshot"]["manifest_sha256"],
             "archive_content_sha256": archive.content_sha256,
             "archive_byte_size": archive.byte_size,
             "archive_entry_count": archive.entry_count,
@@ -4355,16 +4228,13 @@ def _cross_task_content_admission_authority(
         receipt = receipts[artifact_type]
         if not isinstance(receipt, dict):
             raise TypeError("cross-task admission receipt is invalid")
-        content = ArtifactContentAdmissionReceipt.model_validate(
-            receipt.get("content_admission")
-        )
+        content = ArtifactContentAdmissionReceipt.model_validate(receipt.get("content_admission"))
         registry_id = registry[artifact_type].get("registry_id")
         if (
             receipt.get("action") != "update"
             or not isinstance(registry_id, str)
             or registry_id not in content.proposal_artifact_ids
-            or receipt.get("content_admission_sha256")
-            != content.content_sha256
+            or receipt.get("content_admission_sha256") != content.content_sha256
             or not isinstance(receipt.get("admission_decision_id"), str)
             or not isinstance(receipt.get("admission_decision_sha256"), str)
             or content.passed is not True
@@ -4440,9 +4310,7 @@ class LocalSanitizerPort(ProductionOperationPort):
 
     @staticmethod
     def _cross_restore_key(restore_key: str, next_task_id: str) -> str:
-        return "cross-" + hashlib.sha256(
-            f"{restore_key}:{next_task_id}".encode()
-        ).hexdigest()
+        return "cross-" + hashlib.sha256(f"{restore_key}:{next_task_id}".encode()).hexdigest()
 
     def _prepare_cross_task_destination(
         self,
@@ -4480,12 +4348,7 @@ class LocalSanitizerPort(ProductionOperationPort):
                 raise ValueError("cross-task destination workspace is incomplete")
         objective = workspace.instructions.read_text(encoding="utf-8")
         project_config = _project_config(self.config, next_task_id, objective)
-        archive_path = (
-            self.root
-            / "control"
-            / run_id
-            / "cross-task-destination-workspace.tar"
-        )
+        archive_path = self.root / "control" / run_id / "cross-task-destination-workspace.tar"
         archive_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         archive_output = archive_path
         verify_only = archive_path.exists()
@@ -4499,16 +4362,11 @@ class LocalSanitizerPort(ProductionOperationPort):
             0o600,
         )
         try:
-            archive = write_workspace_archive(
-                workspace.candidate_workspace, descriptor
-            )
+            archive = write_workspace_archive(workspace.candidate_workspace, descriptor)
         finally:
             os.close(descriptor)
         if verify_only:
-            if (
-                hashlib.sha256(archive_path.read_bytes()).hexdigest()
-                != archive.content_sha256
-            ):
+            if hashlib.sha256(archive_path.read_bytes()).hexdigest() != archive.content_sha256:
                 archive_output.unlink(missing_ok=True)
                 raise ValueError("cross-task destination workspace archive changed")
             archive_output.unlink(missing_ok=True)
@@ -4529,9 +4387,7 @@ class LocalSanitizerPort(ProductionOperationPort):
                 upload_request = WorkspaceUploadCreateV2(
                     expected_project_head_id=None,
                     expected_project_head_manifest_sha256=None,
-                    expected_project_config_sha256=project[
-                        "project_config_sha256"
-                    ],
+                    expected_project_config_sha256=project["project_config_sha256"],
                     archive=archive,
                     chunk_byte_size=chunk_size,
                     chunk_count=(archive.byte_size + chunk_size - 1) // chunk_size,
@@ -4557,14 +4413,10 @@ class LocalSanitizerPort(ProductionOperationPort):
                             content=chunk,
                             headers={
                                 "Content-Type": "application/octet-stream",
-                                "X-OpenEvo-Chunk-SHA256": hashlib.sha256(
-                                    chunk
-                                ).hexdigest(),
+                                "X-OpenEvo-Chunk-SHA256": hashlib.sha256(chunk).hexdigest(),
                                 "X-OpenEvo-Chunk-Byte-Size": str(len(chunk)),
                                 "If-Match": upload["etag"],
-                                "Idempotency-Key": (
-                                    f"{cross_restore_key}:chunk:{index}"
-                                ),
+                                "Idempotency-Key": (f"{cross_restore_key}:chunk:{index}"),
                             },
                         )
                 if upload.get("state") != "finalized":
@@ -4572,23 +4424,17 @@ class LocalSanitizerPort(ProductionOperationPort):
                         "POST",
                         f"/v2/projects/{project['project_id']}/workspace-uploads/"
                         f"{upload['upload_id']}/finalize",
-                        payload={
-                            "expected_content_sha256": archive.content_sha256
-                        },
+                        payload={"expected_content_sha256": archive.content_sha256},
                         headers={
                             "If-Match": upload["etag"],
                             "Idempotency-Key": f"{cross_restore_key}:finalize",
                         },
                     )
             deadline = time.monotonic() + 30.0
-            project = client.json(
-                "GET", f"/v2/projects/{project['project_id']}"
-            )
+            project = client.json("GET", f"/v2/projects/{project['project_id']}")
             while project.get("state") != "ready" and time.monotonic() < deadline:
                 time.sleep(0.25)
-                project = client.json(
-                    "GET", f"/v2/projects/{project['project_id']}"
-                )
+                project = client.json("GET", f"/v2/projects/{project['project_id']}")
         finally:
             client.close()
         head = project.get("active_project_head")
@@ -4657,22 +4503,16 @@ class LocalSanitizerPort(ProductionOperationPort):
                     "restored_composite": rebound,
                     "restore_receipt_id": restored["restore_request_id"],
                     "cross_restore_receipt_id": (
-                        None
-                        if cross_restored is None
-                        else cross_restored["restore_request_id"]
+                        None if cross_restored is None else cross_restored["restore_request_id"]
                     ),
                 }
             ),
             "content_admission": content_admission,
-            "content_admission_receipts": rebound.get(
-                "admission_receipts", {}
-            ),
+            "content_admission_receipts": rebound.get("admission_receipts", {}),
             "task_local_overlay_carried": False,
             "historical_restore_receipt_id": restored["restore_request_id"],
             "cross_project_restore_receipt_id": (
-                None
-                if cross_restored is None
-                else cross_restored["restore_request_id"]
+                None if cross_restored is None else cross_restored["restore_request_id"]
             ),
             "source_composite_id": request["composite_id"],
             "restored_project_head_id": rebound["core_project_head_id"],
@@ -4713,7 +4553,9 @@ class LocalSanitizerPort(ProductionOperationPort):
         composite = self.composites.get_composite(request["composite_id"])
         if composite.get("composite_id") != request["composite_id"]:
             raise ValueError("cross-task composite identity changed")
-        if request["composite_id"] != "c000" and len(composite.get("registry_artifacts", {})) not in {0, 3}:
+        if request["composite_id"] != "c000" and len(
+            composite.get("registry_artifacts", {})
+        ) not in {0, 3}:
             raise ValueError("cross-task composite lacks three admitted artifacts")
         _cross_task_content_admission_authority(composite)
         candidate = request.get("final_candidate")
@@ -4728,9 +4570,7 @@ class LocalSanitizerPort(ProductionOperationPort):
         try:
             deadline = time.monotonic() + 120
             while True:
-                authority = client.json(
-                    "GET", f"/v2/internal/training-successors/{transition_id}"
-                )
+                authority = client.json("GET", f"/v2/internal/training-successors/{transition_id}")
                 transition = authority["transition"]
                 state = transition["state"]
                 if state == "failed":
@@ -4738,9 +4578,7 @@ class LocalSanitizerPort(ProductionOperationPort):
                     abandon_operation = client.json(
                         "POST",
                         f"/v2/transitions/{transition_id}/abandon",
-                        payload={
-                            "expected_project_head_id": predecessor["project_head_id"]
-                        },
+                        payload={"expected_project_head_id": predecessor["project_head_id"]},
                         headers={"Idempotency-Key": f"{restore_key}:abandon"},
                     )
                     # Core completes transition abandonment synchronously before
@@ -4758,9 +4596,7 @@ class LocalSanitizerPort(ProductionOperationPort):
                 elif state == "cancelled":
                     break
                 elif state == "committed":
-                    raise ValueError(
-                        "final attempt unexpectedly committed an evolution successor"
-                    )
+                    raise ValueError("final attempt unexpectedly committed an evolution successor")
                 elif time.monotonic() >= deadline:
                     raise ValueError(
                         "final attempt successor did not reach a restorable terminal state"
@@ -4787,9 +4623,7 @@ class LocalSanitizerPort(ProductionOperationPort):
             client.close()
         next_task_id = request.get("next_task_id")
         if next_task_id is None:
-            return self._result(
-                request, restored=restored, restore_key=restore_key
-            )
+            return self._result(request, restored=restored, restore_key=restore_key)
         if not isinstance(next_task_id, str) or not next_task_id:
             raise TypeError("cross-task sanitizer next task identity is invalid")
         cross_restore_key = self._cross_restore_key(restore_key, next_task_id)
@@ -4803,21 +4637,18 @@ class LocalSanitizerPort(ProductionOperationPort):
             if destination_head.get("generation") == 0:
                 cross_restored = client.json(
                     "POST",
-                    f"/v2/internal/projects/{destination['project_id']}/"
-                    "historical-restores",
+                    f"/v2/internal/projects/{destination['project_id']}/historical-restores",
                     payload={
-                        "expected_project_head_id": destination_head[
-                            "project_head_id"
-                        ],
+                        "expected_project_head_id": destination_head["project_head_id"],
                         "expected_project_head_manifest_sha256": (
                             destination_head["manifest_sha256"]
                         ),
-                        "source_project_head_id": restored[
-                            "successor_project_head"
-                        ]["project_head_id"],
-                        "source_project_head_manifest_sha256": restored[
-                            "successor_project_head"
-                        ]["manifest_sha256"],
+                        "source_project_head_id": restored["successor_project_head"][
+                            "project_head_id"
+                        ],
+                        "source_project_head_manifest_sha256": restored["successor_project_head"][
+                            "manifest_sha256"
+                        ],
                         "idempotency_key": cross_restore_key,
                         "mode": "cross_project_fork",
                         "source_project_id": project_id,
@@ -4833,13 +4664,8 @@ class LocalSanitizerPort(ProductionOperationPort):
                     "GET",
                     f"/v2/internal/historical-restores/{cross_restore_id}",
                 )
-                if (
-                    cross_restored.get("successor_project_head")
-                    != destination_head
-                ):
-                    raise ValueError(
-                        "cross-task destination head lacks its restore receipt"
-                    )
+                if cross_restored.get("successor_project_head") != destination_head:
+                    raise ValueError("cross-task destination head lacks its restore receipt")
         finally:
             client.close()
         return self._result(
@@ -4885,8 +4711,7 @@ class CoreProjectFreezePort(ProductionOperationPort):
             "adapter_identity_sha256",
         )
         if any(
-            not isinstance(request.get(key), str)
-            or len(request[key]) != 64
+            not isinstance(request.get(key), str) or len(request[key]) != 64
             for key in required_identities
         ):
             raise ValueError("final freeze lacks source identity fences")
@@ -4918,25 +4743,17 @@ class CoreProjectFreezePort(ProductionOperationPort):
             "protocol_sha256": request["protocol_sha256"],
             "core_identity_sha256": request["core_identity_sha256"],
             "adapter_identity_sha256": request["adapter_identity_sha256"],
-            "runtime_digest": str(self.config.require("candidate.runtime_image")).split(
-                "@", 1
-            )[1],
+            "runtime_digest": str(self.config.require("candidate.runtime_image")).split("@", 1)[1],
             "codex_cli_version": self.config.require("candidate.codex_cli_version"),
             "model": self.config.require("candidate.model"),
             "reasoning_effort": self.config.require("candidate.reasoning_level"),
             "training_manifest_sha256": canonical_sha256(training_manifest),
-            "budget_policy_sha256": canonical_sha256(
-                self.config.require("budgets")
-            ),
+            "budget_policy_sha256": canonical_sha256(self.config.require("budgets")),
             "tool_policy_sha256": canonical_sha256(
                 {
                     "candidate_network": self.config.require("candidate.network"),
-                    "candidate_tool_network": self.config.require(
-                        "candidate.tool_network"
-                    ),
-                    "max_tool_steps": self.config.require(
-                        "candidate.max_tool_steps"
-                    ),
+                    "candidate_tool_network": self.config.require("candidate.tool_network"),
+                    "max_tool_steps": self.config.require("candidate.max_tool_steps"),
                     "token_limit": self.config.require("candidate.token_limit"),
                 }
             ),
@@ -4971,9 +4788,7 @@ class CoreProjectFreezePort(ProductionOperationPort):
             "adapter_identity_sha256": authority["adapter_identity_sha256"],
             "core_project_id": authority["project_id"],
             "core_project_head_id": authority["project_head_id"],
-            "core_project_head_manifest_sha256": authority[
-                "project_head_manifest_sha256"
-            ],
+            "core_project_head_manifest_sha256": authority["project_head_manifest_sha256"],
             "composite_id": authority["composite_id"],
             "composite_sha256": authority["composite_sha256"],
             "evolution_enabled": False,
@@ -5004,9 +4819,7 @@ class CoreProjectFreezePort(ProductionOperationPort):
         expected = {
             "project_id": payload["project_id"],
             "project_head_id": payload["expected_project_head_id"],
-            "project_head_manifest_sha256": payload[
-                "expected_project_head_manifest_sha256"
-            ],
+            "project_head_manifest_sha256": payload["expected_project_head_manifest_sha256"],
             "composite_id": payload["composite_id"],
             "composite_sha256": payload["composite_sha256"],
             "protocol_sha256": payload["protocol_sha256"],
@@ -5045,6 +4858,11 @@ def build_production_ports(
             authority_root=run_root / "evaluator_private" / "durable_authority",
         )
     )
+    feedback_projection = EvaluationFeedbackProjectionPort(
+        root=run_root / "evaluator_private" / "feedback_projection",
+        researchclawbench_root=config.researchclawbench_root,
+        evaluator=evaluator,
+    )
     return ProductionPorts(
         candidate=CoreV2CandidatePort(
             config,
@@ -5054,6 +4872,7 @@ def build_production_ports(
         ),
         validation=LocalValidationPort(),
         evaluation=evaluator,
+        feedback_projection=feedback_projection,
         attachment=CoreFeedbackPort(
             core_authority=core_authority,
             evaluator=evaluator,

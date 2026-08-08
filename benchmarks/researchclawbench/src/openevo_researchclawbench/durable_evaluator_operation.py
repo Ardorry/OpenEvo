@@ -921,6 +921,24 @@ class DurableEvaluatorOperation:
             raise EvaluationIntegrityError("private feedback authority hash differs")
         return feedback
 
+    def read_private_evaluation_for_projection(
+        self,
+        *,
+        idempotency_key: str,
+        expected_sha256: str,
+    ) -> dict[str, Any]:
+        """Evaluator-boundary read for the post-score sanitizer only.
+
+        The caller receives the private score object in memory.  The sanitizer
+        is responsible for returning a new closed projection; this object must
+        never be submitted to Core or included in an operation receipt.
+        """
+
+        row, raw, _feedback, _public = self.store.completed_payloads(idempotency_key)
+        if row["raw_response_sha256"] != expected_sha256:
+            raise EvaluationIntegrityError("private evaluation authority hash differs")
+        return json.loads(_canonical(raw))
+
     def _recover(self, idempotency_key: str, *, recovered: bool) -> DurableEvaluationResult:
         row, raw, feedback, public = self.store.completed_payloads(idempotency_key)
         raw_path = self.store.private_root / row["operation_id"] / "raw_score.json"

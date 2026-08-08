@@ -1,0 +1,356 @@
+from __future__ import annotations
+
+import json
+from copy import deepcopy
+from pathlib import Path
+from typing import Any
+
+import pytest
+from openevo_researchclawbench.evaluation_feedback import (
+    EvaluationFeedbackProjectionPort,
+    FeedbackAdmissionError,
+    admit_sanitized_feedback,
+    objective_outcome_signal,
+    project_sanitized_evaluation_feedback,
+)
+
+from openevo.evolution import methods as methods_module
+from openevo.evolution.framework.execution import (
+    ReflectorInferenceRequest,
+    ReflectorInferenceResponse,
+    ReflectorRuntimeReceipt,
+)
+from openevo.evolution.managed_reflector import default_managed_reflector_runtime
+from openevo.evolution.methods import run_method
+from openevo.evolution.models import WorkerClaimedJob
+
+
+def _candidate(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
+    root = tmp_path / "candidate"
+    (root / "report/images").mkdir(parents=True)
+    (root / "code").mkdir()
+    (root / "report/report.md").write_text(
+        "# Methods\n\nWe analyze public data.\n\n"
+        "# Results\n\nFigure evidence is presented.\n\n"
+        "# Discussion\n\nThe analysis needs independent checks.\n",
+        encoding="utf-8",
+    )
+    (root / "report/images/candidate_summary.png").write_bytes(b"candidate-image")
+    (root / "code/analyze.py").write_text("print('public analysis')\n", encoding="utf-8")
+    (root / "_agent_output.jsonl").write_text(
+        json.dumps({"response": "created report and figure"}) + "\n",
+        encoding="utf-8",
+    )
+    return root, {
+        "run_id": "Life_005_a0_feedback_test",
+        "session_id": "session-baseline",
+        "core_task_id": "task-baseline",
+        "core_attempt_id": "attempt-baseline",
+        "candidate_output_root": str(root),
+    }
+
+
+def _gt() -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "image",
+            "path": "private_target_figure.png",
+            "content": "Hidden quasiflux curvature must bend toward the private reference.",
+            "keywords": ["quasiflux curvature"],
+            "weight": 3,
+        }
+    ]
+
+
+def _raw_evaluation() -> dict[str, Any]:
+    return {
+        "total_score": 41.5,
+        "items": [
+            {
+                "type": "image",
+                "score": 41.5,
+                "score_valid": True,
+                "content": "private criterion is not consumed",
+                "reasoning": "private Judge reasoning is not consumed",
+                "weight": 3,
+            }
+        ],
+    }
+
+
+def _projection(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
+    root, candidate = _candidate(tmp_path)
+    result = project_sanitized_evaluation_feedback(
+        task_id="Life_005",
+        candidate=candidate,
+        raw_evaluation=_raw_evaluation(),
+        public_task_info={
+            "task": "Analyze the supplied public data and deliver a report with figures.",
+            "data": ["public.csv"],
+        },
+        ground_truth_entries=_gt(),
+    )
+    return root, result
+
+
+def test_objective_error_signal_never_projects_the_correct_answer() -> None:
+    signal = objective_outcome_signal(prediction="A", expected="B")
+    assert signal == {"incorrect": True}
+    assert "B" not in json.dumps(signal)
+
+
+def test_targeted_feedback_is_candidate_grounded_and_answer_free(tmp_path: Path) -> None:
+    _root, result = _projection(tmp_path)
+    feedback = result["sanitized_feedback"]
+    encoded = json.dumps(feedback, sort_keys=True)
+
+    assert result["admission"]["status"] == "ADMITTED"
+    assert result["quality_contract"]["generic_only_advice"] is False
+    assert result["quality_contract"]["candidate_specific_references_present"] is True
+    assert feedback["preserve_before_improve"].startswith("PRESERVE VERIFIED")
+    assert {item["dimension"] for item in feedback["diagnoses"]} == {
+        "quantitative_validation",
+        "visual_evidence",
+    }
+    assert all(item["candidate_grounded"] for item in feedback["diagnoses"])
+    assert all(item["evidence_refs"] for item in feedback["diagnoses"])
+    assert "quasiflux" not in encoded.casefold()
+    assert "private_target_figure" not in encoded.casefold()
+    assert "private Judge reasoning" not in encoded
+
+
+def test_raw_gt_literal_is_rejected(tmp_path: Path) -> None:
+    root, result = _projection(tmp_path)
+    feedback = deepcopy(result["sanitized_feedback"])
+    feedback["diagnoses"][0]["candidate_observation"] = _gt()[0]["content"]
+
+    with pytest.raises(FeedbackAdmissionError) as caught:
+        admit_sanitized_feedback(
+            feedback,
+            candidate_root=root,
+            public_corpus="public data report figure analysis",
+            ground_truth_entries=_gt(),
+        )
+
+    assert caught.value.reason_code == "FEEDBACK_GT_LITERAL_VIOLATION"
+
+
+def test_paraphrased_answer_reconstruction_is_rejected(tmp_path: Path) -> None:
+    root, result = _projection(tmp_path)
+    feedback = deepcopy(result["sanitized_feedback"])
+    feedback["diagnoses"][0]["improvement_direction"] = (
+        "The correct relationship should increase toward the hidden reference."
+    )
+
+    with pytest.raises(FeedbackAdmissionError) as caught:
+        admit_sanitized_feedback(
+            feedback,
+            candidate_root=root,
+            public_corpus="public data report figure analysis",
+            ground_truth_entries=_gt(),
+        )
+
+    assert caught.value.reason_code == "FEEDBACK_ANSWER_RECONSTRUCTION_VIOLATION"
+
+
+def test_projection_port_persists_only_sanitized_output(tmp_path: Path) -> None:
+    root, candidate = _candidate(tmp_path)
+    benchmark = tmp_path / "ResearchClawBench"
+    task_root = benchmark / "tasks/Life_005"
+    task_root.mkdir(parents=True)
+    (task_root / "task_info.json").write_text(
+        json.dumps(
+            {
+                "task": "Analyze the public data and deliver a report with figures.",
+                "data": ["public.csv"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class Evaluator:
+        def read_private_evaluation_for_projection(
+            self, *, idempotency_key: str, expected_sha256: str
+        ) -> dict[str, Any]:
+            assert idempotency_key == "evaluation-key"
+            assert expected_sha256 == "a" * 64
+            return _raw_evaluation()
+
+    port = EvaluationFeedbackProjectionPort(
+        root=tmp_path / "projection-authority",
+        researchclawbench_root=benchmark,
+        evaluator=Evaluator(),
+    )
+    request = {
+        "task_id": "Life_005",
+        "attempt_index": 0,
+        "candidate": candidate,
+        "validation": {"artifact_root_sha256": "b" * 64},
+        "evaluation": {
+            "idempotency_key": "evaluation-key",
+            "raw_response_sha256": "a" * 64,
+            "evaluation_receipt_id": "evaluation-receipt",
+        },
+        "gt_supervision": {
+            "task_id": "Life_005",
+            "ground_truth_sha256": "c" * 64,
+            "task_local_feedback": {"ground_truth_entries": _gt()},
+        },
+    }
+
+    result = port.execute(request, "projection-key")
+    recovered = port.recover(request, "projection-key")
+    stored_text = next((tmp_path / "projection-authority").glob("*.json")).read_text(
+        encoding="utf-8"
+    )
+
+    assert recovered == result
+    assert result["evaluation_frozen"] is True
+    assert result["feedback_projector_model_calls"] == 0
+    assert result["openevo_state_mutations"] == 0
+    assert result["admission"]["status"] == "ADMITTED"
+    assert "quasiflux" not in stored_text.casefold()
+    assert "private Judge reasoning" not in stored_text
+    assert "private criterion is not consumed" not in stored_text
+    assert str(root) not in json.dumps(result["sanitized_feedback"])
+
+
+def _dataset(tmp_path: Path, feedback: dict[str, Any]) -> dict[str, Any]:
+    root = tmp_path / "dataset"
+    root.mkdir()
+    records = root / "records.jsonl"
+    records.write_text(
+        json.dumps(
+            {
+                "event_id": "event-feedback",
+                "task_id": "Life_005",
+                "session_id": "session-baseline",
+                "status": "COMPLETED",
+                "reward": 0.415,
+                "traces": [
+                    {
+                        "prompt_messages": [
+                            {"role": "user", "content": "Analyze the public data."}
+                        ],
+                        "response_messages": [
+                            {
+                                "role": "assistant",
+                                "content": "Created report/report.md and a candidate figure.",
+                            }
+                        ],
+                        "metadata": {"capture_mode": "transcript"},
+                    }
+                ],
+                "payload": {"evolution_feedback": {"training_attachments": [feedback]}},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    manifest = root / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "dataset_id": "dataset-feedback",
+                "name": "sanitized feedback dataset",
+                "records_path": "records.jsonl",
+                "records_uri": records.as_uri(),
+                "event_count": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return {
+        "artifact_id": "artifact-feedback-dataset",
+        "type": "dataset",
+        "uri": manifest.as_uri(),
+        "name": "sanitized feedback dataset",
+    }
+
+
+def test_native_reflector_requests_see_only_sanitized_feedback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _root, projection = _projection(tmp_path / "projection")
+    feedback = projection["sanitized_feedback"]
+    dataset = _dataset(tmp_path, feedback)
+    runtime = default_managed_reflector_runtime()
+    captured: list[ReflectorInferenceRequest] = []
+
+    class FakeService:
+        def infer(self, request: ReflectorInferenceRequest) -> ReflectorInferenceResponse:
+            captured.append(request)
+            if "ExpeL" in request.prompt:
+                text = (
+                    "# Memory\n\n## Do\nPreserve useful evidence.\n\n"
+                    "## Avoid\nAvoid unsupported claims.\n\n"
+                    "## Validate\nAdd independent checks.\n\n"
+                    "## When Applicable\nUse for public-data analysis.\n\n"
+                    "## Retired Or Superseded\nNone.\n"
+                )
+            elif "Skill Bundle" in request.prompt:
+                text = "# Evidence Validation Skill\n\nPreserve outputs and add checks.\n"
+            else:
+                text = "# Evolved Agent System\n\nPreserve valid work and verify additions.\n"
+            receipt = ReflectorRuntimeReceipt(
+                request_id=request.request_id,
+                session_id=f"capture-{len(captured)}",
+                runtime_profile=request.runtime.profile,
+                runtime_digest=request.runtime.image_digest.removeprefix("sha256:"),
+                codex_binary=request.runtime.codex_binary,
+                actual_cli_version=request.runtime.expected_cli_version,
+                model_name=request.model_name,
+                reasoning_effort=request.reasoning_effort,
+                auth_mode=request.runtime.auth_mode,
+                capture_mode=request.runtime.capture_mode,
+                path_fallback_allowed=request.runtime.path_fallback_allowed,
+                exit_status=0,
+                transcript_sha256="a" * 64,
+            )
+            return ReflectorInferenceResponse(
+                request_id=request.request_id,
+                text=text,
+                receipt=receipt,
+            )
+
+    monkeypatch.setattr(
+        methods_module,
+        "require_active_reflector_service",
+        lambda: FakeService(),
+    )
+    common = {
+        "reflector_llm": {
+            "provider": "codex_cli",
+            "model": "gpt-5.5",
+            "runtime": runtime.model_dump(mode="json"),
+        },
+        "candidate_count": 1,
+    }
+    for method in (
+        "text_memory_expel_reflector",
+        "skill_bundle_reflector",
+        "agent_system_gepa_reflector",
+    ):
+        run_method(
+            WorkerClaimedJob(
+                job_id=f"job-{method}",
+                lease_id=f"lease-{method}",
+                job_type="reference",
+                method=method,
+                input_artifacts=[dataset],
+                config=common,
+            ),
+            artifact_root=tmp_path / "artifacts",
+        )
+
+    assert len(captured) == 3
+    prompts = "\n".join(request.prompt for request in captured)
+    assert all(request.model_name == "gpt-5.5" for request in captured)
+    assert prompts.count("sanitized_evaluation_feedback_v1") >= 3
+    assert "submitted report relies on its produced figures" in prompts
+    assert "PRESERVE VERIFIED STRENGTHS BEFORE ADDING IMPROVEMENTS" in prompts
+    assert "candidate_summary.png" in prompts
+    assert "quasiflux" not in prompts.casefold()
+    assert "private_target_figure" not in prompts.casefold()
+    assert "private Judge reasoning" not in prompts
+    assert "ground_truth_entries" not in prompts

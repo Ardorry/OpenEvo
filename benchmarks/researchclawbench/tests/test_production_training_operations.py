@@ -87,12 +87,13 @@ from openevo.evolution.framework.capabilities import (
     build_evolution_capabilities,
 )
 from openevo.evolution.framework.profiles import execution_profile_for_release_mode
+from openevo.evolution.training_feedback import (
+    TrainingFeedbackAttachmentCreateRequest,
+)
 from openevo.workspace_archive import write_workspace_archive
 
 ROOT = Path(__file__).resolve().parents[4]
-RESEARCHCLAWBENCH_ROOT = (
-    ROOT / "researchclaw_openevo" / "ResearchClawBench"
-).resolve(strict=True)
+RESEARCHCLAWBENCH_ROOT = (ROOT / "researchclaw_openevo" / "ResearchClawBench").resolve(strict=True)
 PROTOCOL = Path(
     os.environ.get(
         "OPENEVORESEARCHCLAWBENCH_TEST_PROTOCOL",
@@ -160,9 +161,7 @@ def _project_head(*, generation: int, artifact_count: int) -> dict[str, Any]:
         "project_head_id": f"head-{generation}",
         "project_id": project_id,
         "generation": generation,
-        "predecessor_project_head_id": (
-            None if generation == 0 else f"head-{generation - 1}"
-        ),
+        "predecessor_project_head_id": (None if generation == 0 else f"head-{generation - 1}"),
         "workspace_snapshot": {
             "schema_version": "2",
             "workspace_snapshot_id": f"workspace-{generation}",
@@ -220,12 +219,10 @@ def _session_result(
             "openevo": {
                 "project_id": head["project_id"],
                 "project_head_id": head["project_head_id"],
-                "evolution_revision_id": head["evolution_revision"][
-                    "evolution_revision_id"
+                "evolution_revision_id": head["evolution_revision"]["evolution_revision_id"],
+                "runtime_context_snapshot_id": head["runtime_context_snapshot"][
+                    "runtime_context_snapshot_id"
                 ],
-                "runtime_context_snapshot_id": head[
-                    "runtime_context_snapshot"
-                ]["runtime_context_snapshot_id"],
             },
             "evolution": evolution,
         },
@@ -381,9 +378,7 @@ def test_core_client_retries_one_stale_get_connection_only(monkeypatch) -> None:
         def request(self, method, *_args, **_kwargs):
             calls.append(method)
             if len(calls) == 1:
-                raise ports_module.httpx.RemoteProtocolError(
-                    "stale forwarded connection"
-                )
+                raise ports_module.httpx.RemoteProtocolError("stale forwarded connection")
             return Response()
 
         def close(self):
@@ -416,14 +411,10 @@ def test_core_client_retries_one_stale_get_connection_only(monkeypatch) -> None:
         (
             {
                 "detail": (
-                    "CANDIDATE_SUBSCRIPTION_ISOLATION_NOT_READY:"
-                    "sandbox_namespace_unavailable"
+                    "CANDIDATE_SUBSCRIPTION_ISOLATION_NOT_READY:sandbox_namespace_unavailable"
                 )
             },
-            (
-                "CANDIDATE_SUBSCRIPTION_ISOLATION_NOT_READY:"
-                "sandbox_namespace_unavailable"
-            ),
+            ("CANDIDATE_SUBSCRIPTION_ISOLATION_NOT_READY:sandbox_namespace_unavailable"),
         ),
         ({"code": "MANAGED_CORE_NOT_READY"}, "MANAGED_CORE_NOT_READY"),
         ({"detail": "unsafe diagnostic / private/path"}, "closed"),
@@ -536,9 +527,7 @@ def _managed_candidate_readiness(
             "image_digest_matches": True,
             "isolation_probe_no_model": True,
             "isolation_policy_id": ports_module.CODEX_SUBSCRIPTION_POLICY_ID,
-            "isolation_policy_sha256": (
-                ports_module.CODEX_SUBSCRIPTION_POLICY_SHA256
-            ),
+            "isolation_policy_sha256": (ports_module.CODEX_SUBSCRIPTION_POLICY_SHA256),
             "authority_issued": True,
         },
     }
@@ -598,10 +587,7 @@ def test_candidate_preflight_accepts_distinct_typed_core_and_service_generations
         }
     )
     assert result["generation"] == public_generation
-    assert (
-        result["managed_candidate_runtime"]["generation_digest"]
-        == service_generation
-    )
+    assert result["managed_candidate_runtime"]["generation_digest"] == service_generation
     assert public_generation != service_generation
 
 
@@ -658,9 +644,7 @@ def test_candidate_port_authenticates_before_local_intent(tmp_path: Path, monkey
     monkeypatch.setattr(
         port,
         "preflight",
-        lambda _request: (_ for _ in ()).throw(
-            CoreControlError("synthetic bearer rejected")
-        ),
+        lambda _request: (_ for _ in ()).throw(CoreControlError("synthetic bearer rejected")),
     )
     with pytest.raises(CandidateAuthorityUnavailable, match="before intent persistence"):
         port.execute(
@@ -695,9 +679,7 @@ def test_candidate_preseeded_workspace_authority_is_exact_and_fail_closed() -> N
         "workspace_snapshot": snapshot,
     }
     authority = {
-        "schema_version": (
-            "openevo.researchclawbench.preseeded_workspace_authority.v1"
-        ),
+        "schema_version": ("openevo.researchclawbench.preseeded_workspace_authority.v1"),
         "project_id": project_id,
         "project_head_id": head["project_head_id"],
         "project_head_manifest_sha256": head["manifest_sha256"],
@@ -710,12 +692,15 @@ def test_candidate_preseeded_workspace_authority_is_exact_and_fail_closed() -> N
         "seed_request_id": "recovery-seed-exact",
         "seed_sha256": "2" * 64,
     }
-    assert _require_preseeded_workspace_authority(
-        authority=authority,
-        project={"project_id": project_id, "state": "ready"},
-        project_head=head,
-        archive=archive,
-    ) == snapshot
+    assert (
+        _require_preseeded_workspace_authority(
+            authority=authority,
+            project={"project_id": project_id, "state": "ready"},
+            project_head=head,
+            archive=archive,
+        )
+        == snapshot
+    )
 
     with pytest.raises(
         CoreControlError,
@@ -748,11 +733,14 @@ def test_candidate_later_attempt_reuses_only_the_exact_existing_workspace() -> N
         "workspace_snapshot": snapshot,
     }
 
-    assert _require_existing_workspace_snapshot(
-        project=project,
-        project_head=head,
-        archive=archive,
-    ) == snapshot
+    assert (
+        _require_existing_workspace_snapshot(
+            project=project,
+            project_head=head,
+            archive=archive,
+        )
+        == snapshot
+    )
 
     recovery_project = {**project, "state": "needs_attention"}
     with pytest.raises(
@@ -764,12 +752,15 @@ def test_candidate_later_attempt_reuses_only_the_exact_existing_workspace() -> N
             project_head=head,
             archive=archive,
         )
-    assert _require_existing_workspace_snapshot(
-        project=recovery_project,
-        project_head=head,
-        archive=archive,
-        allow_recovery_needs_attention=True,
-    ) == snapshot
+    assert (
+        _require_existing_workspace_snapshot(
+            project=recovery_project,
+            project_head=head,
+            archive=archive,
+            allow_recovery_needs_attention=True,
+        )
+        == snapshot
+    )
 
     with pytest.raises(
         CoreControlError,
@@ -830,12 +821,7 @@ def test_candidate_successor_workspace_is_materialized_and_attempt_aligned(
         os.close(descriptor)
 
     run_root = tmp_path / "run"
-    destination = (
-        run_root
-        / "successor_workspaces"
-        / "Astronomy_004"
-        / "Astronomy_004_a0_v13"
-    )
+    destination = run_root / "successor_workspaces" / "Astronomy_004" / "Astronomy_004_a0_v13"
     materialized, projection = _materialize_successor_workspace(
         payload=archive_path.read_bytes(),
         destination=destination,
@@ -845,9 +831,7 @@ def test_candidate_successor_workspace_is_materialized_and_attempt_aligned(
     assert projection["stripped_entry_count"] == 0
 
     authority_body = {
-        "schema_version": (
-            "openevo.researchclawbench.successor_workspace_authority.v2"
-        ),
+        "schema_version": ("openevo.researchclawbench.successor_workspace_authority.v2"),
         "task_id": "Astronomy_004",
         "source_attempt_index": 0,
         "source_run_id": "Astronomy_004_a0_v13",
@@ -931,12 +915,7 @@ def test_candidate_successor_workspace_strips_sealed_runtime_only_entries(
     }
 
     run_root = tmp_path / "run"
-    destination = (
-        run_root
-        / "successor_workspaces"
-        / "Astronomy_004"
-        / "Astronomy_004_a1_v24"
-    )
+    destination = run_root / "successor_workspaces" / "Astronomy_004" / "Astronomy_004_a1_v24"
     materialized, projection = _materialize_successor_workspace(
         payload=archive_path.read_bytes(),
         destination=destination,
@@ -959,16 +938,12 @@ def test_candidate_successor_workspace_strips_sealed_runtime_only_entries(
         raw_archive.extracted_byte_size - len(runtime_instruction)
     )
     assert projection["core_output_archive"] == raw_archive.model_dump(mode="json")
-    assert projection["sanitized_output_archive"] == materialized.model_dump(
-        mode="json"
-    )
+    assert projection["sanitized_output_archive"] == materialized.model_dump(mode="json")
     assert projection["stripped_entry_count"] == 4
     assert projection["stripped_byte_size"] == len(runtime_instruction)
 
     authority_body = {
-        "schema_version": (
-            "openevo.researchclawbench.successor_workspace_authority.v2"
-        ),
+        "schema_version": ("openevo.researchclawbench.successor_workspace_authority.v2"),
         "task_id": "Astronomy_004",
         "source_attempt_index": 1,
         "source_run_id": "Astronomy_004_a1_v24",
@@ -997,11 +972,9 @@ def test_candidate_successor_workspace_strips_sealed_runtime_only_entries(
     )
     assert root == destination.resolve()
     assert verified == materialized
-    core_archive, verified_projection = (
-        _require_successor_core_workspace_projection(
-            authority=successor_authority,
-            sanitized_archive=verified,
-        )
+    core_archive, verified_projection = _require_successor_core_workspace_projection(
+        authority=successor_authority,
+        sanitized_archive=verified,
     )
     assert core_archive == raw_archive
     assert verified_projection == projection
@@ -1053,9 +1026,7 @@ def test_candidate_successor_workspace_strips_sealed_runtime_only_entries(
     run_id = "Astronomy_004_a2_v24"
     candidate_run_root = run_root / "runs" / run_id
     candidate_run_root.mkdir(parents=True)
-    (candidate_run_root / "INSTRUCTIONS.md").write_text(
-        "closed task\n", encoding="utf-8"
-    )
+    (candidate_run_root / "INSTRUCTIONS.md").write_text("closed task\n", encoding="utf-8")
     fallback_root = run_root / "sanitized_workspaces" / "Astronomy_004"
     shutil.copytree(destination, fallback_root)
 
@@ -1212,9 +1183,7 @@ def test_formal_v12_a1_static_template_reproduces_snapshot_drift() -> None:
     stale_a0_input = WorkspaceArchiveDeclarationV2(
         format="openevo_deterministic_tar_v1",
         media_type="application/vnd.openevo.workspace-tar",
-        content_sha256=(
-            "0124ab1d31f357987201083774fa6ae8ecbe4e70734e5ccf323d0325948424a7"
-        ),
+        content_sha256=("0124ab1d31f357987201083774fa6ae8ecbe4e70734e5ccf323d0325948424a7"),
         byte_size=57395712,
         entry_count=15,
         extracted_byte_size=57385061,
@@ -1222,9 +1191,7 @@ def test_formal_v12_a1_static_template_reproduces_snapshot_drift() -> None:
     sealed_a0_output = WorkspaceArchiveDeclarationV2(
         format="openevo_deterministic_tar_v1",
         media_type="application/vnd.openevo.workspace-tar",
-        content_sha256=(
-            "f90cd0cea626f9fa017f4021ef3a24cc3da1548db0068ca5c0d4d340af017c8d"
-        ),
+        content_sha256=("f90cd0cea626f9fa017f4021ef3a24cc3da1548db0068ca5c0d4d340af017c8d"),
         byte_size=114139136,
         entry_count=29,
         extracted_byte_size=114117867,
@@ -1251,17 +1218,23 @@ def test_formal_v12_a1_static_template_reproduces_snapshot_drift() -> None:
             project_head=head,
             archive=stale_a0_input,
         )
-    assert _require_existing_workspace_snapshot(
-        project=project,
-        project_head=head,
-        archive=sealed_a0_output,
-    ) == active_snapshot
+    assert (
+        _require_existing_workspace_snapshot(
+            project=project,
+            project_head=head,
+            archive=sealed_a0_output,
+        )
+        == active_snapshot
+    )
 
 
 def test_core_control_error_projection_preserves_v2_lowercase_code() -> None:
-    assert _closed_core_control_error_code(
-        {"code": "project_authority_changed", "message": "redacted"}
-    ) == "project_authority_changed"
+    assert (
+        _closed_core_control_error_code(
+            {"code": "project_authority_changed", "message": "redacted"}
+        )
+        == "project_authority_changed"
+    )
 
 
 def test_candidate_runtime_injection_c000_is_exact_empty_generation_zero() -> None:
@@ -1295,9 +1268,7 @@ def test_candidate_runtime_injection_binds_exact_triple_and_rejects_tamper() -> 
             "context_injected": True,
             "context_source": "materialized_successor",
             "runtime_context_snapshot_id": "runtime-1",
-            "context_artifact_ids": [
-                item["artifact_id"] for item in receipt["artifacts"]
-            ],
+            "context_artifact_ids": [item["artifact_id"] for item in receipt["artifacts"]],
             "runtime_injection_receipt": receipt,
         },
     )
@@ -1323,9 +1294,9 @@ def test_candidate_runtime_injection_binds_exact_triple_and_rejects_tamper() -> 
         item["artifact_id"] for item in receipt["artifacts"]
     ]
     tampered = json.loads(json.dumps(session))
-    tampered["metadata"]["evolution"]["runtime_injection_receipt"][
-        "artifacts"
-    ][0]["artifact_id"] = "registry-foreign"
+    tampered["metadata"]["evolution"]["runtime_injection_receipt"]["artifacts"][0][
+        "artifact_id"
+    ] = "registry-foreign"
     with pytest.raises(ValueError, match="selected composite"):
         _candidate_runtime_injection_authority(
             session_result=tampered,
@@ -1361,9 +1332,7 @@ def test_candidate_project_config_matches_native_closed_capabilities() -> None:
     )
     capabilities = build_evolution_capabilities(
         snapshot,
-        profile=execution_profile_for_release_mode(
-            "codex_subscription_transcript"
-        ),
+        profile=execution_profile_for_release_mode("codex_subscription_transcript"),
         audience=CapabilityAudience.DESKTOP,
         core_version="test",
     )
@@ -1408,9 +1377,7 @@ def test_production_candidate_objective_always_applies_runtime_capture_safety(
 
 def test_candidate_project_capability_preflight_rejects_closed_config_drift() -> None:
     config = ExperimentConfig.load(PROTOCOL)
-    payload = _project_config(config, CANARY_TASK, "Capability preflight.").model_dump(
-        mode="json"
-    )
+    payload = _project_config(config, CANARY_TASK, "Capability preflight.").model_dump(mode="json")
     payload["evolution"]["targets"]["agent_system"]["config"] = {
         "adapter_only_undeclared_field": True
     }
@@ -1424,9 +1391,7 @@ def test_candidate_project_capability_preflight_rejects_closed_config_drift() ->
     )
     capabilities = build_evolution_capabilities(
         snapshot,
-        profile=execution_profile_for_release_mode(
-            "codex_subscription_transcript"
-        ),
+        profile=execution_profile_for_release_mode("codex_subscription_transcript"),
         audience=CapabilityAudience.DESKTOP,
         core_version="test",
     )
@@ -1520,9 +1485,7 @@ def test_candidate_dataset_wait_fails_fast_on_terminal_successor() -> None:
                         "successor_transition_id": "transition-1",
                     },
                 }
-            assert path == (
-                "/v2/internal/training-successors/transition-1"
-            )
+            assert path == ("/v2/internal/training-successors/transition-1")
             return {
                 "transition": {
                     "state": "failed",
@@ -1541,9 +1504,7 @@ def test_candidate_dataset_wait_fails_fast_on_terminal_successor() -> None:
             deadline=ports_module.time.monotonic() + 60,
         )
 
-    assert observed.value.reason_code == (
-        "candidate_successor_transition_failed"
-    )
+    assert observed.value.reason_code == ("candidate_successor_transition_failed")
     assert calls == [
         ("GET", "/v2/tasks/task-1/timeline?limit=100"),
         ("GET", "/v2/tasks/task-1"),
@@ -1623,11 +1584,9 @@ def test_candidate_retries_retryable_successor_once_before_dataset() -> None:
     )
 
     assert dataset["session_id"] == "session-1"
-    assert [
-        (method, path)
-        for method, path, _kwargs in calls
-        if method == "POST"
-    ] == [("POST", "/v2/transitions/transition-1/retry")]
+    assert [(method, path) for method, path, _kwargs in calls if method == "POST"] == [
+        ("POST", "/v2/transitions/transition-1/retry")
+    ]
 
 
 def test_candidate_terminal_setup_failure_converges_without_seal_wait() -> None:
@@ -1673,9 +1632,7 @@ def test_candidate_terminal_setup_failure_converges_without_seal_wait() -> None:
             attempt_id="attempt-1",
         )
     assert observed.value.terminal_proven is True
-    assert observed.value.reason_code == (
-        "candidate_subscription_isolation_not_ready"
-    )
+    assert observed.value.reason_code == ("candidate_subscription_isolation_not_ready")
     assert observed.value.failure_receipt == {
         "schema_version": "openevo.candidate_terminal_failure.v1",
         "core_task_id": "task-1",
@@ -2012,10 +1969,7 @@ def test_feedback_attachment_separates_dataset_science_and_benchmark_scopes(
             if path.endswith("/attachments"):
                 assert payload["task_id"] == "rollout-attempt-1"
                 assert payload["task_scope_id"] == "science-task-1"
-                assert (
-                    payload["task_local_feedback"]["benchmark_task_scope_id"]
-                    == CANARY_TASK
-                )
+                assert payload["task_local_feedback"]["benchmark_task_scope_id"] == CANARY_TASK
                 return {
                     **payload,
                     "attachment_id": "attachment-1",
@@ -2038,9 +1992,7 @@ def test_feedback_attachment_separates_dataset_science_and_benchmark_scopes(
 
     run_root = tmp_path / "run"
     (run_root / "report").mkdir(parents=True)
-    (run_root / "report" / "report.md").write_text(
-        "# Summary\n## Findings\n", encoding="utf-8"
-    )
+    (run_root / "report" / "report.md").write_text("# Summary\n## Findings\n", encoding="utf-8")
     result = Port(core_authority=object()).execute(
         {
             "task_id": CANARY_TASK,
@@ -2155,11 +2107,10 @@ def test_current_task_gt_attachment_uses_core_without_judge() -> None:
                     "task_id": "rollout-gt",
                 }
             if path.endswith("/attachments"):
+                TrainingFeedbackAttachmentCreateRequest.model_validate(payload)
                 assert payload["feedback_class"] == "HARD_GT"
                 assert payload["global_feedback"] == {}
-                assert payload["task_local_feedback"]["feedback_source"] == (
-                    "current_task_gt"
-                )
+                assert payload["task_local_feedback"]["feedback_source"] == ("current_task_gt")
                 return {
                     **payload,
                     "attachment_id": "attachment-gt",
@@ -2208,6 +2159,103 @@ def test_current_task_gt_attachment_uses_core_without_judge() -> None:
     assert result["judge_calls"] == 0
     assert result["judge_feedback_included"] is False
     assert result["ground_truth_sha256"] == "7" * 64
+    assert len(calls) == 3
+
+
+def test_sanitized_evaluation_feedback_attachment_projects_only_admitted_signal() -> None:
+    calls = []
+    sanitized = {
+        "status": "available_for_evolution",
+        "feedback_class": "sanitized_evaluation_feedback_v1",
+        "diagnoses": [
+            {
+                "dimension": "visual_evidence",
+                "candidate_observation": "The candidate report needs stronger evidence.",
+            }
+        ],
+    }
+    sanitized_sha256 = ports_module.canonical_sha256(sanitized)
+
+    class Client:
+        def json(self, method, path, *, payload=None, headers=None):
+            del headers
+            calls.append((method, path, payload))
+            if method == "GET":
+                return {
+                    "completed_dataset_id": "dataset-sanitized",
+                    "completed_dataset_revision": "artifact-sanitized.v1",
+                    "session_id": "session-sanitized",
+                    "task_id": "rollout-sanitized",
+                }
+            if path.endswith("/attachments"):
+                assert payload["feedback_class"] == "HARD_GT"
+                assert payload["global_feedback"] == sanitized
+                TrainingFeedbackAttachmentCreateRequest.model_validate(payload)
+                assert payload["task_local_feedback"]["ground_truth_entries"] == [
+                    {"content": "PRIVATE_GT_LITERAL"}
+                ]
+                assert "PRIVATE_GT_LITERAL" not in json.dumps(payload["global_feedback"])
+                return {
+                    **payload,
+                    "attachment_id": "attachment-sanitized",
+                    "content_sha256": "c" * 64,
+                    "status": "sealed",
+                }
+            assert path.endswith("/resolve")
+            return {
+                "resolved_view_sha256": "a" * 64,
+                "dataset_artifact": {"artifact_id": "resolved-sanitized"},
+                "dataset_view": {"task_local_overlay_sha256": "b" * 64},
+            }
+
+    class Port(CoreFeedbackPort):
+        @contextmanager
+        def _client(self):
+            yield Client()
+
+    result = Port(core_authority=object(), evaluator=None).execute(
+        {
+            "task_id": CANARY_TASK,
+            "core_task_id": "science-task-sanitized",
+            "dataset_id": "dataset-sanitized",
+            "dataset_revision": "artifact-sanitized.v1",
+            "session_id": "session-sanitized",
+            "feedback_source": "sanitized_evaluation_feedback_v1",
+            "gt_supervision": {
+                "task_id": CANARY_TASK,
+                "ground_truth_sha256": "7" * 64,
+                "feedback_class": "HARD_GT",
+                "global_feedback": {},
+                "task_local_feedback": {
+                    "feedback_source": "current_task_gt",
+                    "ground_truth_sha256": "7" * 64,
+                    "ground_truth_entries": [{"content": "PRIVATE_GT_LITERAL"}],
+                    "judge_feedback_included": False,
+                },
+                "judge_feedback_included": False,
+            },
+            "feedback_projection": {
+                "task_id": CANARY_TASK,
+                "ground_truth_sha256": "7" * 64,
+                "sanitized_feedback": sanitized,
+                "sanitized_feedback_sha256": sanitized_sha256,
+                "admission": {
+                    "status": "ADMITTED",
+                    "feedback_sha256": sanitized_sha256,
+                },
+                "raw_gt_projected": False,
+                "judge_reasoning_projected": False,
+                "target_image_projected": False,
+            },
+        },
+        "supervisor-sanitized-feedback-key",
+    )
+
+    assert result["feedback_source"] == "sanitized_evaluation_feedback_v1"
+    assert result["sanitized_feedback_included"] is True
+    assert result["raw_gt_projected"] is False
+    assert result["judge_reasoning_projected"] is False
+    assert result["target_image_projected"] is False
     assert len(calls) == 3
 
 
@@ -2363,11 +2411,7 @@ def test_successor_lost_retry_response_reconciles_commit_without_second_post(
     monkeypatch.setattr(
         CoreSuccessorPort,
         "_result",
-        staticmethod(
-            lambda _authority, _request, _client: {
-                "successor_commit_id": "commit-1"
-            }
-        ),
+        staticmethod(lambda _authority, _request, _client: {"successor_commit_id": "commit-1"}),
     )
     port = CoreSuccessorPort(object(), core_authority=_SuccessorCoreAuthority())
     with pytest.raises(ports_module.httpx.ReadError, match="lost retry response"):
@@ -2410,9 +2454,7 @@ def test_completed_method_reconciliation_lost_response_reads_commit_without_seco
             calls.append((method, path, payload, headers))
             if method == "POST":
                 type(self).committed = True
-                raise ports_module.httpx.ReadError(
-                    "lost completed-method reconciliation response"
-                )
+                raise ports_module.httpx.ReadError("lost completed-method reconciliation response")
             if type(self).committed:
                 return {
                     "transition": {
@@ -2472,15 +2514,11 @@ def test_completed_method_reconciliation_lost_response_reads_commit_without_seco
     assert recovered["successor_commit_id"] == "commit-reconciled-1"
     assert recovered["model_calls_started"] == 0
     assert recovered["completed_methods_reconciliation"] == {
-        "schema_version": (
-            "openevo.researchclawbench.completed_methods_reconciliation.v1"
-        ),
+        "schema_version": ("openevo.researchclawbench.completed_methods_reconciliation.v1"),
         "reconciliation_id": reconciliation_id,
         "successor_transition_id": "transition-failed",
         "source_transition_attempt_count": len(source["attempts"]),
-        "source_terminal_authority_sha256": checkpoint[
-            "terminal_authority_sha256"
-        ],
+        "source_terminal_authority_sha256": checkpoint["terminal_authority_sha256"],
         "core_generation": "1" * 32,
         "core_release_identity": "2" * 64,
         "reconciliation_only": True,
@@ -2618,13 +2656,9 @@ def test_terminal_successor_reconciliation_preserves_source_and_replays_without_
             request,
             "completed-method-checkpoint-key",
         )
-    source_path = terminal_operations.receipts._path(
-        "completed-method-checkpoint-key"
-    )
+    source_path = terminal_operations.receipts._path("completed-method-checkpoint-key")
     source_before = source_path.read_bytes()
-    source_receipt = terminal_operations.receipts.get(
-        "completed-method-checkpoint-key"
-    )
+    source_receipt = terminal_operations.receipts.get("completed-method-checkpoint-key")
     assert source_receipt is not None
 
     class ReconciliationPort:
@@ -2679,12 +2713,10 @@ def test_terminal_successor_reconciliation_preserves_source_and_replays_without_
         "completed-method-checkpoint-key",
     )
     assert recovered.status is OperationStatus.RECOVERED
-    assert recovered.payload["successor_commit_id"] == (
-        "successor-commit-reconciled-1"
-    )
+    assert recovered.payload["successor_commit_id"] == ("successor-commit-reconciled-1")
     assert recovered.payload["model_calls_started"] == 0
-    assert recovered.payload["source_terminal_receipt_sha256"] == (
-        source_receipt["content_sha256"]
+    assert (
+        recovered.payload["source_terminal_receipt_sha256"] == (source_receipt["content_sha256"])
     )
     assert source_path.read_bytes() == source_before
     assert Path(recovered.receipt_path).is_file()
@@ -2746,16 +2778,12 @@ def test_composite_binds_native_successor_head_and_rejects_silent_rollback(
             "proposal_ids": [f"registry-{artifact_type}"],
             "admission_decision_id": f"decision-{artifact_type}",
             "admission_decision_sha256": str(index + 4) * 64,
-            "content_admission": _content_admission(
-                f"registry-{artifact_type}"
-            ),
+            "content_admission": _content_admission(f"registry-{artifact_type}"),
         }
         for index, artifact_type in enumerate(("agent_system", "text_memory", "skill_bundle"))
     ]
     for job in jobs:
-        job["content_admission_sha256"] = job["content_admission"][
-            "content_sha256"
-        ]
+        job["content_admission_sha256"] = job["content_admission"]["content_sha256"]
     composite = composites.execute(
         {
             "parent_composite_id": "c000",
@@ -2865,16 +2893,12 @@ def test_cross_task_sanitizer_abandons_final_transition_and_restores_selected_he
         def json(self, method, path, *, payload=None, headers=None, content=None):
             if path == "/v2/internal/training-successors/transition-a2":
                 if self.cancelled:
-                    raise AssertionError(
-                        "sanitizer must not poll the closed task after abandon"
-                    )
+                    raise AssertionError("sanitizer must not poll the closed task after abandon")
                 return {
                     "transition": {
                         "state": "failed",
                         "transition": {
-                            "predecessor_project_head": {
-                                "project_head_id": "head-before-a2"
-                            }
+                            "predecessor_project_head": {"project_head_id": "head-before-a2"}
                         },
                     }
                 }
@@ -2917,9 +2941,7 @@ def test_cross_task_sanitizer_abandons_final_transition_and_restores_selected_he
             "task_id": CANARY_TASK,
             "composite_id": "c000",
             "core_project_id": "project-1",
-            "final_candidate": {
-                "successor_transition_id": "transition-a2"
-            },
+            "final_candidate": {"successor_transition_id": "transition-a2"},
         },
         "sanitize-best-of-three",
     )
@@ -2992,16 +3014,12 @@ def test_cross_task_sanitizer_forks_selected_authority_into_next_workspace(
         def json(self, method, path, *, payload=None, headers=None, content=None):
             if path == "/v2/internal/training-successors/transition-a2":
                 if self.cancelled:
-                    raise AssertionError(
-                        "sanitizer must not poll the closed task after abandon"
-                    )
+                    raise AssertionError("sanitizer must not poll the closed task after abandon")
                 return {
                     "transition": {
                         "state": "failed",
                         "transition": {
-                            "predecessor_project_head": {
-                                "project_head_id": "head-before-a2"
-                            }
+                            "predecessor_project_head": {"project_head_id": "head-before-a2"}
                         },
                     }
                 }
@@ -3235,8 +3253,7 @@ def test_per_item_production_ports_use_native_candidate_and_successor_adapters(
     tmp_path: Path,
 ) -> None:
     source = ExperimentConfig.load(
-        Path(__file__).resolve().parents[3]
-        / "configs/researchclawbench/per_item_community17.yaml"
+        Path(__file__).resolve().parents[3] / "configs/researchclawbench/per_item_community17.yaml"
     )
     raw = json.loads(json.dumps(source.raw))
     raw["paths"]["project_root"] = "/"
@@ -3252,14 +3269,14 @@ def test_per_item_production_ports_use_native_candidate_and_successor_adapters(
     assert isinstance(ports.candidate, CoreV2CandidatePort)
     assert isinstance(ports.evolution, CoreSuccessorPort)
     assert isinstance(ports.per_item_evolved, PerItemEvolvedWorkspacePort)
+    assert ports.feedback_projection is not None
 
 
 def test_per_item_supervisor_closes_through_production_operation_driver(
     tmp_path: Path,
 ) -> None:
     source = ExperimentConfig.load(
-        Path(__file__).resolve().parents[3]
-        / "configs/researchclawbench/per_item_community17.yaml"
+        Path(__file__).resolve().parents[3] / "configs/researchclawbench/per_item_community17.yaml"
     )
     raw = json.loads(json.dumps(source.raw))
     raw["reflector"]["require_credential_mount_readiness"] = False
@@ -3292,11 +3309,10 @@ def test_per_item_supervisor_closes_through_production_operation_driver(
 
     state = supervisor.status()
     assert state["stage"] == "ITEM_RESET"
-    assert state["paired_result"]["artifact_consumption"][
-        "artifact_read_requested"
-    ] is True
+    assert state["paired_result"]["artifact_consumption"]["artifact_read_requested"] is True
     assert authorities["candidate"].call_count() == 2
     assert authorities["evaluation"].call_count() == 2
+    assert authorities["feedback_projection"].call_count() == 1
     assert authorities["attachment"].call_count() == 1
     assert authorities["evolution"].call_count() == 1
     assert authorities["per_item_evolved"].call_count() == 1
@@ -3434,9 +3450,7 @@ def test_community17_final_freeze_is_directly_accepted_by_official40_plan(
         ),
     )
     assert plan.task_ids == task_ids
-    assert plan.freeze_authority_sha256 == final["final_freeze_receipt"][
-        "authority_sha256"
-    ]
+    assert plan.freeze_authority_sha256 == final["final_freeze_receipt"]["authority_sha256"]
     assert plan.frozen_composite_id == final["final_freeze_receipt"]["composite_id"]
     assert set(plan.frozen_registry_artifacts) == set(ARTIFACT_TYPES)
 

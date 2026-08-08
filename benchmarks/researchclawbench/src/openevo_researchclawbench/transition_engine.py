@@ -17,6 +17,8 @@ class TrainingStage(StrEnum):
     ARTIFACT_VALIDATED = "ARTIFACT_VALIDATED"
     EVALUATION_PENDING = "EVALUATION_PENDING"
     EVALUATED = "EVALUATED"
+    FEEDBACK_PROJECTION_PENDING = "FEEDBACK_PROJECTION_PENDING"
+    FEEDBACK_ADMITTED = "FEEDBACK_ADMITTED"
     ATTACHMENT_SEALED = "ATTACHMENT_SEALED"
     EVOLUTION_PENDING = "EVOLUTION_PENDING"
     EVOLUTION_RUNNING = "EVOLUTION_RUNNING"
@@ -50,12 +52,8 @@ _ALLOWED: dict[TrainingStage, frozenset[TrainingStage]] = {
             TrainingStage.RECOVERY_SEEDED_CONTINUATION,
         }
     ),
-    TrainingStage.RECOVERY_SEEDED_CONTINUATION: frozenset(
-        {TrainingStage.NEXT_ATTEMPT_READY}
-    ),
-    TrainingStage.CANDIDATE_SEALED_RECONCILED: frozenset(
-        {TrainingStage.CANDIDATE_SEALED}
-    ),
+    TrainingStage.RECOVERY_SEEDED_CONTINUATION: frozenset({TrainingStage.NEXT_ATTEMPT_READY}),
+    TrainingStage.CANDIDATE_SEALED_RECONCILED: frozenset({TrainingStage.CANDIDATE_SEALED}),
     TrainingStage.TASK_ATTEMPT_READY: frozenset(
         {
             TrainingStage.CANDIDATE_RUNNING,
@@ -81,9 +79,7 @@ _ALLOWED: dict[TrainingStage, frozenset[TrainingStage]] = {
             TrainingStage.FAILED,
         }
     ),
-    TrainingStage.VALIDATOR_FEEDBACK_PENDING: frozenset(
-        {TrainingStage.ATTACHMENT_SEALED}
-    ),
+    TrainingStage.VALIDATOR_FEEDBACK_PENDING: frozenset({TrainingStage.ATTACHMENT_SEALED}),
     TrainingStage.ARTIFACT_VALIDATED: frozenset(
         {
             TrainingStage.EVALUATION_PENDING,
@@ -102,10 +98,13 @@ _ALLOWED: dict[TrainingStage, frozenset[TrainingStage]] = {
     TrainingStage.EVALUATED: frozenset(
         {
             TrainingStage.ATTACHMENT_SEALED,
+            TrainingStage.FEEDBACK_PROJECTION_PENDING,
             TrainingStage.TASK_SELECTION_PENDING,
             TrainingStage.ITEM_CLOSED,
         }
     ),
+    TrainingStage.FEEDBACK_PROJECTION_PENDING: frozenset({TrainingStage.FEEDBACK_ADMITTED}),
+    TrainingStage.FEEDBACK_ADMITTED: frozenset({TrainingStage.ATTACHMENT_SEALED}),
     TrainingStage.ATTACHMENT_SEALED: frozenset(
         {TrainingStage.EVOLUTION_PENDING, TrainingStage.TASK_SELECTION_PENDING}
     ),
@@ -122,9 +121,7 @@ _ALLOWED: dict[TrainingStage, frozenset[TrainingStage]] = {
             TrainingStage.EVOLVED_WORKSPACE_PREPARED,
         }
     ),
-    TrainingStage.EVOLVED_WORKSPACE_PREPARED: frozenset(
-        {TrainingStage.TASK_ATTEMPT_READY}
-    ),
+    TrainingStage.EVOLVED_WORKSPACE_PREPARED: frozenset({TrainingStage.TASK_ATTEMPT_READY}),
     TrainingStage.NEXT_ATTEMPT_READY: frozenset({TrainingStage.TASK_ATTEMPT_READY}),
     TrainingStage.TASK_SELECTION_PENDING: frozenset(
         {TrainingStage.TASK_BEST_SELECTED, TrainingStage.TASK_NO_VALID_ATTEMPT}
@@ -136,9 +133,7 @@ _ALLOWED: dict[TrainingStage, frozenset[TrainingStage]] = {
         {TrainingStage.NEXT_TASK_READY, TrainingStage.COMMUNITY_TRAINING_COMPLETE}
     ),
     TrainingStage.NEXT_TASK_READY: frozenset({TrainingStage.TASK_ATTEMPT_READY}),
-    TrainingStage.COMMUNITY_TRAINING_COMPLETE: frozenset(
-        {TrainingStage.FINAL_FREEZE_PENDING}
-    ),
+    TrainingStage.COMMUNITY_TRAINING_COMPLETE: frozenset({TrainingStage.FINAL_FREEZE_PENDING}),
     TrainingStage.FINAL_FREEZE_PENDING: frozenset(
         {TrainingStage.FINAL_FROZEN, TrainingStage.BLOCKED, TrainingStage.FAILED}
     ),

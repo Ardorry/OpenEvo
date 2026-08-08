@@ -96,10 +96,7 @@ class DurableFakeAuthority(ProductionOperationPort):
                 )
             }
             binding = {
-                "schema_version": (
-                    "openevo.researchclawbench."
-                    "candidate_workspace_binding.v2"
-                ),
+                "schema_version": ("openevo.researchclawbench.candidate_workspace_binding.v2"),
                 "expected_workspace_snapshot": snapshot,
                 "actual_workspace_snapshot": snapshot,
                 "workspace_snapshot_match": True,
@@ -125,7 +122,9 @@ class DurableFakeAuthority(ProductionOperationPort):
         payload = {
             "request_sha256": canonical_sha256(request),
             "result": result,
-            "external_billed_side_effect_count": 1 if self.kind in {"candidate", "evaluation", "evolution"} else 0,
+            "external_billed_side_effect_count": 1
+            if self.kind in {"candidate", "evaluation", "evolution"}
+            else 0,
         }
         path = self._path(idempotency_key)
         temporary = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
@@ -155,18 +154,12 @@ class DurableFakeAuthority(ProductionOperationPort):
         seed = canonical_sha256({"kind": self.kind, "key": key})
         if self.kind == "candidate":
             run_id = str(request["run_id"])
-            project_id = (
-                request.get("core_project_id")
-                or "project-synthetic-life-v2"
-            )
+            project_id = request.get("core_project_id") or "project-synthetic-life-v2"
             transition_id = f"transition-{task}-a{attempt}"
             session_id = f"session-{task}-a{attempt}"
             dataset_id = f"dataset-{task}-a{attempt}"
             successor_workspace_body = {
-                "schema_version": (
-                    "openevo.researchclawbench."
-                    "successor_workspace_authority.v2"
-                ),
+                "schema_version": ("openevo.researchclawbench.successor_workspace_authority.v2"),
                 "task_id": task,
                 "source_attempt_index": attempt,
                 "source_run_id": run_id,
@@ -184,14 +177,9 @@ class DurableFakeAuthority(ProductionOperationPort):
             }
             successor_workspace_authority = {
                 **successor_workspace_body,
-                "content_sha256": canonical_sha256(
-                    successor_workspace_body
-                ),
+                "content_sha256": canonical_sha256(successor_workspace_body),
             }
-            injected_ids = [
-                f"registry-{artifact_type}-a1"
-                for artifact_type in ARTIFACT_TYPES
-            ]
+            injected_ids = [f"registry-{artifact_type}-a1" for artifact_type in ARTIFACT_TYPES]
             runtime_injection = {
                 "artifact_count": 0 if attempt == 0 else 3,
                 "artifact_ids": [] if attempt == 0 else injected_ids,
@@ -229,9 +217,7 @@ class DurableFakeAuthority(ProductionOperationPort):
                 "dataset_id": dataset_id,
                 "dataset_revision": f"artifact-dataset-{task}-a{attempt}.v1",
                 "successor_transition_id": transition_id,
-                "successor_workspace_authority": (
-                    successor_workspace_authority
-                ),
+                "successor_workspace_authority": (successor_workspace_authority),
                 "transcript_receipt": {"sha256": seed, "trace_count": 1},
                 "candidate_output_root": f"/synthetic/{task}/candidate-{attempt}",
                 "input_project_head_id": f"head-input-{task}-a{attempt}",
@@ -275,6 +261,37 @@ class DurableFakeAuthority(ProductionOperationPort):
                 "usage": None,
                 "runtime_seconds": 0.0,
             }
+        if self.kind == "feedback_projection":
+            feedback = {
+                "status": "available_for_evolution",
+                "feedback_class": "sanitized_evaluation_feedback_v1",
+            }
+            feedback_sha256 = canonical_sha256(feedback)
+            return {
+                "task_id": task,
+                "ground_truth_sha256": request["gt_supervision"]["ground_truth_sha256"],
+                "sanitized_feedback": feedback,
+                "sanitized_feedback_sha256": feedback_sha256,
+                "admission": {
+                    "status": "ADMITTED",
+                    "feedback_sha256": feedback_sha256,
+                },
+                "quality_contract": {
+                    "generic_only_advice": False,
+                    "candidate_specific_references_present": True,
+                    "candidate_evidence_refs_present": True,
+                    "preserve_strength_guidance_present": True,
+                    "targeted_improvement_guidance_present": True,
+                    "gt_leakage": False,
+                },
+                "feedback_projector_model_calls": 0,
+                "openevo_state_mutations": 0,
+                "evaluation_frozen": True,
+                "raw_gt_projected": False,
+                "judge_reasoning_projected": False,
+                "target_image_projected": False,
+                "secret_recorded": False,
+            }
         if self.kind == "attachment":
             result = {
                 "attachment_id": f"attachment-{task}-a{attempt}",
@@ -293,6 +310,23 @@ class DurableFakeAuthority(ProductionOperationPort):
                         "judge_calls": 0,
                         "ground_truth_sha256": gt["ground_truth_sha256"],
                         "judge_feedback_included": False,
+                    }
+                )
+            if request.get("feedback_source") == "sanitized_evaluation_feedback_v1":
+                gt = request["gt_supervision"]
+                projection = request["feedback_projection"]
+                result.update(
+                    {
+                        "feedback_class": "HARD_GT",
+                        "feedback_source": "sanitized_evaluation_feedback_v1",
+                        "judge_calls": 0,
+                        "ground_truth_sha256": gt["ground_truth_sha256"],
+                        "sanitized_feedback_sha256": projection["sanitized_feedback_sha256"],
+                        "sanitized_feedback_included": True,
+                        "judge_feedback_included": False,
+                        "raw_gt_projected": False,
+                        "judge_reasoning_projected": False,
+                        "target_image_projected": False,
                     }
                 )
             return result
@@ -322,7 +356,9 @@ class DurableFakeAuthority(ProductionOperationPort):
                 "composite_id": f"c{revision:03d}-{task}",
                 "parent_composite_id": request["parent_composite_id"],
                 "registry_artifact_ids": [item["successor_registry_id"] for item in jobs],
-                "artifact_hashes": {item["artifact_type"]: item["successor_sha256"] for item in jobs},
+                "artifact_hashes": {
+                    item["artifact_type"]: item["successor_sha256"] for item in jobs
+                },
                 "composite_sha256": seed,
                 "admission_receipt_ids": [f"admission-{item['job_id']}" for item in jobs],
             }
@@ -330,9 +366,7 @@ class DurableFakeAuthority(ProductionOperationPort):
             admitted = request["admitted_composite"]
             artifact_ids = list(admitted["registry_artifact_ids"])
             authority = {
-                "schema_version": (
-                    "openevo.researchclawbench.preseeded_workspace_authority.v1"
-                ),
+                "schema_version": ("openevo.researchclawbench.preseeded_workspace_authority.v1"),
                 "synthetic": True,
                 "artifact_ids": artifact_ids,
             }
@@ -394,9 +428,7 @@ class DurableFakeAuthority(ProductionOperationPort):
                 "composite_id": request["selected_composite_id"],
                 "core_project_id": "project-synthetic-life-v2",
                 "core_project_head_id": f"head-frozen-{seed[:16]}",
-                "core_project_head_manifest_sha256": canonical_sha256(
-                    {"head": seed}
-                ),
+                "core_project_head_manifest_sha256": canonical_sha256({"head": seed}),
                 "protocol_sha256": request["protocol_sha256"],
                 "core_identity_sha256": request["core_identity_sha256"],
                 "adapter_identity_sha256": request["adapter_identity_sha256"],
@@ -416,13 +448,24 @@ class DurableFakeAuthority(ProductionOperationPort):
         return len(list(self.root.glob("*.json")))
 
 
-def build_synthetic_ports(root: str | Path, *, crash_point: str | None = None) -> tuple[ProductionPorts, dict[str, DurableFakeAuthority]]:
+def build_synthetic_ports(
+    root: str | Path, *, crash_point: str | None = None
+) -> tuple[ProductionPorts, dict[str, DurableFakeAuthority]]:
     base = Path(root)
     authorities = {
         kind: DurableFakeAuthority(base, kind, crash_point=crash_point)
         for kind in (
-            "candidate", "validation", "evaluation", "attachment", "evolution",
-            "composite", "per_item_evolved", "task_local", "sanitizer", "freeze",
+            "candidate",
+            "validation",
+            "evaluation",
+            "feedback_projection",
+            "attachment",
+            "evolution",
+            "composite",
+            "per_item_evolved",
+            "task_local",
+            "sanitizer",
+            "freeze",
         )
     }
     return (
@@ -430,6 +473,7 @@ def build_synthetic_ports(root: str | Path, *, crash_point: str | None = None) -
             candidate=authorities["candidate"],
             validation=authorities["validation"],
             evaluation=authorities["evaluation"],
+            feedback_projection=authorities["feedback_projection"],
             attachment=authorities["attachment"],
             evolution=authorities["evolution"],
             composite=authorities["composite"],
