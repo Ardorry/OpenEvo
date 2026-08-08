@@ -40,35 +40,35 @@ paths:
   experiment_root: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0
   researchclawbench_root: /home/lhy-h/work/researchclaw_openevo/ResearchClawBench
 source_identity:
-  openevo_commit: 218e6195366a5e4a644d6d1ee699e4663cee01a0
-  openevo_core_source_tree_sha256: ce8bb56436bef1002a4278908653b17a87d817232340a9d50c7110bb90464b7d
+  openevo_commit: 137ca2fff4335747607a9d36de7a8c8b86f69389
+  openevo_core_source_tree_sha256: b93cca9b02726097d314fca49d55be748682bfe612ed8300ea2cb8da146c480d
   adapter_tree_sha256: bfd06b5e7ef985ad708304a8d42956accca666ca47eea63cbe87d340077fe9e4
   researchclawbench_commit: b1175eca3deb78ff8b2c839070874474051d2261
   canonical_scorer_sha256: 9492317443acc069744330f27aac693d162f1aa6837d512e40419704197c6022
 native_openevo:
   core_control_mode: managed_remote_daemon
   core_control_url: managed_dynamic_loopback
-  framework_lock: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/runtime/native_release_218e61953_20260808T153547/core/framework-lock.json
+  framework_lock: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/runtime/native_release_137ca2fff_retry2_20260808T162700/core/framework-lock.json
   core_host_codex_probe_bin: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/runtime/host-codex-probe-bin-0.144.1
   remote_core:
-    profile_id: rcb-oe-native-gpt55-v1
+    profile_id: rcb-oe-native-gpt55-v2
     host: 127.0.0.1
-    port: 50077
+    port: 50078
     user: openevo
     private_key_path: /home/lhy-h/.ssh/id_ed25519_github
-    host_key_store_root: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/runtime/ssh-known-hosts-native-gpt55-50077
+    host_key_store_root: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/runtime/ssh-known-hosts-native-gpt55-50078
     host_key_algorithm: ssh-ed25519
-    host_key_fingerprint: SHA256:0MS0Y5Gz+VGwkFc6Vev3yjPtUvaFaIl3clwkWusFsf8
+    host_key_fingerprint: SHA256:8W4389j8qfgUqd2JOOf3q2mLvhq+isbv8eLmiNgttKY
     fixture_check_script: /home/lhy-h/work/researchclaw_per_item_minimal/scripts/e2e/docker_release_host_fixture.py
-    container_name: openevo-researchclaw-native-v1
-    container_hostname: 4f9131535a71
+    container_name: openevo-researchclaw-native-v2
+    container_hostname: 3b79ab84b67d
     docker_server_version: 29.5.2
     docker_server_api: '1.54'
     supported_docker_server_versions:
       - 29.3.0
       - 29.5.2
-    daemon_bundle: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/runtime/native_release_218e61953_20260808T153547/daemon/openevo-daemon-linux-x86_64
-    daemon_manifest: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/runtime/native_release_218e61953_20260808T153547/daemon/openevo-daemon-bundle.json
+    daemon_bundle: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/runtime/native_release_137ca2fff_retry2_20260808T162700/daemon/openevo-daemon-linux-x86_64
+    daemon_manifest: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/runtime/native_release_137ca2fff_retry2_20260808T162700/daemon/openevo-daemon-bundle.json
   rollout_url: http://127.0.0.1:8080
   evolution_url: http://127.0.0.1:8200
   rollout_step: 0
@@ -113,18 +113,18 @@ reflector:
   auth_mode: subscription
   capture_mode: transcript
   runtime_status: PINNED
-  readiness_receipt: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/logs/native_runtime_restore_20260808T074650Z/readiness_runtime.json
+  readiness_receipt: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/logs/native_runtime_restore_20260808T081500Z/readiness_runtime.json
   host_path_fallback_allowed: false
-  credential_mount_readiness_receipt: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/logs/native_runtime_restore_20260808T074650Z/readiness_mount.json
+  credential_mount_readiness_receipt: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/logs/native_runtime_restore_20260808T081500Z/readiness_mount.json
   require_credential_mount_readiness: true
   credential_mount_expected:
-    authority_id: 0eef518c58d5388ddecf55fee24bc000084a530889545b2920e62170c0e8db00
-    worker_launch_id: mrl-26564464cc9cbd9e88107d92c28dc7d3
-    generation_digest: f8796d40998a573f98ed97118a592d4d5d778c013f94acfb2c1a3ecadd79929a
-    daemon_release_identity: 6d5247dab93b1afa8359c9e0926af0099a143324f39709101ee374b20c31cfd5
-    release_install_digest: 64124c32566fb98533d36afd5f3ea3d5783d1f6c53341a515f3640656c68a83e
-    release_registry_digest: aef4a70109b4811c319134320c9842a6434fe503397a555959bdec600e3c48c0
-    docker_host_path_identity: d82ef5320654c781bf238d40a97c1c77ed5b9c543a15ca58de85b9f4e9027503
+    authority_id: 18e1653d9c55b9acc1935fe73a4d4ee499de626357fed9d943a99eba39865758
+    worker_launch_id: mrl-aa506c4038dcb94898f3256193722848
+    generation_digest: 756b8db3d2da1e6da2245eaf970b70bdb8964905e20722ab90c487f2e7c03717
+    daemon_release_identity: f5c3ba119c0db5267e1f853b13a6ac592f79550258e377117a70eff513f63074
+    release_install_digest: 3b7cb8deb790d00f8d379eb5d98f580df3b358d843a49d01fccf70058a39eae8
+    release_registry_digest: ac14e24fc411ba8f4aedbf9d16406307479f657dc5155de4610df4b7975f6594
+    docker_host_path_identity: 8d5eb354d484d81172a0b1148f0059e40c1b36c23355e35b21f52096b918b89c
     runtime_digest: sha256:c60d4a60a7f0a353cccf07399407bac3f6b56991610a0457a6c1d4e5bdd61d88
 judge:
   model: openai/gpt-5.1
