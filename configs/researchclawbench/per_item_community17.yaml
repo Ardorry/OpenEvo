@@ -64,7 +64,8 @@ paths:
   experiment_root: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0
   researchclawbench_root: /home/lhy-h/work/researchclaw_openevo/ResearchClawBench
 source_identity:
-  openevo_commit: fa65a48565a8ff8e4f6ccb3d4c621d0d866bccec
+  openevo_commit: 877fb7c7bc231ee73bd31be2b0e90a7718ae894b
+  adapter_implementation_commit: 9ec89c4ee7d4be42655774955978559ddb559962
   openevo_core_source_tree_sha256: 9fa76172efcebb43948ea64288d878157171b844abf5f006758898122b0bc9fe
   adapter_tree_sha256: df596629e5a9eff580b29c883bc8220b7ab9bc2eee12a5c23cae604ebcbf297d
   researchclawbench_commit: b1175eca3deb78ff8b2c839070874474051d2261
