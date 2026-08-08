@@ -51,7 +51,11 @@ from openevo.backend.science_run_owner import (
     CoreScienceTaskOwnerV2,
     ScienceSuccessorPreparerV2,
     _as_inherited_successor_contribution,
+    _successor_transition_closed_failure_code,
     _successor_transition_failure_is_retryable,
+)
+from openevo.backend.science_successor_preparer_v2 import (
+    ScienceSuccessorPreparationV2Error,
 )
 from openevo.backend.science_run_store import (
     ScienceProjectAdmissionAuthorityV2,
@@ -104,6 +108,35 @@ def test_successor_http_failure_retryability_uses_closed_status_classification()
     assert (
         _successor_transition_failure_is_retryable(EvolutionHttpStatusError(status_code=422))
         is False
+    )
+
+
+def test_successor_failure_diagnostic_projects_closed_http_cause() -> None:
+    http_failure = EvolutionHttpStatusError(
+        status_code=422,
+        detail_code="request_validation_failed",
+    )
+    failure = ScienceSuccessorPreparationV2Error(
+        "private request data must not appear in the diagnostic",
+        failure_code="plan_bound_job_creation_failed",
+    )
+    failure.__cause__ = http_failure
+
+    diagnostic = _successor_transition_closed_failure_code(failure)
+
+    assert diagnostic == "EVOLUTION_HTTP_422_REQUEST_VALIDATION_FAILED"
+    assert "private" not in diagnostic.lower()
+
+
+def test_successor_failure_diagnostic_uses_validated_preparation_code() -> None:
+    failure = ScienceSuccessorPreparationV2Error(
+        "private path",
+        failure_code="plan_bound_job_creation_failed",
+    )
+
+    assert (
+        _successor_transition_closed_failure_code(failure)
+        == "PREPARATION_PLAN_BOUND_JOB_CREATION_FAILED"
     )
 
 

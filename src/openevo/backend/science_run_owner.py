@@ -10,6 +10,7 @@ import json
 import logging
 import math
 from pathlib import Path
+import re
 import secrets
 import threading
 from typing import Any, Iterator, Protocol, cast
@@ -106,7 +107,11 @@ from openevo.evolution.revisions import (
     atomic_successor_manifest_sha256,
 )
 from openevo.experiments import EvolutionHttpClient, RolloutHttpClient
-from openevo.experiments.clients import EvolutionClientProtocol, RolloutClientProtocol
+from openevo.experiments.clients import (
+    EvolutionClientProtocol,
+    EvolutionHttpStatusError,
+    RolloutClientProtocol,
+)
 from openevo.experiments.runner import _run_core_authoritative_experiment
 from openevo.internal_auth import (
     GenerationBoundRunAdmissionCheck,
@@ -1502,7 +1507,7 @@ class CoreScienceTaskOwnerV2:
             logger.error(
                 "v2 science successor transition %s failed during preparation [%s]",
                 transition_id,
-                type(exc).__name__,
+                _successor_transition_closed_failure_code(exc),
             )
             retryable = _successor_transition_failure_is_retryable(exc)
             error = _successor_transition_api_error(
@@ -1592,7 +1597,7 @@ class CoreScienceTaskOwnerV2:
             logger.error(
                 "v2 science successor reconciliation %s failed [%s]",
                 successor_transition_id,
-                type(exc).__name__,
+                _successor_transition_closed_failure_code(exc),
             )
             retryable = _successor_transition_failure_is_retryable(exc)
             error = _successor_transition_api_error(
@@ -2996,6 +3001,34 @@ def _successor_transition_failure_is_retryable(exc: Exception) -> bool:
     ):
         return False
     return True
+
+
+def _successor_transition_closed_failure_code(exc: Exception) -> str:
+    """Project a non-secret diagnostic code from one successor failure chain."""
+
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    declared_failure_code: str | None = None
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, EvolutionHttpStatusError):
+            detail = current.detail_code.upper()
+            return f"EVOLUTION_HTTP_{current.status_code}_{detail}"
+        failure_code = getattr(current, "failure_code", None)
+        if (
+            declared_failure_code is None
+            and isinstance(failure_code, str)
+            and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", failure_code)
+        ):
+            declared_failure_code = failure_code.upper()
+        current = current.__cause__ or current.__context__
+    if declared_failure_code is not None:
+        return f"PREPARATION_{declared_failure_code}"
+    exception_name = type(exc).__name__
+    closed_name = re.sub(r"(?<!^)(?=[A-Z])", "_", exception_name).upper()
+    if re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", closed_name):
+        return f"EXCEPTION_{closed_name}"
+    return "EXCEPTION_UNCLASSIFIED"
 
 
 def _successor_transition_api_error(
