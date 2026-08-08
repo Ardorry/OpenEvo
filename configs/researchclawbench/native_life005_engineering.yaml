@@ -113,18 +113,18 @@ reflector:
   auth_mode: subscription
   capture_mode: transcript
   runtime_status: PINNED
-  readiness_receipt: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/logs/dev17_terminal_authority_release_v17_20260801T182116Z/readiness_runtime.json
+  readiness_receipt: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/logs/native_runtime_restore_20260808T074650Z/readiness_runtime.json
   host_path_fallback_allowed: false
-  credential_mount_readiness_receipt: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/logs/dev17_terminal_authority_release_v17_20260801T182116Z/readiness_mount.json
+  credential_mount_readiness_receipt: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/logs/native_runtime_restore_20260808T074650Z/readiness_mount.json
   require_credential_mount_readiness: true
   credential_mount_expected:
-    authority_id: 5f83f0f9a1085e7ce062f5c9b43aa23f2c6aed8138ed93cf919e17b24308cc38
-    worker_launch_id: mrl-9dedc931c0711efaebb7b5eee2b68e6c
-    generation_digest: 4b3cfba520ccfc5c7f26c0b2a5ba1c863c8f125b452039926ce482b2cac46f93
-    daemon_release_identity: fa984ea2799dc2e567813780d84642f0791ad5b918794a252a2b2ab1e7c8dd43
-    release_install_digest: 557862b0b630832860bd053942f8b32449f7a711910149d290e22fd82eff5477
-    release_registry_digest: a8ac470c1a68f68db3e49945d8bb4386e8877902f3edfb2429d3f2e2beec2703
-    docker_host_path_identity: 0e4bbc8228536a12f2dfbd8df27fdc38d3f6d664fafd9e57a626116274bfdb5f
+    authority_id: 0eef518c58d5388ddecf55fee24bc000084a530889545b2920e62170c0e8db00
+    worker_launch_id: mrl-26564464cc9cbd9e88107d92c28dc7d3
+    generation_digest: f8796d40998a573f98ed97118a592d4d5d778c013f94acfb2c1a3ecadd79929a
+    daemon_release_identity: 6d5247dab93b1afa8359c9e0926af0099a143324f39709101ee374b20c31cfd5
+    release_install_digest: 64124c32566fb98533d36afd5f3ea3d5783d1f6c53341a515f3640656c68a83e
+    release_registry_digest: aef4a70109b4811c319134320c9842a6434fe503397a555959bdec600e3c48c0
+    docker_host_path_identity: d82ef5320654c781bf238d40a97c1c77ed5b9c543a15ca58de85b9f4e9027503
     runtime_digest: sha256:c60d4a60a7f0a353cccf07399407bac3f6b56991610a0457a6c1d4e5bdd61d88
 judge:
   model: openai/gpt-5.1
@@ -178,6 +178,9 @@ budgets:
   max_candidate_model_calls: 51
   max_reflector_model_calls: 170
   max_infrastructure_retries_per_attempt: 1
+randomness_policy:
+  seed: provider_default_fresh_session
+  candidate_sampling: independent_fresh_attempts
 gates:
   contamination_receipt_status: PASS
   reflector_runtime_status: PINNED
