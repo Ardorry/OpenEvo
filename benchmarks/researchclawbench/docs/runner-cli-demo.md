@@ -1,8 +1,8 @@
-# ResearchClawBench maintainer CLI meeting demo
+# ResearchClawBench per-item runner meeting demo
 
-This package-local maintainer command uses OpenEvo Core, `CodexHarness`, and the
-managed runtime. It never falls back to host `codex exec`; it is not a separate
-OpenEvo end-user CLI product.
+This package-local maintainer CLI runs the Community per-item experiment through
+OpenEvo Core. It is not a public OpenEvo end-user CLI and never falls back to a
+host `codex exec` subprocess.
 
 ## 1. Enter the repository
 
@@ -11,92 +11,85 @@ cd /home/lhy-h/work/researchclaw_per_item_minimal
 export PYTHONPATH="$PWD/benchmarks/researchclawbench/src:$PWD/src"
 ```
 
-## 2. Check the closed inputs without displaying secrets
+## 2. Check Judge credentials without printing them
 
 ```bash
-test -f configs/researchclawbench/native_life005_engineering.yaml
-test -n "${CODEX_HOME:+set}"
-/usr/bin/docker version --format '{{.Server.Version}} {{.Server.APIVersion}}'
+test -d /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/secrets
+test -f /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/secrets/judge.env
+test "$(stat -c %a /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/secrets/judge.env)" = 600
 ```
 
-Do not use `env`, `printenv`, shell tracing, or display `auth.json` in a meeting.
-This engineering validation does not invoke the Judge.
+Do not use `env`, `printenv`, shell tracing, or display `judge.env`, OAuth files,
+API keys, or tokens during the meeting.
 
-## 3. Zero-call demo
+## 3. Zero-call Community 17 plan
 
 ```bash
-.venv/bin/python -m openevo_researchclawbench.cli run-per-item \
-  --protocol configs/researchclawbench/native_life005_engineering.yaml \
-  --task Life_005 \
-  --run-id rcb_oe_v0_native_life005_meeting \
+.venv/bin/python -m openevo_researchclawbench.cli run-per-item-community \
+  --protocol configs/researchclawbench/per_item_community17.yaml \
+  --run-id rcb_oe_v0_per_item_community17_meeting_dry \
   --dry-run \
   --no-model-calls
 ```
 
-This prints task discovery, the Core/CodexHarness route, planned stages, output
-root, managed readiness, and `provider_calls=0`. It creates no run namespace.
+The output lists all 17 tasks and the sequence `baseline -> judge -> evolve
+once -> evolved -> judge -> pair -> reset`. It reports `provider_calls=0` and
+does not create a run namespace.
 
-## 4. Fresh baseline plus native evolution command
-
-Run only after the dry-run reports `managed_runtime_ready=true`:
+## 4. Life_005 engineering rehearsal
 
 ```bash
 .venv/bin/python -m openevo_researchclawbench.cli run-per-item \
-  --protocol configs/researchclawbench/native_life005_engineering.yaml \
+  --protocol configs/researchclawbench/per_item_community17.yaml \
   --task Life_005 \
-  --run-id rcb_oe_v0_native_life005_meeting
+  --run-id rcb_oe_v0_per_item_life005_meeting
 ```
 
-This is the real fresh engineering command. It consumes model calls, uses a new
-namespace, attaches only Life_005 GT, and stops before evolved Candidate/Judge.
-Do not run it during a zero-call meeting demo.
+This paid command uses fresh Candidate sessions for baseline and evolved,
+performs exactly one native GT-supervised evolution cycle, writes a pair, and
+resets active state. Use a new run ID if the shown namespace already exists.
 
-The completed architecture validation used the sealed baseline and Core's
-native recovery API:
+## 5. Community 17 launch command (prepared, not executed here)
 
 ```bash
-.venv/bin/python -m openevo_researchclawbench.cli recover-native-evolution \
-  --protocol configs/researchclawbench/native_life005_engineering.yaml \
-  --source-run-id rcb_oe_v0_native_life005_arch_20260808T084500Z \
-  --run-id rcb_oe_v0_native_life005_evolution_recovery_20260808T094500Z
+.venv/bin/python -m openevo_researchclawbench.cli run-per-item-community \
+  --protocol configs/researchclawbench/per_item_community17.yaml \
+  --run-id rcb_oe_v0_per_item_community17_formal_01
 ```
 
-It is now idempotent: Core reads the three completed target operations and the
-existing Project Head seed without issuing another reflector call.
-
-## 5. Status
+## 6. Status
 
 ```bash
-python -m json.tool \
-  /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/successor_recovery/rcb_oe_v0_native_life005_evolution_recovery_20260808T094500Z/closed_receipt.json
+.venv/bin/python -m openevo_researchclawbench.cli per-item-community-status \
+  --protocol configs/researchclawbench/per_item_community17.yaml \
+  --run-id rcb_oe_v0_per_item_community17_formal_01
 ```
 
-## 6. Target operation receipts
+## 7. Logs and receipts
 
 ```bash
-find /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/successor_recovery/rcb_oe_v0_native_life005_evolution_recovery_20260808T094500Z/targets \
-  -type f -name '*.json' -print | sort
+find /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/per_item_community/rcb_oe_v0_per_item_community17_formal_01 \
+  -type f \( -name '*.json' -o -name '*.jsonl' \) -print | sort
 ```
 
-## 7. Verify/result
+## 8. Verify and results
 
 ```bash
-.venv/bin/pytest -q \
-  benchmarks/researchclawbench/tests/test_native_evolution_recovery.py \
-  benchmarks/researchclawbench/tests/test_runner_cli_demo.py
+.venv/bin/python -m openevo_researchclawbench.cli per-item-community-verify \
+  --protocol configs/researchclawbench/per_item_community17.yaml \
+  --run-id rcb_oe_v0_per_item_community17_formal_01
 ```
 
-The closed receipt records the three registry artifact IDs/hashes and successor
-Project Head. The source baseline remains under the original Supervisor
-namespace; no result is copied into this source checkout.
+The final paired result is under the printed output root as
+`paired_results.json`.
 
-## 8. Stop owned resources
+## 9. Stop owned resources
 
 ```bash
-.venv/bin/python -m openevo_researchclawbench.cli stop-owned \
-  --protocol configs/researchclawbench/native_life005_engineering.yaml \
-  --run-id rcb_oe_v0_native_life005_meeting
+.venv/bin/python -m openevo_researchclawbench.cli per-item-community-stop-owned \
+  --protocol configs/researchclawbench/per_item_community17.yaml \
+  --run-id rcb_oe_v0_per_item_community17_formal_01
 ```
 
-This targets only resources whose ownership is recorded by the fresh meeting
-Supervisor. It is not needed for the already closed recovery validation.
+The stop command uses only Supervisor-recorded ownership. It does not target
+unrelated processes, containers, or archived evidence.

@@ -179,6 +179,10 @@ class TrainingOperations(Protocol):
 
     def construct_composite(self, request: dict[str, Any], idempotency_key: str) -> OperationResult: ...
 
+    def prepare_per_item_evolved_workspace(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> OperationResult: ...
+
     def sanitize_cross_task(self, request: dict[str, Any], idempotency_key: str) -> OperationResult: ...
 
     def freeze_final_artifact(self, request: dict[str, Any], idempotency_key: str) -> OperationResult: ...
@@ -196,6 +200,7 @@ class ProductionPorts:
     sanitizer: ProductionOperationPort
     freeze: ProductionOperationPort
     reconciliation: ProductionOperationPort | None = None
+    per_item_evolved: ProductionOperationPort | None = None
 
 
 def _utc_now() -> str:
@@ -780,6 +785,20 @@ class ProductionTrainingOperations:
     def construct_composite(self, request: dict[str, Any], idempotency_key: str) -> OperationResult:
         return self._run(kind="composite", port=self.ports.composite, request=request, idempotency_key=idempotency_key)
 
+    def prepare_per_item_evolved_workspace(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> OperationResult:
+        if self.ports.per_item_evolved is None:
+            raise ProductionOperationError(
+                "per-item evolved workspace authority is unavailable"
+            )
+        return self._run(
+            kind="per_item_evolved_workspace",
+            port=self.ports.per_item_evolved,
+            request=request,
+            idempotency_key=idempotency_key,
+        )
+
     def sanitize_cross_task(self, request: dict[str, Any], idempotency_key: str) -> OperationResult:
         return self._run(kind="sanitizer", port=self.ports.sanitizer, request=request, idempotency_key=idempotency_key)
 
@@ -805,6 +824,13 @@ class ProductionTrainingOperations:
 
     def admit_composite(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
         return self.construct_composite(request, idempotency_key).to_dict()
+
+    def prepare_evolved_workspace(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> dict[str, Any]:
+        return self.prepare_per_item_evolved_workspace(
+            request, idempotency_key
+        ).to_dict()
 
     def destroy_task_local(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
         return self._run(kind="task_local_destroy", port=self.ports.task_local, request=request, idempotency_key=idempotency_key).to_dict()

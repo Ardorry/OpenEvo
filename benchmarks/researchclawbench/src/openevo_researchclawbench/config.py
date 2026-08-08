@@ -165,6 +165,42 @@ class ExperimentConfig:
         except ValueError as exc:
             raise ProtocolError(str(exc)) from exc
 
+    @property
+    def per_item_reset(self) -> dict[str, Any] | None:
+        value = self.raw.get("per_item_reset")
+        if value is None:
+            return None
+        expected = {
+            "contract_version": "openevo.researchclawbench.per_item_reset.v1",
+            "only_per_item_reset": True,
+            "dataset": "community",
+            "passes": [
+                "baseline",
+                "judge_baseline",
+                "evolve_once_current_task_gt",
+                "evolved",
+                "judge_evolved",
+                "paired_result",
+                "reset",
+            ],
+            "fresh_codex_per_pass": True,
+            "fresh_generation_zero_per_task": True,
+            "one_evolution_cycle_per_task": True,
+            "candidate_visible_evolution_artifacts": [
+                "agent_system",
+                "text_memory",
+                "skill_bundle",
+            ],
+            "gt_visible_to_candidate": False,
+            "judge_feedback_in_evolution": False,
+            "cross_task_artifact_inheritance": False,
+            "cross_task_project_head_inheritance": False,
+            "terminal_stage": "ITEM_RESET",
+        }
+        if value != expected:
+            raise ProtocolError("per-item reset contract differs from the closed protocol")
+        return value
+
     def validate_static(self) -> None:
         if self.require("experiment_id") != EXPERIMENT_ID:
             raise ProtocolError("unexpected experiment_id")
@@ -172,14 +208,21 @@ class ExperimentConfig:
             raise ProtocolError("unexpected refactor_id")
         if tuple(self.require("tasks")) != FROZEN_TASKS:
             raise ProtocolError("task sequence differs from the frozen 17-task sequence")
+        per_item = self.per_item_reset is not None
         expected = {
             "community_training_tasks": len(FROZEN_TASKS),
-            "attempts_per_task": ATTEMPTS_PER_TASK,
-            "reflector_rounds_per_task": REFLECTOR_ROUNDS_PER_TASK,
-            "candidate_runs": EXPECTED_CANDIDATE_RUNS,
-            "reflector_cycles_per_artifact": EXPECTED_REFLECTOR_CYCLES,
-            "artifact_evolution_requests": EXPECTED_ARTIFACT_EVOLUTION_REQUESTS,
-            "official_frozen_test_runs": OFFICIAL_TASK_COUNT,
+            "attempts_per_task": 2 if per_item else ATTEMPTS_PER_TASK,
+            "reflector_rounds_per_task": 1 if per_item else REFLECTOR_ROUNDS_PER_TASK,
+            "candidate_runs": len(FROZEN_TASKS) * 2 if per_item else EXPECTED_CANDIDATE_RUNS,
+            "reflector_cycles_per_artifact": (
+                len(FROZEN_TASKS) if per_item else EXPECTED_REFLECTOR_CYCLES
+            ),
+            "artifact_evolution_requests": (
+                len(FROZEN_TASKS) * len(ARTIFACT_TYPES)
+                if per_item
+                else EXPECTED_ARTIFACT_EVOLUTION_REQUESTS
+            ),
+            "official_frozen_test_runs": 0 if per_item else OFFICIAL_TASK_COUNT,
         }
         for key, value in expected.items():
             if self.require(key) != value:
@@ -264,18 +307,65 @@ class ExperimentConfig:
             raise ProtocolError("reflector max_tool_steps must remain 80")
         if self.require("reflector.max_runtime_seconds") != 900:
             raise ProtocolError("reflector max runtime must remain 900 seconds")
-        if self.require("budgets.max_candidate_model_calls") != EXPECTED_CANDIDATE_RUNS:
+        expected_candidate_calls = (
+            len(FROZEN_TASKS) * 2 if per_item else EXPECTED_CANDIDATE_RUNS
+        )
+        if self.require("budgets.max_candidate_model_calls") != expected_candidate_calls:
             raise ProtocolError("candidate call budget must equal the frozen schedule")
-        if self.require("budgets.max_reflector_model_calls") != 170:
+        expected_reflector_calls = len(FROZEN_TASKS) * 5 if per_item else 170
+        if self.require("budgets.max_reflector_model_calls") != expected_reflector_calls:
             raise ProtocolError("reflector call budget must include three GEPA proposals")
-        if self.require("official_freeze.evolution_enabled") is not False:
-            raise ProtocolError("official freeze must disable evolution")
-        if self.require("official_freeze.reflector_enabled") is not False:
-            raise ProtocolError("official freeze must disable reflector")
-        if self.require("official_freeze.teacher_enabled") is not False:
-            raise ProtocolError("official freeze must disable teacher")
-        if self.require("official_freeze.feedback_released") is not False:
-            raise ProtocolError("official feedback must remain withheld")
+        if per_item:
+            if self.raw.get("formal_runs") is not None or self.raw.get(
+                "official_freeze"
+            ) is not None:
+                raise ProtocolError(
+                    "per-item reset protocol cannot include formal or official workflow"
+                )
+            if self.raw.get("cross_task") != {
+                "carry_native_composite": False,
+                "carry_task_local_overlay": False,
+                "carry_workspace": False,
+                "carry_raw_data": False,
+                "carry_task_outputs": False,
+                "carry_project_head": False,
+                "reset_active_state": True,
+            }:
+                raise ProtocolError("per-item cross-task state must reset completely")
+            if self.raw.get("teacher") != {
+                "enabled_on_community": True,
+                "modes": ["HARD_GT"],
+                "task_local_overlay_for_candidate": False,
+                "evolution_private_attachment": True,
+                "global_artifact_answers_forbidden": True,
+            }:
+                raise ProtocolError("per-item GT supervision boundary drifted")
+            if self.raw.get("pairing") != {
+                "same_task_only": True,
+                "score_direction": "maximize",
+                "retry_for_score_improvement": False,
+            }:
+                raise ProtocolError("per-item pairing policy drifted")
+            per_item_judge = {
+                "judge.model": "openai/gpt-5.1",
+                "judge.provider": "openai_compatible",
+                "judge.provider_only": "azure",
+                "judge.allow_fallbacks": False,
+                "judge.runs_per_attempt": 1,
+                "candidate.host_codex_allowed": False,
+            }
+            for key, expected_value in per_item_judge.items():
+                if self.require(key) != expected_value:
+                    raise ProtocolError(f"{key} differs from per-item policy")
+        else:
+            if self.require("official_freeze.evolution_enabled") is not False:
+                raise ProtocolError("official freeze must disable evolution")
+            if self.require("official_freeze.reflector_enabled") is not False:
+                raise ProtocolError("official freeze must disable reflector")
+            if self.require("official_freeze.teacher_enabled") is not False:
+                raise ProtocolError("official freeze must disable teacher")
+            if self.require("official_freeze.feedback_released") is not False:
+                raise ProtocolError("official feedback must remain withheld")
         reflector = self.raw.get("reflector")
         if (
             isinstance(reflector, dict)
@@ -305,6 +395,10 @@ class ExperimentConfig:
                     "managed reflector credential mount readiness identity is incomplete"
                 )
         policy = self.community_validator_failure_policy
+        if per_item and policy is not None:
+            raise ProtocolError(
+                "per-item quality failure cannot enter continual validator learning"
+            )
         if policy is not None:
             suffix = policy.get("run_id_suffix")
             exact = {
@@ -488,7 +582,12 @@ class ExperimentConfig:
         production_attachment_transport = self.require(
             "gates.production_training_feedback_transport_status"
         )
-        formal_orchestrator = self.require("gates.formal_training_orchestrator_status")
+        orchestrator_gate = (
+            "gates.per_item_orchestrator_status"
+            if self.per_item_reset is not None
+            else "gates.formal_training_orchestrator_status"
+        )
+        formal_orchestrator = self.require(orchestrator_gate)
         framework_lock_present = Path(self.require("native_openevo.framework_lock")).is_file()
         reflector_receipt_valid = self.reflector_readiness_receipt_valid()
         reflector_mount = self.reflector_credential_mount_readiness()
@@ -544,7 +643,7 @@ class ExperimentConfig:
         if production_attachment_transport != "READY":
             blockers.append("PRODUCTION_TRAINING_FEEDBACK_TRANSPORT_UNAVAILABLE")
         if formal_orchestrator != "READY":
-            blockers.append("FORMAL_TRAINING_ORCHESTRATOR_UNAVAILABLE")
+            blockers.append("PER_ITEM_ORCHESTRATOR_UNAVAILABLE")
         if not framework_lock_present:
             blockers.append("VERIFIED_FRAMEWORK_LOCK_MISSING")
         if not source_identity_matches:
@@ -552,7 +651,14 @@ class ExperimentConfig:
         if not formal_identity_valid:
             blockers.append("FORMAL_V11_IDENTITY_DRIFT")
         missing_judge = [name for name in judge_names if not source.get(name)]
-        if missing_judge:
+        judge_file_readiness: dict[str, Any] | None = None
+        judge_credentials_ready = not missing_judge
+        if self.per_item_reset is not None:
+            from .production_training_operations import judge_credential_readiness
+
+            judge_file_readiness = judge_credential_readiness(self)
+            judge_credentials_ready = judge_file_readiness.get("ready") is True
+        if not judge_credentials_ready:
             blockers.append("JUDGE_CREDENTIALS_MISSING")
         return {
             "native_candidate_contract_complete": True,
@@ -562,16 +668,37 @@ class ExperimentConfig:
             "managed_reflector_credential_mount": reflector_mount,
             "teacher_attachment_status": teacher_status,
             "production_training_feedback_transport_status": production_attachment_transport,
-            "formal_training_orchestrator_status": formal_orchestrator,
+            "per_item_orchestrator_status": (
+                formal_orchestrator if self.per_item_reset is not None else None
+            ),
+            "formal_training_orchestrator_status": (
+                None if self.per_item_reset is not None else formal_orchestrator
+            ),
             "contamination_receipt_status": contamination,
             "judge_environment_present": {name: bool(source.get(name)) for name in judge_names},
             "missing_judge_environment": missing_judge,
+            "judge_credentials_ready": judge_credentials_ready,
+            "judge_secret_file_present": (
+                None
+                if judge_file_readiness is None
+                else judge_file_readiness.get("secret_file_present")
+            ),
+            "judge_secret_file_permissions_valid": (
+                None
+                if judge_file_readiness is None
+                else judge_file_readiness.get("secret_file_permissions_valid")
+            ),
+            "judge_secret_values_read": (
+                None
+                if judge_file_readiness is None
+                else judge_file_readiness.get("secret_values_read")
+            ),
             "unresolved_protocol_fields": self.unresolved_fields(),
             "framework_lock_present": framework_lock_present,
             "source_identity_matches": source_identity_matches,
             "active_source_identities": active_identities,
             "formal_v11_identity_valid": formal_identity_valid,
             "formal_v11_identity_error": formal_identity_error,
-            "ready": static_ready and all(bool(source.get(name)) for name in judge_names),
+            "ready": static_ready and judge_credentials_ready,
             "blockers": blockers,
         }

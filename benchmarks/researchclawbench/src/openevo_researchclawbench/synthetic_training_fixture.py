@@ -188,6 +188,35 @@ class DurableFakeAuthority(ProductionOperationPort):
                     successor_workspace_body
                 ),
             }
+            injected_ids = [
+                f"registry-{artifact_type}-a1"
+                for artifact_type in ARTIFACT_TYPES
+            ]
+            runtime_injection = {
+                "artifact_count": 0 if attempt == 0 else 3,
+                "artifact_ids": [] if attempt == 0 else injected_ids,
+                "runtime_injection_receipt": (
+                    None
+                    if attempt == 0
+                    else {
+                        "artifacts": [
+                            {
+                                "artifact_id": artifact_id,
+                                "artifact_type": artifact_type,
+                                "content_sha256": canonical_sha256(
+                                    {
+                                        "artifact_id": artifact_id,
+                                        "artifact_type": artifact_type,
+                                    }
+                                ),
+                            }
+                            for artifact_type, artifact_id in zip(
+                                ARTIFACT_TYPES, injected_ids, strict=True
+                            )
+                        ]
+                    }
+                ),
+            }
             return {
                 "run_id": run_id,
                 "core_project_id": project_id,
@@ -204,6 +233,9 @@ class DurableFakeAuthority(ProductionOperationPort):
                     successor_workspace_authority
                 ),
                 "transcript_receipt": {"sha256": seed, "trace_count": 1},
+                "candidate_output_root": f"/synthetic/{task}/candidate-{attempt}",
+                "input_project_head_id": f"head-input-{task}-a{attempt}",
+                "runtime_injection": runtime_injection,
                 "completed": True,
                 "runtime_seconds": float(30 - attempt * 2),
                 "cost_total_usd": None,
@@ -244,7 +276,7 @@ class DurableFakeAuthority(ProductionOperationPort):
                 "runtime_seconds": 0.0,
             }
         if self.kind == "attachment":
-            return {
+            result = {
                 "attachment_id": f"attachment-{task}-a{attempt}",
                 "attachment_sha256": seed,
                 "resolved_view_sha256": canonical_sha256({"view": seed}),
@@ -252,6 +284,18 @@ class DurableFakeAuthority(ProductionOperationPort):
                 "task_local_overlay_id": f"overlay-{task}-a{attempt}",
                 "authority": "evaluator_only",
             }
+            if request.get("feedback_source") == "current_task_gt":
+                gt = request["gt_supervision"]
+                result.update(
+                    {
+                        "feedback_class": "HARD_GT",
+                        "feedback_source": "current_task_gt",
+                        "judge_calls": 0,
+                        "ground_truth_sha256": gt["ground_truth_sha256"],
+                        "judge_feedback_included": False,
+                    }
+                )
+            return result
         if self.kind == "evolution":
             jobs = []
             for artifact_type in ARTIFACT_TYPES:
@@ -281,6 +325,37 @@ class DurableFakeAuthority(ProductionOperationPort):
                 "artifact_hashes": {item["artifact_type"]: item["successor_sha256"] for item in jobs},
                 "composite_sha256": seed,
                 "admission_receipt_ids": [f"admission-{item['job_id']}" for item in jobs],
+            }
+        if self.kind == "per_item_evolved":
+            admitted = request["admitted_composite"]
+            artifact_ids = list(admitted["registry_artifact_ids"])
+            authority = {
+                "schema_version": (
+                    "openevo.researchclawbench.preseeded_workspace_authority.v1"
+                ),
+                "synthetic": True,
+                "artifact_ids": artifact_ids,
+            }
+            return {
+                "task_id": task,
+                "same_task_only": True,
+                "fresh_generation_zero_destination": True,
+                "source_core_project_id": request["source_core_project_id"],
+                "source_project_head_id": f"source-head-{task}",
+                "core_project_id": f"project-{task}-evolved",
+                "core_project_head_id": f"head-{task}-evolved",
+                "composite_id": f"{admitted['composite_id']}-clean",
+                "artifact_ids": artifact_ids,
+                "artifact_hashes": admitted.get("artifact_hashes", {}),
+                "preseeded_workspace_authority": authority,
+                "candidate_started": False,
+                "task_created": False,
+                "attempt_budget_consumed": False,
+                "raw_gt_carried": False,
+                "judge_feedback_carried": False,
+                "cross_task_inheritance": False,
+                "recovery_command_used": False,
+                "recovery_path_used": False,
             }
         if self.kind == "task_local":
             return {"destroyed": True, "overlay_id": request.get("overlay_id")}
@@ -347,7 +422,7 @@ def build_synthetic_ports(root: str | Path, *, crash_point: str | None = None) -
         kind: DurableFakeAuthority(base, kind, crash_point=crash_point)
         for kind in (
             "candidate", "validation", "evaluation", "attachment", "evolution",
-            "composite", "task_local", "sanitizer", "freeze",
+            "composite", "per_item_evolved", "task_local", "sanitizer", "freeze",
         )
     }
     return (
@@ -358,6 +433,7 @@ def build_synthetic_ports(root: str | Path, *, crash_point: str | None = None) -
             attachment=authorities["attachment"],
             evolution=authorities["evolution"],
             composite=authorities["composite"],
+            per_item_evolved=authorities["per_item_evolved"],
             task_local=authorities["task_local"],
             sanitizer=authorities["sanitizer"],
             freeze=authorities["freeze"],

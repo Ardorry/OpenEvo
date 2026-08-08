@@ -22,6 +22,7 @@ class TrainingStage(StrEnum):
     EVOLUTION_RUNNING = "EVOLUTION_RUNNING"
     EVOLUTION_COMPLETED = "EVOLUTION_COMPLETED"
     COMPOSITE_ADMITTED = "COMPOSITE_ADMITTED"
+    EVOLVED_WORKSPACE_PREPARED = "EVOLVED_WORKSPACE_PREPARED"
     NEXT_ATTEMPT_READY = "NEXT_ATTEMPT_READY"
     TASK_SELECTION_PENDING = "TASK_SELECTION_PENDING"
     TASK_BEST_SELECTED = "TASK_BEST_SELECTED"
@@ -32,6 +33,8 @@ class TrainingStage(StrEnum):
     COMMUNITY_TRAINING_COMPLETE = "COMMUNITY_TRAINING_COMPLETE"
     FINAL_FREEZE_PENDING = "FINAL_FREEZE_PENDING"
     FINAL_FROZEN = "FINAL_FROZEN"
+    ITEM_CLOSED = "ITEM_CLOSED"
+    ITEM_RESET = "ITEM_RESET"
     BUDGET_EXHAUSTED = "BUDGET_EXHAUSTED"
     BLOCKED = "BLOCKED"
     FAILED = "FAILED"
@@ -97,7 +100,11 @@ _ALLOWED: dict[TrainingStage, frozenset[TrainingStage]] = {
         }
     ),
     TrainingStage.EVALUATED: frozenset(
-        {TrainingStage.ATTACHMENT_SEALED, TrainingStage.TASK_SELECTION_PENDING}
+        {
+            TrainingStage.ATTACHMENT_SEALED,
+            TrainingStage.TASK_SELECTION_PENDING,
+            TrainingStage.ITEM_CLOSED,
+        }
     ),
     TrainingStage.ATTACHMENT_SEALED: frozenset(
         {TrainingStage.EVOLUTION_PENDING, TrainingStage.TASK_SELECTION_PENDING}
@@ -109,7 +116,15 @@ _ALLOWED: dict[TrainingStage, frozenset[TrainingStage]] = {
         {TrainingStage.EVOLUTION_COMPLETED, TrainingStage.BLOCKED, TrainingStage.FAILED}
     ),
     TrainingStage.EVOLUTION_COMPLETED: frozenset({TrainingStage.COMPOSITE_ADMITTED}),
-    TrainingStage.COMPOSITE_ADMITTED: frozenset({TrainingStage.NEXT_ATTEMPT_READY}),
+    TrainingStage.COMPOSITE_ADMITTED: frozenset(
+        {
+            TrainingStage.NEXT_ATTEMPT_READY,
+            TrainingStage.EVOLVED_WORKSPACE_PREPARED,
+        }
+    ),
+    TrainingStage.EVOLVED_WORKSPACE_PREPARED: frozenset(
+        {TrainingStage.TASK_ATTEMPT_READY}
+    ),
     TrainingStage.NEXT_ATTEMPT_READY: frozenset({TrainingStage.TASK_ATTEMPT_READY}),
     TrainingStage.TASK_SELECTION_PENDING: frozenset(
         {TrainingStage.TASK_BEST_SELECTED, TrainingStage.TASK_NO_VALID_ATTEMPT}
@@ -128,6 +143,8 @@ _ALLOWED: dict[TrainingStage, frozenset[TrainingStage]] = {
         {TrainingStage.FINAL_FROZEN, TrainingStage.BLOCKED, TrainingStage.FAILED}
     ),
     TrainingStage.FINAL_FROZEN: frozenset(),
+    TrainingStage.ITEM_CLOSED: frozenset({TrainingStage.ITEM_RESET}),
+    TrainingStage.ITEM_RESET: frozenset(),
     TrainingStage.BUDGET_EXHAUSTED: frozenset(),
     TrainingStage.BLOCKED: frozenset(),
     TrainingStage.FAILED: frozenset(),
@@ -146,6 +163,8 @@ def evolution_allowed(stage: TrainingStage) -> bool:
         TrainingStage.COMMUNITY_TRAINING_COMPLETE,
         TrainingStage.FINAL_FREEZE_PENDING,
         TrainingStage.FINAL_FROZEN,
+        TrainingStage.ITEM_CLOSED,
+        TrainingStage.ITEM_RESET,
         TrainingStage.BUDGET_EXHAUSTED,
         TrainingStage.CANDIDATE_SETUP_BLOCKED,
         TrainingStage.BLOCKED,

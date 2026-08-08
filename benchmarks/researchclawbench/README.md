@@ -1,10 +1,11 @@
 # OpenEvo ResearchClawBench native-path adapter
 
 This package is the adapter-only prototype for
-`sequential_task_reflector_evolution_v0`. It freezes the 17 Community tasks in
-the protocol order, three independent attempts per task, and two completed-task
-evolution cycles per task. The resulting plan contains 51 candidate runs, 34
-reflector cycles, and 102 artifact-specific evolution requests.
+`sequential_task_reflector_evolution_v0`. The active protocol treats every one
+of the 17 Community tasks as an independent experiment: two fresh Candidate
+passes, one current-task GT-supervised native evolution cycle, two independent
+Judge operations, one paired result, and a complete active-state reset. The
+plan contains 34 Candidate runs, 17 evolution cycles, and 51 artifact jobs.
 
 Candidate execution is owned by OpenEvo Core: an opaque workspace handoff and
 runtime-context binding enter a real `TaskRequest`, `AgentSpec(harness="codex")`
@@ -23,16 +24,13 @@ Reflector work is submitted as three independent native plan-bound jobs using
 `skill_bundle_reflector`. A verified OpenEvo evolution worker, not this adapter,
 executes methods and persists registry artifacts. The Life_005 engineering
 validation proved the managed GPT-5.5 runtime, current-task GT attachment,
-native artifact registry, and atomic successor Project Head seed. It stopped
-before the evolved Candidate and Judge.
+native artifact registry, and atomic successor Project Head seed. The per-item
+runner extends that native route with a fresh evolved Candidate, paired Judge
+result, and task-local reset.
 
-The original Life_005 successor exhausted its pre-job transition capacity. The
-package-local `recover-native-evolution` maintainer command now freezes that
-immutable Supervisor evidence and calls Core's existing source-resolution and
-successor-recovery APIs. It does not implement a reflector, artifact registry,
-runtime, provider, or fallback. Completed target operations are reconciled by
-GET before any POST, so a CLI restart does not reauthorize an already durable
-paid operation.
+The package-local `recover-native-evolution` command remains a debug-only tool
+for immutable historical evidence. The production per-item command does not
+call or depend on it.
 
 No-model checks:
 
@@ -40,6 +38,5 @@ See `docs/runner-cli-demo.md` for the exact repository-managed protocol and
 meeting commands. These commands are benchmark maintainer automation, not a
 third OpenEvo user product or a replacement for the Daemon/Desktop contract.
 
-This is a Community training prototype, not an official leaderboard, Pass@1,
-or Pass@5 run. The official-40 gate disables evolution, reflector, teacher,
-task-local overlays, feedback release, and cross-task state changes.
+This branch prepares only the Community per-item reset experiment. It does not
+accumulate artifacts across tasks or prepare a frozen-composite/Official flow.

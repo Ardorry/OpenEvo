@@ -35,6 +35,7 @@ from openevo_researchclawbench.production_operation_ports import (
     CoreV2CandidatePort,
     LocalCompositePort,
     LocalSanitizerPort,
+    PerItemEvolvedWorkspacePort,
     _candidate_runtime_injection_authority,
     _candidate_workspace_binding_receipt,
     _closed_core_control_error_code,
@@ -51,6 +52,7 @@ from openevo_researchclawbench.production_operation_ports import (
     _require_successor_workspace_authority,
     _wait_for_completed_dataset,
     _workspace_snapshot_for_archive,
+    build_production_ports,
     require_nonterminal_candidate_lifecycle,
 )
 from openevo_researchclawbench.production_training_operations import (
@@ -3071,6 +3073,225 @@ def test_cross_task_sanitizer_forks_selected_authority_into_next_workspace(
     restored = composites.get_composite(result["composite_id"])
     assert restored["core_project_id"] == "project-destination"
     assert restored["restore_mode"] == "cross_project_fork"
+
+
+def test_per_item_evolved_workspace_rebinds_only_same_task_artifacts_to_clean_head(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    selected = {
+        "composite_id": "composite-life-evolved",
+        "composite_sha256": "1" * 64,
+        "core_project_id": "project-life-baseline",
+        "core_project_head_id": "head-life-successor",
+        "core_project_head_manifest_sha256": "2" * 64,
+        "registry_artifact_ids": ["art-system", "art-memory", "art-skill"],
+        "artifact_hashes": {
+            "agent_system": "3" * 64,
+            "text_memory": "4" * 64,
+            "skill_bundle": "5" * 64,
+        },
+        "registry_artifacts": {
+            "agent_system": {"registry_id": "art-system"},
+            "text_memory": {"registry_id": "art-memory"},
+            "skill_bundle": {"registry_id": "art-skill"},
+        },
+        "task_local_overlay_id": None,
+    }
+
+    class Composites:
+        def get_composite(self, composite_id):
+            assert composite_id == selected["composite_id"]
+            return selected
+
+        def register_restored(self, **kwargs):
+            assert kwargs["selected_composite_id"] == selected["composite_id"]
+            assert kwargs["restore_mode"] == "per_item_same_task_clean_workspace"
+            assert kwargs["project_id"] == "project-life-evolved"
+            return {
+                **selected,
+                "composite_id": "composite-life-evolved-clean",
+                "core_project_id": "project-life-evolved",
+                "core_project_head_id": kwargs["project_head"]["project_head_id"],
+            }
+
+    monkeypatch.setattr(
+        ports_module,
+        "_cross_task_content_admission_authority",
+        lambda _selected: {"passed": True},
+    )
+
+    class Client:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def close(self):
+            pass
+
+        def json(self, method, path, *, payload=None, **_kwargs):
+            if path == "/v2/projects/project-life-baseline":
+                assert method == "GET"
+                return {
+                    "active_project_head": {
+                        "project_head_id": "head-life-successor",
+                        "manifest_sha256": "2" * 64,
+                        "evolution_revision": {"artifact_count": 3},
+                    }
+                }
+            if path == "/v2/internal/projects/project-life-evolved/historical-restores":
+                assert method == "POST"
+                assert payload["mode"] == "cross_project_fork"
+                assert payload["source_project_id"] == "project-life-baseline"
+                return {
+                    "restore_request_id": "restore-life-same-task",
+                    "successor_project_head": {
+                        "project_head_id": "head-life-evolved",
+                        "project_id": "project-life-evolved",
+                        "generation": 1,
+                        "predecessor_project_head_id": "head-life-genesis",
+                        "manifest_sha256": "6" * 64,
+                        "workspace_snapshot": {
+                            "workspace_snapshot_id": "workspace-life-clean",
+                            "manifest_sha256": "7" * 64,
+                        },
+                        "evolution_revision": {"artifact_count": 3},
+                    },
+                }
+            raise AssertionError((method, path))
+
+    monkeypatch.setattr(ports_module, "CoreControlV2Client", Client)
+    port = PerItemEvolvedWorkspacePort(
+        Composites(),
+        config=object(),
+        root=tmp_path,
+        core_authority=object(),
+    )
+    archive = WorkspaceArchiveDeclarationV2(
+        format="openevo_deterministic_tar_v1",
+        media_type="application/vnd.openevo.workspace-tar",
+        content_sha256="8" * 64,
+        byte_size=1024,
+        entry_count=0,
+        extracted_byte_size=0,
+    )
+    monkeypatch.setattr(
+        port.destination_candidate,
+        "prepare_preseeded_destination",
+        lambda *_args, **_kwargs: {
+            "project_id": "project-life-evolved",
+            "project_head": {
+                "project_head_id": "head-life-genesis",
+                "project_id": "project-life-evolved",
+                "generation": 0,
+                "predecessor_project_head_id": None,
+                "manifest_sha256": "9" * 64,
+                "workspace_snapshot": {
+                    "workspace_snapshot_id": "workspace-life-clean",
+                    "manifest_sha256": "7" * 64,
+                },
+                "evolution_revision": {"artifact_count": 0},
+            },
+            "workspace_archive": archive.model_dump(mode="json"),
+        },
+    )
+    result = port.execute(
+        {
+            "task_id": "Life_005",
+            "attempt_index": 0,
+            "source_core_project_id": "project-life-baseline",
+            "admitted_composite": {
+                "composite_id": selected["composite_id"],
+                "registry_artifact_ids": selected["registry_artifact_ids"],
+            },
+            "ground_truth_sha256": "a" * 64,
+            "judge_feedback": None,
+            "fresh_workspace": True,
+            "same_task_only": True,
+        },
+        "per-item-life-evolved",
+    )
+    assert result["same_task_only"] is True
+    assert result["fresh_generation_zero_destination"] is True
+    assert result["cross_task_inheritance"] is False
+    assert result["raw_gt_carried"] is False
+    assert result["judge_feedback_carried"] is False
+    assert result["recovery_command_used"] is False
+    assert result["recovery_path_used"] is False
+    assert result["artifact_ids"] == selected["registry_artifact_ids"]
+    assert result["preseeded_workspace_authority"]["archive_content_sha256"] == (
+        archive.content_sha256
+    )
+
+
+def test_per_item_production_ports_use_native_candidate_and_successor_adapters(
+    tmp_path: Path,
+) -> None:
+    source = ExperimentConfig.load(
+        Path(__file__).resolve().parents[3]
+        / "configs/researchclawbench/per_item_community17.yaml"
+    )
+    raw = json.loads(json.dumps(source.raw))
+    raw["paths"]["project_root"] = "/"
+    raw["paths"]["experiment_root"] = str(tmp_path)
+    config = ExperimentConfig(source.path, raw)
+
+    ports = build_production_ports(
+        config,
+        tmp_path / "production-run",
+        core_authority=_core_authority(),
+    )
+
+    assert isinstance(ports.candidate, CoreV2CandidatePort)
+    assert isinstance(ports.evolution, CoreSuccessorPort)
+    assert isinstance(ports.per_item_evolved, PerItemEvolvedWorkspacePort)
+
+
+def test_per_item_supervisor_closes_through_production_operation_driver(
+    tmp_path: Path,
+) -> None:
+    source = ExperimentConfig.load(
+        Path(__file__).resolve().parents[3]
+        / "configs/researchclawbench/per_item_community17.yaml"
+    )
+    raw = json.loads(json.dumps(source.raw))
+    raw["reflector"]["require_credential_mount_readiness"] = False
+    config = ExperimentConfig(source.path, raw)
+    ports, authorities = build_synthetic_ports(tmp_path / "external")
+    run_id = "rcb_oe_v0_per_item_production_contract"
+    operations = ProductionTrainingOperations(
+        config=config,
+        experiment_run_id=run_id,
+        receipt_root=tmp_path / "operations",
+        ports=ports,
+    )
+    supervisor = CommunityTrainingSupervisor(
+        store=TrainingStateStore(tmp_path / "supervisor"),
+        experiment_id=run_id,
+        identity=_identity(config),
+        operations=operations,
+        task_ids=("Life_005",),
+        current_task_gt_supervision=True,
+        per_item_reset=True,
+    )
+    supervisor.initialize()
+    for _ in range(100):
+        state = supervisor.status()
+        if state["stage"] == "ITEM_RESET":
+            break
+        supervisor.run_next()
+    else:  # pragma: no cover - bounded fail-closed guard
+        raise AssertionError("per-item production driver did not close")
+
+    state = supervisor.status()
+    assert state["stage"] == "ITEM_RESET"
+    assert state["paired_result"]["artifact_consumption"][
+        "artifact_read_requested"
+    ] is True
+    assert authorities["candidate"].call_count() == 2
+    assert authorities["evaluation"].call_count() == 2
+    assert authorities["attachment"].call_count() == 1
+    assert authorities["evolution"].call_count() == 1
+    assert authorities["per_item_evolved"].call_count() == 1
 
 
 def test_full_synthetic_single_task_three_attempt_pipeline(tmp_path: Path, monkeypatch) -> None:

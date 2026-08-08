@@ -54,7 +54,7 @@ from .community_evaluator import (
     DurableCommunityEvaluatorPort,
     build_production_community_evaluator,
 )
-from .config import ARTIFACT_TYPES, ExperimentConfig
+from .config import ARTIFACT_TYPES, FROZEN_TASKS, ExperimentConfig
 from .managed_core_control import ManagedCoreControlAuthority
 from .production_training_operations import (
     ProductionOperationPort,
@@ -213,7 +213,7 @@ def _successor_workspace_projection_authority(
     stripped_bytes = 0
     for item in normalized:
         if not isinstance(item, dict):
-            raise ValueError("successor workspace projection entry is invalid")
+            raise TypeError("successor workspace projection entry is invalid")
         path = item.get("relative_path")
         kind = item.get("kind")
         if not isinstance(path, str) or path in seen:
@@ -1374,7 +1374,7 @@ def _candidate_runtime_injection_authority(
     openevo = metadata.get("openevo")
     evolution = metadata.get("evolution")
     if not isinstance(openevo, dict) or not isinstance(evolution, dict):
-        raise ValueError("sealed SessionResult lacks runtime injection metadata")
+        raise TypeError("sealed SessionResult lacks runtime injection metadata")
     if (
         openevo.get("project_id") != head.project_id
         or openevo.get("project_head_id") != head.project_head_id
@@ -1840,7 +1840,7 @@ class CoreV2CandidatePort(ProductionOperationPort):
                 project_head=project_head,
                 archive=archive,
             )
-            source = "recovery_preseed"
+            source = "preseeded_workspace"
         else:
             successor_authority = request.get("successor_workspace_authority")
             if successor_authority is None:
@@ -1977,12 +1977,17 @@ class CoreV2CandidatePort(ProductionOperationPort):
             result["candidate_workspace_binding"] = workspace_binding
         return result
 
-    def prepare_successor_recovery_destination(
+    def prepare_preseeded_destination(
         self,
         request: dict[str, Any],
         idempotency_key: str,
     ) -> dict[str, Any]:
-        """Create an artifact-empty Core project without creating a Task."""
+        """Create an artifact-empty Core project without creating a Task.
+
+        This is the shared clean-workspace primitive.  Historical successor
+        recovery and the normal per-item evolved pass use distinct caller
+        semantics and idempotency keys; neither creates a Candidate task here.
+        """
 
         journal_key = f"successor-recovery-destination:{idempotency_key}"
         prior = self.journal.read(journal_key)
@@ -1994,7 +1999,7 @@ class CoreV2CandidatePort(ProductionOperationPort):
             or request.get("resume_in_place") is not False
             or request.get("core_project_id") is not None
         ):
-            raise ValueError("recovery destination requires a fresh attempt-one project")
+            raise ValueError("preseed destination requires a fresh attempt-one project")
         task_id = str(request["task_id"])
         run_id = str(request["run_id"])
         workspace_root = self.run_root / "runs" / run_id
@@ -2023,8 +2028,14 @@ class CoreV2CandidatePort(ProductionOperationPort):
                 raise ValueError("recovery destination workspace authority is incomplete")
         objective = workspace.instructions.read_text(encoding="utf-8")
         project_config = _project_config(self.config, task_id, objective)
+        purpose = request.get("destination_purpose")
+        display_prefix = (
+            "RCB per-item evolved destination"
+            if purpose == "per_item_fresh_evolved"
+            else "RCB recovery destination"
+        )
         project_request = ProjectCreateV2(
-            display_name=f"RCB recovery destination {request['experiment_id']}",
+            display_name=f"{display_prefix} {request['experiment_id']}",
             config=project_config,
         ).model_dump(mode="json")
         archive_path = (
@@ -2124,7 +2135,7 @@ class CoreV2CandidatePort(ProductionOperationPort):
             or head.get("predecessor_project_head_id") is not None
             or head.get("evolution_revision", {}).get("artifact_count") != 0
         ):
-            raise ValueError("recovery destination did not publish an empty genesis head")
+            raise ValueError("preseed destination did not publish an empty genesis head")
         baseline = self.composites.register_baseline(
             project_id=project["project_id"],
             project_head=head,
@@ -2140,12 +2151,22 @@ class CoreV2CandidatePort(ProductionOperationPort):
             "task_created": False,
             "attempt_budget_consumed": False,
             "archive_sha256": archive.content_sha256,
+            "workspace_archive": archive.model_dump(mode="json"),
         }
         self.journal.write(
             journal_key,
             {"request_sha256": canonical_sha256(request), "result": result},
         )
         return result
+
+    def prepare_successor_recovery_destination(
+        self,
+        request: dict[str, Any],
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        """Compatibility entrypoint for immutable historical recovery."""
+
+        return self.prepare_preseeded_destination(request, idempotency_key)
 
     def recover(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any] | None:
         completed = self.journal.read(idempotency_key + ":result")
@@ -2378,7 +2399,7 @@ class CoreV2CandidatePort(ProductionOperationPort):
                         project_head=head,
                         archive=archive,
                     )
-                    workspace_source = "recovery_preseed"
+                    workspace_source = "preseeded_workspace"
                     self.journal.write(
                         key + ":preseeded-workspace",
                         {
@@ -2510,7 +2531,7 @@ class CoreV2CandidatePort(ProductionOperationPort):
                 "predecessor_project_head"
             )
             if not isinstance(admitted_head, dict):
-                raise ValueError("sealed candidate lacks admitted project-head authority")
+                raise TypeError("sealed candidate lacks admitted project-head authority")
             runtime_injection = _candidate_runtime_injection_authority(
                 session_result=authority["session_result"],
                 project_head=admitted_head,
@@ -4078,6 +4099,231 @@ class LocalTaskLocalPort(ProductionOperationPort):
         return {"destroyed": True, "overlay_id": overlay, "active_reference_removed": True}
 
 
+class PerItemEvolvedWorkspacePort(ProductionOperationPort):
+    """Bind one same-task artifact triple to a clean Candidate project.
+
+    Core's successor head correctly owns the evolved artifacts, but it also
+    retains the immutable baseline output workspace.  The per-item experiment
+    requires a fresh Candidate B workspace.  This adapter creates an unused
+    generation-zero project from the original public task, then uses Core's
+    existing cross-project historical authority to bind exactly the same-task
+    successor artifacts to that clean workspace.  The resulting project is
+    never reused by another benchmark task.
+    """
+
+    def __init__(
+        self,
+        composites: LocalCompositePort,
+        *,
+        config: ExperimentConfig,
+        root: Path,
+        core_authority: ManagedCoreControlAuthority,
+    ) -> None:
+        self.composites = composites
+        self.config = config
+        self.root = root
+        self.core_authority = core_authority
+        self.journal = _AuthorityJournal(root / "per_item_evolved_workspace")
+        destination_composites = LocalCompositePort(
+            root / "per_item_evolved_destination_registry"
+        )
+        self.destination_candidate = CoreV2CandidatePort(
+            config,
+            root,
+            core_authority=core_authority,
+            composites=destination_composites,
+        )
+
+    def recover(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> dict[str, Any] | None:
+        prior = self.journal.read(idempotency_key)
+        if prior is None:
+            return None
+        if prior.get("request_sha256") != canonical_sha256(request):
+            raise ValueError("per-item evolved workspace request drifted")
+        return prior["result"]
+
+    def execute(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> dict[str, Any]:
+        prior = self.recover(request, idempotency_key)
+        if prior is not None:
+            return prior
+        task_id = request.get("task_id")
+        source_project_id = request.get("source_core_project_id")
+        admitted = request.get("admitted_composite")
+        if (
+            task_id not in FROZEN_TASKS
+            or request.get("attempt_index") != 0
+            or request.get("fresh_workspace") is not True
+            or request.get("same_task_only") is not True
+            or request.get("judge_feedback") is not None
+            or not isinstance(request.get("ground_truth_sha256"), str)
+            or not isinstance(source_project_id, str)
+            or not isinstance(admitted, dict)
+            or len(admitted.get("registry_artifact_ids", [])) != 3
+        ):
+            raise ValueError("per-item evolved workspace request is invalid")
+        selected = self.composites.get_composite(admitted["composite_id"])
+        if (
+            selected.get("composite_id") != admitted.get("composite_id")
+            or selected.get("core_project_id") != source_project_id
+            or selected.get("registry_artifact_ids")
+            != admitted.get("registry_artifact_ids")
+            or set(selected.get("registry_artifacts", {})) != set(ARTIFACT_TYPES)
+            or selected.get("task_local_overlay_id") is not None
+        ):
+            raise ValueError("per-item admitted composite authority drifted")
+        _cross_task_content_admission_authority(selected)
+
+        seed = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
+        destination_run_id = f"{task_id}_a1_per_item_seed_{seed[:12]}"
+        destination = self.destination_candidate.prepare_preseeded_destination(
+            {
+                "task_id": task_id,
+                "run_id": destination_run_id,
+                "experiment_id": str(request.get("experiment_id") or seed[:24]),
+                "attempt_index": 1,
+                "fresh_workspace": True,
+                "resume_in_place": False,
+                "core_project_id": None,
+                "destination_purpose": "per_item_fresh_evolved",
+            },
+            f"{idempotency_key}:clean-destination",
+        )
+        destination_head = destination["project_head"]
+        if (
+            destination_head.get("generation") != 0
+            or destination_head.get("predecessor_project_head_id") is not None
+            or destination_head.get("evolution_revision", {}).get(
+                "artifact_count"
+            )
+            != 0
+        ):
+            raise ValueError("per-item destination is not generation zero")
+
+        restore_key = "per-item-" + hashlib.sha256(
+            f"{idempotency_key}:{task_id}".encode()
+        ).hexdigest()
+        client = CoreControlV2Client(self.core_authority)
+        try:
+            source = client.json("GET", f"/v2/projects/{source_project_id}")
+            source_head = source.get("active_project_head")
+            if (
+                not isinstance(source_head, dict)
+                or source_head.get("project_head_id")
+                != selected.get("core_project_head_id")
+                or source_head.get("manifest_sha256")
+                != selected.get("core_project_head_manifest_sha256")
+                or source_head.get("evolution_revision", {}).get(
+                    "artifact_count"
+                )
+                != 3
+            ):
+                raise ValueError("same-task successor head differs from composite")
+            restored = client.json(
+                "POST",
+                f"/v2/internal/projects/{destination['project_id']}/historical-restores",
+                payload={
+                    "expected_project_head_id": destination_head[
+                        "project_head_id"
+                    ],
+                    "expected_project_head_manifest_sha256": destination_head[
+                        "manifest_sha256"
+                    ],
+                    "source_project_head_id": source_head["project_head_id"],
+                    "source_project_head_manifest_sha256": source_head[
+                        "manifest_sha256"
+                    ],
+                    "idempotency_key": restore_key,
+                    "mode": "cross_project_fork",
+                    "source_project_id": source_project_id,
+                },
+            )
+        finally:
+            client.close()
+        evolved_head = restored.get("successor_project_head")
+        if (
+            not isinstance(evolved_head, dict)
+            or evolved_head.get("project_id") != destination["project_id"]
+            or evolved_head.get("generation") != 1
+            or evolved_head.get("workspace_snapshot")
+            != destination_head.get("workspace_snapshot")
+            or evolved_head.get("evolution_revision", {}).get("artifact_count")
+            != 3
+        ):
+            raise ValueError("per-item same-task artifact binding is invalid")
+        rebound = self.composites.register_restored(
+            selected_composite_id=selected["composite_id"],
+            project_head=evolved_head,
+            restore_receipt_id=restored["restore_request_id"],
+            idempotency_key=f"per-item-composite:{restore_key}",
+            project_id=destination["project_id"],
+            restore_mode="per_item_same_task_clean_workspace",
+        )
+        archive = WorkspaceArchiveDeclarationV2.model_validate(
+            destination["workspace_archive"]
+        )
+        seed_body = {
+            "restore_request_id": restored["restore_request_id"],
+            "destination_project_id": destination["project_id"],
+            "destination_project_head_id": evolved_head["project_head_id"],
+            "workspace_archive_sha256": archive.content_sha256,
+            "source_composite_sha256": selected["composite_sha256"],
+        }
+        preseeded = {
+            "schema_version": (
+                "openevo.researchclawbench.preseeded_workspace_authority.v1"
+            ),
+            "project_id": destination["project_id"],
+            "project_head_id": evolved_head["project_head_id"],
+            "project_head_manifest_sha256": evolved_head["manifest_sha256"],
+            "workspace_snapshot_id": evolved_head["workspace_snapshot"][
+                "workspace_snapshot_id"
+            ],
+            "workspace_manifest_sha256": evolved_head["workspace_snapshot"][
+                "manifest_sha256"
+            ],
+            "archive_content_sha256": archive.content_sha256,
+            "archive_byte_size": archive.byte_size,
+            "archive_entry_count": archive.entry_count,
+            "archive_extracted_byte_size": archive.extracted_byte_size,
+            "seed_request_id": restored["restore_request_id"],
+            "seed_sha256": canonical_sha256(seed_body),
+        }
+        result = {
+            "task_id": task_id,
+            "same_task_only": True,
+            "fresh_generation_zero_destination": True,
+            "source_core_project_id": source_project_id,
+            "source_project_head_id": source_head["project_head_id"],
+            "core_project_id": destination["project_id"],
+            "core_project_head_id": evolved_head["project_head_id"],
+            "composite_id": rebound["composite_id"],
+            "artifact_ids": rebound["registry_artifact_ids"],
+            "artifact_hashes": rebound["artifact_hashes"],
+            "preseeded_workspace_authority": preseeded,
+            "candidate_started": False,
+            "task_created": False,
+            "attempt_budget_consumed": False,
+            "raw_gt_carried": False,
+            "judge_feedback_carried": False,
+            "cross_task_inheritance": False,
+            "core_restore_mode": "cross_project_fork",
+            "experiment_semantics": "same_task_clean_evolved_candidate",
+            "recovery_command_used": False,
+            "recovery_path_used": False,
+            "destination_workspace_run_id": destination_run_id,
+            "restore_request_id": restored["restore_request_id"],
+        }
+        self.journal.write(
+            idempotency_key,
+            {"request_sha256": canonical_sha256(request), "result": result},
+        )
+        return result
+
+
 def _cross_task_content_admission_authority(
     composite: dict[str, Any],
 ) -> dict[str, Any]:
@@ -4108,7 +4354,7 @@ def _cross_task_content_admission_authority(
     for artifact_type in ARTIFACT_TYPES:
         receipt = receipts[artifact_type]
         if not isinstance(receipt, dict):
-            raise ValueError("cross-task admission receipt is invalid")
+            raise TypeError("cross-task admission receipt is invalid")
         content = ArtifactContentAdmissionReceipt.model_validate(
             receipt.get("content_admission")
         )
@@ -4632,7 +4878,7 @@ class CoreProjectFreezePort(ProductionOperationPort):
             raise ValueError("final freeze lacks triple-artifact authority")
         project_id = composite.get("core_project_id")
         if not isinstance(project_id, str):
-            raise ValueError("final freeze lacks the Core project authority")
+            raise TypeError("final freeze lacks the Core project authority")
         required_identities = (
             "protocol_sha256",
             "core_identity_sha256",
@@ -4814,6 +5060,12 @@ def build_production_ports(
         ),
         evolution=CoreSuccessorPort(config, core_authority=core_authority),
         composite=composite,
+        per_item_evolved=PerItemEvolvedWorkspacePort(
+            composite,
+            config=config,
+            root=run_root,
+            core_authority=core_authority,
+        ),
         task_local=LocalTaskLocalPort(),
         sanitizer=LocalSanitizerPort(
             composite,

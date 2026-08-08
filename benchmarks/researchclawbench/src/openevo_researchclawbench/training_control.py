@@ -76,6 +76,7 @@ class DurableTrainingControl:
         production: bool = False,
         core_control_authority: ManagedCoreControlAuthority | None = None,
         current_task_gt_supervision: bool = False,
+        per_item_reset: bool | None = None,
     ) -> None:
         if _RUN_ID.fullmatch(run_id) is None:
             raise ValueError("training run ID must use the rcb_oe_v0_ namespace")
@@ -111,6 +112,10 @@ class DurableTrainingControl:
                     core_authority=core_control_authority,
                 ),
             )
+        if per_item_reset is None:
+            per_item_reset = getattr(config, "per_item_reset", None) is not None
+        if per_item_reset:
+            current_task_gt_supervision = True
         self.supervisor = CommunityTrainingSupervisor(
             store=self.store,
             experiment_id=run_id,
@@ -123,16 +128,21 @@ class DurableTrainingControl:
                 else getattr(config, "community_validator_failure_policy", None)
             ),
             current_task_gt_supervision=current_task_gt_supervision,
+            per_item_reset=per_item_reset,
             budget_policy=TrainingBudgetPolicy(
-                max_candidate_model_calls=int(
-                    config.require("budgets.max_candidate_model_calls")
+                max_candidate_model_calls=(
+                    2
+                    if per_item_reset
+                    else int(config.require("budgets.max_candidate_model_calls"))
                 ),
-                max_reflector_model_calls=int(
-                    config.require("budgets.max_reflector_model_calls")
+                max_reflector_model_calls=(
+                    5
+                    if per_item_reset
+                    else int(config.require("budgets.max_reflector_model_calls"))
                 ),
                 max_judge_operations=(
                     len(task_ids)
-                    * 3
+                    * (2 if per_item_reset else 3)
                     * int(config.require("judge.runs_per_attempt"))
                 ),
                 cumulative_runtime_seconds=int(

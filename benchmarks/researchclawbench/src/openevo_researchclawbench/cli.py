@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import statistics
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -108,6 +109,7 @@ _FORMAL_TERMINAL_STAGES = {
     TrainingStage.FAILED.value,
     TrainingStage.TASK_NO_VALID_ATTEMPT.value,
     TrainingStage.CANDIDATE_SETUP_BLOCKED.value,
+    TrainingStage.ITEM_RESET.value,
 }
 
 _OFFICIAL_TERMINAL_STAGES = {
@@ -564,10 +566,10 @@ def _print_per_item_runner_summary(
     print(
         "\n".join(
             (
-                "ResearchClawBench Runner",
-                "========================",
+                "ResearchClawBench Per-Item Runner",
+                "=================================",
                 "",
-                f"Protocol: {config.require('experiment_id')}",
+                f"Protocol: {config.require('protocol_name')}",
                 f"Task: {task_id}",
                 f"Run ID: {run_id}",
                 "Dataset: community",
@@ -588,15 +590,24 @@ def _print_per_item_runner_summary(
                 "  judge_feedback: excluded",
                 "",
                 "Judge:",
-                "  not executed in this engineering validation",
+                "  backend: OpenRouter",
+                "  model: openai/gpt-5.1",
+                "  provider: Azure",
                 "",
                 "Passes:",
                 "  baseline",
-                "  evolve",
+                "  judge baseline",
+                "  evolve once with current-task GT",
+                "  evolved",
+                "  judge evolved",
+                "  paired result",
+                "  reset",
                 "",
                 "Isolation:",
-                "  per-task namespace",
+                "  fresh Codex per pass",
+                "  fresh state per task",
                 "  GT hidden from Candidate",
+                "  Judge feedback excluded from Evolution",
                 "  cross-task artifacts excluded",
                 "",
                 "Output:",
@@ -610,25 +621,14 @@ def _print_per_item_runner_summary(
 
 
 def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> int:
-    """Run one Community task through the existing production operation ports."""
+    """Run one complete same-task pair through native production ports."""
 
     task_id = str(args.task)
     if task_id not in FROZEN_TASKS:
         raise ProtocolError("run-per-item task is outside the frozen Community inventory")
-    engineering = config.raw.get("native_engineering_validation")
-    expected_engineering = {
-        "task": "Life_005",
-        "run_purpose": "OPENEVO_NATIVE_HARNESS_ENGINEERING_VALIDATION",
-        "leaderboard": False,
-        "supervision": "current_task_gt",
-        "judge_feedback_included": False,
-        "execute_judge": False,
-        "execute_evolved_candidate": False,
-        "stop_after_stage": TrainingStage.EVOLUTION_COMPLETED.value,
-    }
-    if engineering != expected_engineering or task_id != engineering["task"]:
+    if config.per_item_reset is None:
         raise ProtocolError(
-            "run-per-item requires the closed Life_005 native engineering validation block"
+            "run-per-item requires the canonical per-item reset protocol"
         )
     dry_run = bool(args.dry_run or args.no_model_calls)
     _print_per_item_runner_summary(
@@ -640,10 +640,14 @@ def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> 
     host_profile = managed_core_profile_readiness(config)
     output_root = config.experiment_root / "supervisor" / args.run_id
     planned_stages = [
-        "baseline",
-        "current-task-gt-attachment",
-        "native-evolve",
-        "stop-before-evolved-candidate",
+        "fresh-generation-zero",
+        "fresh-codex-baseline",
+        "baseline-judge",
+        "current-task-gt-native-evolve-once",
+        "fresh-codex-evolved",
+        "evolved-judge",
+        "paired-result",
+        "reset-active-state",
     ]
     if dry_run:
         print_closed_json(
@@ -661,8 +665,12 @@ def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> 
                 "managed_runtime_ready": host_profile["ready"],
                 "managed_runtime_reason_code": host_profile["reason_code"],
                 "supervision": "current_task_gt",
-                "judge_executed": False,
-                "evolved_candidate_executed": False,
+                "judge_feedback_in_evolution": False,
+                "gt_visible_to_candidate": False,
+                "one_evolution_cycle": True,
+                "fresh_codex_per_pass": True,
+                "reset_after_task": True,
+                "direct_host_codex_subprocess": False,
                 "secret_recorded": False,
             }
         )
@@ -674,6 +682,19 @@ def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> 
                 "task_id": task_id,
                 "run_id": args.run_id,
                 "reason_code": host_profile["reason_code"],
+                "model_started": False,
+                "provider_calls": 0,
+                "secret_recorded": False,
+            }
+        )
+        return 5
+    judge = judge_credential_readiness(config)
+    if judge.get("ready") is not True:
+        print_closed_json(
+            {
+                "status": "JUDGE_CREDENTIALS_REQUIRED",
+                "task_id": task_id,
+                "run_id": args.run_id,
                 "model_started": False,
                 "provider_calls": 0,
                 "secret_recorded": False,
@@ -702,29 +723,314 @@ def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> 
             production=True,
             core_control_authority=authority,
             current_task_gt_supervision=True,
+            per_item_reset=True,
         )
         result = control.initialize()
-        while (
-            result["stage"] not in _FORMAL_TERMINAL_STAGES
-            and result["stage"] != TrainingStage.EVOLUTION_COMPLETED.value
-        ):
+        while result["stage"] not in _FORMAL_TERMINAL_STAGES:
             result = control.run_next()
     finally:
         authority.close()
-    if result["stage"] == TrainingStage.EVOLUTION_COMPLETED.value:
+    if result["stage"] == TrainingStage.ITEM_RESET.value:
+        verification = control.verify()
         print_closed_json(
             {
-                "status": "ONE_TASK_BASELINE_PLUS_EVOLVE_CLOSED",
+                "status": "PER_ITEM_FULL_CYCLE_CLOSED",
                 "task_id": task_id,
                 "run_id": args.run_id,
-                "judge_executed": False,
-                "evolved_candidate_executed": False,
+                "judge_executed": True,
+                "evolved_candidate_executed": True,
+                "one_native_evolution_cycle": True,
+                "post_close_active_artifacts": result["active_artifact_ids"],
+                "post_close_active_project_head": result["core_project_id"],
+                "verification": verification,
                 "state": result,
             }
         )
         return 0
     print_closed_json(result)
     return 5
+
+
+def _per_item_subrun_id(run_id: str, index: int, task_id: str) -> str:
+    suffix = f"_{index:02d}_{task_id}"
+    candidate = f"{run_id}{suffix}"
+    if len(candidate) > 105:
+        raise ProtocolError("Community run ID is too long for per-item namespaces")
+    return candidate
+
+
+def _per_item_community_root(config: ExperimentConfig, run_id: str) -> Path:
+    root = config.experiment_root / "per_item_community" / run_id
+    resolved = root.resolve(strict=False)
+    if not resolved.is_relative_to(
+        (config.experiment_root / "per_item_community").resolve(strict=False)
+    ):
+        raise ProtocolError("per-item Community root escapes experiment authority")
+    return resolved
+
+
+def _per_item_community_plan(
+    config: ExperimentConfig, run_id: str
+) -> list[dict[str, object]]:
+    return [
+        {
+            "index": index,
+            "task_id": task_id,
+            "run_id": _per_item_subrun_id(run_id, index, task_id),
+            "stages": [
+                "baseline",
+                "judge_baseline",
+                "evolve_once_current_task_gt",
+                "evolved",
+                "judge_evolved",
+                "paired_result",
+                "reset",
+            ],
+            "generation_zero": True,
+            "cross_task_inheritance": False,
+        }
+        for index, task_id in enumerate(config.require("tasks"), start=1)
+    ]
+
+
+def _paired_statistics(
+    items: list[dict[str, object]],
+    *,
+    failed: int = 0,
+) -> dict[str, object]:
+    pairs = [item["paired_result"] for item in items]
+    baseline = [float(item["baseline_score"]) for item in pairs]
+    evolved = [float(item["evolved_score"]) for item in pairs]
+    deltas = [float(item["delta"]) for item in pairs]
+    attempted = len(items) + failed
+    return {
+        "task_count": len(FROZEN_TASKS),
+        "attempted": attempted,
+        "paired_completed": len(items),
+        "failed": failed,
+        "baseline_mean": None if not baseline else sum(baseline) / len(baseline),
+        "evolved_mean": None if not evolved else sum(evolved) / len(evolved),
+        "paired_mean_delta": None if not deltas else sum(deltas) / len(deltas),
+        "paired_median_delta": None if not deltas else statistics.median(deltas),
+        "wins": sum(value > 0 for value in deltas),
+        "ties": sum(value == 0 for value in deltas),
+        "losses": sum(value < 0 for value in deltas),
+        "candidate_failure_rate": 0.0 if not attempted else failed / attempted,
+        "task_completion_rate": len(items) / len(FROZEN_TASKS),
+    }
+
+
+def command_run_per_item_community(
+    config: ExperimentConfig, args: argparse.Namespace
+) -> int:
+    """Run independent per-task controls; never carry an active head forward."""
+
+    if config.per_item_reset is None:
+        raise ProtocolError("Community command requires the per-item reset protocol")
+    plan = _per_item_community_plan(config, args.run_id)
+    root = _per_item_community_root(config, args.run_id)
+    dry_run = bool(args.dry_run or args.no_model_calls)
+    print(
+        "\n".join(
+            (
+                "ResearchClawBench Per-Item Runner",
+                "=================================",
+                "",
+                f"Protocol: {config.require('protocol_name')}",
+                "Dataset: community",
+                "Tasks: 17 canonical Community tasks",
+                f"Run ID: {args.run_id}",
+                "Protocol: baseline -> judge -> evolve once -> evolved -> judge -> pair -> reset",
+                "Candidate: OpenEvo Core / CodexHarness / GPT-5.5 / managed",
+                "Evolution: native successor / managed reflector / artifact registry",
+                "Judge: OpenRouter / openai/gpt-5.1 / Azure",
+                "Isolation: fresh Codex per pass; generation-zero per task; no cross-task artifacts",
+                f"Output: {root}",
+                f"Dry run: {str(dry_run).lower()}",
+            )
+        )
+    )
+    if dry_run:
+        print_closed_json(
+            {
+                "status": "PER_ITEM_COMMUNITY17_DRY_RUN_NO_MODEL_CALLS",
+                "protocol": config.require("protocol_name"),
+                "task_discovery": list(config.require("tasks")),
+                "plan": plan,
+                "provider_calls": 0,
+                "judge_calls": 0,
+                "reflector_calls": 0,
+                "direct_host_codex_subprocess": False,
+                "output_root": str(root),
+                "secret_recorded": False,
+            }
+        )
+        return 0
+    host_profile = managed_core_profile_readiness(config)
+    if host_profile["ready"] is not True:
+        print_closed_json(
+            {
+                "status": "BLOCKED_OPEN_EVO_HARNESS_RUNTIME",
+                "run_id": args.run_id,
+                "reason_code": host_profile["reason_code"],
+                "model_started": False,
+                "provider_calls": 0,
+                "secret_recorded": False,
+            }
+        )
+        return 5
+    judge = judge_credential_readiness(config)
+    if judge.get("ready") is not True:
+        print_closed_json(
+            {
+                "status": "JUDGE_CREDENTIALS_REQUIRED",
+                "run_id": args.run_id,
+                "model_started": False,
+                "provider_calls": 0,
+                "secret_recorded": False,
+            }
+        )
+        return 5
+    if root.exists():
+        raise ProtocolError("per-item Community run namespace already exists")
+    root.mkdir(parents=True, mode=0o700)
+    authority = acquire_managed_core_control(config)
+    completed: list[dict[str, object]] = []
+    previous_reset: dict[str, object] | None = None
+    try:
+        for item in plan:
+            task_id = str(item["task_id"])
+            item_run_id = str(item["run_id"])
+            item_root = root / "items" / f"{int(item['index']):02d}_{task_id}"
+            item_root.mkdir(parents=True, mode=0o700)
+            isolation = {
+                "schema_version": (
+                    "openevo.researchclawbench.pre_dispatch_isolation.v1"
+                ),
+                "task_id": task_id,
+                "run_id": item_run_id,
+                "fresh_generation_zero": True,
+                "active_artifact_ids": [],
+                "active_successor_head": None,
+                "active_project_head": None,
+                "prior_task_gt": None,
+                "prior_task_workspace": None,
+                "prior_task_candidate_session": None,
+                "cross_project_fork_from_previous_task": False,
+                "previous_item_reset": previous_reset,
+                "task_provider_calls_before_receipt": 0,
+                "secret_recorded": False,
+            }
+            _write(item_root / "pre_dispatch_isolation.json", isolation)
+            control = DurableTrainingControl(
+                config=config,
+                run_id=item_run_id,
+                require_existing=False,
+                task_ids=(task_id,),
+                production=True,
+                core_control_authority=authority,
+                current_task_gt_supervision=True,
+                per_item_reset=True,
+            )
+            result = control.initialize()
+            while result["stage"] not in _FORMAL_TERMINAL_STAGES:
+                result = control.run_next()
+            if result["stage"] != TrainingStage.ITEM_RESET.value:
+                failed = {
+                    "task_id": task_id,
+                    "run_id": item_run_id,
+                    "stage": result["stage"],
+                    "state_sha256": result.get("_state_sha256"),
+                }
+                _write(
+                    root / "progress.json",
+                    {
+                        "status": "PER_ITEM_COMMUNITY17_STOPPED_ON_ITEM_FAILURE",
+                        "completed": completed,
+                        "failure": failed,
+                        "statistics": _paired_statistics(completed, failed=1),
+                        "silent_skip": False,
+                        "cross_task_continuation_after_failure": False,
+                    },
+                )
+                return 5
+            verification = control.verify()
+            closed = {
+                "task_id": task_id,
+                "run_id": item_run_id,
+                "paired_result": result["paired_result"],
+                "reset_receipt": result["item_reset_receipt"],
+                "verification": verification,
+            }
+            completed.append(closed)
+            previous_reset = {
+                "task_id": task_id,
+                "run_id": item_run_id,
+                "active_artifact_ids": [],
+                "active_successor_head": None,
+                "state_sha256": result["_state_sha256"],
+            }
+            _write(
+                root / "progress.json",
+                {
+                    "status": "PER_ITEM_COMMUNITY17_RUNNING",
+                    "completed": completed,
+                    "next_task_index": int(item["index"]) + 1,
+                },
+            )
+    finally:
+        authority.close()
+    summary = {
+        "status": "PER_ITEM_COMMUNITY17_CLOSED",
+        "run_id": args.run_id,
+        "items": completed,
+        "statistics": _paired_statistics(completed),
+    }
+    _write(root / "paired_results.json", summary)
+    _write(root / "progress.json", summary)
+    print_closed_json(summary)
+    return 0
+
+
+def command_per_item_community_inspect(
+    config: ExperimentConfig, args: argparse.Namespace
+) -> int:
+    root = _per_item_community_root(config, args.run_id)
+    progress = root / "progress.json"
+    if not progress.is_file():
+        raise ProtocolError("per-item Community progress does not exist")
+    payload = json.loads(progress.read_text(encoding="utf-8"))
+    if args.command == "per-item-community-status":
+        print_closed_json(payload)
+        return 0
+    completed = payload.get("items", payload.get("completed", []))
+    if not isinstance(completed, list):
+        raise ProtocolError("per-item Community progress inventory is invalid")
+    failure = payload.get("failure")
+    inventory = list(completed)
+    if isinstance(failure, dict):
+        inventory.append(failure)
+    results = []
+    for item in inventory:
+        control = DurableTrainingControl(
+            config=config,
+            run_id=str(item["run_id"]),
+            require_existing=True,
+            task_ids=(str(item["task_id"]),),
+        )
+        if args.command == "per-item-community-stop-owned":
+            results.append(control.stop_owned())
+        else:
+            results.append(control.verify())
+    print_closed_json(
+        {
+            "status": "PASS",
+            "command": args.command,
+            "run_id": args.run_id,
+            "items": results,
+        }
+    )
+    return 0
 
 
 def command_recover_native_evolution(
@@ -1028,6 +1334,19 @@ def main(argv: list[str] | None = None) -> int:
     run_per_item.add_argument("--task", required=True, choices=FROZEN_TASKS)
     run_per_item.add_argument("--dry-run", action="store_true")
     run_per_item.add_argument("--no-model-calls", action="store_true")
+    per_item_community = sub.add_parser("run-per-item-community")
+    per_item_community.add_argument("--protocol", required=True, type=Path)
+    per_item_community.add_argument("--run-id", required=True)
+    per_item_community.add_argument("--dry-run", action="store_true")
+    per_item_community.add_argument("--no-model-calls", action="store_true")
+    for name in (
+        "per-item-community-status",
+        "per-item-community-verify",
+        "per-item-community-stop-owned",
+    ):
+        command = sub.add_parser(name)
+        command.add_argument("--protocol", required=True, type=Path)
+        command.add_argument("--run-id", required=True)
     native_recovery = sub.add_parser("recover-native-evolution")
     native_recovery.add_argument("--protocol", required=True, type=Path)
     native_recovery.add_argument("--source-run-id", required=True)
@@ -1097,6 +1416,14 @@ def main(argv: list[str] | None = None) -> int:
         config = ExperimentConfig.load(args.protocol)
         if args.command == "run-per-item":
             return command_run_per_item(config, args)
+        if args.command == "run-per-item-community":
+            return command_run_per_item_community(config, args)
+        if args.command in {
+            "per-item-community-status",
+            "per-item-community-verify",
+            "per-item-community-stop-owned",
+        }:
+            return command_per_item_community_inspect(config, args)
         if args.command == "recover-native-evolution":
             return command_recover_native_evolution(config, args)
         if (

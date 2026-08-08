@@ -1,0 +1,211 @@
+experiment_id: sequential_task_reflector_evolution_v0
+refactor_id: PRODUCTION_TRAINING_OPERATIONS_DRIVER_V1
+protocol_name: per_item_supervised_one_step_reset_v1
+protocol_version: 1.0.0
+status: PER_ITEM_CONFIGURED_NOT_STARTED
+per_item_reset:
+  contract_version: openevo.researchclawbench.per_item_reset.v1
+  only_per_item_reset: true
+  dataset: community
+  passes:
+    - baseline
+    - judge_baseline
+    - evolve_once_current_task_gt
+    - evolved
+    - judge_evolved
+    - paired_result
+    - reset
+  fresh_codex_per_pass: true
+  fresh_generation_zero_per_task: true
+  one_evolution_cycle_per_task: true
+  candidate_visible_evolution_artifacts:
+    - agent_system
+    - text_memory
+    - skill_bundle
+  gt_visible_to_candidate: false
+  judge_feedback_in_evolution: false
+  cross_task_artifact_inheritance: false
+  cross_task_project_head_inheritance: false
+  terminal_stage: ITEM_RESET
+evolution:
+  level: attempt
+  token_level: false
+  step_level: false
+  execution_streaming: false
+community_training_tasks: 17
+attempts_per_task: 2
+reflector_rounds_per_task: 1
+candidate_runs: 34
+reflector_cycles_per_artifact: 17
+artifact_evolution_requests: 51
+official_frozen_test_runs: 0
+tasks:
+  - Astronomy_004
+  - Chemistry_004
+  - Earth_004
+  - Earth_005
+  - Energy_004
+  - Information_004
+  - Information_005
+  - Information_006
+  - Information_007
+  - Life_004
+  - Life_005
+  - Life_006
+  - Life_007
+  - Material_004
+  - Math_004
+  - Neuroscience_004
+  - Physics_004
+canary_task: Life_005
+paths:
+  project_root: /home/lhy-h/work
+  openevo_root: /home/lhy-h/work/researchclaw_per_item_minimal
+  experiment_root: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0
+  researchclawbench_root: /home/lhy-h/work/researchclaw_openevo/ResearchClawBench
+source_identity:
+  openevo_commit: fa65a48565a8ff8e4f6ccb3d4c621d0d866bccec
+  openevo_core_source_tree_sha256: 9fa76172efcebb43948ea64288d878157171b844abf5f006758898122b0bc9fe
+  adapter_tree_sha256: df596629e5a9eff580b29c883bc8220b7ab9bc2eee12a5c23cae604ebcbf297d
+  researchclawbench_commit: b1175eca3deb78ff8b2c839070874474051d2261
+  canonical_scorer_sha256: 9492317443acc069744330f27aac693d162f1aa6837d512e40419704197c6022
+native_openevo:
+  core_control_mode: managed_remote_daemon
+  core_control_url: managed_dynamic_loopback
+  framework_lock: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/runtime/native_release_877fb7c7b_20260808T170000/core/framework-lock.json
+  core_host_codex_probe_bin: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/runtime/host-codex-probe-bin-0.144.1
+  remote_core:
+    profile_id: rcb-oe-native-gpt55-v3
+    host: 127.0.0.1
+    port: 50079
+    user: openevo
+    private_key_path: /home/lhy-h/.ssh/id_ed25519_github
+    host_key_store_root: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/runtime/ssh-known-hosts-native-gpt55-50079
+    host_key_algorithm: ssh-ed25519
+    host_key_fingerprint: SHA256:8kdZo+hM2YPgsyZcdVf535ZwhMYuoMRI1KsBFQj0r6A
+    fixture_check_script: /home/lhy-h/work/researchclaw_per_item_minimal/scripts/e2e/docker_release_host_fixture.py
+    container_name: openevo-researchclaw-native-v3
+    container_hostname: 3c31afbbd380
+    docker_server_version: 29.5.2
+    docker_server_api: '1.54'
+    supported_docker_server_versions:
+      - 29.3.0
+      - 29.5.2
+    daemon_bundle: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/runtime/native_release_877fb7c7b_20260808T170000/daemon/openevo-daemon-linux-x86_64
+    daemon_manifest: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/runtime/native_release_877fb7c7b_20260808T170000/daemon/openevo-daemon-bundle.json
+  rollout_url: http://127.0.0.1:8080
+  evolution_url: http://127.0.0.1:8200
+  rollout_step: 0
+  task_request_owner: OpenEvo_Core_run_owner
+  workspace_handoff_required: true
+  runtime_context_binding_required: true
+candidate:
+  model: gpt-5.5
+  provider: codex_cli_subscription
+  reasoning_level: high
+  codex_binary: /opt/codex/bin/codex
+  codex_cli_version: 0.144.1
+  runtime_profile: managed_science
+  runtime_image: openevo/science-runtime@sha256:c60d4a60a7f0a353cccf07399407bac3f6b56991610a0457a6c1d4e5bdd61d88
+  runtime_image_id: sha256:d8e691fa6d07ec62bb8616e607909202df9c17cff88e8944a82d3ba24d7f3b20
+  auth_mode: subscription
+  capture_mode: transcript
+  mcp_enabled: false
+  host_codex_allowed: false
+  network: disabled
+  tool_network: disabled
+  model_control_plane_network: managed_only
+  attempt_timeout_seconds: 3600
+  max_tool_steps: 300
+  token_limit: 131072
+  cost_limit_usd: unavailable_for_subscription_auth
+  cpus: 2
+  memory_mb: 4096
+  storage_mb: 16384
+reflector:
+  model: gpt-5.5
+  provider: codex_cli
+  reasoning_level: high
+  max_runtime_seconds: 900
+  max_tool_steps: 80
+  runtime_owner: OpenEvo_evolution_worker
+  runtime_mode: managed
+  runtime_profile: managed_science
+  runtime_image_digest: sha256:c60d4a60a7f0a353cccf07399407bac3f6b56991610a0457a6c1d4e5bdd61d88
+  codex_binary: /opt/codex/bin/codex
+  codex_cli_version: 0.144.1
+  auth_mode: subscription
+  capture_mode: transcript
+  runtime_status: PINNED
+  readiness_receipt: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/logs/native_runtime_restore_20260808T081500Z/readiness_runtime.json
+  host_path_fallback_allowed: false
+  credential_mount_readiness_receipt: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/logs/native_runtime_restore_20260808T081500Z/readiness_mount.json
+  require_credential_mount_readiness: true
+  credential_mount_expected:
+    authority_id: 18e1653d9c55b9acc1935fe73a4d4ee499de626357fed9d943a99eba39865758
+    worker_launch_id: mrl-aa506c4038dcb94898f3256193722848
+    generation_digest: 756b8db3d2da1e6da2245eaf970b70bdb8964905e20722ab90c487f2e7c03717
+    daemon_release_identity: f5c3ba119c0db5267e1f853b13a6ac592f79550258e377117a70eff513f63074
+    release_install_digest: 3b7cb8deb790d00f8d379eb5d98f580df3b358d843a49d01fccf70058a39eae8
+    release_registry_digest: ac14e24fc411ba8f4aedbf9d16406307479f657dc5155de4610df4b7975f6594
+    docker_host_path_identity: 8d5eb354d484d81172a0b1148f0059e40c1b36c23355e35b21f52096b918b89c
+    runtime_digest: sha256:c60d4a60a7f0a353cccf07399407bac3f6b56991610a0457a6c1d4e5bdd61d88
+judge:
+  model: openai/gpt-5.1
+  provider: openai_compatible
+  model_source: OpenRouter_model_catalog
+  api_key_env: JUDGE_API_KEY
+  api_base_env: JUDGE_API_BASE
+  model_env: JUDGE_MODEL_NAME
+  provider_only: azure
+  allow_fallbacks: false
+  runs_per_attempt: 1
+  scorer_commit: b1175eca3deb78ff8b2c839070874474051d2261
+  scorer_sha256: 9492317443acc069744330f27aac693d162f1aa6837d512e40419704197c6022
+artifacts:
+  agent_system:
+    enabled: true
+    native_method: agent_system_gepa_reflector
+  text_memory:
+    enabled: true
+    native_method: text_memory_expel_reflector
+  skill_bundle:
+    enabled: true
+    native_method: skill_bundle_reflector
+  parametric_memory:
+    enabled: false
+teacher:
+  enabled_on_community: true
+  modes: [HARD_GT]
+  task_local_overlay_for_candidate: false
+  evolution_private_attachment: true
+  global_artifact_answers_forbidden: true
+feedback:
+  native_post_run_attachment_status: ATTACHED_TO_NATIVE_COMPLETED_TASK_DATASET
+  private_target_study: true
+pairing:
+  same_task_only: true
+  score_direction: maximize
+  retry_for_score_improvement: false
+cross_task:
+  carry_native_composite: false
+  carry_task_local_overlay: false
+  carry_workspace: false
+  carry_raw_data: false
+  carry_task_outputs: false
+  carry_project_head: false
+  reset_active_state: true
+budgets:
+  cumulative_runtime_seconds: 345600
+  cumulative_cost_usd: unavailable_for_subscription_auth
+  max_candidate_model_calls: 34
+  max_reflector_model_calls: 85
+  max_infrastructure_retries_per_attempt: 1
+randomness_policy:
+  seed: provider_default_fresh_session
+  candidate_sampling: independent_fresh_session_per_pass
+gates:
+  contamination_receipt_status: PASS
+  reflector_runtime_status: PINNED
+  production_training_feedback_transport_status: READY
+  per_item_orchestrator_status: READY

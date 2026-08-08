@@ -97,6 +97,32 @@ class SyntheticOperations:
 
     def ensure_candidate(self, request, idempotency_key):
         attempt = request["attempt_index"]
+        project_id = request.get("core_project_id") or "project-synthetic"
+        injected = [
+            f"artifact-{request['task_id']}-0-{kind}"
+            for kind in ("system", "memory", "skills")
+        ]
+        artifact_types = ("agent_system", "text_memory", "skill_bundle")
+        runtime_injection = {
+            "artifact_count": 0 if attempt == 0 else 3,
+            "artifact_ids": [] if attempt == 0 else injected,
+            "runtime_injection_receipt": (
+                None
+                if attempt == 0
+                else {
+                    "artifacts": [
+                        {
+                            "artifact_type": artifact_type,
+                            "artifact_id": artifact_id,
+                            "content_sha256": str(index + 1) * 64,
+                        }
+                        for index, (artifact_type, artifact_id) in enumerate(
+                            zip(artifact_types, injected, strict=True)
+                        )
+                    ]
+                }
+            ),
+        }
         workspace_authority = {
             "schema_version": (
                 "openevo.researchclawbench.successor_workspace_authority.v2"
@@ -121,12 +147,19 @@ class SyntheticOperations:
                 "dataset_revision": f"dataset-artifact-{request['task_id']}-{attempt}.v1",
                 "completed": True,
                 "run_id": request["run_id"],
-                "core_project_id": "project-synthetic",
+                "core_project_id": project_id,
                 "core_task_id": f"task-{request['task_id']}-{attempt}",
                 "core_attempt_id": f"attempt-{request['task_id']}-{attempt}",
                 "workspace_binding_id": f"workspace-{request['task_id']}-{attempt}",
                 "task_request_id": f"request-{request['task_id']}-{attempt}",
                 "session_result_id": f"result-{request['task_id']}-{attempt}",
+                "candidate_output_root": (
+                    f"/synthetic/{request['task_id']}/candidate-{attempt}"
+                ),
+                "input_project_head_id": (
+                    f"head-{request['task_id']}-{attempt}"
+                ),
+                "runtime_injection": runtime_injection,
                 "transcript_receipt": {"sha256": "f" * 64},
                 "runtime_seconds": 10 + attempt,
                 "cost_total_usd": None,
@@ -157,14 +190,34 @@ class SyntheticOperations:
 
     def attach_feedback(self, request, idempotency_key):
         attempt = request["attempt_index"]
+        result = {
+            "attachment_id": f"attachment-{request['task_id']}-{attempt}",
+            "resolved_view_sha256": f"{attempt + 4}" * 64,
+            "task_local_overlay_id": f"overlay-{request['task_id']}",
+        }
+        if request.get("feedback_source") == "current_task_gt":
+            gt = request["gt_supervision"]
+            result.update(
+                {
+                    "feedback_class": "HARD_GT",
+                    "feedback_source": "current_task_gt",
+                    "judge_calls": 0,
+                    "ground_truth_sha256": gt["ground_truth_sha256"],
+                    "judge_feedback_included": False,
+                }
+            )
         return self._once(
             idempotency_key,
-            {
-                "attachment_id": f"attachment-{request['task_id']}-{attempt}",
-                "resolved_view_sha256": f"{attempt + 4}" * 64,
-                "task_local_overlay_id": f"overlay-{request['task_id']}",
-            },
+            result,
         )
+
+    def current_task_gt_supervision(self, task_id):
+        return {
+            "task_id": task_id,
+            "feedback_class": "HARD_GT",
+            "ground_truth_sha256": "7" * 64,
+            "judge_feedback_included": False,
+        }
 
     def evolve_artifacts(self, request, idempotency_key):
         attempt = request["attempt_index"]
@@ -191,6 +244,28 @@ class SyntheticOperations:
                     f"artifact-{request['task_id']}-{attempt}-{kind}"
                     for kind in ("system", "memory", "skills")
                 ],
+            },
+        )
+
+    def prepare_evolved_workspace(self, request, idempotency_key):
+        admitted = request["admitted_composite"]
+        return self._once(
+            idempotency_key,
+            {
+                "task_id": request["task_id"],
+                "same_task_only": True,
+                "fresh_generation_zero_destination": True,
+                "core_project_id": f"project-{request['task_id']}-evolved",
+                "composite_id": f"{admitted['composite_id']}-clean",
+                "artifact_ids": list(admitted["registry_artifact_ids"]),
+                "preseeded_workspace_authority": {"synthetic": True},
+                "candidate_started": False,
+                "task_created": False,
+                "raw_gt_carried": False,
+                "judge_feedback_carried": False,
+                "cross_task_inheritance": False,
+                "recovery_command_used": False,
+                "recovery_path_used": False,
             },
         )
 
@@ -226,6 +301,176 @@ def _supervisor(tmp_path: Path, operations: SyntheticOperations, tasks=("Life_00
     )
     supervisor.initialize()
     return supervisor
+
+
+def _per_item_supervisor(
+    tmp_path: Path, operations: SyntheticOperations, task: str = "Life_005"
+):
+    store = TrainingStateStore(tmp_path / "per-item-state")
+    supervisor = CommunityTrainingSupervisor(
+        store=store,
+        experiment_id="synthetic-per-item",
+        identity=IDENTITY,
+        operations=operations,
+        task_ids=(task,),
+        current_task_gt_supervision=True,
+        per_item_reset=True,
+        budget_policy=TrainingBudgetPolicy(
+            max_candidate_model_calls=2,
+            max_reflector_model_calls=5,
+            max_judge_operations=2,
+            cumulative_runtime_seconds=3600,
+            reflector_calls_per_cycle=5,
+        ),
+    )
+    supervisor.initialize()
+    return supervisor
+
+
+def test_per_item_reset_closes_exact_pair_and_clears_active_state(
+    tmp_path: Path,
+) -> None:
+    class RecordingOperations(SyntheticOperations):
+        def __init__(self) -> None:
+            super().__init__()
+            self.candidate_requests: list[dict] = []
+            self.evaluation_requests: list[dict] = []
+            self.attachment_requests: list[dict] = []
+            self.evolution_requests: list[dict] = []
+            self.evolved_workspace_requests: list[dict] = []
+
+        def ensure_candidate(self, request, idempotency_key):
+            self.candidate_requests.append(request)
+            return super().ensure_candidate(request, idempotency_key)
+
+        def evaluate(self, request, idempotency_key):
+            self.evaluation_requests.append(request)
+            return super().evaluate(request, idempotency_key)
+
+        def attach_feedback(self, request, idempotency_key):
+            self.attachment_requests.append(request)
+            return super().attach_feedback(request, idempotency_key)
+
+        def evolve_artifacts(self, request, idempotency_key):
+            self.evolution_requests.append(request)
+            return super().evolve_artifacts(request, idempotency_key)
+
+        def prepare_evolved_workspace(self, request, idempotency_key):
+            self.evolved_workspace_requests.append(request)
+            return super().prepare_evolved_workspace(request, idempotency_key)
+
+    operations = RecordingOperations()
+    supervisor = _per_item_supervisor(tmp_path, operations)
+    _drive_to(supervisor, "ITEM_RESET")
+
+    state = supervisor.status()
+    verified = supervisor.verify()
+    pair = state["paired_result"]
+    assert state["namespace_type"] == "per_item_reset"
+    assert pair["baseline_score"] == 0.2
+    assert pair["evolved_score"] == 0.5
+    assert pair["delta"] == pytest.approx(0.3)
+    assert all(pair["candidate_identity_distinct"].values())
+    assert pair["artifact_consumption"]["artifact_read_requested"] is True
+    assert len(pair["artifact_consumption"]["artifact_ids"]) == 3
+    assert set(pair["artifact_consumption"]["artifact_sha256"]) == {
+        "agent_system",
+        "text_memory",
+        "skill_bundle",
+    }
+    assert state["active_artifact_ids"] == []
+    assert len(state["archived_artifact_ids"]) == 3
+    assert state["current_composite_id"] is None
+    assert state["core_project_id"] is None
+    assert state["preseeded_workspace_authority"] is None
+    assert state["current_task_local_overlay_id"] is None
+    assert state["current_task_local_overlay_scope_id"] is None
+    assert state["item_reset_receipt"]["cross_project_fork_to_next_task"] is False
+    assert verified["execution_status"] == "COMPLETED"
+    assert operations.calls[
+        "synthetic-per-item:Life_005:a0:evaluation"
+    ] == 1
+    assert operations.calls[
+        "synthetic-per-item:Life_005:a1:evaluation"
+    ] == 1
+    assert operations.calls[
+        "synthetic-per-item:Life_005:a0:evolution"
+    ] == 1
+    assert "synthetic-per-item:Life_005:a1:evolution" not in operations.calls
+    assert len(operations.candidate_requests) == 2
+    baseline_request, evolved_request = operations.candidate_requests
+    assert baseline_request["attempt_index"] == 0
+    assert baseline_request["core_project_id"] is None
+    assert baseline_request["input_composite_id"] == "c000"
+    assert baseline_request["task_local_overlay_id"] is None
+    assert baseline_request["preseeded_workspace_authority"] is None
+    assert evolved_request["attempt_index"] == 1
+    assert evolved_request["task_local_overlay_id"] is None
+    assert evolved_request["preseeded_workspace_authority"] is not None
+    for candidate_request in operations.candidate_requests:
+        assert "ground_truth" not in candidate_request
+        assert "judge" not in candidate_request
+        assert candidate_request["fresh_workspace"] is True
+        assert candidate_request["resume_in_place"] is False
+    assert len(operations.evaluation_requests) == 2
+    assert len(operations.attachment_requests) == 1
+    attachment = operations.attachment_requests[0]
+    assert attachment["feedback_source"] == "current_task_gt"
+    assert attachment["judge_feedback"] is None
+    assert attachment["gt_supervision"]["ground_truth_sha256"] == "7" * 64
+    assert len(operations.evolution_requests) == 1
+    assert operations.evolution_requests[0]["attachment"][
+        "judge_feedback_included"
+    ] is False
+    assert len(operations.evolved_workspace_requests) == 1
+    assert operations.evolved_workspace_requests[0]["judge_feedback"] is None
+
+
+def test_next_per_item_namespace_starts_clean_after_prior_item_reset(
+    tmp_path: Path,
+) -> None:
+    life_operations = SyntheticOperations()
+    life = _per_item_supervisor(tmp_path / "life", life_operations)
+    _drive_to(life, "ITEM_RESET")
+    life_state = life.status()
+
+    class ChemistryRecordingOperations(SyntheticOperations):
+        def __init__(self) -> None:
+            super().__init__()
+            self.candidate_requests: list[dict] = []
+
+        def ensure_candidate(self, request, idempotency_key):
+            self.candidate_requests.append(request)
+            return super().ensure_candidate(request, idempotency_key)
+
+    chemistry_operations = ChemistryRecordingOperations()
+    chemistry = _per_item_supervisor(
+        tmp_path / "chemistry",
+        chemistry_operations,
+        task="Chemistry_004",
+    )
+    initial = chemistry.status()
+    assert initial["current_composite_id"] == "c000"
+    assert initial["core_project_id"] is None
+    assert initial["active_artifact_ids"] == []
+    assert initial["archived_artifact_ids"] == []
+    assert initial["current_task_local_overlay_id"] is None
+    assert initial["preseeded_workspace_authority"] is None
+    _drive_to(chemistry, "CANDIDATE_SEALED")
+
+    request = chemistry_operations.candidate_requests[0]
+    assert request["task_id"] == "Chemistry_004"
+    assert request["attempt_index"] == 0
+    assert request["core_project_id"] is None
+    assert request["input_composite_id"] == "c000"
+    assert request["task_local_overlay_id"] is None
+    assert request["preseeded_workspace_authority"] is None
+    assert request["successor_workspace_authority"] is None
+    assert "Life_005" not in repr(request)
+    chemistry_session = chemistry.status()["session_ids"][0]
+    assert chemistry_session not in life_state["session_ids"]
+    assert life_state["active_artifact_ids"] == []
+    assert life_state["core_project_id"] is None
 
 
 def _drive_to(supervisor: CommunityTrainingSupervisor, stage: str) -> None:
@@ -326,7 +571,6 @@ def test_completed_side_effect_before_transition_is_not_repeated(tmp_path: Path)
     supervisor = _supervisor(tmp_path, operations)
     supervisor.run_next()  # attempt ready
     supervisor.run_next()  # candidate running and side effect planned
-    state = supervisor.status()
     request = {
         "experiment_id": "synthetic-training",
         "task_id": "Life_005",
