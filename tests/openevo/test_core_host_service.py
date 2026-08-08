@@ -5,7 +5,6 @@ import errno
 import hashlib
 import json
 import os
-from pathlib import Path
 import select
 import signal
 import socket
@@ -13,14 +12,13 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from openevo import __version__
-from openevo.backend import launcher
-from openevo.backend import runtime_identity
-from openevo.backend import service
+from openevo.backend import launcher, runtime_identity, service
 from openevo.backend.contracts.v2.provider import RELEASE_DAEMON_FEATURE_FLAGS_V2
 from openevo.backend.contracts.v2.snapshots import (
     events_schema_sha256,
@@ -40,7 +38,6 @@ from openevo.backend.service import (
     ensure_core_service,
     stop_core_service,
 )
-
 
 SOURCE_COMMIT = "1" * 40
 RELEASE_A = CoreReleaseIdentity(
@@ -2935,6 +2932,12 @@ def test_daemon_floor_allows_legacy_upgrade_and_rejects_same_abi_downgrade(
         "schema_version": 3,
         "state": "stopped",
     }
+
+
+def test_current_daemon_lifecycle_advances_past_pre_artifact_audit_floor() -> None:
+    """A changed audit-capable Daemon cannot reuse the lifecycle-98 floor."""
+
+    assert service.V2_DAEMON_LIFECYCLE_COMPATIBILITY > 98
 
 
 def test_pending_process_is_recovered_before_restart(
