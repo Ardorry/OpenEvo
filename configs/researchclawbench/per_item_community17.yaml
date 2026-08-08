@@ -65,9 +65,9 @@ paths:
   researchclawbench_root: /home/lhy-h/work/researchclaw_openevo/ResearchClawBench
 source_identity:
   openevo_commit: 877fb7c7bc231ee73bd31be2b0e90a7718ae894b
-  adapter_implementation_commit: 9ec89c4ee7d4be42655774955978559ddb559962
+  adapter_implementation_commit: 837062ba925b1603a5ddf1ef664f3ae3ca2b96c0
   openevo_core_source_tree_sha256: 9fa76172efcebb43948ea64288d878157171b844abf5f006758898122b0bc9fe
-  adapter_tree_sha256: df596629e5a9eff580b29c883bc8220b7ab9bc2eee12a5c23cae604ebcbf297d
+  adapter_tree_sha256: e7953ccaa612d13b4ce4eaf81cc9c7419d14698eeca8f6212d31df318bd52b6d
   researchclawbench_commit: b1175eca3deb78ff8b2c839070874474051d2261
   canonical_scorer_sha256: 9492317443acc069744330f27aac693d162f1aa6837d512e40419704197c6022
 native_openevo:
@@ -163,6 +163,10 @@ judge:
   runs_per_attempt: 1
   scorer_commit: b1175eca3deb78ff8b2c839070874474051d2261
   scorer_sha256: 9492317443acc069744330f27aac693d162f1aa6837d512e40419704197c6022
+  evaluator_dependency_lock:
+    path: /home/lhy-h/work/researchclaw_per_item_minimal/configs/researchclawbench/per_item_evaluator_dependency_lock.json
+    sha256: a58897b666394e12aac27ac1cff8972f11da43a552240f20a8c125b9965f763f
+    content_sha256: e444677ea3ffb81074b5d7183da9be32856efe13425b5a57a07216d25a218dce
 artifacts:
   agent_system:
     enabled: true
