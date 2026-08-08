@@ -647,10 +647,11 @@ def test_production_builder_constructs_policy_executor_and_durable_store(
     tmp_path: Path, monkeypatch
 ) -> None:
     project = tmp_path / "project"
+    scorer_project = tmp_path / "canonical-scorer"
     experiment = project / "experiment"
-    benchmark = project / "ResearchClawBench"
+    benchmark = scorer_project / "ResearchClawBench"
     experiment.mkdir(parents=True)
-    benchmark.mkdir()
+    benchmark.mkdir(parents=True)
 
     class Config:
         project_root = project
@@ -685,6 +686,7 @@ def test_production_builder_constructs_policy_executor_and_durable_store(
     assert bundle.policy.model == "openai/gpt-5.1"
     assert bundle.scorer_tracked_tree_sha256 == "6" * 64
     assert isinstance(bundle.executor, DurableCommunityJudgeExecutor)
+    assert bundle.executor.project_root == scorer_project
     assert bundle.operation.store.db_path.is_file()
     assert stat_mode(bundle.operation.store.db_path) == 0o600
 

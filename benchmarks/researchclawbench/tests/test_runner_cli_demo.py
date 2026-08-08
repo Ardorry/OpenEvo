@@ -176,6 +176,11 @@ def test_run_per_item_live_selects_existing_production_control(
         "judge_credential_readiness",
         lambda _config: {"ready": True},
     )
+    monkeypatch.setattr(
+        cli,
+        "judge_identity_preflight",
+        lambda _config, *, receipt_path: {"receipt_path": str(receipt_path)},
+    )
     observed: dict[str, Any] = {}
 
     class Authority:
@@ -222,6 +227,119 @@ def test_run_per_item_live_selects_existing_production_control(
     assert observed["per_item_reset"] is True
     assert observed["require_existing"] is False
     assert observed["authority_closed"] is True
+
+
+def test_next_task_baseline_only_requires_closed_reset_before_dispatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = _MeetingConfig(tmp_path)
+    monkeypatch.setattr(cli.ExperimentConfig, "load", lambda _path: config)
+    monkeypatch.setattr(
+        cli,
+        "managed_core_profile_readiness",
+        lambda _config: _host_profile(ready=True),
+    )
+    monkeypatch.setattr(
+        cli,
+        "judge_credential_readiness",
+        lambda _config: (_ for _ in ()).throw(
+            AssertionError("baseline-only reset proof loaded Judge credentials")
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "judge_identity_preflight",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("baseline-only reset proof ran Judge preflight")
+        ),
+    )
+
+    class Authority:
+        def close(self) -> None:
+            pass
+
+    created: list[dict[str, Any]] = []
+
+    class Control:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+            created.append(kwargs)
+
+        def status(self) -> dict[str, Any]:
+            return {
+                "stage": "ITEM_RESET",
+                "active_artifact_ids": [],
+                "core_project_id": None,
+                "item_reset_receipt": {
+                    "active_artifact_ids": [],
+                    "active_successor_head": None,
+                },
+                "_state_sha256": "a" * 64,
+            }
+
+        def verify(self) -> dict[str, Any]:
+            return {"status": "PASS"}
+
+        def initialize(self) -> dict[str, Any]:
+            return {
+                "stage": "ARTIFACT_VALIDATED",
+                "active_artifact_ids": [],
+                "active_candidate_receipt": {
+                    "core_task_id": "core-task-chemistry",
+                    "core_attempt_id": "core-attempt-chemistry",
+                    "session_id": "session-chemistry",
+                    "candidate_output_root": "/isolated/chemistry",
+                },
+            }
+
+        def run_next(self) -> dict[str, Any]:  # pragma: no cover
+            raise AssertionError("sealed baseline fixture must not advance")
+
+    monkeypatch.setattr(cli, "acquire_managed_core_control", lambda _config: Authority())
+    monkeypatch.setattr(cli, "DurableTrainingControl", Control)
+
+    result = cli.main(
+        [
+            "run-per-item",
+            "--protocol",
+            str(tmp_path / "protocol.yaml"),
+            "--run-id",
+            "rcb_oe_v0_chemistry_reset_proof",
+            "--task",
+            "Chemistry_004",
+            "--baseline-only",
+            "--previous-closed-run-id",
+            "rcb_oe_v0_life_closed",
+            "--previous-closed-task",
+            "Life_005",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    payload = json.loads(output[output.index("{") :])
+    receipt = json.loads(
+        (
+            tmp_path
+            / "supervisor/rcb_oe_v0_chemistry_reset_proof"
+            / "pre_dispatch_isolation.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert result == 0
+    assert len(created) == 2
+    assert created[0]["require_existing"] is True
+    assert created[1]["production"] is True
+    assert payload["status"] == "PER_ITEM_NEXT_TASK_BASELINE_SEALED"
+    assert payload["active_artifact_ids"] == []
+    assert payload["judge_executed"] is False
+    assert payload["evolution_executed"] is False
+    assert receipt["fresh_generation_zero"] is True
+    assert receipt["active_artifact_ids"] == []
+    assert receipt["prior_task_gt_present"] is False
+    assert receipt["prior_task_workspace_present"] is False
+    assert receipt["prior_task_candidate_session_present"] is False
+    assert receipt["cross_project_fork_from_previous_task"] is False
 
 
 def test_per_item_community17_zero_call_plan_is_complete_and_non_mutating(
@@ -284,6 +402,11 @@ def test_per_item_community_failure_is_recorded_and_never_silently_skipped(
         cli,
         "judge_credential_readiness",
         lambda _config: {"ready": True},
+    )
+    monkeypatch.setattr(
+        cli,
+        "judge_identity_preflight",
+        lambda _config, *, receipt_path: {"receipt_path": str(receipt_path)},
     )
 
     class Authority:

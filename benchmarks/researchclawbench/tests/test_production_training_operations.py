@@ -90,6 +90,9 @@ from openevo.evolution.framework.profiles import execution_profile_for_release_m
 from openevo.workspace_archive import write_workspace_archive
 
 ROOT = Path(__file__).resolve().parents[4]
+RESEARCHCLAWBENCH_ROOT = (
+    ROOT / "researchclaw_openevo" / "ResearchClawBench"
+).resolve(strict=True)
 PROTOCOL = Path(
     os.environ.get(
         "OPENEVORESEARCHCLAWBENCH_TEST_PROTOCOL",
@@ -1798,6 +1801,7 @@ def test_judge_identity_preflight_uses_evaluator_only_child_without_request(
 
     class Config:
         project_root = ROOT
+        researchclawbench_root = RESEARCHCLAWBENCH_ROOT
         experiment_root = tmp_path
 
         @staticmethod
@@ -1825,7 +1829,7 @@ def test_judge_identity_preflight_uses_evaluator_only_child_without_request(
     second = judge_identity_preflight(Config(), receipt_path=destination)
     assert first == second
     assert first == {
-        "schema_version": "openevo.researchclawbench.judge_scorer_preflight.v2",
+        "schema_version": "openevo.researchclawbench.judge_scorer_preflight.v3",
         "api_base": "https://openrouter.ai/api/v1",
         "api_key_present": True,
         "model": "openai/gpt-5.1",
@@ -1837,6 +1841,9 @@ def test_judge_identity_preflight_uses_evaluator_only_child_without_request(
         "evaluator_dependency_content_sha256": dependency["content_sha256"],
         "tasks_dir_authority_matches": True,
         "tasks_dir_relative": "ResearchClawBench/tasks",
+        "scorer_project_root_sha256": hashlib.sha256(
+            os.fspath(RESEARCHCLAWBENCH_ROOT.parent).encode("utf-8")
+        ).hexdigest(),
         "model_slug_preserved": True,
         "judge_request_started": False,
         "model_started": False,
@@ -1859,6 +1866,7 @@ def test_judge_identity_preflight_rejects_model_drift_without_request(
 
     class Config:
         project_root = ROOT
+        researchclawbench_root = RESEARCHCLAWBENCH_ROOT
         experiment_root = tmp_path
 
         @staticmethod

@@ -559,10 +559,46 @@ def _print_per_item_runner_summary(
     task_id: str,
     run_id: str,
     dry_run: bool,
+    baseline_only: bool = False,
 ) -> None:
     """Print the non-secret meeting summary before any mutable operation."""
 
     output_root = config.experiment_root / "supervisor" / run_id
+    evolution_lines = (
+        ("  not executed in next-task reset validation",)
+        if baseline_only
+        else (
+            "  backend: OpenEvo native successor/reflector",
+            f"  model: {MANAGED_CODEX_MODEL}",
+            "  artifacts:",
+            "    - memory",
+            "    - skill",
+            "    - agent-system",
+            "  supervision: current-task GT",
+            "  judge_feedback: excluded",
+        )
+    )
+    judge_lines = (
+        ("  not executed in next-task reset validation",)
+        if baseline_only
+        else (
+            "  backend: OpenRouter",
+            "  model: openai/gpt-5.1",
+            "  provider: Azure",
+        )
+    )
+    pass_lines = (
+        ("  validate and seal baseline", "  stop")
+        if baseline_only
+        else (
+            "  judge baseline",
+            "  evolve once with current-task GT",
+            "  evolved",
+            "  judge evolved",
+            "  paired result",
+            "  reset",
+        )
+    )
     print(
         "\n".join(
             (
@@ -580,28 +616,14 @@ def _print_per_item_runner_summary(
                 "  runtime: managed",
                 "",
                 "Evolution:",
-                "  backend: OpenEvo native successor/reflector",
-                f"  model: {MANAGED_CODEX_MODEL}",
-                "  artifacts:",
-                "    - memory",
-                "    - skill",
-                "    - agent-system",
-                "  supervision: current-task GT",
-                "  judge_feedback: excluded",
+                *evolution_lines,
                 "",
                 "Judge:",
-                "  backend: OpenRouter",
-                "  model: openai/gpt-5.1",
-                "  provider: Azure",
+                *judge_lines,
                 "",
                 "Passes:",
                 "  baseline",
-                "  judge baseline",
-                "  evolve once with current-task GT",
-                "  evolved",
-                "  judge evolved",
-                "  paired result",
-                "  reset",
+                *pass_lines,
                 "",
                 "Isolation:",
                 "  fresh Codex per pass",
@@ -631,24 +653,45 @@ def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> 
             "run-per-item requires the canonical per-item reset protocol"
         )
     dry_run = bool(args.dry_run or args.no_model_calls)
+    baseline_only = bool(args.baseline_only)
+    if baseline_only != bool(args.previous_closed_run_id):
+        raise ProtocolError(
+            "--baseline-only requires exactly one --previous-closed-run-id"
+        )
+    if baseline_only != bool(args.previous_closed_task):
+        raise ProtocolError(
+            "--baseline-only requires exactly one --previous-closed-task"
+        )
     _print_per_item_runner_summary(
         config,
         task_id=task_id,
         run_id=args.run_id,
         dry_run=dry_run,
+        baseline_only=baseline_only,
     )
     host_profile = managed_core_profile_readiness(config)
     output_root = config.experiment_root / "supervisor" / args.run_id
-    planned_stages = [
-        "fresh-generation-zero",
-        "fresh-codex-baseline",
-        "baseline-judge",
-        "current-task-gt-native-evolve-once",
-        "fresh-codex-evolved",
-        "evolved-judge",
-        "paired-result",
-        "reset-active-state",
-    ]
+    planned_stages = (
+        [
+            "verify-previous-item-reset",
+            "write-pre-dispatch-isolation-receipt",
+            "fresh-generation-zero",
+            "fresh-codex-baseline",
+            "validate-and-seal-baseline",
+            "stop-before-judge",
+        ]
+        if baseline_only
+        else [
+            "fresh-generation-zero",
+            "fresh-codex-baseline",
+            "baseline-judge",
+            "current-task-gt-native-evolve-once",
+            "fresh-codex-evolved",
+            "evolved-judge",
+            "paired-result",
+            "reset-active-state",
+        ]
+    )
     if dry_run:
         print_closed_json(
             {
@@ -667,9 +710,10 @@ def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> 
                 "supervision": "current_task_gt",
                 "judge_feedback_in_evolution": False,
                 "gt_visible_to_candidate": False,
-                "one_evolution_cycle": True,
+                "one_evolution_cycle": not baseline_only,
                 "fresh_codex_per_pass": True,
-                "reset_after_task": True,
+                "reset_after_task": not baseline_only,
+                "baseline_only": baseline_only,
                 "direct_host_codex_subprocess": False,
                 "secret_recorded": False,
             }
@@ -688,19 +732,29 @@ def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> 
             }
         )
         return 5
-    judge = judge_credential_readiness(config)
-    if judge.get("ready") is not True:
-        print_closed_json(
-            {
-                "status": "JUDGE_CREDENTIALS_REQUIRED",
-                "task_id": task_id,
-                "run_id": args.run_id,
-                "model_started": False,
-                "provider_calls": 0,
-                "secret_recorded": False,
-            }
+    if not baseline_only:
+        judge = judge_credential_readiness(config)
+        if judge.get("ready") is not True:
+            print_closed_json(
+                {
+                    "status": "JUDGE_CREDENTIALS_REQUIRED",
+                    "task_id": task_id,
+                    "run_id": args.run_id,
+                    "model_started": False,
+                    "provider_calls": 0,
+                    "secret_recorded": False,
+                }
+            )
+            return 5
+        judge_identity_preflight(
+            config,
+            receipt_path=(
+                config.experiment_root
+                / "per_item_preflight"
+                / args.run_id
+                / "judge-preflight.json"
+            ),
         )
-        return 5
     state_path = output_root / "training-supervisor.sqlite3"
     if state_path.exists():
         print_closed_json(
@@ -715,6 +769,47 @@ def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> 
         return 5
     authority = acquire_managed_core_control(config)
     try:
+        if baseline_only:
+            previous = DurableTrainingControl(
+                config=config,
+                run_id=str(args.previous_closed_run_id),
+                require_existing=True,
+                task_ids=(str(args.previous_closed_task),),
+            )
+            previous_state = previous.status()
+            previous_verification = previous.verify()
+            previous_reset = previous_state.get("item_reset_receipt")
+            if (
+                previous_state.get("stage") != TrainingStage.ITEM_RESET.value
+                or previous_state.get("active_artifact_ids") != []
+                or previous_state.get("core_project_id") is not None
+                or not isinstance(previous_reset, dict)
+                or previous_reset.get("active_artifact_ids") != []
+                or previous_reset.get("active_successor_head") is not None
+                or previous_verification.get("status") != "PASS"
+            ):
+                raise ProtocolError("previous per-item state is not closed and reset")
+            isolation_receipt = {
+                "schema_version": (
+                    "openevo.researchclawbench.pre_dispatch_isolation.v1"
+                ),
+                "task_id": task_id,
+                "run_id": args.run_id,
+                "previous_task_id": str(args.previous_closed_task),
+                "previous_run_id": str(args.previous_closed_run_id),
+                "previous_state_sha256": previous_state.get("_state_sha256"),
+                "fresh_generation_zero": True,
+                "active_artifact_ids": [],
+                "active_successor_head": None,
+                "active_project_head": None,
+                "prior_task_gt_present": False,
+                "prior_task_workspace_present": False,
+                "prior_task_candidate_session_present": False,
+                "cross_project_fork_from_previous_task": False,
+                "task_provider_calls_before_receipt": 0,
+                "secret_recorded": False,
+            }
+            _write(output_root / "pre_dispatch_isolation.json", isolation_receipt)
         control = DurableTrainingControl(
             config=config,
             run_id=args.run_id,
@@ -726,10 +821,36 @@ def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> 
             per_item_reset=True,
         )
         result = control.initialize()
-        while result["stage"] not in _FORMAL_TERMINAL_STAGES:
+        while result["stage"] not in _FORMAL_TERMINAL_STAGES and not (
+            baseline_only
+            and result["stage"] == TrainingStage.ARTIFACT_VALIDATED.value
+        ):
             result = control.run_next()
     finally:
         authority.close()
+    if baseline_only and result["stage"] == TrainingStage.ARTIFACT_VALIDATED.value:
+        candidate = result.get("active_candidate_receipt")
+        if not isinstance(candidate, dict):
+            raise ProtocolError("baseline-only validation lacks Candidate receipt")
+        print_closed_json(
+            {
+                "status": "PER_ITEM_NEXT_TASK_BASELINE_SEALED",
+                "task_id": task_id,
+                "run_id": args.run_id,
+                "baseline_core_task_id": candidate.get("core_task_id"),
+                "baseline_core_attempt_id": candidate.get("core_attempt_id"),
+                "baseline_session_id": candidate.get("session_id"),
+                "baseline_workspace": candidate.get("candidate_output_root"),
+                "fresh_generation_zero": True,
+                "active_artifact_ids": result.get("active_artifact_ids"),
+                "judge_executed": False,
+                "evolution_executed": False,
+                "pre_dispatch_isolation_receipt": str(
+                    output_root / "pre_dispatch_isolation.json"
+                ),
+            }
+        )
+        return 0
     if result["stage"] == TrainingStage.ITEM_RESET.value:
         verification = control.verify()
         print_closed_json(
@@ -891,6 +1012,15 @@ def command_run_per_item_community(
             }
         )
         return 5
+    judge_identity_preflight(
+        config,
+        receipt_path=(
+            config.experiment_root
+            / "per_item_preflight"
+            / args.run_id
+            / "judge-preflight.json"
+        ),
+    )
     if root.exists():
         raise ProtocolError("per-item Community run namespace already exists")
     root.mkdir(parents=True, mode=0o700)
@@ -1334,6 +1464,9 @@ def main(argv: list[str] | None = None) -> int:
     run_per_item.add_argument("--task", required=True, choices=FROZEN_TASKS)
     run_per_item.add_argument("--dry-run", action="store_true")
     run_per_item.add_argument("--no-model-calls", action="store_true")
+    run_per_item.add_argument("--baseline-only", action="store_true")
+    run_per_item.add_argument("--previous-closed-run-id")
+    run_per_item.add_argument("--previous-closed-task", choices=FROZEN_TASKS)
     per_item_community = sub.add_parser("run-per-item-community")
     per_item_community.add_argument("--protocol", required=True, type=Path)
     per_item_community.add_argument("--run-id", required=True)

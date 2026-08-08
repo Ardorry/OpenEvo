@@ -934,8 +934,9 @@ def judge_identity_preflight(
         != dependency_claim.get("content_sha256")
     ):
         raise JudgeCredentialsRequired("evaluator dependency lock identity drifted")
+    scorer_project_root = config.researchclawbench_root.parent
     expected = {
-        "schema_version": "openevo.researchclawbench.judge_scorer_preflight.v2",
+        "schema_version": "openevo.researchclawbench.judge_scorer_preflight.v3",
         "api_base": OPENROUTER_API_BASE,
         "api_key_present": True,
         "model": config.require("judge.model"),
@@ -947,6 +948,9 @@ def judge_identity_preflight(
         "evaluator_dependency_content_sha256": dependency_lock["content_sha256"],
         "tasks_dir_authority_matches": True,
         "tasks_dir_relative": "ResearchClawBench/tasks",
+        "scorer_project_root_sha256": hashlib.sha256(
+            os.fspath(scorer_project_root).encode("utf-8")
+        ).hexdigest(),
         "model_slug_preserved": True,
         "judge_request_started": False,
         "model_started": False,
@@ -1004,7 +1008,7 @@ def judge_identity_preflight(
         "--credential-preflight-output",
         os.fspath(destination),
         "--project-root",
-        os.fspath(config.project_root),
+        os.fspath(scorer_project_root),
         "--expected-judge-model",
         str(expected["model"]),
         "--expected-judge-api-base",

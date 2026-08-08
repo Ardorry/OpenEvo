@@ -248,7 +248,11 @@ def build_production_community_evaluator(
         raise EvaluatorError("evaluator private scorer root is unsafe")
     os.chmod(scorer_private, 0o700)
     executor = DurableCommunityJudgeExecutor(
-        project_root=config.project_root,
+        # ``project_root`` on the evaluator executor is the import authority
+        # containing the canonical ``ResearchClawBench`` package.  The wider
+        # experiment project root may live in a sibling checkout and is not a
+        # valid scorer import root.
+        project_root=config.researchclawbench_root.parent,
         evaluator_private_root=scorer_private,
         policy=policy,
         judge_env_file=selected_secret,
@@ -857,7 +861,7 @@ def _credential_preflight(
     _write_private_json(
         output,
         {
-            "schema_version": "openevo.researchclawbench.judge_scorer_preflight.v2",
+            "schema_version": "openevo.researchclawbench.judge_scorer_preflight.v3",
             "api_base": actual_api_base,
             "api_key_present": True,
             "model": actual_model,
@@ -871,6 +875,9 @@ def _credential_preflight(
             ],
             "tasks_dir_authority_matches": True,
             "tasks_dir_relative": scorer["tasks_dir_relative"],
+            "scorer_project_root_sha256": hashlib.sha256(
+                os.fspath(project_root.resolve(strict=True)).encode("utf-8")
+            ).hexdigest(),
             "model_slug_preserved": "/" in actual_model,
             "judge_request_started": False,
             "model_started": False,
