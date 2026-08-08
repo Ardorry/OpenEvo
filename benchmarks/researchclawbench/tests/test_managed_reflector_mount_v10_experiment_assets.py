@@ -15,6 +15,7 @@ from types import ModuleType, SimpleNamespace
 import pytest
 import yaml
 from openevo_researchclawbench.legacy_supervisor_attestation import (
+    _read_immutable_supervisor_state,
     build_legacy_supervisor_attested_inventory,
 )
 from openevo_researchclawbench.training_state_store import canonical_sha256
@@ -924,6 +925,73 @@ def test_v10_legacy_attestation_rejects_non_sqlite_file_inventory_drift() -> Non
 
     with pytest.raises(ValueError, match="differs from its attestation"):
         build_legacy_supervisor_attested_inventory(**inputs)
+
+
+def test_legacy_attestation_accepts_exact_pre_job_cross_check() -> None:
+    inputs = _legacy_inventory_inputs()
+    cross_check = dict(inputs["expected_core_cross_check"])
+    failed_job_id = cross_check.pop("failed_job_id")
+    cross_check["failed_pre_job_operation_id"] = failed_job_id
+    inputs["expected_core_cross_check"] = cross_check
+    inputs["allow_stable_empty_wal_sidecars"] = True
+
+    inventory = build_legacy_supervisor_attested_inventory(**inputs)
+
+    values = inventory["expected_core_cross_check"]["values"]
+    assert values["failed_pre_job_operation_id"] == failed_job_id
+    assert "failed_job_id" not in values
+
+
+def test_legacy_attestation_rejects_ambiguous_failed_source_cross_check() -> None:
+    inputs = _legacy_inventory_inputs()
+    inputs["expected_core_cross_check"] = {
+        **inputs["expected_core_cross_check"],
+        "failed_pre_job_operation_id": "successor-attempt-source",
+    }
+
+    with pytest.raises(ValueError, match="cross-check inventory is not closed"):
+        build_legacy_supervisor_attested_inventory(**inputs)
+
+
+def test_immutable_supervisor_read_accepts_only_stable_empty_wal_sidecars(
+    tmp_path: Path,
+) -> None:
+    namespace = "source-namespace"
+    database = tmp_path / "training-supervisor.sqlite3"
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute(
+            "CREATE TABLE experiment_state ("
+            "experiment_id TEXT PRIMARY KEY, stage TEXT NOT NULL, "
+            "state_sha256 TEXT NOT NULL, revision INTEGER NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO experiment_state VALUES (?, ?, ?, ?)",
+            (namespace, "EVOLUTION_RUNNING", "1" * 64, 8),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    Path(str(database) + "-wal").write_bytes(b"")
+    Path(str(database) + "-shm").write_bytes(b"closed-shm")
+
+    state = _read_immutable_supervisor_state(
+        database=database,
+        namespace=namespace,
+        allow_stable_empty_wal_sidecars=True,
+    )
+
+    assert state["stage"] == "EVOLUTION_RUNNING"
+    assert state["stable_empty_wal_sidecars"]["wal"]["size_bytes"] == 0
+    assert state["stable_empty_wal_sidecars"]["shm"]["size_bytes"] == 10
+
+    Path(str(database) + "-wal").write_bytes(b"not-empty")
+    with pytest.raises(ValueError, match="WAL is not empty"):
+        _read_immutable_supervisor_state(
+            database=database,
+            namespace=namespace,
+            allow_stable_empty_wal_sidecars=True,
+        )
 
 
 def test_v10_runner_reconciles_historical_and_canonical_tree_hashes(

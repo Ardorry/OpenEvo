@@ -8,7 +8,6 @@ import pytest
 from openevo_researchclawbench import cli
 from openevo_researchclawbench.config import ExperimentConfig
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 NATIVE_LIFE005_PROTOCOL = (
     REPOSITORY_ROOT / "configs/researchclawbench/native_life005_engineering.yaml"
@@ -196,6 +195,54 @@ def test_run_per_item_live_selects_existing_production_control(
     assert observed["current_task_gt_supervision"] is True
     assert observed["require_existing"] is False
     assert observed["authority_closed"] is True
+
+
+def test_native_evolution_recovery_zero_call_command_parses_without_core(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = _MeetingConfig(tmp_path)
+    monkeypatch.setattr(cli.ExperimentConfig, "load", lambda _path: config)
+    monkeypatch.setattr(
+        cli,
+        "native_evolution_recovery_dry_run",
+        lambda _config, *, source_run_id, recovery_run_id: {
+            "status": "NATIVE_EVOLUTION_RECOVERY_DRY_RUN_NO_MODEL_CALLS",
+            "source_run_id": source_run_id,
+            "recovery_run_id": recovery_run_id,
+            "provider_calls": 0,
+            "model_started": False,
+        },
+    )
+    monkeypatch.setattr(
+        cli,
+        "acquire_managed_core_control",
+        lambda _config: (_ for _ in ()).throw(
+            AssertionError("dry-run acquired Core authority")
+        ),
+    )
+
+    result = cli.main(
+        [
+            "recover-native-evolution",
+            "--protocol",
+            str(tmp_path / "protocol.yaml"),
+            "--source-run-id",
+            "rcb_oe_v0_native_life005_source",
+            "--run-id",
+            "rcb_oe_v0_native_life005_recovery",
+            "--dry-run",
+            "--no-model-calls",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    payload = json.loads(output[output.index("{") :])
+    assert result == 0
+    assert "Native Evolution Recovery" in output
+    assert payload["provider_calls"] == 0
+    assert payload["model_started"] is False
 
 
 def test_native_codex_delivery_cli_rejects_direct_subprocess_route(

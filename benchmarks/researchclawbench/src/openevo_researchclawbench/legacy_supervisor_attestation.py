@@ -68,13 +68,30 @@ def _read_immutable_supervisor_state(
     *,
     database: Path,
     namespace: str,
+    allow_stable_empty_wal_sidecars: bool = False,
 ) -> dict[str, Any]:
     if database.is_symlink() or not database.is_file():
         raise ValueError("legacy Supervisor database is unsafe")
     value = database.resolve(strict=True)
     sidecars = (Path(str(value) + "-wal"), Path(str(value) + "-shm"))
+    observed_sidecars: dict[str, dict[str, Any]] = {}
     if any(item.exists() for item in sidecars):
-        raise ValueError("legacy Supervisor database has an active SQLite sidecar")
+        if not allow_stable_empty_wal_sidecars or not all(
+            item.exists() for item in sidecars
+        ):
+            raise ValueError("legacy Supervisor database has an active SQLite sidecar")
+        for label, item in zip(("wal", "shm"), sidecars, strict=True):
+            if item.is_symlink() or not item.is_file():
+                raise ValueError("legacy Supervisor SQLite sidecar is unsafe")
+            metadata = os.stat(item, follow_symlinks=False)
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                raise ValueError("legacy Supervisor SQLite sidecar is unsafe")
+            observed_sidecars[label] = {
+                "size_bytes": metadata.st_size,
+                "sha256": _file_sha256(item),
+            }
+        if observed_sidecars["wal"]["size_bytes"] != 0:
+            raise ValueError("legacy Supervisor SQLite WAL is not empty")
     before = _file_sha256(value)
     connection = sqlite3.connect(
         f"{value.as_uri()}?mode=ro&immutable=1",
@@ -89,7 +106,15 @@ def _read_immutable_supervisor_state(
     finally:
         connection.close()
     after = _file_sha256(value)
-    if before != after or any(item.exists() for item in sidecars):
+    sidecars_after = {
+        label: {
+            "size_bytes": item.stat().st_size,
+            "sha256": _file_sha256(item),
+        }
+        for label, item in zip(("wal", "shm"), sidecars, strict=True)
+        if item.exists()
+    }
+    if before != after or sidecars_after != observed_sidecars:
         raise ValueError("legacy Supervisor database changed during immutable readback")
     if len(rows) != 1 or rows[0][0] != namespace:
         raise ValueError("legacy Supervisor namespace is ambiguous")
@@ -107,6 +132,7 @@ def _read_immutable_supervisor_state(
         "revision": revision,
         "database_sha256_before": before,
         "database_sha256_after": after,
+        "stable_empty_wal_sidecars": observed_sidecars,
     }
 
 
@@ -159,6 +185,7 @@ def build_legacy_supervisor_attested_inventory(
     evidence_files: Mapping[str, Path],
     expected_evidence_sha256: Mapping[str, str],
     expected_core_cross_check: Mapping[str, str],
+    allow_stable_empty_wal_sidecars: bool = False,
 ) -> dict[str, Any]:
     """Build a non-secret inventory without creating a protocol or authority."""
 
@@ -178,7 +205,6 @@ def build_legacy_supervisor_attested_inventory(
         raise ValueError("legacy evidence inventory is not the closed file set")
     required_core_fields = {
         "successor_transition_id",
-        "failed_job_id",
         "dataset_id",
         "dataset_revision",
         "attachment_id",
@@ -186,7 +212,14 @@ def build_legacy_supervisor_attested_inventory(
         "resolved_dataset_artifact_id",
         "resolved_view_sha256",
     }
-    if set(expected_core_cross_check) != required_core_fields:
+    failure_fields = set(expected_core_cross_check) & {
+        "failed_job_id",
+        "failed_pre_job_operation_id",
+    }
+    if (
+        len(failure_fields) != 1
+        or set(expected_core_cross_check) != required_core_fields | failure_fields
+    ):
         raise ValueError("expected Core cross-check inventory is not closed")
     for name, value in expected_core_cross_check.items():
         pattern = _SHA256 if name.endswith("_sha256") else _IDENTIFIER
@@ -218,6 +251,7 @@ def build_legacy_supervisor_attested_inventory(
     state = _read_immutable_supervisor_state(
         database=supervisor_root / "training-supervisor.sqlite3",
         namespace=supervisor_namespace,
+        allow_stable_empty_wal_sidecars=allow_stable_empty_wal_sidecars,
     )
     tree_sha256 = _tree_sha256(supervisor_root)
     supervisor_files = _closed_supervisor_file_inventory(supervisor_root)
@@ -267,6 +301,15 @@ def build_legacy_supervisor_attested_inventory(
                 ).stat().st_size,
                 "sha256_before": state["database_sha256_before"],
                 "sha256_after": state["database_sha256_after"],
+                **(
+                    {
+                        "stable_empty_wal_sidecars": state[
+                            "stable_empty_wal_sidecars"
+                        ]
+                    }
+                    if state["stable_empty_wal_sidecars"]
+                    else {}
+                ),
             },
             "canonical_tree": {
                 "algorithm": _TREE_ALGORITHM,

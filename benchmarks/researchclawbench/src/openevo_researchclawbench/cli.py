@@ -57,6 +57,10 @@ from .minimal_per_item_runner import (
     MinimalPerItemConfig,
     MinimalPerItemRunner,
 )
+from .native_evolution_recovery import (
+    NativeEvolutionRecoveryAdapter,
+    native_evolution_recovery_dry_run,
+)
 from .official_training_control import (
     OfficialTrainingControl,
     OfficialTrainingOperationsUnavailable,
@@ -723,6 +727,78 @@ def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> 
     return 5
 
 
+def command_recover_native_evolution(
+    config: ExperimentConfig,
+    args: argparse.Namespace,
+) -> int:
+    """Resume only the failed Life_005 successor through Core recovery APIs."""
+
+    dry_run = bool(args.dry_run or args.no_model_calls)
+    print(
+        "\n".join(
+            (
+                "ResearchClawBench Native Evolution Recovery",
+                "===========================================",
+                "",
+                "Task: Life_005",
+                f"Source Run ID: {args.source_run_id}",
+                f"Recovery Run ID: {args.run_id}",
+                "Candidate: sealed source only; not re-executed",
+                "Evolution: OpenEvo native successor / managed reflector",
+                "Supervision: current-task GT; Judge feedback excluded",
+                "Targets: agent-system, skill, memory",
+                "Judge: not executed",
+                "Evolved Candidate: not executed",
+                f"Dry run: {str(dry_run).lower()}",
+            )
+        )
+    )
+    if dry_run:
+        print_closed_json(
+            native_evolution_recovery_dry_run(
+                config,
+                source_run_id=args.source_run_id,
+                recovery_run_id=args.run_id,
+            )
+        )
+        return 0
+    authority = acquire_managed_core_control(config)
+    try:
+        adapter = NativeEvolutionRecoveryAdapter(
+            config=config,
+            source_run_id=args.source_run_id,
+            recovery_run_id=args.run_id,
+            core_authority=authority,
+        )
+        if args.prepare_only:
+            prepared = adapter.prepare()
+            print_closed_json(
+                {
+                    "status": "NATIVE_EVOLUTION_RECOVERY_PREPARED_NO_MODEL_CALLS",
+                    "task_id": prepared["task_id"],
+                    "source_run_id": prepared["source_run_id"],
+                    "recovery_run_id": prepared["recovery_run_id"],
+                    "source_state_sha256": prepared[
+                        "supervisor_state_sha256"
+                    ],
+                    "source_tree_sha256": prepared["supervisor_tree_sha256"],
+                    "execution_identity": prepared["execution_identity"],
+                    "provider_calls": 0,
+                    "model_started": False,
+                    "output_root": str(adapter.recovery_root),
+                }
+            )
+            return 0
+        if args.create_only:
+            print_closed_json(adapter.create())
+            return 0
+        result = adapter.run()
+        print_closed_json(result)
+        return 0
+    finally:
+        authority.close()
+
+
 def command_pilot_v2(args: argparse.Namespace) -> int:
     """Run the three-task per-item pilot v2 (dry-run or live)."""
 
@@ -952,6 +1028,15 @@ def main(argv: list[str] | None = None) -> int:
     run_per_item.add_argument("--task", required=True, choices=FROZEN_TASKS)
     run_per_item.add_argument("--dry-run", action="store_true")
     run_per_item.add_argument("--no-model-calls", action="store_true")
+    native_recovery = sub.add_parser("recover-native-evolution")
+    native_recovery.add_argument("--protocol", required=True, type=Path)
+    native_recovery.add_argument("--source-run-id", required=True)
+    native_recovery.add_argument("--run-id", required=True)
+    native_recovery_mode = native_recovery.add_mutually_exclusive_group()
+    native_recovery_mode.add_argument("--prepare-only", action="store_true")
+    native_recovery_mode.add_argument("--create-only", action="store_true")
+    native_recovery.add_argument("--dry-run", action="store_true")
+    native_recovery.add_argument("--no-model-calls", action="store_true")
     judge_probe = sub.add_parser("judge-probe")
     judge_probe.add_argument("--project-root", required=True, type=Path)
     judge_probe.add_argument("--output-root", required=True, type=Path)
@@ -1012,6 +1097,8 @@ def main(argv: list[str] | None = None) -> int:
         config = ExperimentConfig.load(args.protocol)
         if args.command == "run-per-item":
             return command_run_per_item(config, args)
+        if args.command == "recover-native-evolution":
+            return command_recover_native_evolution(config, args)
         if (
             getattr(config, "formal_runs_v11", None) is not None
             and args.command in {"training-start", "run-next", "resume"}
