@@ -177,7 +177,9 @@ class ExperimentConfig:
             "passes": [
                 "baseline",
                 "judge_baseline",
-                "evolve_once_current_task_gt",
+                "project_sanitized_evaluation_feedback",
+                "admit_sanitized_evaluation_feedback",
+                "evolve_once_sanitized_evaluation_feedback",
                 "evolved",
                 "judge_evolved",
                 "paired_result",
