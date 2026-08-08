@@ -130,9 +130,13 @@ judge:
   model: openai/gpt-5.1
   provider: openai_compatible
   model_source: OpenRouter_model_catalog
+  api_key_env: JUDGE_API_KEY
+  api_base_env: JUDGE_API_BASE
+  model_env: JUDGE_MODEL_NAME
   provider_only: azure
   allow_fallbacks: false
   runs_per_attempt: 1
+  scorer_commit: b1175eca3deb78ff8b2c839070874474051d2261
   scorer_sha256: 9492317443acc069744330f27aac693d162f1aa6837d512e40419704197c6022
 artifacts:
   agent_system:

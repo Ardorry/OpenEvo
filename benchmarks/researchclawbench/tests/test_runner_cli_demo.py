@@ -6,6 +6,13 @@ from typing import Any
 
 import pytest
 from openevo_researchclawbench import cli
+from openevo_researchclawbench.config import ExperimentConfig
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+NATIVE_LIFE005_PROTOCOL = (
+    REPOSITORY_ROOT / "configs/researchclawbench/native_life005_engineering.yaml"
+)
 
 
 class _MeetingConfig:
@@ -41,6 +48,18 @@ def _host_profile(*, ready: bool) -> dict[str, Any]:
         "reason_code": None if ready else "DOCKER_USER_CONTAINER_MAPPING_UNAVAILABLE",
         "secret_recorded": False,
     }
+
+
+def test_native_life005_protocol_pins_current_judge_identity_contract() -> None:
+    config = ExperimentConfig.load(NATIVE_LIFE005_PROTOCOL)
+
+    assert config.require("judge.scorer_commit") == (
+        config.require("source_identity.researchclawbench_commit")
+    )
+    assert config.require("judge.api_key_env") == "JUDGE_API_KEY"
+    assert config.require("judge.api_base_env") == "JUDGE_API_BASE"
+    assert config.require("judge.model_env") == "JUDGE_MODEL_NAME"
+    assert config.require("native_engineering_validation.execute_judge") is False
 
 
 def test_run_per_item_zero_call_demo_parses_and_prints_safe_summary(
