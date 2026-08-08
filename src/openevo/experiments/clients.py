@@ -411,8 +411,8 @@ class EvolutionHttpClient:
             raise TypeError("evolution health response was not a JSON object")
         return result
 
-    @staticmethod
     def _raise_for_status(
+        self,
         response: httpx.Response,
         *,
         diagnostic_evidence_id: str | None = None,
@@ -439,6 +439,19 @@ class EvolutionHttpClient:
             detail_code = "request_validation_failed"
         elif response.status_code >= 500:
             detail_code = "server_failure"
+        if (
+            diagnostic_evidence_id is None
+            and diagnostic_evidence_sha256 is None
+            and self._planned_job_evidence_root is not None
+        ):
+            (
+                diagnostic_evidence_id,
+                diagnostic_evidence_sha256,
+            ) = self._record_http_response_evidence(
+                request=response.request,
+                response=response,
+                evidence_kind="evolution-error",
+            )
         raise EvolutionHttpStatusError(
             status_code=response.status_code,
             detail_code=detail_code,
@@ -449,11 +462,68 @@ class EvolutionHttpClient:
             request_path=_request_url_path(response.request),
         )
 
-    def _record_planned_job_http_evidence(
+    def _record_http_request_evidence(
+        self,
+        *,
+        request: httpx.Request,
+    ) -> tuple[str | None, str | None]:
+        root = self._planned_job_evidence_root
+        if root is None:
+            return None, None
+        request_body = bytes(request.content)
+        request_sha256 = hashlib.sha256(request_body).hexdigest()
+        try:
+            request_json = json.loads(request_body)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("planned-job request was not serialized JSON") from exc
+        recorded_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        identity_seed = _canonical_json_bytes(
+            {
+                "phase": "pre_dispatch",
+                "recorded_at": recorded_at,
+                "request_sha256": request_sha256,
+                "nonce": secrets.token_hex(16),
+            }
+        )
+        evidence_id = (
+            "planned-job-http-pre-"
+            f"{hashlib.sha256(identity_seed).hexdigest()}"
+        )
+        evidence = {
+            "schema_version": "openevo.planned_job_http_evidence.v2",
+            "evidence_id": evidence_id,
+            "phase": "pre_dispatch",
+            "recorded_at": recorded_at,
+            "endpoint_identity": {
+                "base_url": _safe_endpoint_identity(self.base_url),
+                "context": self._planned_job_evidence_context,
+            },
+            "request": {
+                "method": request.method,
+                "url_path": _request_url_path(request),
+                "headers": _allowlisted_headers(
+                    request.headers,
+                    _HTTP_EVIDENCE_REQUEST_HEADERS,
+                ),
+                "json": _redact_http_evidence(request_json),
+                "sha256": request_sha256,
+            },
+            "response": None,
+            "parsed_error": None,
+            "secret_recorded": False,
+        }
+        evidence_sha256 = hashlib.sha256(_canonical_json_bytes(evidence)).hexdigest()
+        evidence["content_sha256"] = evidence_sha256
+        _write_private_json(root, evidence_id, evidence)
+        return evidence_id, evidence_sha256
+
+    def _record_http_response_evidence(
         self,
         *,
         request: httpx.Request,
         response: httpx.Response,
+        evidence_kind: str,
+        pre_dispatch_evidence: tuple[str | None, str | None] = (None, None),
     ) -> tuple[str | None, str | None]:
         root = self._planned_job_evidence_root
         if root is None:
@@ -462,10 +532,13 @@ class EvolutionHttpClient:
         response_body = bytes(response.content)
         request_sha256 = hashlib.sha256(request_body).hexdigest()
         response_sha256 = hashlib.sha256(response_body).hexdigest()
-        try:
-            request_json = json.loads(request_body)
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise RuntimeError("planned-job request was not serialized JSON") from exc
+        if request_body:
+            try:
+                request_json = json.loads(request_body)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                request_json = request_body.decode("utf-8", errors="replace")
+        else:
+            request_json = None
         parsed_response = _decoded_http_body(response_body)
         detail = (
             parsed_response.get("detail")
@@ -481,10 +554,17 @@ class EvolutionHttpClient:
                 "nonce": secrets.token_hex(16),
             }
         )
-        evidence_id = f"planned-job-http-{hashlib.sha256(identity_seed).hexdigest()}"
+        prefix = (
+            "planned-job-http"
+            if evidence_kind == "planned-job"
+            else "evolution-http"
+        )
+        evidence_id = f"{prefix}-{hashlib.sha256(identity_seed).hexdigest()}"
         evidence = {
-            "schema_version": "openevo.planned_job_http_evidence.v1",
+            "schema_version": "openevo.evolution_http_evidence.v2",
             "evidence_id": evidence_id,
+            "phase": "response",
+            "evidence_kind": evidence_kind,
             "recorded_at": recorded_at,
             "endpoint_identity": {
                 "base_url": _safe_endpoint_identity(self.base_url),
@@ -513,6 +593,10 @@ class EvolutionHttpClient:
                 "detail": detail,
                 "validation_detail_present": detail is not None,
             },
+            "pre_dispatch_evidence": {
+                "evidence_id": pre_dispatch_evidence[0],
+                "content_sha256": pre_dispatch_evidence[1],
+            },
             "secret_recorded": False,
         }
         evidence_sha256 = hashlib.sha256(_canonical_json_bytes(evidence)).hexdigest()
@@ -532,10 +616,13 @@ class EvolutionHttpClient:
             f"{self.base_url}{path}",
             json=payload,
         )
+        pre_dispatch_evidence = self._record_http_request_evidence(request=request)
         response = self._client.send(request)
-        evidence_id, evidence_sha256 = self._record_planned_job_http_evidence(
+        evidence_id, evidence_sha256 = self._record_http_response_evidence(
             request=request,
             response=response,
+            evidence_kind="planned-job",
+            pre_dispatch_evidence=pre_dispatch_evidence,
         )
         self._raise_for_status(
             response,

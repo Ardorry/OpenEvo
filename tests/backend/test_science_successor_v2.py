@@ -152,6 +152,13 @@ def test_successor_failure_preserves_only_content_bound_http_diagnostic_referenc
         evidence_sha256,
     )
 
+    generic_evidence_id = f"evolution-http-{'c' * 64}"
+    http_failure.diagnostic_evidence_id = generic_evidence_id
+    assert _successor_transition_http_diagnostic(failure) == (
+        generic_evidence_id,
+        evidence_sha256,
+    )
+
     http_failure.diagnostic_evidence_id = "../../private"
     assert _successor_transition_http_diagnostic(failure) is None
 

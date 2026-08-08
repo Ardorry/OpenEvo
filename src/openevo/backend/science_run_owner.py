@@ -3067,7 +3067,10 @@ def _successor_transition_http_diagnostic(
             evidence_sha256 = current.diagnostic_evidence_sha256
             if (
                 isinstance(evidence_id, str)
-                and re.fullmatch(r"planned-job-http-[0-9a-f]{64}", evidence_id)
+                and re.fullmatch(
+                    r"(?:planned-job-http|evolution-http)-[0-9a-f]{64}",
+                    evidence_id,
+                )
                 and isinstance(evidence_sha256, str)
                 and re.fullmatch(r"[0-9a-f]{64}", evidence_sha256)
             ):

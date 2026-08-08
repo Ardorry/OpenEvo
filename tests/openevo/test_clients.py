@@ -201,10 +201,22 @@ def test_planned_job_422_preserves_redacted_durable_http_evidence(tmp_path) -> N
         )
 
     evidence_files = list((tmp_path / "planned-job-http").glob("*.json"))
-    assert len(evidence_files) == 1
-    evidence_bytes = evidence_files[0].read_bytes()
+    assert len(evidence_files) == 2
+    pre_dispatch_file = next(
+        item for item in evidence_files if item.name.startswith("planned-job-http-pre-")
+    )
+    pre_dispatch = json.loads(pre_dispatch_file.read_bytes())
+    assert pre_dispatch["phase"] == "pre_dispatch"
+    assert pre_dispatch["response"] is None
+    evidence_file = next(
+        item
+        for item in evidence_files
+        if item.name.startswith("planned-job-http-")
+        and not item.name.startswith("planned-job-http-pre-")
+    )
+    evidence_bytes = evidence_file.read_bytes()
     evidence = json.loads(evidence_bytes)
-    assert evidence_files[0].stat().st_mode & 0o777 == 0o600
+    assert evidence_file.stat().st_mode & 0o777 == 0o600
     assert evidence["request"]["method"] == "POST"
     assert evidence["request"]["url_path"] == "/v1/planned-jobs"
     assert "authorization" not in evidence["request"]["headers"]
@@ -229,6 +241,10 @@ def test_planned_job_422_preserves_redacted_durable_http_evidence(tmp_path) -> N
         "<redacted>"
     )
     assert evidence["parsed_error"]["validation_detail_present"] is True
+    assert evidence["pre_dispatch_evidence"] == {
+        "evidence_id": pre_dispatch["evidence_id"],
+        "content_sha256": pre_dispatch["content_sha256"],
+    }
     assert evidence["endpoint_identity"]["context"]["credential_note"] == (
         "<redacted>"
     )
@@ -268,7 +284,11 @@ def test_planned_job_retry_422_preserves_exact_path_and_validation_detail(
             },
         )
 
-    evidence_file = next((tmp_path / "planned-job-http").glob("*.json"))
+    evidence_file = next(
+        item
+        for item in (tmp_path / "planned-job-http").glob("*.json")
+        if not item.name.startswith("planned-job-http-pre-")
+    )
     evidence = json.loads(evidence_file.read_bytes())
     assert evidence["request"]["url_path"] == (
         "/v1/planned-jobs/job-a%3Fprivate-fragment/retry"
@@ -280,3 +300,41 @@ def test_planned_job_retry_422_preserves_exact_path_and_validation_detail(
         "/v1/planned-jobs/job-a%3Fprivate-fragment/retry"
     )
     assert captured.value.validation_detail_present is True
+
+
+def test_non_planned_evolution_422_preserves_redacted_durable_http_evidence(
+    tmp_path,
+) -> None:
+    response_detail = "dataset source authority is invalid"
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(422, json={"detail": response_detail})
+
+    client = EvolutionHttpClient(
+        "http://evolution.example",
+        headers={"Authorization": "Bearer private-generation-credential"},
+        transport=httpx.MockTransport(handler),
+        planned_job_evidence_root=tmp_path / "planned-job-http",
+        planned_job_evidence_context={"source_task_id": "task-a"},
+    )
+
+    with pytest.raises(EvolutionHttpStatusError) as captured:
+        client.create_dataset({"name": "dataset-a"})
+
+    evidence_file = next((tmp_path / "planned-job-http").glob("evolution-http-*.json"))
+    evidence_bytes = evidence_file.read_bytes()
+    evidence = json.loads(evidence_bytes)
+    assert evidence["evidence_kind"] == "evolution-error"
+    assert evidence["request"]["method"] == "POST"
+    assert evidence["request"]["url_path"] == "/v1/datasets"
+    assert evidence["request"]["json"] == {"name": "dataset-a"}
+    assert "authorization" not in evidence["request"]["headers"]
+    assert evidence["response"]["http_status"] == 422
+    assert evidence["response"]["body"] == {"detail": response_detail}
+    assert evidence["parsed_error"]["validation_detail_present"] is True
+    assert evidence["secret_recorded"] is False
+    assert b"private-generation-credential" not in evidence_bytes
+    assert captured.value.diagnostic_evidence_id == evidence["evidence_id"]
+    assert captured.value.diagnostic_evidence_sha256 == evidence["content_sha256"]
+    assert captured.value.request_method == "POST"
+    assert captured.value.request_path == "/v1/datasets"
