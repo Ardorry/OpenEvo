@@ -257,6 +257,70 @@ def test_single_task_three_attempt_closed_loop_survives_restart_every_transition
     assert all(count == 1 for count in operations.calls.values())
 
 
+def test_current_task_gt_path_skips_judge_and_stops_after_native_evolution(
+    tmp_path: Path,
+) -> None:
+    class CurrentTaskGtOperations(SyntheticOperations):
+        def current_task_gt_supervision(self, task_id):
+            assert task_id == "Life_005"
+            return {
+                "schema_version": "openevo.researchclawbench.current_task_gt.v1",
+                "task_id": task_id,
+                "ground_truth_sha256": "7" * 64,
+                "feedback_class": "HARD_GT",
+                "global_feedback": {},
+                "task_local_feedback": {
+                    "feedback_source": "current_task_gt",
+                    "ground_truth_sha256": "7" * 64,
+                    "ground_truth_entries": [{"content": "expected"}],
+                    "judge_feedback_included": False,
+                },
+                "judge_feedback_included": False,
+            }
+
+        def evaluate(self, request, idempotency_key):  # pragma: no cover
+            raise AssertionError("Judge must not run in current-task GT mode")
+
+        def attach_feedback(self, request, idempotency_key):
+            assert request["feedback_source"] == "current_task_gt"
+            assert request["gt_supervision"]["judge_feedback_included"] is False
+            return self._once(
+                idempotency_key,
+                {
+                    "attachment_id": "attachment-Life_005-0",
+                    "resolved_view_sha256": "4" * 64,
+                    "task_local_overlay_id": "overlay-Life_005",
+                    "task_local_overlay_scope_id": "task-Life_005-0",
+                    "feedback_class": "HARD_GT",
+                    "feedback_source": "current_task_gt",
+                    "judge_calls": 0,
+                    "ground_truth_sha256": "7" * 64,
+                    "judge_feedback_included": False,
+                },
+            )
+
+    operations = CurrentTaskGtOperations()
+    supervisor = CommunityTrainingSupervisor(
+        store=TrainingStateStore(tmp_path / "gt-state"),
+        experiment_id="synthetic-current-task-gt",
+        identity=IDENTITY,
+        operations=operations,
+        task_ids=("Life_005",),
+        current_task_gt_supervision=True,
+    )
+    supervisor.initialize()
+    _drive_to(supervisor, "EVOLUTION_COMPLETED")
+
+    state = supervisor.status()
+    assert state["current_attempt"] == 0
+    assert state["supervision_mode"] == "current_task_gt"
+    assert state["judge_feedback_included"] is False
+    assert len(state["session_ids"]) == 1
+    assert len(state["attachment_ids"]) == 1
+    assert len(state["evolution_job_ids"]) == 3
+    assert not any(":evaluation" in key for key in operations.calls)
+
+
 def test_completed_side_effect_before_transition_is_not_repeated(tmp_path: Path) -> None:
     operations = SyntheticOperations()
     supervisor = _supervisor(tmp_path, operations)

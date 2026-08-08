@@ -721,7 +721,10 @@ def validate_formal_v11_identity(config: ExperimentConfig) -> dict[str, Any]:
         raise FormalV11ProtocolError("formal v11 runtime assets drifted")
     content_sha256 = receipt.get("content_sha256")
     body = {key: item for key, item in receipt.items() if key != "content_sha256"}
-    active = active_source_identities(config.project_root)
+    active = active_source_identities(
+        config.project_root,
+        openevo_root=config.openevo_root,
+    )
     expected = {
         "schema_version": "openevo.researchclawbench.formal_protocol_identity.v11",
         "protocol_path": str(config.path),
@@ -941,7 +944,12 @@ def prepare_formal_v11_protocol(
     source = payload.get("source_identity")
     if not isinstance(source, dict):
         raise FormalV11ProtocolError("base protocol source identity is absent")
-    source.update(active_source_identities(base_config.project_root))
+    source.update(
+        active_source_identities(
+            base_config.project_root,
+            openevo_root=base_config.openevo_root,
+        )
+    )
     payload["native_openevo"]["framework_lock"] = runtime_asset_block[
         "framework_lock"
     ]["path"]
@@ -1142,7 +1150,10 @@ def prepare_formal_v11_protocol(
         "protocol_sha256": _file_sha256(output),
         "formal_runs_sha256": canonical_sha256(payload["formal_runs"]),
         "runtime_assets_sha256": canonical_sha256(runtime_asset_block),
-        "source_identities": active_source_identities(base_config.project_root),
+        "source_identities": active_source_identities(
+            base_config.project_root,
+            openevo_root=base_config.openevo_root,
+        ),
         "community_run_id": community_run_id,
         "official_run_id": official_run_id,
         "model_calls": 0,

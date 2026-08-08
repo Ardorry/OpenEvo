@@ -2130,6 +2130,77 @@ def test_soft_judge_attachment_projects_out_verified_routing_metadata() -> None:
     assert len(calls) == 3
 
 
+def test_current_task_gt_attachment_uses_core_without_judge() -> None:
+    calls = []
+
+    class Client:
+        def json(self, method, path, *, payload=None, headers=None):
+            del headers
+            calls.append((method, path, payload))
+            if method == "GET":
+                return {
+                    "completed_dataset_id": "dataset-gt",
+                    "completed_dataset_revision": "artifact-gt.v1",
+                    "session_id": "session-gt",
+                    "task_id": "rollout-gt",
+                }
+            if path.endswith("/attachments"):
+                assert payload["feedback_class"] == "HARD_GT"
+                assert payload["global_feedback"] == {}
+                assert payload["task_local_feedback"]["feedback_source"] == (
+                    "current_task_gt"
+                )
+                return {
+                    **payload,
+                    "attachment_id": "attachment-gt",
+                    "content_sha256": "c" * 64,
+                    "status": "sealed",
+                }
+            assert path.endswith("/resolve")
+            return {
+                "resolved_view_sha256": "a" * 64,
+                "dataset_artifact": {"artifact_id": "resolved-gt"},
+                "dataset_view": {"task_local_overlay_sha256": "b" * 64},
+            }
+
+    class Port(CoreFeedbackPort):
+        @contextmanager
+        def _client(self):
+            yield Client()
+
+    result = Port(core_authority=object(), evaluator=None).execute(
+        {
+            "task_id": CANARY_TASK,
+            "core_task_id": "science-task-gt",
+            "dataset_id": "dataset-gt",
+            "dataset_revision": "artifact-gt.v1",
+            "session_id": "session-gt",
+            "feedback_source": "current_task_gt",
+            "gt_supervision": {
+                "task_id": CANARY_TASK,
+                "ground_truth_sha256": "7" * 64,
+                "feedback_class": "HARD_GT",
+                "global_feedback": {},
+                "task_local_feedback": {
+                    "feedback_source": "current_task_gt",
+                    "ground_truth_sha256": "7" * 64,
+                    "ground_truth_entries": [{"content": "expected"}],
+                    "judge_feedback_included": False,
+                },
+                "judge_feedback_included": False,
+            },
+        },
+        "supervisor-current-task-gt-key",
+    )
+
+    assert result["feedback_class"] == "HARD_GT"
+    assert result["feedback_source"] == "current_task_gt"
+    assert result["judge_calls"] == 0
+    assert result["judge_feedback_included"] is False
+    assert result["ground_truth_sha256"] == "7" * 64
+    assert len(calls) == 3
+
+
 class _SuccessorCoreAuthority:
     generation = "1" * 32
     release_identity = "2" * 64

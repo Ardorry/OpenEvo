@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
 from openevo.runtime.managed import MANAGED_RUNTIME_RELEASES
 
 EXPERIMENT_ID = "sequential_task_reflector_evolution_v0"
@@ -99,6 +100,18 @@ class ExperimentConfig:
     @property
     def project_root(self) -> Path:
         return Path(self.require("paths.project_root")).resolve(strict=True)
+
+    @property
+    def openevo_root(self) -> Path:
+        raw = self.raw.get("paths", {}).get("openevo_root")
+        value = (
+            Path(raw).resolve(strict=True)
+            if raw is not None
+            else (self.project_root / "OpenEvo").resolve(strict=True)
+        )
+        if not value.is_relative_to(self.project_root):
+            raise ProtocolError("OpenEvo root escapes project root")
+        return value
 
     @property
     def experiment_root(self) -> Path:
@@ -480,7 +493,10 @@ class ExperimentConfig:
         reflector_receipt_valid = self.reflector_readiness_receipt_valid()
         reflector_mount = self.reflector_credential_mount_readiness()
         try:
-            active_identities = active_source_identities(self.project_root)
+            active_identities = active_source_identities(
+                self.project_root,
+                openevo_root=self.openevo_root,
+            )
         except (OSError, ValueError):
             active_identities = {
                 "openevo_core_source_tree_sha256": "UNAVAILABLE",

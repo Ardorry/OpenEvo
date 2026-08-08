@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from pathlib import Path
 from typing import ClassVar
@@ -27,10 +28,14 @@ from openevo.backend.workspace_handoff_v2 import (
     WorkspaceHandoffBindingV2,
     WorkspaceResultReceiptV2,
 )
+from openevo.gateway.node import GatewayNodeManager
 from openevo.harness.factory import create_harness
 from openevo.harness.presets.codex import CodexHarness
-from openevo.rollout.models import SessionResult, TaskRequest
+from openevo.rollout.models import SessionDispatchRequest, SessionResult, TaskRequest
 from openevo.rollout.run_owner import NativeTaskRunOwner
+from openevo.runtime.base import BaseRuntime
+from openevo.runtime.codex_isolation import CODEX_SUBSCRIPTION_CANARY_OK
+from openevo.runtime.models import ExecResult
 from openevo.trajectory.models import Trace, Trajectory
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -198,6 +203,89 @@ def test_native_codex_run_step_uses_managed_binary(tmp_path: Path) -> None:
     command = harness.run_steps("task")[0].command
     assert "/opt/codex/bin/codex exec" in command
     assert "/usr/bin/codex exec" not in command
+
+
+def test_task_request_enters_gateway_codex_harness_with_fake_lowest_executor(
+    tmp_path: Path,
+) -> None:
+    task = _request(tmp_path).task_request
+    assert task.runtime is not None
+    dispatch = SessionDispatchRequest(
+        session_id="session-zero-call-contract",
+        task_id=task.task_id,
+        instruction=task.instruction,
+        remaining_timeout_seconds=60,
+        runtime=task.runtime,
+        agent=task.agent,
+        metadata=task.metadata,
+    )
+    harness = GatewayNodeManager.__new__(GatewayNodeManager)._resolve_agent_harness(
+        dispatch
+    )
+    assert isinstance(harness, CodexHarness)
+
+    class LowestLevelExecutor(BaseRuntime):
+        def __init__(self) -> None:
+            super().__init__(
+                task.runtime,
+                session_id=dispatch.session_id,
+                session_dir=tmp_path,
+            )
+            self.commands: list[str] = []
+            self.provider_dispatches = 0
+
+        @property
+        def runtime_id(self) -> str:
+            return "fake-lowest-level-model-executor"
+
+        async def start(self) -> None:
+            return None
+
+        async def stop(self) -> None:
+            return None
+
+        async def exec(self, command: str, **_kwargs) -> ExecResult:
+            self.commands.append(command)
+            if "deterministic_no_model_sandbox" in command or "sandbox_output=" in command:
+                return ExecResult(
+                    return_code=0,
+                    stdout=f"{CODEX_SUBSCRIPTION_CANARY_OK}\n",
+                )
+            return ExecResult(return_code=0)
+
+        async def upload_file(self, local_path: str, remote_path: str) -> None:
+            raise AssertionError((local_path, remote_path))
+
+        async def upload_dir(self, local_path: str, remote_path: str) -> None:
+            raise AssertionError((local_path, remote_path))
+
+        async def download_file(self, remote_path: str, local_path: str) -> None:
+            raise AssertionError((remote_path, local_path))
+
+        async def download_dir(self, remote_path: str, local_path: str) -> None:
+            raise AssertionError((remote_path, local_path))
+
+    runtime = LowestLevelExecutor()
+
+    async def run_contract() -> None:
+        await harness.setup(runtime)
+        for step in harness.run_steps(dispatch.instruction):
+            await runtime.exec(
+                step.command,
+                cwd=step.cwd,
+                env=step.env,
+            )
+
+    asyncio.run(run_contract())
+
+    model_commands = [
+        command
+        for command in runtime.commands
+        if "/opt/codex/bin/codex exec" in command
+    ]
+    assert len(model_commands) == 1
+    assert "--model gpt-5.5" in model_commands[0]
+    assert runtime.provider_dispatches == 0
 
 
 def test_genesis_context_injects_no_simulated_artifact(tmp_path: Path) -> None:

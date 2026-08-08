@@ -6,7 +6,6 @@ import hashlib
 import os
 from pathlib import Path
 
-
 _IGNORED_PARTS = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
 _IGNORED_SUFFIXES = {".pyc", ".pyo"}
 
@@ -40,14 +39,25 @@ def source_tree_sha256(root: str | Path) -> str:
     return digest.hexdigest()
 
 
-def active_source_identities(project_root: str | Path) -> dict[str, str]:
+def active_source_identities(
+    project_root: str | Path,
+    *,
+    openevo_root: str | Path | None = None,
+) -> dict[str, str]:
     project = Path(os.path.abspath(project_root))
+    openevo = (
+        Path(os.path.abspath(openevo_root))
+        if openevo_root is not None
+        else project / "OpenEvo"
+    )
+    if not openevo.is_relative_to(project):
+        raise ValueError("OpenEvo source root escapes the project root")
     return {
         "openevo_core_source_tree_sha256": source_tree_sha256(
-            project / "OpenEvo" / "src" / "openevo"
+            openevo / "src" / "openevo"
         ),
         "adapter_tree_sha256": source_tree_sha256(
-            project / "OpenEvo" / "benchmarks" / "researchclawbench"
+            openevo / "benchmarks" / "researchclawbench"
         ),
     }
 

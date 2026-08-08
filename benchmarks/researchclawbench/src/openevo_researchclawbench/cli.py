@@ -47,6 +47,7 @@ from .managed_core_control import (
     ManagedCoreControlUnavailable,
     acquire_managed_core_control,
     managed_core_host_profile_readiness,
+    managed_core_profile_readiness,
 )
 from .minimal_per_item_runner import (
     DryRunCandidatePort,
@@ -131,8 +132,8 @@ def command_contamination_audit(config: ExperimentConfig) -> int:
 def command_static_audit(config: ExperimentConfig) -> int:
     schedule = FrozenTrainingSchedule.build()
     candidate = candidate_source_audit(_package_root())
-    reflector = reflector_runtime_audit(config.project_root / "OpenEvo")
-    teacher = native_teacher_attachment_capability(config.project_root / "OpenEvo")
+    reflector = reflector_runtime_audit(config.openevo_root)
+    teacher = native_teacher_attachment_capability(config.openevo_root)
     supervisor = supervisor_capability_audit(_package_root())
     receipt = {
         "schema_version": "1.0.0",
@@ -185,7 +186,7 @@ def command_readiness(config: ExperimentConfig) -> int:
         core_control = authority.public_readiness()
         host_profile = core_control.get("managed_host_profile")
         if not isinstance(host_profile, dict):
-            host_profile = managed_core_host_profile_readiness()
+            host_profile = managed_core_profile_readiness(config)
             core_control["managed_host_profile"] = host_profile
         if not host_profile["ready"]:
             receipt["ready"] = False
@@ -319,7 +320,7 @@ def command_formal_community_live_preflight(
         )
         readiness = authority.public_readiness()
         native_feedback = native_teacher_attachment_capability(
-            config.project_root / "OpenEvo"
+            config.openevo_root
         )
         required_core = (
             "service_reachable",
@@ -568,35 +569,31 @@ def _print_per_item_runner_summary(
                 "Dataset: community",
                 "",
                 "Candidate:",
-                "  backend: OpenEvo harness",
+                "  backend: OpenEvo Core / CodexHarness",
                 f"  model: {MANAGED_CODEX_MODEL}",
-                "  profile: managed native Codex subscription",
+                "  runtime: managed",
                 "",
                 "Evolution:",
-                "  backend: OpenEvo managed reflector + native artifact registry",
+                "  backend: OpenEvo native successor/reflector",
                 f"  model: {MANAGED_CODEX_MODEL}",
                 "  artifacts:",
                 "    - memory",
                 "    - skill",
                 "    - agent-system",
+                "  supervision: current-task GT",
+                "  judge_feedback: excluded",
                 "",
                 "Judge:",
-                "  backend: OpenRouter",
-                f"  model: {config.require('judge.model')}",
-                "  provider: Azure",
+                "  not executed in this engineering validation",
                 "",
                 "Passes:",
                 "  baseline",
-                "  evolve-1",
-                "  evolved-1",
-                "  evolve-2",
-                "  evolved-2",
+                "  evolve",
                 "",
                 "Isolation:",
                 "  per-task namespace",
                 "  GT hidden from Candidate",
-                "  Judge credentials hidden from Candidate and reflector",
-                "  evaluator feedback attached through OpenEvo Core",
+                "  cross-task artifacts excluded",
                 "",
                 "Output:",
                 f"  {output_root}",
@@ -614,6 +611,21 @@ def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> 
     task_id = str(args.task)
     if task_id not in FROZEN_TASKS:
         raise ProtocolError("run-per-item task is outside the frozen Community inventory")
+    engineering = config.raw.get("native_engineering_validation")
+    expected_engineering = {
+        "task": "Life_005",
+        "run_purpose": "OPENEVO_NATIVE_HARNESS_ENGINEERING_VALIDATION",
+        "leaderboard": False,
+        "supervision": "current_task_gt",
+        "judge_feedback_included": False,
+        "execute_judge": False,
+        "execute_evolved_candidate": False,
+        "stop_after_stage": TrainingStage.EVOLUTION_COMPLETED.value,
+    }
+    if engineering != expected_engineering or task_id != engineering["task"]:
+        raise ProtocolError(
+            "run-per-item requires the closed Life_005 native engineering validation block"
+        )
     dry_run = bool(args.dry_run or args.no_model_calls)
     _print_per_item_runner_summary(
         config,
@@ -621,14 +633,13 @@ def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> 
         run_id=args.run_id,
         dry_run=dry_run,
     )
-    host_profile = managed_core_host_profile_readiness()
+    host_profile = managed_core_profile_readiness(config)
     output_root = config.experiment_root / "supervisor" / args.run_id
     planned_stages = [
         "baseline",
-        "evolve-1",
-        "evolved-1",
-        "evolve-2",
-        "evolved-2",
+        "current-task-gt-attachment",
+        "native-evolve",
+        "stop-before-evolved-candidate",
     ]
     if dry_run:
         print_closed_json(
@@ -645,6 +656,9 @@ def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> 
                 "provider_calls": 0,
                 "managed_runtime_ready": host_profile["ready"],
                 "managed_runtime_reason_code": host_profile["reason_code"],
+                "supervision": "current_task_gt",
+                "judge_executed": False,
+                "evolved_candidate_executed": False,
                 "secret_recorded": False,
             }
         )
@@ -683,14 +697,30 @@ def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> 
             task_ids=(task_id,),
             production=True,
             core_control_authority=authority,
+            current_task_gt_supervision=True,
         )
         result = control.initialize()
-        while result["stage"] not in _FORMAL_TERMINAL_STAGES:
+        while (
+            result["stage"] not in _FORMAL_TERMINAL_STAGES
+            and result["stage"] != TrainingStage.EVOLUTION_COMPLETED.value
+        ):
             result = control.run_next()
     finally:
         authority.close()
+    if result["stage"] == TrainingStage.EVOLUTION_COMPLETED.value:
+        print_closed_json(
+            {
+                "status": "ONE_TASK_BASELINE_PLUS_EVOLVE_CLOSED",
+                "task_id": task_id,
+                "run_id": args.run_id,
+                "judge_executed": False,
+                "evolved_candidate_executed": False,
+                "state": result,
+            }
+        )
+        return 0
     print_closed_json(result)
-    return 0 if result["stage"] == TrainingStage.FINAL_FROZEN.value else 5
+    return 5
 
 
 def command_pilot_v2(args: argparse.Namespace) -> int:

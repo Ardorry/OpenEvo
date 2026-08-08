@@ -52,6 +52,8 @@ class TrainingOperations(Protocol):
 
     def evaluate(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]: ...
 
+    def current_task_gt_supervision(self, task_id: str) -> dict[str, Any]: ...
+
     def attach_feedback(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]: ...
 
     def evolve_artifacts(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]: ...
@@ -103,6 +105,7 @@ class CommunityTrainingSupervisor:
         task_ids: tuple[str, ...] = FROZEN_TASKS,
         validator_failure_policy: dict[str, Any] | None = None,
         budget_policy: TrainingBudgetPolicy | None = None,
+        current_task_gt_supervision: bool = False,
     ) -> None:
         if not task_ids or any(task not in FROZEN_TASKS for task in task_ids):
             raise ValueError("supervisor task scope is outside the frozen Community inventory")
@@ -114,6 +117,9 @@ class CommunityTrainingSupervisor:
         self.operations = operations
         self.task_ids = task_ids
         self.validator_failure_policy = validator_failure_policy
+        if current_task_gt_supervision and len(task_ids) != 1:
+            raise ValueError("current-task GT supervision requires exactly one task")
+        self.current_task_gt_supervision_enabled = current_task_gt_supervision
         self.budget_policy = budget_policy or TrainingBudgetPolicy(
             max_candidate_model_calls=len(task_ids) * 3,
             max_reflector_model_calls=len(task_ids) * 2 * 5,
@@ -132,6 +138,11 @@ class CommunityTrainingSupervisor:
         return {
             "schema_version": "openevo.researchclawbench.training_state.v1",
             "namespace_type": "standard_training",
+            "supervision_mode": (
+                "current_task_gt"
+                if self.current_task_gt_supervision_enabled
+                else "community_evaluator"
+            ),
             "task_ids": list(self.task_ids),
             "current_task_index": 0,
             "current_attempt": 0,
@@ -2071,6 +2082,73 @@ class CommunityTrainingSupervisor:
                 receipt=attachment,
             )
         if stage is TrainingStage.ARTIFACT_VALIDATED:
+            if self.current_task_gt_supervision_enabled:
+                gt = self.operations.current_task_gt_supervision(str(task))
+                if (
+                    not isinstance(gt, dict)
+                    or gt.get("task_id") != task
+                    or gt.get("feedback_class") != "HARD_GT"
+                    or gt.get("judge_feedback_included") is not False
+                    or not isinstance(gt.get("ground_truth_sha256"), str)
+                ):
+                    raise ValueError("current-task GT supervision authority is invalid")
+                attachment = self._effect(
+                    kind="feedback-attachment",
+                    request={
+                        "task_id": task,
+                        "attempt_index": attempt,
+                        "dataset_id": state["active_candidate_receipt"]["dataset_id"],
+                        "dataset_revision": state["active_candidate_receipt"][
+                            "dataset_revision"
+                        ],
+                        "session_id": state["active_candidate_receipt"]["session_id"],
+                        "core_task_id": state["active_candidate_receipt"]["core_task_id"],
+                        "core_attempt_id": state["active_candidate_receipt"][
+                            "core_attempt_id"
+                        ],
+                        "successor_transition_id": state[
+                            "active_candidate_receipt"
+                        ].get("successor_transition_id"),
+                        "candidate": state["active_candidate_receipt"],
+                        "validation": state["active_validation_receipt"],
+                        "feedback_source": "current_task_gt",
+                        "gt_supervision": gt,
+                        "authority": "evaluator_only",
+                    },
+                    execute=self.operations.attach_feedback,
+                )
+                if (
+                    not attachment.get("attachment_id")
+                    or not attachment.get("resolved_view_sha256")
+                    or attachment.get("feedback_class") != "HARD_GT"
+                    or attachment.get("feedback_source") != "current_task_gt"
+                    or attachment.get("judge_calls") != 0
+                    or attachment.get("ground_truth_sha256")
+                    != gt["ground_truth_sha256"]
+                    or attachment.get("judge_feedback_included") is not False
+                ):
+                    raise ValueError("current-task GT attachment receipt is incomplete")
+                return self._transition(
+                    stage,
+                    TrainingStage.ATTACHMENT_SEALED,
+                    "current-task-gt-attachment-sealed",
+                    updates={
+                        "attachment_ids": [
+                            *state["attachment_ids"],
+                            attachment["attachment_id"],
+                        ],
+                        "active_attachment_receipt": attachment,
+                        "current_task_local_overlay_id": attachment.get(
+                            "task_local_overlay_id"
+                        ),
+                        "current_task_local_overlay_scope_id": attachment.get(
+                            "task_local_overlay_scope_id"
+                        ),
+                        "training_signal_status": "ATTACHED_FROM_CURRENT_TASK_GT",
+                        "judge_feedback_included": False,
+                    },
+                    receipt=attachment,
+                )
             return self._transition(stage, TrainingStage.EVALUATION_PENDING, "evaluation-pending")
         if stage is TrainingStage.EVALUATION_PENDING:
             if not self._runtime_budget_available():

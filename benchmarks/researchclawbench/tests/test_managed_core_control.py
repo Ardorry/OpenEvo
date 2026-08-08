@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import threading
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
-from pydantic import SecretStr
-
-from openevo.backend.service import CoreServiceAttachment
 from openevo_researchclawbench.managed_core_control import (
     ManagedCoreControlAuthority,
     ManagedCoreControlUnavailable,
@@ -16,7 +13,11 @@ from openevo_researchclawbench.managed_core_control import (
     _managed_core_attach_lock,
     _remote_fixture_host_profile,
     acquire_managed_core_control,
+    managed_core_profile_readiness,
 )
+from pydantic import SecretStr
+
+from openevo.backend.service import CoreServiceAttachment
 
 
 class _Config:
@@ -218,6 +219,7 @@ def test_remote_fixture_host_profile_accepts_only_exact_closed_docker_set(
 
     class RemoteFixtureConfig:
         project_root = project
+        openevo_root = project / "OpenEvo"
         experiment_root = experiment
 
         def require(self, key: str):
@@ -256,6 +258,55 @@ def test_remote_fixture_host_profile_accepts_only_exact_closed_docker_set(
         assert "identity drifted" in str(exc)
     else:  # pragma: no cover - defensive assertion
         raise AssertionError("an open-ended Docker support projection was accepted")
+
+
+def test_managed_profile_readiness_uses_remote_fixture_authority(monkeypatch) -> None:
+    expected = {
+        "ready": True,
+        "profile": "docker_user_container_v1",
+        "mapping_identity_present": True,
+        "reason_code": None,
+        "secret_recorded": False,
+    }
+
+    class RemoteConfig:
+        raw = {"native_openevo": {"core_control_mode": "managed_remote_daemon"}}
+
+    monkeypatch.setattr(
+        "openevo_researchclawbench.managed_core_control._remote_fixture_host_profile",
+        lambda _config: expected,
+    )
+    monkeypatch.setattr(
+        "openevo_researchclawbench.managed_core_control.managed_core_host_profile_readiness",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("remote readiness fell back to the bare WSL host")
+        ),
+    )
+
+    assert managed_core_profile_readiness(RemoteConfig()) == expected
+
+
+def test_managed_profile_readiness_fails_closed_on_remote_fixture_drift(
+    monkeypatch,
+) -> None:
+    class RemoteConfig:
+        raw = {"native_openevo": {"core_control_mode": "managed_remote_daemon"}}
+
+    monkeypatch.setattr(
+        "openevo_researchclawbench.managed_core_control._remote_fixture_host_profile",
+        lambda _config: (_ for _ in ()).throw(
+            ManagedCoreControlUnavailable("fixture identity drifted")
+        ),
+    )
+
+    receipt = managed_core_profile_readiness(RemoteConfig())
+    assert receipt == {
+        "ready": False,
+        "profile": "docker_user_container_v1",
+        "mapping_identity_present": False,
+        "reason_code": "DOCKER_USER_CONTAINER_MAPPING_UNAVAILABLE",
+        "secret_recorded": False,
+    }
 
 
 def test_isolated_launcher_strips_parent_secrets_and_consumes_private_attachment(

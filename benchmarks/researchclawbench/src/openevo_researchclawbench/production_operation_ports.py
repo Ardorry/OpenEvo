@@ -3133,6 +3133,44 @@ class CoreFeedbackPort(ProductionOperationPort):
             raise ValueError("feedback attachment idempotency key is empty")
         return "rcb-feedback-" + hashlib.sha256(supervisor_key.encode()).hexdigest()
 
+    @staticmethod
+    def _feedback_receipt_fields(request: dict[str, Any]) -> dict[str, Any]:
+        feedback_source = request.get("feedback_source", "community_evaluator")
+        if feedback_source == "artifact_validator":
+            return {
+                "feedback_class": "MIXED",
+                "feedback_source": feedback_source,
+                "judge_calls": 0,
+            }
+        if feedback_source == "current_task_gt":
+            gt = request.get("gt_supervision")
+            if (
+                not isinstance(gt, dict)
+                or gt.get("task_id") != request.get("task_id")
+                or gt.get("feedback_class") != "HARD_GT"
+                or gt.get("global_feedback") != {}
+                or not isinstance(gt.get("task_local_feedback"), dict)
+                or gt.get("judge_feedback_included") is not False
+                or not isinstance(gt.get("ground_truth_sha256"), str)
+                or not _SHA256.fullmatch(gt["ground_truth_sha256"])
+            ):
+                raise CoreControlError("current-task GT supervision authority is invalid")
+            return {
+                "feedback_class": "HARD_GT",
+                "feedback_source": feedback_source,
+                "judge_calls": 0,
+                "ground_truth_sha256": gt["ground_truth_sha256"],
+                "judge_feedback_included": False,
+            }
+        evaluation = request.get("evaluation")
+        if not isinstance(evaluation, dict):
+            raise CoreControlError("community evaluator feedback authority is absent")
+        return {
+            "feedback_class": evaluation.get("feedback_class", "SOFT_JUDGE"),
+            "feedback_source": feedback_source,
+            "judge_calls": 1,
+        }
+
     def recover(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any] | None:
         core_key = self._core_idempotency_key(idempotency_key)
         with self._client() as client:
@@ -3155,18 +3193,7 @@ class CoreFeedbackPort(ProductionOperationPort):
                 attachment,
                 dataset_authority=dataset_authority,
             )
-            feedback_source = request.get("feedback_source", "community_evaluator")
-            result.update(
-                {
-                    "feedback_class": (
-                        "MIXED"
-                        if feedback_source == "artifact_validator"
-                        else request["evaluation"].get("feedback_class", "SOFT_JUDGE")
-                    ),
-                    "feedback_source": feedback_source,
-                    "judge_calls": 0 if feedback_source == "artifact_validator" else 1,
-                }
-            )
+            result.update(self._feedback_receipt_fields(request))
             return result
 
     def execute(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
@@ -3179,6 +3206,12 @@ class CoreFeedbackPort(ProductionOperationPort):
                 candidate, validation
             )
             feedback_class = "MIXED"
+        elif feedback_source == "current_task_gt":
+            metadata = self._feedback_receipt_fields(request)
+            gt = request["gt_supervision"]
+            global_feedback = gt["global_feedback"]
+            task_local_feedback = gt["task_local_feedback"]
+            feedback_class = metadata["feedback_class"]
         else:
             evaluation = request["evaluation"]
             if self.evaluator is None:
@@ -3267,13 +3300,7 @@ class CoreFeedbackPort(ProductionOperationPort):
                 attachment,
                 dataset_authority=dataset_authority,
             )
-            result.update(
-                {
-                    "feedback_class": feedback_class,
-                    "feedback_source": feedback_source,
-                    "judge_calls": 0 if feedback_source == "artifact_validator" else 1,
-                }
-            )
+            result.update(self._feedback_receipt_fields(request))
             return result
 
     @staticmethod

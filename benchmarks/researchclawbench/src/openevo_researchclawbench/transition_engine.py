@@ -82,7 +82,11 @@ _ALLOWED: dict[TrainingStage, frozenset[TrainingStage]] = {
         {TrainingStage.ATTACHMENT_SEALED}
     ),
     TrainingStage.ARTIFACT_VALIDATED: frozenset(
-        {TrainingStage.EVALUATION_PENDING, TrainingStage.FAILED}
+        {
+            TrainingStage.EVALUATION_PENDING,
+            TrainingStage.ATTACHMENT_SEALED,
+            TrainingStage.FAILED,
+        }
     ),
     TrainingStage.EVALUATION_PENDING: frozenset(
         {

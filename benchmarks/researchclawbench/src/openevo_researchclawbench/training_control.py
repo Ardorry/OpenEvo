@@ -75,6 +75,7 @@ class DurableTrainingControl:
         task_ids: tuple[str, ...] | None = None,
         production: bool = False,
         core_control_authority: ManagedCoreControlAuthority | None = None,
+        current_task_gt_supervision: bool = False,
     ) -> None:
         if _RUN_ID.fullmatch(run_id) is None:
             raise ValueError("training run ID must use the rcb_oe_v0_ namespace")
@@ -116,9 +117,12 @@ class DurableTrainingControl:
             identity=supervisor_identity(config),
             operations=operations or _InspectionOnlyOperations(),
             task_ids=task_ids,
-            validator_failure_policy=getattr(
-                config, "community_validator_failure_policy", None
+            validator_failure_policy=(
+                None
+                if current_task_gt_supervision
+                else getattr(config, "community_validator_failure_policy", None)
             ),
+            current_task_gt_supervision=current_task_gt_supervision,
             budget_policy=TrainingBudgetPolicy(
                 max_candidate_model_calls=int(
                     config.require("budgets.max_candidate_model_calls")

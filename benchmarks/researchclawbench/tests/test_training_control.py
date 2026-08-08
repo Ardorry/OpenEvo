@@ -3,14 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from openevo_researchclawbench.training_control import (
     DurableTrainingControl,
-    TrainingOperationsUnavailable,
 )
 
 
 class _Config:
+    community_validator_failure_policy = {
+        "enabled": True,
+        "run_id_suffix": "v9",
+    }
+
     def __init__(self, root: Path) -> None:
         self.experiment_root = root
         self.path = root / "protocol.yaml"
@@ -66,3 +69,18 @@ def test_control_initializes_verifies_and_refuses_unbound_mutation(
 def test_control_rejects_foreign_run_namespace(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="rcb_oe_v0"):
         DurableTrainingControl(config=_Config(tmp_path), run_id="another-run")
+
+
+def test_current_task_gt_control_disables_validator_feedback_evolution(
+    tmp_path: Path,
+) -> None:
+    control = DurableTrainingControl(
+        config=_Config(tmp_path),
+        run_id="rcb_oe_v0_current_gt_policy",
+        operations=object(),  # type: ignore[arg-type]
+        task_ids=("Life_005",),
+        current_task_gt_supervision=True,
+    )
+
+    assert control.supervisor.validator_failure_policy is None
+    assert control.supervisor.current_task_gt_supervision_enabled is True

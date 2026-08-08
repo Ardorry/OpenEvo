@@ -13,6 +13,18 @@ class _MeetingConfig:
 
     def __init__(self, root: Path) -> None:
         self.experiment_root = root
+        self.raw = {
+            "native_engineering_validation": {
+                "task": "Life_005",
+                "run_purpose": "OPENEVO_NATIVE_HARNESS_ENGINEERING_VALIDATION",
+                "leaderboard": False,
+                "supervision": "current_task_gt",
+                "judge_feedback_included": False,
+                "execute_judge": False,
+                "execute_evolved_candidate": False,
+                "stop_after_stage": "EVOLUTION_COMPLETED",
+            }
+        }
 
     def require(self, key: str) -> str:
         return {
@@ -39,7 +51,9 @@ def test_run_per_item_zero_call_demo_parses_and_prints_safe_summary(
     config = _MeetingConfig(tmp_path)
     monkeypatch.setattr(cli.ExperimentConfig, "load", lambda _path: config)
     monkeypatch.setattr(
-        cli, "managed_core_host_profile_readiness", lambda: _host_profile(ready=False)
+        cli,
+        "managed_core_profile_readiness",
+        lambda _config: _host_profile(ready=False),
     )
     monkeypatch.setenv("RCB_JUDGE_API_KEY", "never-print-this-judge-secret")
     monkeypatch.setenv("CODEX_HOME", "/never/print/this/profile")
@@ -50,9 +64,9 @@ def test_run_per_item_zero_call_demo_parses_and_prints_safe_summary(
             "--protocol",
             str(tmp_path / "protocol.yaml"),
             "--run-id",
-            "rcb_oe_v0_meeting_demo_earth_004",
+            "rcb_oe_v0_meeting_demo_life_005",
             "--task",
-            "Earth_004",
+            "Life_005",
             "--dry-run",
             "--no-model-calls",
         ]
@@ -62,13 +76,14 @@ def test_run_per_item_zero_call_demo_parses_and_prints_safe_summary(
     payload = json.loads(output[output.index("{") :])
     assert result == 0
     assert "ResearchClawBench Runner" in output
-    assert "backend: OpenEvo harness" in output
+    assert "backend: OpenEvo Core / CodexHarness" in output
     assert "model: gpt-5.5" in output
-    assert "model: openai/gpt-5.1" in output
-    assert "Task: Earth_004" in output
+    assert "Judge:\n  not executed" in output
+    assert "Task: Life_005" in output
     assert "never-print-this" not in output
     assert payload["provider_calls"] == 0
-    assert payload["task_discovery"] == ["Earth_004"]
+    assert payload["task_discovery"] == ["Life_005"]
+    assert payload["judge_executed"] is False
     assert payload["managed_runtime_reason_code"] == ("DOCKER_USER_CONTAINER_MAPPING_UNAVAILABLE")
 
 
@@ -80,7 +95,9 @@ def test_run_per_item_live_fails_before_control_when_runtime_is_unavailable(
     config = _MeetingConfig(tmp_path)
     monkeypatch.setattr(cli.ExperimentConfig, "load", lambda _path: config)
     monkeypatch.setattr(
-        cli, "managed_core_host_profile_readiness", lambda: _host_profile(ready=False)
+        cli,
+        "managed_core_profile_readiness",
+        lambda _config: _host_profile(ready=False),
     )
     monkeypatch.setattr(
         cli,
@@ -96,9 +113,9 @@ def test_run_per_item_live_fails_before_control_when_runtime_is_unavailable(
             "--protocol",
             str(tmp_path / "protocol.yaml"),
             "--run-id",
-            "rcb_oe_v0_meeting_demo_earth_004",
+            "rcb_oe_v0_meeting_demo_life_005",
             "--task",
-            "Earth_004",
+            "Life_005",
         ]
     )
 
@@ -118,7 +135,9 @@ def test_run_per_item_live_selects_existing_production_control(
     config = _MeetingConfig(tmp_path)
     monkeypatch.setattr(cli.ExperimentConfig, "load", lambda _path: config)
     monkeypatch.setattr(
-        cli, "managed_core_host_profile_readiness", lambda: _host_profile(ready=True)
+        cli,
+        "managed_core_profile_readiness",
+        lambda _config: _host_profile(ready=True),
     )
     observed: dict[str, Any] = {}
 
@@ -131,7 +150,7 @@ def test_run_per_item_live_selects_existing_production_control(
             observed.update(kwargs)
 
         def initialize(self) -> dict[str, Any]:
-            return {"stage": "FINAL_FROZEN"}
+            return {"stage": "EVOLUTION_COMPLETED"}
 
         def run_next(self) -> dict[str, Any]:  # pragma: no cover - terminal fixture
             raise AssertionError("terminal fixture must not advance")
@@ -145,16 +164,17 @@ def test_run_per_item_live_selects_existing_production_control(
             "--protocol",
             str(tmp_path / "protocol.yaml"),
             "--run-id",
-            "rcb_oe_v0_meeting_demo_earth_004",
+            "rcb_oe_v0_meeting_demo_life_005",
             "--task",
-            "Earth_004",
+            "Life_005",
         ]
     )
 
     capsys.readouterr()
     assert result == 0
-    assert observed["task_ids"] == ("Earth_004",)
+    assert observed["task_ids"] == ("Life_005",)
     assert observed["production"] is True
+    assert observed["current_task_gt_supervision"] is True
     assert observed["require_existing"] is False
     assert observed["authority_closed"] is True
 

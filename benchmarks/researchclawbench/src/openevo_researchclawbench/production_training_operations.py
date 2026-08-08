@@ -35,6 +35,7 @@ from openevo.runtime.codex_isolation import (
 from .config import FROZEN_TASKS, ExperimentConfig
 from .durable_evaluator_operation import OPENROUTER_API_BASE
 from .evaluator_dependency_lock import validate_evaluator_dependency_lock
+from .gt_supervision import load_current_task_gt_supervision
 from .training_state_store import canonical_bytes, canonical_sha256
 
 _IDENTITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
@@ -459,6 +460,11 @@ class ProductionTrainingOperations:
                 "candidate Core-control readiness failed closed"
             )
         return json.loads(canonical_bytes(result))
+
+    def current_task_gt_supervision(self, task_id: str) -> dict[str, Any]:
+        """Load one bounded current-task GT authority without invoking Judge."""
+
+        return load_current_task_gt_supervision(self.config, task_id=task_id)
 
     def evolution_readiness(self, request: dict[str, Any]) -> dict[str, Any]:
         """Fail closed before an evolution operation intent can be persisted."""
@@ -941,15 +947,15 @@ def judge_identity_preflight(
     readiness = judge_credential_readiness(config)
     if not readiness["ready"]:
         raise JudgeCredentialsRequired("JUDGE_CREDENTIALS_REQUIRED")
+    openevo_root = getattr(config, "openevo_root", config.project_root / "OpenEvo")
     environment = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "PYTHONUNBUFFERED": "1",
         "PYTHONPATH": os.pathsep.join(
             (
-                os.fspath(config.project_root / "OpenEvo" / "src"),
+                os.fspath(openevo_root / "src"),
                 os.fspath(
-                    config.project_root
-                    / "OpenEvo"
+                    openevo_root
                     / "benchmarks"
                     / "researchclawbench"
                     / "src"

@@ -8,19 +8,20 @@ copied into the process environment, protocol, supervisor state, or receipts.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from dataclasses import dataclass, field
 import fcntl
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import secrets
 import subprocess
 import sys
 import time
-from typing import Any, Iterator
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
 from pydantic import SecretStr
 
@@ -40,7 +41,6 @@ from openevo.runtime.docker_host import (
 )
 
 from .config import ExperimentConfig
-
 
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
@@ -138,7 +138,7 @@ class ManagedCoreControlAuthority:
         attachment: CoreServiceAttachment,
         *,
         managed_host_profile_ready: bool = True,
-    ) -> "ManagedCoreControlAuthority":
+    ) -> ManagedCoreControlAuthority:
         material = json.dumps(
             {
                 "generation": attachment.generation,
@@ -307,7 +307,7 @@ def _remote_fixture_host_profile(config: ExperimentConfig) -> dict[str, Any]:
         or script.is_symlink()
         or not script.is_file()
         or script.name != "docker_release_host_fixture.py"
-        or not script.is_relative_to(config.project_root / "OpenEvo" / "scripts" / "e2e")
+        or not script.is_relative_to(config.openevo_root / "scripts" / "e2e")
     ):
         raise ManagedCoreControlUnavailable("remote Core fixture checker is invalid")
     allowed = {
@@ -729,7 +729,7 @@ def managed_core_host_profile_readiness() -> dict[str, Any]:
             "reason_code": None,
             "secret_recorded": False,
         }
-    except Exception:
+    except Exception:  # noqa: BLE001 - readiness must collapse all local authority failures
         return {
             "ready": False,
             "profile": "docker_user_container_v1",
@@ -739,9 +739,40 @@ def managed_core_host_profile_readiness() -> dict[str, Any]:
         }
 
 
+def managed_core_profile_readiness(config: ExperimentConfig) -> dict[str, Any]:
+    """Select the exact managed-host proof required by the configured Core mode."""
+
+    mode = str(
+        config.raw.get("native_openevo", {}).get(
+            "core_control_mode", "managed_host_service"
+        )
+    )
+    if mode == "managed_host_service":
+        return managed_core_host_profile_readiness()
+    if mode == "managed_remote_daemon":
+        try:
+            return _remote_fixture_host_profile(config)
+        except Exception:  # noqa: BLE001 - remote readiness is deliberately fail closed
+            return {
+                "ready": False,
+                "profile": "docker_user_container_v1",
+                "mapping_identity_present": False,
+                "reason_code": "DOCKER_USER_CONTAINER_MAPPING_UNAVAILABLE",
+                "secret_recorded": False,
+            }
+    return {
+        "ready": False,
+        "profile": "docker_user_container_v1",
+        "mapping_identity_present": False,
+        "reason_code": "MANAGED_CORE_CONTROL_MODE_UNSUPPORTED",
+        "secret_recorded": False,
+    }
+
+
 __all__ = [
     "ManagedCoreControlAuthority",
     "ManagedCoreControlUnavailable",
     "acquire_managed_core_control",
     "managed_core_host_profile_readiness",
+    "managed_core_profile_readiness",
 ]

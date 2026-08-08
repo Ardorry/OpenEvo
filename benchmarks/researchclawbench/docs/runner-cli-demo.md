@@ -1,99 +1,87 @@
 # ResearchClawBench runner CLI meeting demo
 
-This reuses the production control/ports, Core v2, and managed Codex harness;
-it does not use the engineering `CodexEngineeringPort` subprocess route.
+This command uses the production control, OpenEvo Core v2, `CodexHarness`, and
+managed runtime. It never falls back to host `codex exec`.
 
 ## 1. Enter the repository
 
 ```bash
 cd /home/lhy-h/work/researchclaw_per_item_minimal
+export PYTHONPATH="$PWD/benchmarks/researchclawbench/src:$PWD/src"
 ```
 
-## 2. Check environment without displaying secrets
-
-Set a fully pinned native ResearchClaw protocol and a fresh namespace:
+## 2. Check the closed inputs without displaying secrets
 
 ```bash
-export RCB_PROTOCOL=/absolute/path/to/native-protocol.yaml
-export RCB_RUN_ID=rcb_oe_v0_meeting_demo_earth_004
-export RCB_TASK=Earth_004
-test -f "$RCB_PROTOCOL"
-test -n "${RCB_JUDGE_API_KEY:+set}"
-test -n "${RCB_JUDGE_BASE_URL:+set}"
-test -n "${RCB_JUDGE_MODEL:+set}"
+test -f configs/researchclawbench/native_life005_engineering.yaml
+test -n "${CODEX_HOME:+set}"
+/usr/bin/docker version --format '{{.Server.Version}} {{.Server.APIVersion}}'
 ```
 
-Do not use `env`, `printenv`, or shell tracing in the meeting.
+Do not use `env`, `printenv`, shell tracing, or display `auth.json` in a meeting.
+This engineering validation does not invoke the Judge.
 
 ## 3. Zero-call demo
 
 ```bash
 .venv/bin/python -m openevo_researchclawbench.cli run-per-item \
-  --protocol "$RCB_PROTOCOL" \
-  --task "$RCB_TASK" \
-  --run-id "$RCB_RUN_ID" \
+  --protocol configs/researchclawbench/native_life005_engineering.yaml \
+  --task Life_005 \
+  --run-id rcb_oe_v0_native_life005_meeting \
   --dry-run \
   --no-model-calls
 ```
 
-This prints discovery, route, stages, output, readiness, and `provider_calls=0`;
-it creates no namespace and issues no Candidate, Evolution, or Judge call.
+This prints task discovery, the Core/CodexHarness route, planned stages, output
+root, managed readiness, and `provider_calls=0`. It creates no run namespace.
 
-## 4. Real single-task command
+## 4. Baseline plus native evolution
 
-Run only after `managed_runtime_ready=true` and all normal preflights pass:
+Run only after the dry-run reports `managed_runtime_ready=true`:
 
 ```bash
 .venv/bin/python -m openevo_researchclawbench.cli run-per-item \
-  --protocol "$RCB_PROTOCOL" \
-  --task "$RCB_TASK" \
-  --run-id "$RCB_RUN_ID"
+  --protocol configs/researchclawbench/native_life005_engineering.yaml \
+  --task Life_005 \
+  --run-id rcb_oe_v0_native_life005_meeting
 ```
 
-The live command rejects existing namespaces and host `codex exec` fallback.
+The command runs one baseline, attaches only Life_005 GT, creates native
+memory/skill/agent-system artifacts, and stops before evolved Candidate/Judge.
 
-## 5. Startup fields
-
-- Candidate identifies the Core-owned Codex harness and GPT-5.5.
-- Evolution identifies the managed reflector and native artifact registry.
-- Judge identifies OpenRouter, GPT-5.1, and Azure-only routing.
-- Passes reflect the existing two-round production supervisor.
-- Core attaches closed evaluator feedback while keeping credentials private.
-
-## 6. Status
+## 5. Status
 
 ```bash
 .venv/bin/python -m openevo_researchclawbench.cli status \
-  --protocol "$RCB_PROTOCOL" \
-  --run-id "$RCB_RUN_ID"
+  --protocol configs/researchclawbench/native_life005_engineering.yaml \
+  --run-id rcb_oe_v0_native_life005_meeting
 ```
 
-## 7. Logs and receipts
-
-Use the `Output` path printed at startup as `RCB_STATE_ROOT`:
+## 6. Logs and receipts
 
 ```bash
-export RCB_STATE_ROOT=/absolute/output/path/from/startup
-find "$RCB_STATE_ROOT/operations" -type f -name '*.json' -print | sort
+find /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/supervisor/rcb_oe_v0_native_life005_meeting/operations \
+  -type f -name '*.json' -print | sort
 ```
 
-## 8. Result verification
+## 7. Verify/result
 
 ```bash
 .venv/bin/python -m openevo_researchclawbench.cli verify \
-  --protocol "$RCB_PROTOCOL" \
-  --run-id "$RCB_RUN_ID"
+  --protocol configs/researchclawbench/native_life005_engineering.yaml \
+  --run-id rcb_oe_v0_native_life005_meeting
 ```
 
-State is in `training-supervisor.sqlite3`; receipts are under `operations/`.
+State is in `training-supervisor.sqlite3`; immutable operation receipts are
+under `operations/`; Core artifact IDs and Project Head are in successor
+receipts.
 
-## 9. Stop
+## 8. Stop owned resources
 
 ```bash
 .venv/bin/python -m openevo_researchclawbench.cli stop-owned \
-  --protocol "$RCB_PROTOCOL" \
-  --run-id "$RCB_RUN_ID"
+  --protocol configs/researchclawbench/native_life005_engineering.yaml \
+  --run-id rcb_oe_v0_native_life005_meeting
 ```
 
-Only provably owned processes are stopped; Core resources fail closed. Never
-display API keys, OAuth files, tokens, or credential paths.
+This targets only resources whose ownership is recorded by the supervisor.
