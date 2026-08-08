@@ -2,8 +2,17 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
+from openevo_researchclawbench.candidate_runner import (
+    build_native_task_request,
+    candidate_source_audit,
+    execute_native_candidate,
+)
+from openevo_researchclawbench.config import MANAGED_RUNTIME_IMAGE
+from openevo_researchclawbench.hashing import UnsafePathError
+from openevo_researchclawbench.workspace import WorkspaceReceipt
 
 from openevo.backend.contracts.v2.models import (
     EffectiveExecutionSnapshotRefV2,
@@ -14,26 +23,30 @@ from openevo.backend.contracts.v2.models import (
     WorkspaceSnapshotRefV2,
 )
 from openevo.backend.runtime_context_binding_v2 import RuntimeContextBindingV2
-from openevo.backend.workspace_handoff_v2 import WorkspaceHandoffBindingV2
-from openevo.backend.workspace_handoff_v2 import WorkspaceResultReceiptV2
+from openevo.backend.workspace_handoff_v2 import (
+    WorkspaceHandoffBindingV2,
+    WorkspaceResultReceiptV2,
+)
 from openevo.harness.factory import create_harness
 from openevo.harness.presets.codex import CodexHarness
 from openevo.rollout.models import SessionResult, TaskRequest
 from openevo.rollout.run_owner import NativeTaskRunOwner
 from openevo.trajectory.models import Trace, Trajectory
 
-from openevo_researchclawbench.candidate_runner import (
-    build_native_task_request,
-    candidate_source_audit,
-    execute_native_candidate,
-)
-from openevo_researchclawbench.config import ExperimentConfig, MANAGED_RUNTIME_IMAGE
-from openevo_researchclawbench.hashing import UnsafePathError
-from openevo_researchclawbench.workspace import WorkspaceReceipt
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[4]
-PROTOCOL = PROJECT_ROOT / "experiments/sequential_task_reflector_evolution_v0/protocol/protocol.yaml"
+class _NativeCandidateConfig:
+    _VALUES: ClassVar[dict[str, object]] = {
+        "candidate.reasoning_level": "high",
+        "candidate.attempt_timeout_seconds": 120,
+        "candidate.cpus": 2,
+        "candidate.memory_mb": 4096,
+        "native_openevo.rollout_step": 0,
+    }
+
+    def require(self, key: str):
+        return self._VALUES[key]
 
 
 def _workspace(tmp_path: Path) -> WorkspaceReceipt:
@@ -142,7 +155,7 @@ def _authorities():
 def _request(tmp_path: Path):
     handoff, context = _authorities()
     return build_native_task_request(
-        ExperimentConfig.load(PROTOCOL),
+        _NativeCandidateConfig(),
         _workspace(tmp_path),
         workspace_handoff=handoff,
         runtime_context_binding=context,
@@ -286,7 +299,7 @@ def test_hidden_candidate_entry_is_rejected(tmp_path: Path) -> None:
     handoff, context = _authorities()
     with pytest.raises(UnsafePathError):
         build_native_task_request(
-            ExperimentConfig.load(PROTOCOL),
+            _NativeCandidateConfig(),
             workspace,
             workspace_handoff=handoff,
             runtime_context_binding=context,
@@ -295,7 +308,7 @@ def test_hidden_candidate_entry_is_rejected(tmp_path: Path) -> None:
 
 def test_candidate_source_has_no_direct_codex_or_credential_path() -> None:
     receipt = candidate_source_audit(
-        PROJECT_ROOT / "OpenEvo/benchmarks/researchclawbench/src/openevo_researchclawbench"
+        PROJECT_ROOT / "benchmarks/researchclawbench/src/openevo_researchclawbench"
     )
     assert receipt["passed"]
     assert receipt["candidate_codex_version"] == "0.144.1"

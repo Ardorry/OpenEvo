@@ -3,20 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
-
-from openevo.evolution.framework.builtins import (
-    ImplementationDistributionIdentity,
-    build_builtin_registry,
-)
-from openevo.evolution.admission import ArtifactProposalDecisionReceipt
-from openevo.evolution.framework.profiles import execution_profile_for_release_mode
-from openevo.evolution.planned_jobs import PlanBoundJobCreateRequest
-from openevo.experiments.compiler import compile_experiment
-from openevo.experiments.models import ExperimentConfig as NativeExperimentConfig
-
-from openevo_researchclawbench.config import ExperimentConfig
 from openevo_researchclawbench.native_planner import native_experiment_payload
 from openevo_researchclawbench.reflector_runner import (
     NATIVE_METHODS,
@@ -28,13 +17,34 @@ from openevo_researchclawbench.reflector_runner import (
     submit_native_triple_artifact_cycle,
 )
 
+from openevo.evolution.admission import ArtifactProposalDecisionReceipt
+from openevo.evolution.framework.builtins import (
+    ImplementationDistributionIdentity,
+    build_builtin_registry,
+)
+from openevo.evolution.framework.profiles import execution_profile_for_release_mode
+from openevo.evolution.planned_jobs import PlanBoundJobCreateRequest
+from openevo.experiments.compiler import compile_experiment
+from openevo.experiments.models import ExperimentConfig as NativeExperimentConfig
 
-PROJECT_ROOT = Path(__file__).resolve().parents[4]
-PROTOCOL = PROJECT_ROOT / "experiments/sequential_task_reflector_evolution_v0/protocol/protocol.yaml"
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+
+class _NativeEvolutionConfig:
+    experiment_root = PROJECT_ROOT
+    rollout_url = "http://127.0.0.1:18000"
+    evolution_url = "http://127.0.0.1:18001"
+    _VALUES: ClassVar[dict[str, str]] = {
+        "experiment_id": "native-evolution-test",
+        "candidate.reasoning_level": "high",
+    }
+
+    def require(self, key: str):
+        return self._VALUES[key]
 
 
 def _compiled():
-    config = ExperimentConfig.load(PROTOCOL)
+    config = _NativeEvolutionConfig()
     payload = native_experiment_payload(config, task_id="Life_005", instruction="public task")
     native = NativeExperimentConfig.model_validate(payload)
     identity = ImplementationDistributionIdentity(
@@ -67,9 +77,7 @@ def _decision() -> ArtifactProposalDecisionReceipt:
         "passed": True,
     }
     content_admission["content_sha256"] = hashlib.sha256(
-        json.dumps(
-            content_admission, sort_keys=True, separators=(",", ":")
-        ).encode()
+        json.dumps(content_admission, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
     body = {
         "schema_version": "openevo.artifact_proposal_decision.v1",
@@ -124,7 +132,7 @@ def test_native_plan_contains_exact_triple_artifact_methods() -> None:
 
 def test_parametric_memory_is_disabled() -> None:
     payload = native_experiment_payload(
-        ExperimentConfig.load(PROTOCOL), task_id="Life_005", instruction="public task"
+        _NativeEvolutionConfig(), task_id="Life_005", instruction="public task"
     )
     assert "CODEX_HOME" not in payload["runtime"]["env"]
     assert payload["evolution"]["targets"]["parametric_memory"]["enabled"] is False
@@ -150,7 +158,10 @@ def test_each_artifact_is_submitted_as_independent_planned_job() -> None:
         round_index=0,
         dataset_artifact_id="dataset-current",
         context_artifact_ids={
-            "dataset": [], "agent_system": [], "text_memory": [], "skill_bundle": []
+            "dataset": [],
+            "agent_system": [],
+            "text_memory": [],
+            "skill_bundle": [],
         },
     )
     assert tuple(item.artifact_type for item in submissions) == SERIAL_REQUEST_ORDER
@@ -159,9 +170,15 @@ def test_each_artifact_is_submitted_as_independent_planned_job() -> None:
 
 
 def test_native_worker_registry_result_is_consumed_not_simulated() -> None:
-    submission = type("Submission", (), {
-        "job_id": "job-1", "artifact_type": "agent_system", "method_id": "agent_system_gepa_reflector"
-    })()
+    submission = type(
+        "Submission",
+        (),
+        {
+            "job_id": "job-1",
+            "artifact_type": "agent_system",
+            "method_id": "agent_system_gepa_reflector",
+        },
+    )()
 
     class Client:
         def get_internal_job_result(self, job_id):
@@ -232,7 +249,7 @@ def test_updated_revision_requires_native_promotion() -> None:
 
 
 def test_reflector_runtime_is_statically_pinned_and_needs_runtime_receipt() -> None:
-    receipt = reflector_runtime_audit(PROJECT_ROOT / "OpenEvo")
+    receipt = reflector_runtime_audit(PROJECT_ROOT)
     assert receipt["managed_reflector_service"]
     assert receipt["managed_reflector_core_service_binding"]
     assert receipt["path_fallback_rejected"]
@@ -244,7 +261,7 @@ def test_reflector_runtime_is_statically_pinned_and_needs_runtime_receipt() -> N
 def test_adapter_reflector_module_has_no_subprocess_execution() -> None:
     text = (
         PROJECT_ROOT
-        / "OpenEvo/benchmarks/researchclawbench/src/openevo_researchclawbench/reflector_runner.py"
+        / "benchmarks/researchclawbench/src/openevo_researchclawbench/reflector_runner.py"
     ).read_text(encoding="utf-8")
     assert "subprocess.run(" not in text
     assert "codex exec" not in text

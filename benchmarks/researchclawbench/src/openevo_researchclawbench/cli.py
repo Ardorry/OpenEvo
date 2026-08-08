@@ -14,8 +14,21 @@ from .candidate_reconciliation import (
     reconcile_invalid_validator_terminal,
 )
 from .candidate_runner import candidate_source_audit
-from .config import CANARY_TASK, FROZEN_TASKS, ExperimentConfig, ProtocolError
+from .community_evaluator import (
+    run_judge_environment_diagnostic,
+    run_judge_probe_subprocess,
+)
+from .config import (
+    CANARY_TASK,
+    FROZEN_TASKS,
+    MANAGED_CODEX_MODEL,
+    ExperimentConfig,
+    ProtocolError,
+)
 from .contamination_audit import run_offline_contamination_audit
+from .deepseek_codex_engineering_port import (
+    DeepSeekCodexEngineeringPort,
+)
 from .delivery_canary_v3 import (
     DeliveryCanaryConfig,
     DeliveryCanaryDryRunCandidate,
@@ -43,15 +56,6 @@ from .minimal_per_item_runner import (
     MinimalPerItemConfig,
     MinimalPerItemRunner,
 )
-from .per_item_pilot_v2 import (
-    PilotV2Error,
-    PilotV2Config,
-    PilotV2DryRunCandidate,
-    PilotV2DryRunEvolution,
-    PilotV2DryRunJudge,
-    PilotV2JudgePort,
-    PilotV2Runner,
-)
 from .official_training_control import (
     OfficialTrainingControl,
     OfficialTrainingOperationsUnavailable,
@@ -59,19 +63,20 @@ from .official_training_control import (
     validate_official_control,
 )
 from .official_training_supervisor import OfficialTrainingStage
+from .per_item_pilot_v2 import (
+    PilotV2Config,
+    PilotV2DryRunCandidate,
+    PilotV2DryRunEvolution,
+    PilotV2DryRunJudge,
+    PilotV2Error,
+    PilotV2JudgePort,
+    PilotV2Runner,
+)
 from .production_operation_ports import build_production_ports
 from .production_training_operations import (
     JudgeCredentialsRequired,
     judge_credential_readiness,
     judge_identity_preflight,
-)
-from .deepseek_codex_engineering_port import (
-    CodexEngineeringPort,
-    DeepSeekCodexEngineeringPort,
-)
-from .community_evaluator import (
-    run_judge_environment_diagnostic,
-    run_judge_probe_subprocess,
 )
 from .reflector_runner import reflector_runtime_audit
 from .rejudge_sealed import RejudgeSealedError, run_rejudge_sealed
@@ -541,6 +546,153 @@ def command_minimal_per_item(args: argparse.Namespace) -> int:
     return 0 if state.get("stage") == "COMPLETE" else 5
 
 
+def _print_per_item_runner_summary(
+    config: ExperimentConfig,
+    *,
+    task_id: str,
+    run_id: str,
+    dry_run: bool,
+) -> None:
+    """Print the non-secret meeting summary before any mutable operation."""
+
+    output_root = config.experiment_root / "supervisor" / run_id
+    print(
+        "\n".join(
+            (
+                "ResearchClawBench Runner",
+                "========================",
+                "",
+                f"Protocol: {config.require('experiment_id')}",
+                f"Task: {task_id}",
+                f"Run ID: {run_id}",
+                "Dataset: community",
+                "",
+                "Candidate:",
+                "  backend: OpenEvo harness",
+                f"  model: {MANAGED_CODEX_MODEL}",
+                "  profile: managed native Codex subscription",
+                "",
+                "Evolution:",
+                "  backend: OpenEvo managed reflector + native artifact registry",
+                f"  model: {MANAGED_CODEX_MODEL}",
+                "  artifacts:",
+                "    - memory",
+                "    - skill",
+                "    - agent-system",
+                "",
+                "Judge:",
+                "  backend: OpenRouter",
+                f"  model: {config.require('judge.model')}",
+                "  provider: Azure",
+                "",
+                "Passes:",
+                "  baseline",
+                "  evolve-1",
+                "  evolved-1",
+                "  evolve-2",
+                "  evolved-2",
+                "",
+                "Isolation:",
+                "  per-task namespace",
+                "  GT hidden from Candidate",
+                "  Judge credentials hidden from Candidate and reflector",
+                "  evaluator feedback attached through OpenEvo Core",
+                "",
+                "Output:",
+                f"  {output_root}",
+                "",
+                "Dry run:",
+                f"  {str(dry_run).lower()}",
+            )
+        )
+    )
+
+
+def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> int:
+    """Run one Community task through the existing production operation ports."""
+
+    task_id = str(args.task)
+    if task_id not in FROZEN_TASKS:
+        raise ProtocolError("run-per-item task is outside the frozen Community inventory")
+    dry_run = bool(args.dry_run or args.no_model_calls)
+    _print_per_item_runner_summary(
+        config,
+        task_id=task_id,
+        run_id=args.run_id,
+        dry_run=dry_run,
+    )
+    host_profile = managed_core_host_profile_readiness()
+    output_root = config.experiment_root / "supervisor" / args.run_id
+    planned_stages = [
+        "baseline",
+        "evolve-1",
+        "evolved-1",
+        "evolve-2",
+        "evolved-2",
+    ]
+    if dry_run:
+        print_closed_json(
+            {
+                "status": "PER_ITEM_DRY_RUN_NO_MODEL_CALLS",
+                "route_status": "planned_not_executed",
+                "task_discovery": [task_id],
+                "harness_route": (
+                    "DurableTrainingControl -> ProductionTrainingOperations -> "
+                    "CoreV2CandidatePort -> OpenEvo TaskRequest -> CodexHarness"
+                ),
+                "planned_stages": planned_stages,
+                "output_root": str(output_root),
+                "provider_calls": 0,
+                "managed_runtime_ready": host_profile["ready"],
+                "managed_runtime_reason_code": host_profile["reason_code"],
+                "secret_recorded": False,
+            }
+        )
+        return 0
+    if host_profile["ready"] is not True:
+        print_closed_json(
+            {
+                "status": "BLOCKED_OPEN_EVO_HARNESS_RUNTIME",
+                "task_id": task_id,
+                "run_id": args.run_id,
+                "reason_code": host_profile["reason_code"],
+                "model_started": False,
+                "provider_calls": 0,
+                "secret_recorded": False,
+            }
+        )
+        return 5
+    state_path = output_root / "training-supervisor.sqlite3"
+    if state_path.exists():
+        print_closed_json(
+            {
+                "status": "BLOCKED_RUN_NAMESPACE_ALREADY_EXISTS",
+                "task_id": task_id,
+                "run_id": args.run_id,
+                "model_started": False,
+                "secret_recorded": False,
+            }
+        )
+        return 5
+    authority = acquire_managed_core_control(config)
+    try:
+        control = DurableTrainingControl(
+            config=config,
+            run_id=args.run_id,
+            require_existing=False,
+            task_ids=(task_id,),
+            production=True,
+            core_control_authority=authority,
+        )
+        result = control.initialize()
+        while result["stage"] not in _FORMAL_TERMINAL_STAGES:
+            result = control.run_next()
+    finally:
+        authority.close()
+    print_closed_json(result)
+    return 0 if result["stage"] == TrainingStage.FINAL_FROZEN.value else 5
+
+
 def command_pilot_v2(args: argparse.Namespace) -> int:
     """Run the three-task per-item pilot v2 (dry-run or live)."""
 
@@ -610,12 +762,26 @@ def command_delivery_canary_v3(args: argparse.Namespace) -> int:
     else:
         provider = str(config.require("candidate.provider"))
         if provider == "native_codex":
-            candidate_port = CodexEngineeringPort(
-                model=str(config.require("candidate.model")),
-                profile=str(config.require("candidate.profile")),
-                timeout_seconds=int(config.require("candidate.timeout_seconds")),
-                sandbox=str(config.require("candidate.sandbox")),
+            host_profile = managed_core_host_profile_readiness()
+            print_closed_json(
+                {
+                    "status": (
+                        "BLOCKED_OPEN_EVO_HARNESS_RUNTIME"
+                        if host_profile["ready"] is not True
+                        else "BLOCKED_OPEN_EVO_HARNESS_WIRING"
+                    ),
+                    "reason_code": (
+                        host_profile["reason_code"]
+                        if host_profile["ready"] is not True
+                        else "DIRECT_CODEX_SUBPROCESS_ROUTE_REJECTED"
+                    ),
+                    "model": str(config.require("candidate.model")),
+                    "model_started": False,
+                    "provider_calls": 0,
+                    "secret_recorded": False,
+                }
             )
+            return 5
         else:
             candidate_port = DeepSeekCodexEngineeringPort(
                 model=str(config.require("candidate.model")),
@@ -750,6 +916,12 @@ def main(argv: list[str] | None = None) -> int:
     minimal.add_argument("--run-id", required=True)
     minimal.add_argument("--dry-run", action="store_true")
     minimal.add_argument("--no-model-calls", action="store_true")
+    run_per_item = sub.add_parser("run-per-item")
+    run_per_item.add_argument("--protocol", required=True, type=Path)
+    run_per_item.add_argument("--run-id", required=True)
+    run_per_item.add_argument("--task", required=True, choices=FROZEN_TASKS)
+    run_per_item.add_argument("--dry-run", action="store_true")
+    run_per_item.add_argument("--no-model-calls", action="store_true")
     judge_probe = sub.add_parser("judge-probe")
     judge_probe.add_argument("--project-root", required=True, type=Path)
     judge_probe.add_argument("--output-root", required=True, type=Path)
@@ -808,6 +980,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "delivery-canary-v3":
             return command_delivery_canary_v3(args)
         config = ExperimentConfig.load(args.protocol)
+        if args.command == "run-per-item":
+            return command_run_per_item(config, args)
         if (
             getattr(config, "formal_runs_v11", None) is not None
             and args.command in {"training-start", "run-next", "resume"}
