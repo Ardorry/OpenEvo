@@ -53,6 +53,7 @@ from openevo.backend.science_run_owner import (
     _as_inherited_successor_contribution,
     _successor_transition_closed_failure_code,
     _successor_transition_failure_is_retryable,
+    _successor_transition_http_diagnostic,
 )
 from openevo.backend.science_successor_preparer_v2 import (
     ScienceSuccessorPreparationV2Error,
@@ -126,6 +127,33 @@ def test_successor_failure_diagnostic_projects_closed_http_cause() -> None:
 
     assert diagnostic == "EVOLUTION_HTTP_422_REQUEST_VALIDATION_FAILED"
     assert "private" not in diagnostic.lower()
+
+
+def test_successor_failure_preserves_only_content_bound_http_diagnostic_reference() -> None:
+    evidence_id = f"planned-job-http-{'a' * 64}"
+    evidence_sha256 = "b" * 64
+    http_failure = EvolutionHttpStatusError(
+        status_code=422,
+        detail_code="request_validation_failed",
+        diagnostic_evidence_id=evidence_id,
+        diagnostic_evidence_sha256=evidence_sha256,
+        validation_detail_present=True,
+        request_method="POST",
+        request_path="/v1/planned-jobs",
+    )
+    failure = ScienceSuccessorPreparationV2Error(
+        "private request and validation response",
+        failure_code="plan_bound_job_creation_failed",
+    )
+    failure.__cause__ = http_failure
+
+    assert _successor_transition_http_diagnostic(failure) == (
+        evidence_id,
+        evidence_sha256,
+    )
+
+    http_failure.diagnostic_evidence_id = "../../private"
+    assert _successor_transition_http_diagnostic(failure) is None
 
 
 def test_successor_failure_diagnostic_uses_validated_preparation_code() -> None:

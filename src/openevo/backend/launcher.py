@@ -203,6 +203,9 @@ def _build_release_daemon_v2_composition(
                 artifact_admission_root=(
                     root / "core-control" / "artifact-admission-v1"
                 ),
+                planned_job_http_evidence_root=(
+                    root / "diagnostics-v1" / "planned-job-http"
+                ),
             )
             preparer_holder["value"] = preparer
             return preparer

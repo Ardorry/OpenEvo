@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+
 import httpx
 import pytest
 
@@ -155,3 +158,125 @@ def test_evolution_http_client_classifies_core_config_failure_without_detail_lea
 
     assert captured.value.detail_code == "core_config_contains_non_core_owned_fields"
     assert private_detail not in str(captured.value)
+
+
+def test_planned_job_422_preserves_redacted_durable_http_evidence(tmp_path) -> None:
+    private_authorization = "Bearer private-generation-credential"
+    private_api_key = "private-api-key-must-not-be-recorded"
+    response_detail = [
+        {
+            "loc": ["body", "plan", "plan_id"],
+            "msg": "Value error, plan identity is invalid",
+            "type": "value_error",
+            "input": {"api_key": private_api_key, "plan_id": "invalid-plan"},
+        }
+    ]
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(422, json={"detail": response_detail})
+
+    client = EvolutionHttpClient(
+        "http://evolution.example",
+        headers={
+            "Authorization": private_authorization,
+            "X-OpenEvo-Internal-Generation": "a" * 64,
+            "X-OpenEvo-Internal-Registry": "b" * 64,
+            "X-OpenEvo-Internal-Service": "core-control",
+        },
+        transport=httpx.MockTransport(handler),
+        planned_job_evidence_root=tmp_path / "planned-job-http",
+        planned_job_evidence_context={
+            "source_task_id": "task-a",
+            "source_project_head_id": "project-head-a",
+            "credential_note": private_api_key,
+        },
+    )
+
+    with pytest.raises(EvolutionHttpStatusError) as captured:
+        client.create_plan_bound_job(
+            {
+                "plan": {"plan_id": "invalid-plan"},
+                "target_id": "skill_bundle",
+            }
+        )
+
+    evidence_files = list((tmp_path / "planned-job-http").glob("*.json"))
+    assert len(evidence_files) == 1
+    evidence_bytes = evidence_files[0].read_bytes()
+    evidence = json.loads(evidence_bytes)
+    assert evidence_files[0].stat().st_mode & 0o777 == 0o600
+    assert evidence["request"]["method"] == "POST"
+    assert evidence["request"]["url_path"] == "/v1/planned-jobs"
+    assert "authorization" not in evidence["request"]["headers"]
+    assert evidence["request"]["sha256"] == hashlib.sha256(
+        httpx.Request(
+            "POST",
+            "http://evolution.example/v1/planned-jobs",
+            json={
+                "plan": {"plan_id": "invalid-plan"},
+                "target_id": "skill_bundle",
+            },
+        ).content
+    ).hexdigest()
+    assert evidence["response"]["http_status"] == 422
+    assert evidence["response"]["sha256"]
+    assert evidence["response"]["body"]["detail"][0]["loc"] == [
+        "body",
+        "plan",
+        "plan_id",
+    ]
+    assert evidence["response"]["body"]["detail"][0]["input"]["api_key"] == (
+        "<redacted>"
+    )
+    assert evidence["parsed_error"]["validation_detail_present"] is True
+    assert evidence["endpoint_identity"]["context"]["credential_note"] == (
+        "<redacted>"
+    )
+    assert evidence["secret_recorded"] is False
+    assert private_authorization.encode() not in evidence_bytes
+    assert private_api_key.encode() not in evidence_bytes
+    assert captured.value.status_code == 422
+    assert captured.value.validation_detail_present is True
+    assert captured.value.diagnostic_evidence_id == evidence["evidence_id"]
+    assert captured.value.diagnostic_evidence_sha256 == evidence["content_sha256"]
+    assert captured.value.request_method == "POST"
+    assert captured.value.request_path == "/v1/planned-jobs"
+    assert private_api_key not in str(captured.value)
+
+
+def test_planned_job_retry_422_preserves_exact_path_and_validation_detail(
+    tmp_path,
+) -> None:
+    response_detail = "non-retryable plan-bound job requires a replacement plan"
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(422, json={"detail": response_detail})
+
+    client = EvolutionHttpClient(
+        "http://evolution.example",
+        transport=httpx.MockTransport(handler),
+        planned_job_evidence_root=tmp_path / "planned-job-http",
+    )
+
+    with pytest.raises(EvolutionHttpStatusError) as captured:
+        client.retry_plan_bound_job(
+            "job-a?private-fragment",
+            {
+                "retry_request_id": "successor-attempt-a",
+                "plan_id": "plan-a",
+                "target_id": "agent_system",
+            },
+        )
+
+    evidence_file = next((tmp_path / "planned-job-http").glob("*.json"))
+    evidence = json.loads(evidence_file.read_bytes())
+    assert evidence["request"]["url_path"] == (
+        "/v1/planned-jobs/job-a%3Fprivate-fragment/retry"
+    )
+    assert evidence["response"]["body"]["detail"] == response_detail
+    assert evidence["parsed_error"]["validation_detail_present"] is True
+    assert captured.value.request_method == "POST"
+    assert captured.value.request_path == (
+        "/v1/planned-jobs/job-a%3Fprivate-fragment/retry"
+    )
+    assert captured.value.validation_detail_present is True

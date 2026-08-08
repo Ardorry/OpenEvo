@@ -1,11 +1,141 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import os
+import re
+import secrets
 from collections.abc import Mapping
+from datetime import UTC, datetime
+from pathlib import Path
 from types import TracebackType
 from typing import Any, Protocol
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
+
+_HTTP_EVIDENCE_REQUEST_HEADERS = frozenset(
+    {
+        "content-length",
+        "content-type",
+        "x-openevo-internal-generation",
+        "x-openevo-internal-registry",
+        "x-openevo-internal-service",
+        "x-request-id",
+    }
+)
+_HTTP_EVIDENCE_RESPONSE_HEADERS = frozenset(
+    {
+        "content-length",
+        "content-type",
+        "date",
+        "server",
+        "x-request-id",
+    }
+)
+_SENSITIVE_FIELD_RE = re.compile(
+    r"(?:authorization|bearer|api[_-]?key|oauth|cookie|password|secret|token|credential)",
+    re.IGNORECASE,
+)
+_SENSITIVE_VALUE_RE = re.compile(
+    r"(?:\bBearer\s+[A-Za-z0-9._~+/-]+=*|\bsk-or-v1-[A-Za-z0-9_-]+)",
+    re.IGNORECASE,
+)
+_EVIDENCE_FILE_MODE = 0o600
+_EVIDENCE_ROOT_MODE = 0o700
+
+
+def _canonical_json_bytes(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        ensure_ascii=True,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def _redact_http_evidence(value: Any, *, field_name: str | None = None) -> Any:
+    if field_name is not None and _SENSITIVE_FIELD_RE.search(field_name):
+        return "<redacted>"
+    if isinstance(value, dict):
+        return {
+            str(key): _redact_http_evidence(item, field_name=str(key))
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_http_evidence(item) for item in value]
+    if isinstance(value, tuple):
+        return [_redact_http_evidence(item) for item in value]
+    if isinstance(value, str) and _SENSITIVE_VALUE_RE.search(value):
+        return "<redacted>"
+    return value
+
+
+def _allowlisted_headers(
+    headers: httpx.Headers,
+    allowlist: frozenset[str],
+) -> dict[str, str]:
+    return {
+        key.lower(): value
+        for key, value in headers.items()
+        if key.lower() in allowlist
+    }
+
+
+def _safe_endpoint_identity(base_url: str) -> str:
+    parsed = urlsplit(base_url)
+    hostname = parsed.hostname or ""
+    netloc = hostname
+    if parsed.port is not None:
+        netloc = f"{netloc}:{parsed.port}"
+    return urlunsplit((parsed.scheme, netloc, parsed.path.rstrip("/"), "", ""))
+
+
+def _request_url_path(request: httpx.Request) -> str:
+    return request.url.raw_path.decode("ascii")
+
+
+def _decoded_http_body(content: bytes) -> Any:
+    try:
+        decoded = json.loads(content)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        decoded = content.decode("utf-8", errors="replace")
+    return _redact_http_evidence(decoded)
+
+
+def _write_private_json(root: Path, evidence_id: str, payload: Mapping[str, Any]) -> Path:
+    root.mkdir(mode=_EVIDENCE_ROOT_MODE, parents=True, exist_ok=True)
+    if root.is_symlink() or not root.is_dir():
+        raise RuntimeError("planned-job HTTP evidence root is invalid")
+    os.chmod(root, _EVIDENCE_ROOT_MODE)
+    destination = root / f"{evidence_id}.json"
+    temporary = root / f".{evidence_id}.{secrets.token_hex(8)}.tmp"
+    body = _canonical_json_bytes(payload)
+    descriptor = os.open(
+        temporary,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        _EVIDENCE_FILE_MODE,
+    )
+    try:
+        with os.fdopen(descriptor, "wb", closefd=True) as stream:
+            stream.write(body)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, destination)
+        os.chmod(destination, _EVIDENCE_FILE_MODE)
+        directory = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    except BaseException:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+    return destination
 
 
 class RolloutClientProtocol(Protocol):
@@ -197,7 +327,17 @@ class RolloutHttpClient:
 
 
 class EvolutionHttpStatusError(RuntimeError):
-    def __init__(self, *, status_code: int, detail_code: str = "unspecified") -> None:
+    def __init__(
+        self,
+        *,
+        status_code: int,
+        detail_code: str = "unspecified",
+        diagnostic_evidence_id: str | None = None,
+        diagnostic_evidence_sha256: str | None = None,
+        validation_detail_present: bool = False,
+        request_method: str | None = None,
+        request_path: str | None = None,
+    ) -> None:
         if type(status_code) is not int or not 100 <= status_code <= 599:
             raise ValueError("evolution HTTP status code is invalid")
         if detail_code not in {
@@ -211,6 +351,11 @@ class EvolutionHttpStatusError(RuntimeError):
             raise ValueError("evolution HTTP detail code is invalid")
         self.status_code = status_code
         self.detail_code = detail_code
+        self.diagnostic_evidence_id = diagnostic_evidence_id
+        self.diagnostic_evidence_sha256 = diagnostic_evidence_sha256
+        self.validation_detail_present = validation_detail_present
+        self.request_method = request_method
+        self.request_path = request_path
         self.retryable = status_code >= 500 or status_code in {408, 425, 429}
         super().__init__(
             f"evolution service returned HTTP status {status_code} ({detail_code})"
@@ -225,8 +370,18 @@ class EvolutionHttpClient:
         timeout_seconds: float = 30.0,
         headers: Mapping[str, str] | None = None,
         transport: httpx.BaseTransport | None = None,
+        planned_job_evidence_root: str | Path | None = None,
+        planned_job_evidence_context: Mapping[str, Any] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
+        self._planned_job_evidence_root = (
+            None
+            if planned_job_evidence_root is None
+            else Path(planned_job_evidence_root).absolute()
+        )
+        self._planned_job_evidence_context = _redact_http_evidence(
+            dict(planned_job_evidence_context or {})
+        )
         self._client = httpx.Client(
             timeout=httpx.Timeout(timeout_seconds, connect=10.0),
             trust_env=False,
@@ -257,7 +412,12 @@ class EvolutionHttpClient:
         return result
 
     @staticmethod
-    def _raise_for_status(response: httpx.Response) -> None:
+    def _raise_for_status(
+        response: httpx.Response,
+        *,
+        diagnostic_evidence_id: str | None = None,
+        diagnostic_evidence_sha256: str | None = None,
+    ) -> None:
         if 200 <= response.status_code < 300:
             return
         detail_code = "unspecified"
@@ -282,7 +442,107 @@ class EvolutionHttpClient:
         raise EvolutionHttpStatusError(
             status_code=response.status_code,
             detail_code=detail_code,
+            diagnostic_evidence_id=diagnostic_evidence_id,
+            diagnostic_evidence_sha256=diagnostic_evidence_sha256,
+            validation_detail_present=detail is not None,
+            request_method=response.request.method,
+            request_path=_request_url_path(response.request),
         )
+
+    def _record_planned_job_http_evidence(
+        self,
+        *,
+        request: httpx.Request,
+        response: httpx.Response,
+    ) -> tuple[str | None, str | None]:
+        root = self._planned_job_evidence_root
+        if root is None:
+            return None, None
+        request_body = bytes(request.content)
+        response_body = bytes(response.content)
+        request_sha256 = hashlib.sha256(request_body).hexdigest()
+        response_sha256 = hashlib.sha256(response_body).hexdigest()
+        try:
+            request_json = json.loads(request_body)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("planned-job request was not serialized JSON") from exc
+        parsed_response = _decoded_http_body(response_body)
+        detail = (
+            parsed_response.get("detail")
+            if isinstance(parsed_response, dict)
+            else None
+        )
+        recorded_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        identity_seed = _canonical_json_bytes(
+            {
+                "recorded_at": recorded_at,
+                "request_sha256": request_sha256,
+                "response_sha256": response_sha256,
+                "nonce": secrets.token_hex(16),
+            }
+        )
+        evidence_id = f"planned-job-http-{hashlib.sha256(identity_seed).hexdigest()}"
+        evidence = {
+            "schema_version": "openevo.planned_job_http_evidence.v1",
+            "evidence_id": evidence_id,
+            "recorded_at": recorded_at,
+            "endpoint_identity": {
+                "base_url": _safe_endpoint_identity(self.base_url),
+                "context": self._planned_job_evidence_context,
+            },
+            "request": {
+                "method": request.method,
+                "url_path": _request_url_path(request),
+                "headers": _allowlisted_headers(
+                    request.headers,
+                    _HTTP_EVIDENCE_REQUEST_HEADERS,
+                ),
+                "json": _redact_http_evidence(request_json),
+                "sha256": request_sha256,
+            },
+            "response": {
+                "http_status": response.status_code,
+                "headers": _allowlisted_headers(
+                    response.headers,
+                    _HTTP_EVIDENCE_RESPONSE_HEADERS,
+                ),
+                "body": parsed_response,
+                "sha256": response_sha256,
+            },
+            "parsed_error": {
+                "detail": detail,
+                "validation_detail_present": detail is not None,
+            },
+            "secret_recorded": False,
+        }
+        evidence_sha256 = hashlib.sha256(_canonical_json_bytes(evidence)).hexdigest()
+        evidence["content_sha256"] = evidence_sha256
+        _write_private_json(root, evidence_id, evidence)
+        return evidence_id, evidence_sha256
+
+    def _send_planned_job_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        payload: dict[str, Any],
+    ) -> httpx.Response:
+        request = self._client.build_request(
+            method,
+            f"{self.base_url}{path}",
+            json=payload,
+        )
+        response = self._client.send(request)
+        evidence_id, evidence_sha256 = self._record_planned_job_http_evidence(
+            request=request,
+            response=response,
+        )
+        self._raise_for_status(
+            response,
+            diagnostic_evidence_id=evidence_id,
+            diagnostic_evidence_sha256=evidence_sha256,
+        )
+        return response
 
     def create_dataset(self, payload: dict[str, Any]) -> dict[str, Any]:
         response = self._client.post(f"{self.base_url}/v1/datasets", json=payload)
@@ -321,8 +581,11 @@ class EvolutionHttpClient:
         return result
 
     def create_plan_bound_job(self, payload: dict[str, Any]) -> dict[str, Any]:
-        response = self._client.post(f"{self.base_url}/v1/planned-jobs", json=payload)
-        self._raise_for_status(response)
+        response = self._send_planned_job_request(
+            "POST",
+            "/v1/planned-jobs",
+            payload=payload,
+        )
         result = response.json()
         if not isinstance(result, dict):
             raise ValueError("planned evolution job response was not a JSON object")
@@ -334,11 +597,11 @@ class EvolutionHttpClient:
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         encoded_job_id = quote(job_id, safe="")
-        response = self._client.post(
-            f"{self.base_url}/v1/planned-jobs/{encoded_job_id}/retry",
-            json=payload,
+        response = self._send_planned_job_request(
+            "POST",
+            f"/v1/planned-jobs/{encoded_job_id}/retry",
+            payload=payload,
         )
-        self._raise_for_status(response)
         result = response.json()
         if not isinstance(result, dict):
             raise ValueError("planned evolution job retry response was not a JSON object")

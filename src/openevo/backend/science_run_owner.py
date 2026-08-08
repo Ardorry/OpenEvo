@@ -1504,15 +1504,33 @@ class CoreScienceTaskOwnerV2:
                 outputs=outputs,
             )
         except Exception as exc:
+            http_diagnostic = _successor_transition_http_diagnostic(exc)
             logger.error(
-                "v2 science successor transition %s failed during preparation [%s]",
+                "v2 science successor transition %s failed during preparation [%s]%s",
                 transition_id,
                 _successor_transition_closed_failure_code(exc),
+                (
+                    ""
+                    if http_diagnostic is None
+                    else " [diagnostic_evidence="
+                    f"{http_diagnostic[0]} sha256={http_diagnostic[1]}]"
+                ),
             )
             retryable = _successor_transition_failure_is_retryable(exc)
+            diagnostic_suffix = (
+                ""
+                if http_diagnostic is None
+                else (
+                    " Diagnostic evidence: "
+                    f"{http_diagnostic[0]} (sha256 {http_diagnostic[1]})."
+                )
+            )
             error = _successor_transition_api_error(
                 code="successor_transition_failed",
-                message="Core could not prepare and atomically commit the successor state.",
+                message=(
+                    "Core could not prepare and atomically commit the successor state."
+                    f"{diagnostic_suffix}"
+                ),
                 retryable=retryable,
             )
             try:
@@ -3029,6 +3047,34 @@ def _successor_transition_closed_failure_code(exc: Exception) -> str:
     if re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", closed_name):
         return f"EXCEPTION_{closed_name}"
     return "EXCEPTION_UNCLASSIFIED"
+
+
+def _successor_transition_http_diagnostic(
+    exc: Exception,
+) -> tuple[str, str] | None:
+    """Return only the opaque, content-bound HTTP diagnostic reference.
+
+    The referenced private evidence contains the redacted request and response.
+    No response detail is copied into the task-facing transition contract.
+    """
+
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, EvolutionHttpStatusError):
+            evidence_id = current.diagnostic_evidence_id
+            evidence_sha256 = current.diagnostic_evidence_sha256
+            if (
+                isinstance(evidence_id, str)
+                and re.fullmatch(r"planned-job-http-[0-9a-f]{64}", evidence_id)
+                and isinstance(evidence_sha256, str)
+                and re.fullmatch(r"[0-9a-f]{64}", evidence_sha256)
+            ):
+                return evidence_id, evidence_sha256
+            return None
+        current = current.__cause__ or current.__context__
+    return None
 
 
 def _successor_transition_api_error(

@@ -2510,3 +2510,195 @@ def test_planned_job_api_uses_snapshot_from_executable_registry(tmp_path) -> Non
 
     assert response.status_code == 422
     assert "active verified registry" not in response.text
+
+
+def _fresh_per_item_requests(
+    store: EvolutionStore,
+    *,
+    registry,
+    plan_id: str,
+    lifecycle_metadata: dict[str, object],
+) -> tuple[PlanBoundJobCreateRequest, ...]:
+    dataset = _artifact(store, ArtifactType.DATASET, f"{plan_id}-current-gt-view")
+    reflector_llm = {
+        "provider": "codex_cli",
+        "model": "gpt-5.5",
+        "runtime": {
+            "mode": "managed",
+            "profile": "managed_science",
+            "image_digest": "sha256:" + "1" * 64,
+            "codex_binary": "/opt/codex/bin/codex",
+            "expected_cli_version": "codex-cli 0.1.0",
+            "auth_mode": "subscription",
+            "capture_mode": "transcript",
+            "path_fallback_allowed": False,
+        },
+    }
+    selections = (
+        EvolutionTargetSelection(
+            target_id="agent_system",
+            enabled=True,
+            method_id="agent_system_gepa_reflector",
+            config={
+                "reflector_llm": reflector_llm,
+                "target_path": "AGENTS.md",
+                "training_feedback_required": True,
+            },
+        ),
+        EvolutionTargetSelection(
+            target_id="skill_bundle",
+            enabled=True,
+            method_id="skill_bundle_reflector",
+            config={
+                "reflector_llm": reflector_llm,
+                "training_feedback_required": True,
+            },
+        ),
+        EvolutionTargetSelection(
+            target_id="text_memory",
+            enabled=True,
+            method_id="text_memory_expel_reflector",
+            config={
+                "reflector_llm": reflector_llm,
+                "training_feedback_required": True,
+            },
+        ),
+    )
+    plan = registry.snapshot.compile_plan(
+        plan_id=plan_id,
+        selections=selections,
+        profile=_profile(),
+    )
+    transition_id = f"successor-{plan_id}"
+    requests: list[PlanBoundJobCreateRequest] = []
+    for selection in plan.selections:
+        dataset_binding_id = (
+            "current_dataset"
+            if selection.target_id == "skill_bundle"
+            else "dataset_inputs"
+        )
+        requests.append(
+            PlanBoundJobCreateRequest(
+                plan=plan,
+                target_id=selection.target_id,
+                job_type=selection.method_id,
+                input_bindings=(
+                    PlannedInputBinding(
+                        binding_id=dataset_binding_id,
+                        artifact_ids=(dataset.artifact_id,),
+                    ),
+                    PlannedInputBinding(
+                        binding_id="prior_target_artifacts",
+                        artifact_ids=(),
+                    ),
+                ),
+                successor_transition_id=transition_id,
+                core_config={
+                    "name": f"Life_005:{selection.target_id}:generation-1",
+                    "task_id": "Life_005",
+                    "round_index": 0,
+                    "promoted": False,
+                    "max_reflector_model_calls": 1,
+                    "lineage": {
+                        "evolution_cycle_id": "life005-cycle-1",
+                        "generation": 1,
+                        "gt_supervision_sha256": "2" * 64,
+                        **lifecycle_metadata,
+                    },
+                },
+            )
+        )
+    return tuple(requests)
+
+
+@pytest.mark.parametrize(
+    "axis,value",
+    (
+        ("source_project_head", "project-head-baseline"),
+        ("source_project_head", "project-head-successor"),
+        ("destination_run", "Life_005_a0_evolution"),
+        ("destination_run", "life005-evolution-safe-001"),
+        ("source_run", "supervisor-run-life005"),
+        ("source_run", "core-run-life005"),
+        ("project", "project-life005-current"),
+        ("project", "project-life005-fresh"),
+        ("generation", 0),
+        ("generation", 1),
+        ("gt_attachment", "evolution-only-supervision"),
+        ("gt_attachment", "candidate-overlay-absent"),
+    ),
+)
+def test_fresh_per_item_planned_job_route_accepts_lifecycle_metadata_matrix(
+    tmp_path: Path,
+    axis: str,
+    value: object,
+) -> None:
+    """Exercise the real HTTP/schema/store boundary without dispatching a worker.
+
+    These lifecycle identities are lineage evidence, not top-level
+    ``PlanBoundJobCreateRequest`` authority.  This test protects the exact
+    boundary implicated by the fresh Life_005 422 while leaving successor and
+    Project Head validation with their owning Core subsystem.
+    """
+
+    registry = verified_builtin_registry(tmp_path / "verified-registry")
+    app = create_app(
+        db_path=tmp_path / "evolution-api.db",
+        artifact_root=tmp_path / "api-artifacts",
+        executable_registry=registry,
+    )
+    requests = _fresh_per_item_requests(
+        app.state.store,
+        registry=registry,
+        plan_id=f"plan-life005-{axis}-{str(value).replace('_', '-')}",
+        lifecycle_metadata={axis: value},
+    )
+    client = TestClient(app)
+
+    responses = [
+        client.post(
+            "/v1/planned-jobs",
+            json=request.model_dump(mode="json"),
+        )
+        for request in requests
+    ]
+
+    assert [response.status_code for response in responses] == [200, 200, 200]
+    with app.state.store.connect() as connection:
+        persisted = connection.execute(
+            "SELECT target_id, state FROM jobs ORDER BY target_id"
+        ).fetchall()
+    assert [(row["target_id"], row["state"]) for row in persisted] == [
+        ("agent_system", "pending"),
+        ("skill_bundle", "pending"),
+        ("text_memory", "pending"),
+    ]
+
+
+def test_fresh_per_item_planned_job_route_rejects_tampered_plan_with_detail(
+    tmp_path: Path,
+) -> None:
+    registry = verified_builtin_registry(tmp_path / "verified-registry")
+    app = create_app(
+        db_path=tmp_path / "evolution-api.db",
+        artifact_root=tmp_path / "api-artifacts",
+        executable_registry=registry,
+    )
+    request = _fresh_per_item_requests(
+        app.state.store,
+        registry=registry,
+        plan_id="plan-life005-tampered",
+        lifecycle_metadata={"generation": 1},
+    )[0]
+    payload = request.model_dump(mode="python")
+    payload["plan"]["selections"][0]["method_identity_digest"] = "f" * 64
+
+    response = TestClient(app).post("/v1/planned-jobs", json=payload)
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert isinstance(detail, str)
+    assert "plan" in detail
+    assert "registry" in detail or "identity" in detail
+    with app.state.store.connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0

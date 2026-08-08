@@ -383,6 +383,7 @@ class ProductionScienceSuccessorPreparerV2:
         training_feedback_required: bool = False,
         official_frozen_mode: bool = False,
         artifact_admission_root: str | Path | None = None,
+        planned_job_http_evidence_root: str | Path | None = None,
         artifact_admission_policy: NativeArtifactAdmissionPolicy | None = None,
         clock: Callable[[], datetime] | None = None,
         poll_interval_seconds: float = 1.0,
@@ -404,11 +405,11 @@ class ProductionScienceSuccessorPreparerV2:
         self._handoffs = workspace_handoffs
         self._services = services
         self._registry = require_verified_executable_registry(executable_registry)
-        self._evolution_factory = evolution_factory or (
-            lambda binding: EvolutionHttpClient(
-                binding.evolution_backend_url,
-                headers=binding.request_headers(),
-            )
+        self._evolution_factory = evolution_factory
+        self._planned_job_http_evidence_root = (
+            None
+            if planned_job_http_evidence_root is None
+            else Path(planned_job_http_evidence_root).absolute()
         )
         if official_frozen_mode and (
             training_feedback_provider is not None or training_feedback_required
@@ -3110,7 +3111,46 @@ class ProductionScienceSuccessorPreparerV2:
                 "successor service authority changed after Attempt execution"
             )
         self._require_running()
-        client = self._evolution_factory(binding)
+        if self._evolution_factory is None:
+            assert record.evidence is not None
+            client = EvolutionHttpClient(
+                binding.evolution_backend_url,
+                headers=binding.request_headers(),
+                planned_job_evidence_root=(
+                    self._planned_job_http_evidence_root
+                ),
+                planned_job_evidence_context={
+                    "source_project_id": context.task.project_id,
+                    "source_task_id": context.task.task_id,
+                    "source_attempt_id": context.accepted_attempt.attempt_id,
+                    "source_rollout_task_id": record.evidence.rollout_task_id,
+                    "source_codex_session_id": record.evidence.session_id,
+                    "source_project_head_id": (
+                        context.task.admission.predecessor_project_head.project_head_id
+                    ),
+                    "source_project_head_manifest_sha256": (
+                        context.task.admission.predecessor_project_head.manifest_sha256
+                    ),
+                    "source_generation": (
+                        context.task.admission.predecessor_project_head.generation
+                    ),
+                    "successor_transition_id": (
+                        context.transition.transition.successor_transition_id
+                    ),
+                    "successor_transition_attempt_id": (
+                        context.transition_attempt.transition_attempt_id
+                    ),
+                    "successor_transition_attempt_ordinal": (
+                        context.transition_attempt.ordinal
+                    ),
+                    "service_generation_sha256": binding.generation_digest,
+                    "service_registry_sha256": binding.registry_digest,
+                    "framework_lock_sha256": binding.framework_lock_digest,
+                    "runtime_identity_sha256": binding.runtime_identity_digest,
+                },
+            )
+        else:
+            client = self._evolution_factory(binding)
         try:
             yield binding, client
         finally:
