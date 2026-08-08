@@ -113,6 +113,31 @@ def test_capsule_extracts_candidate_specific_evidence_without_gt(tmp_path: Path)
     assert "private_target_structure" not in encoded
 
 
+def test_capsule_extracts_candidate_report_labels_with_candidate_provenance(
+    tmp_path: Path,
+) -> None:
+    root, candidate = _candidate(tmp_path)
+    (root / "report/report.md").write_text(
+        "# Symmetry-aware custom trend study\n\n"
+        "![Custom trend evidence](images/custom_trend.png)\n",
+        encoding="utf-8",
+    )
+    result = project_sanitized_evaluation_feedback(
+        task_id="Life_005",
+        candidate=candidate,
+        raw_evaluation={
+            "total_score": 42.0,
+            "items": [{"type": "image", "score": 42.0, "score_valid": True}],
+        },
+        public_task_info={"task": "Analyze public data and deliver a report with figures."},
+        ground_truth_entries=_gt(),
+    )
+    concepts = [item["text"] for item in result["baseline_evidence_capsule"]["candidate_concepts"]]
+    assert any("symmetry aware custom trend" in item for item in concepts)
+    assert any("custom trend" in item for item in concepts)
+    assert result["baseline_evidence_capsule_admission"]["status"] == "ADMITTED"
+
+
 def test_capsule_requires_fresh_workspace_reconstruction_semantics(tmp_path: Path) -> None:
     root, projection = _projection(tmp_path)
     capsule = deepcopy(projection["baseline_evidence_capsule"])
@@ -172,6 +197,60 @@ def test_candidate_specific_artifact_triple_is_accepted(tmp_path: Path) -> None:
     assert report["aggregate"]["candidate_specific_reference_count"] >= 2
     assert report["aggregate"]["weakness_to_action_mapping_count"] >= 1
     assert report["bundle_requirements"]["per_artifact_role_prescription"] is False
+
+
+def test_quality_accepts_semantic_retention_of_candidate_report_strategy(
+    tmp_path: Path,
+) -> None:
+    """A substantive paraphrase of Candidate report terminology is retained.
+
+    The gate must not require a reflector to repeat a figure filename or an
+    inflected heading literally.  The strategy is still candidate-grounded:
+    both the report heading and figure label originate in the candidate
+    workspace, while the artifacts contain only an executable reconstruction
+    lesson and no private target fact.
+    """
+
+    root, candidate = _candidate(tmp_path)
+    (root / "report/report.md").write_text(
+        "# Repeat pattern probability studies\n\n"
+        "![Probability trends](images/custom_trend.png)\n",
+        encoding="utf-8",
+    )
+    projection = project_sanitized_evaluation_feedback(
+        task_id="Life_005",
+        candidate=candidate,
+        raw_evaluation={
+            "total_score": 42.0,
+            "items": [{"type": "image", "score": 42.0, "score_valid": True}],
+        },
+        public_task_info={"task": "Analyze public data and deliver a report with figures."},
+        ground_truth_entries=_gt(),
+    )
+    artifacts = {
+        "text_memory": (
+            "Reconstruct the repeat-pattern probability study in a fresh workspace. "
+            "The visual evidence weakness needs an independent numeric aggregation."
+        ),
+        "skill_bundle": (
+            "Rebuild the probability-trend analysis from public inputs, then add a "
+            "numeric aggregation to validate the visual evidence."
+        ),
+        "agent_system": (
+            "Preserve the prior repeat-pattern strategy before additions; each visual "
+            "evidence weakness needs a concrete validation action."
+        ),
+    }
+
+    report = require_task_specific_artifact_quality(
+        capsule=projection["baseline_evidence_capsule"],
+        artifact_texts=artifacts,
+        ground_truth_entries=_gt(),
+    )
+
+    assert report["status"] == "PASS"
+    assert report["aggregate"]["candidate_specific_reference_count"] >= 2
+    assert report["gt_leakage_findings"] == []
 
 
 def test_gt_specific_artifact_is_rejected(tmp_path: Path) -> None:

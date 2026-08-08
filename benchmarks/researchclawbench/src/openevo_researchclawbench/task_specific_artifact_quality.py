@@ -48,6 +48,9 @@ _LOW_SIGNAL_CONCEPTS = frozenset(
         "result",
         "summary",
         "validation",
+        "visual",
+        "evidence",
+        "analyze",
     }
 )
 _SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+(?=[#*-]|\S)")
@@ -122,21 +125,38 @@ def _concept_units(text: str, concepts: list[str]) -> dict[str, list[str]]:
     units = _semantic_units(text)
     result: dict[str, list[str]] = {}
     for concept in concepts:
-        concept_tokens = [
-            token for token in concept.split() if token not in _LOW_SIGNAL_CONCEPTS
-        ]
+        concept_tokens = _specific_stems(concept)
         matches = [
             unit
             for unit in units
             if concept in _normalize(unit)
             or (
                 concept_tokens
-                and all(token in _normalize(unit) for token in concept_tokens)
+                and len(concept_tokens.intersection(_specific_stems(unit)))
+                >= min(2, len(concept_tokens))
             )
         ]
         if matches:
             result[concept] = matches
     return result
+
+
+def _stem(token: str) -> str:
+    if len(token) > 4 and token.endswith("ies"):
+        return f"{token[:-3]}y"
+    if len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
+        return token[:-1]
+    return token
+
+
+def _specific_stems(value: str) -> set[str]:
+    return {
+        _stem(token)
+        for token in _normalize(value).split()
+        if token not in _LOW_SIGNAL_CONCEPTS
+        and not token.startswith("figure")
+        and not token.startswith("fig")
+    }
 
 
 def _contains_any(value: str, terms: Iterable[str]) -> bool:

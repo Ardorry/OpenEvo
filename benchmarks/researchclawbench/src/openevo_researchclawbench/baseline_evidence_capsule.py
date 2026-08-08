@@ -40,6 +40,8 @@ _PRIVATE_KEY_FRAGMENTS = (
 _IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".svg"})
 _CODE_SUFFIXES = frozenset({".py", ".ipynb", ".r", ".jl"})
 _OUTPUT_SUFFIXES = frozenset({".csv", ".tsv", ".json"})
+_REPORT_HEADING = re.compile(r"^#{1,3}\s+(.+?)\s*$")
+_REPORT_IMAGE = re.compile(r"!\[([^\]]+)\]\(([^)]+)\)")
 _GENERIC_STEM_TOKENS = frozenset(
     {
         "agent",
@@ -229,9 +231,7 @@ def _target_names(ground_truth_entries: list[dict[str, Any]]) -> set[str]:
     return result
 
 
-def _concept_from_path(relative: str, *, kind: str) -> str | None:
-    path = Path(relative)
-    tokens = [token.casefold() for token in _TOKEN.findall(path.stem)]
+def _concept_from_tokens(tokens: list[str], *, kind: str) -> str | None:
     tokens = [token for token in tokens if not token.isdigit()]
     specific = [token for token in tokens if token not in _GENERIC_STEM_TOKENS]
     selected = specific or tokens
@@ -250,9 +250,77 @@ def _concept_from_path(relative: str, *, kind: str) -> str | None:
     return stem
 
 
-def _concepts(root: Path, files: list[str], targets: set[str]) -> list[dict[str, Any]]:
+def _concept_from_path(relative: str, *, kind: str) -> str | None:
+    path = Path(relative)
+    return _concept_from_tokens(
+        [token.casefold() for token in _TOKEN.findall(path.stem)], kind=kind
+    )
+
+
+def _report_concepts(
+    root: Path,
+    report_ref: str,
+    candidate_files: set[str],
+) -> list[dict[str, Any]]:
+    """Return compact concepts from Candidate-authored headings and figure labels."""
+
+    report = root / report_ref
+    text = report.read_text(encoding="utf-8", errors="replace")[:131_072]
     concepts: list[dict[str, Any]] = []
     seen: set[str] = set()
+
+    def add(label: str, *, kind: str, refs: list[str]) -> None:
+        tokens = [token.casefold() for token in _TOKEN.findall(label)]
+        concept = _concept_from_tokens(tokens, kind=kind)
+        if concept is None or concept in seen:
+            return
+        # Headings such as "Methods" and "Results" are not a useful
+        # Candidate-specific strategy.  Require two non-generic source terms
+        # before they enter the bounded capsule.
+        source_specific = [
+            token
+            for token in tokens
+            if token not in _GENERIC_STEM_TOKENS and not token.isdigit()
+        ]
+        if len(source_specific) < 2:
+            return
+        seen.add(concept)
+        concepts.append(
+            {
+                "concept_id": f"concept_{len(concepts) + 1:02d}",
+                "text": concept,
+                "kind": kind,
+                "evidence_refs": refs,
+                "provenance": "candidate_workspace",
+            }
+        )
+
+    for line in text.splitlines():
+        heading = _REPORT_HEADING.match(line)
+        if heading:
+            add(heading.group(1), kind="analysis", refs=[report_ref])
+    for match in _REPORT_IMAGE.finditer(text):
+        label, destination = match.groups()
+        image_ref = (Path(report_ref).parent / destination).as_posix()
+        if image_ref in candidate_files:
+            add(label, kind="figure", refs=[image_ref, report_ref])
+    return concepts
+
+
+def _concepts(
+    root: Path,
+    files: list[str],
+    targets: set[str],
+    *,
+    report_ref: str,
+) -> list[dict[str, Any]]:
+    concepts: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for report_concept in _report_concepts(root, report_ref, set(files)):
+        seen.add(report_concept["text"])
+        concepts.append(report_concept)
+        if len(concepts) >= 8:
+            return concepts
     kinds = (
         ("analysis", _CODE_SUFFIXES),
         ("figure", _IMAGE_SUFFIXES),
@@ -407,7 +475,12 @@ def build_baseline_evidence_capsule(
     report_ref = "report/report.md"
     if report_ref not in files:
         raise BaselineEvidenceCapsuleError("CAPSULE_REPORT_EVIDENCE_ABSENT")
-    concepts = _concepts(root, files, _target_names(ground_truth_entries))
+    concepts = _concepts(
+        root,
+        files,
+        _target_names(ground_truth_entries),
+        report_ref=report_ref,
+    )
     if not concepts:
         raise BaselineEvidenceCapsuleError("CAPSULE_NO_CANDIDATE_SPECIFIC_CONCEPTS")
     successes = _successes(concepts, report_ref)
@@ -504,14 +577,29 @@ def admit_baseline_evidence_capsule(
             raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_SCHEMA_INVALID")
         concept_ids.add(concept["concept_id"])
         concept_text.add(_normalize(concept["text"]))
+        concept_provenance_matched = False
         for ref in concept["evidence_refs"]:
             if not isinstance(ref, str):
                 raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_SCHEMA_INVALID")
             _verify_ref(root, ref)
             path_tokens = set(_TOKEN.findall(Path(ref).stem.casefold()))
             text_tokens = set(_TOKEN.findall(concept["text"].casefold()))
-            if not text_tokens.intersection(path_tokens):
-                raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_PROVENANCE_VIOLATION")
+            if text_tokens.intersection(path_tokens):
+                concept_provenance_matched = True
+                continue
+            if ref == "report/report.md":
+                report_tokens = set(
+                    _TOKEN.findall(
+                        (root / ref).read_text(encoding="utf-8", errors="replace").casefold()
+                    )
+                )
+                meaningful = {
+                    token for token in text_tokens if token not in _GENERIC_STEM_TOKENS
+                }
+                if len(meaningful.intersection(report_tokens)) >= min(2, len(meaningful)):
+                    concept_provenance_matched = True
+        if not concept_provenance_matched:
+            raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_PROVENANCE_VIOLATION")
 
     strengths = capsule["successful_work"]
     for item in strengths:
