@@ -56,6 +56,7 @@ def _sealed_dataset(
                             }
                         ]
                     },
+                    "token_level_metrics_available": False,
                 }
             },
         },
@@ -223,6 +224,58 @@ def test_cross_process_restart_idempotency_and_resolved_view(tmp_path: Path) -> 
         assert listed.json()["attachments"] == [attachment]
         assert resolved_again.json() == resolved_body
         assert source_manifest.read_bytes() == source_before
+
+
+def test_resolved_view_retry_allows_public_false_and_private_false(
+    tmp_path: Path,
+) -> None:
+    server, core = _identities()
+    app = create_app(
+        db_path=tmp_path / "evolution.db",
+        artifact_root=tmp_path / "artifacts",
+        internal_identity=server,
+    )
+    with TestClient(app) as client:
+        dataset, revision = _sealed_dataset(client, core.request_headers())
+        request = _request(dataset["dataset_id"], revision)
+        request["feedback_class"] = "HARD_GT"
+        request["global_feedback"] = {}
+        request["task_local_feedback"] = {
+            "feedback_source": "current_task_gt",
+            "ground_truth_sha256": "a" * 64,
+            "ground_truth_entries": [{"criterion": "private-ground-truth"}],
+            "judge_feedback_included": False,
+        }
+        attachment = client.post(
+            "/v1/internal/training-feedback/attachments",
+            json=request,
+            headers=core.request_headers(),
+        )
+        assert attachment.status_code == 200, attachment.text
+        resolve_request = {
+            "completed_dataset_id": dataset["dataset_id"],
+            "completed_dataset_revision": revision,
+            "task_id": "feedback_task",
+            "task_scope_id": "feedback_task",
+            "attachment_ids": [attachment.json()["attachment_id"]],
+        }
+
+        first = client.post(
+            "/v1/internal/training-feedback/resolve",
+            json=resolve_request,
+            headers=core.request_headers(),
+        )
+        retry = client.post(
+            "/v1/internal/training-feedback/resolve",
+            json=resolve_request,
+            headers=core.request_headers(),
+        )
+
+        assert first.status_code == retry.status_code == 200
+        assert first.json() == retry.json()
+        records_uri = first.json()["dataset_artifact"]["manifest"]["records_uri"]
+        records = Path(records_uri.removeprefix("file://")).read_text()
+        assert "private-ground-truth" not in records
 
 
 def test_attachment_created_in_another_process_survives_service_restart(

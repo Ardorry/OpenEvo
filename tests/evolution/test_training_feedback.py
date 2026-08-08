@@ -12,6 +12,7 @@ from openevo.evolution.training_feedback import (
     TrainingFeedbackAttachmentStore,
     TrainingFeedbackEvolutionService,
     build_training_feedback_dataset_view,
+    validate_training_feedback_dataset_view,
 )
 from openevo.evolution.models import (
     ArtifactResponse,
@@ -191,6 +192,113 @@ def test_hard_feedback_stays_task_local(
         store.task_local_overlay(
             attachment.attachment_id,
             next_task_scope_id="task_2",
+        )
+
+
+def test_hard_feedback_validation_ignores_matching_public_scalar_values(
+    tmp_path: Path,
+) -> None:
+    manifest_path, session = _source_dataset(tmp_path)
+    source_record_path = manifest_path.with_name("records.jsonl")
+    source_record = json.loads(source_record_path.read_text())
+    source_record["payload"]["token_level_metrics_available"] = False
+    source_bytes = json.dumps(source_record, sort_keys=True).encode() + b"\n"
+    source_record_path.write_bytes(source_bytes)
+    source_manifest = json.loads(manifest_path.read_text())
+    source_manifest["records_byte_size"] = len(source_bytes)
+    source_manifest["records_sha256"] = hashlib.sha256(source_bytes).hexdigest()
+    updated_manifest_bytes = _canonical_pretty(source_manifest)
+    manifest_path.write_bytes(updated_manifest_bytes)
+    session = session.model_copy(
+        update={
+            "dataset_manifest_sha256": hashlib.sha256(
+                updated_manifest_bytes
+            ).hexdigest()
+        }
+    )
+    store, authority = _store(tmp_path)
+    attachment = store.attach(
+        authority=authority,
+        session=session,
+        dataset_revision="rev_1",
+        feedback_class=FeedbackClass.HARD_GT,
+        global_feedback={},
+        task_local_feedback={
+            "feedback_source": "current_task_gt",
+            "ground_truth_sha256": "b" * 64,
+            "ground_truth_entries": [{"criterion": "private-ground-truth"}],
+            "judge_feedback_included": False,
+        },
+    )
+    output_dir = tmp_path / "view-common-false"
+    built = build_training_feedback_dataset_view(
+        source_manifest_path=manifest_path,
+        attachments=(attachment,),
+        output_dir=output_dir,
+        task_id="task_1",
+        resolution_id="resolution_common_false",
+    )
+
+    validated = validate_training_feedback_dataset_view(
+        source_manifest_path=manifest_path,
+        attachments=(attachment,),
+        output_dir=output_dir,
+        task_id="task_1",
+        resolution_id="resolution_common_false",
+    )
+
+    assert validated == built
+    assert "private-ground-truth" not in (output_dir / "records.jsonl").read_text()
+
+
+def test_hard_feedback_validation_rejects_self_attested_task_local_injection(
+    tmp_path: Path,
+) -> None:
+    manifest_path, session = _source_dataset(tmp_path)
+    store, authority = _store(tmp_path)
+    attachment = store.attach(
+        authority=authority,
+        session=session,
+        dataset_revision="rev_1",
+        feedback_class=FeedbackClass.HARD_GT,
+        global_feedback={},
+        task_local_feedback={"ground_truth_entries": ["private-ground-truth"]},
+    )
+    output_dir = tmp_path / "view-tampered"
+    build_training_feedback_dataset_view(
+        source_manifest_path=manifest_path,
+        attachments=(attachment,),
+        output_dir=output_dir,
+        task_id="task_1",
+        resolution_id="resolution_tampered",
+    )
+    records_path = output_dir / "records.jsonl"
+    record = json.loads(records_path.read_text())
+    record["payload"]["raw_gt"] = "private-ground-truth"
+    tampered_bytes = json.dumps(
+        record,
+        ensure_ascii=True,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode() + b"\n"
+    records_path.write_bytes(tampered_bytes)
+    manifest_out = output_dir / "manifest.json"
+    manifest = json.loads(manifest_out.read_text())
+    manifest["records_byte_size"] = len(tampered_bytes)
+    manifest["records_sha256"] = hashlib.sha256(tampered_bytes).hexdigest()
+    manifest_out.write_bytes(_canonical_pretty(manifest))
+
+    with pytest.raises(
+        ValueError,
+        match="published training feedback view authority is inconsistent",
+    ):
+        validate_training_feedback_dataset_view(
+            source_manifest_path=manifest_path,
+            attachments=(attachment,),
+            output_dir=output_dir,
+            task_id="task_1",
+            resolution_id="resolution_tampered",
         )
 
 

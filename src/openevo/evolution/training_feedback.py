@@ -1216,24 +1216,12 @@ def build_training_feedback_dataset_view(
         ):
             raise ValueError("training feedback attachment does not bind the source dataset")
 
-    matching = [record for record in records if record.get("session_id") == session_id]
-    if len(matching) != 1 or matching[0].get("task_id") != task_id:
-        raise ValueError("source dataset does not contain exactly one bound session")
-    record = matching[0]
-    payload = record.setdefault("payload", {})
-    if not isinstance(payload, dict):
-        raise ValueError("source dataset payload is invalid")
-    evolution_feedback = payload.setdefault("evolution_feedback", {})
-    if not isinstance(evolution_feedback, dict):
-        raise ValueError("source evolution feedback is invalid")
-    evolution_feedback["training_attachments"] = [
-        {
-            "feedback_id": attachment.attachment_id,
-            "feedback_class": attachment.feedback_class.value,
-            **_json_copy(attachment.global_feedback),
-        }
-        for attachment in attachments
-    ]
+    records = _records_with_global_training_feedback(
+        records=records,
+        attachments=attachments,
+        session_id=session_id,
+        task_id=task_id,
+    )
 
     output_dir = Path(os.path.abspath(output_dir))
     output_dir.mkdir(parents=True, exist_ok=False, mode=0o700)
@@ -1276,6 +1264,41 @@ def build_training_feedback_dataset_view(
     )
 
 
+def _records_with_global_training_feedback(
+    *,
+    records: list[Any],
+    attachments: tuple[TrainingFeedbackAttachment, ...],
+    session_id: str,
+    task_id: str,
+) -> list[dict[str, Any]]:
+    """Deterministically project only global feedback into one session record."""
+
+    copied = _json_copy(records)
+    if not isinstance(copied, list) or any(
+        not isinstance(record, dict) for record in copied
+    ):
+        raise ValueError("source dataset records are invalid")
+    matching = [record for record in copied if record.get("session_id") == session_id]
+    if len(matching) != 1 or matching[0].get("task_id") != task_id:
+        raise ValueError("source dataset does not contain exactly one bound session")
+    record = matching[0]
+    payload = record.setdefault("payload", {})
+    if not isinstance(payload, dict):
+        raise ValueError("source dataset payload is invalid")
+    evolution_feedback = payload.setdefault("evolution_feedback", {})
+    if not isinstance(evolution_feedback, dict):
+        raise ValueError("source evolution feedback is invalid")
+    evolution_feedback["training_attachments"] = [
+        {
+            "feedback_id": attachment.attachment_id,
+            "feedback_class": attachment.feedback_class.value,
+            **_json_copy(attachment.global_feedback),
+        }
+        for attachment in attachments
+    ]
+    return copied
+
+
 def validate_training_feedback_dataset_view(
     *,
     source_manifest_path: Path,
@@ -1310,9 +1333,40 @@ def validate_training_feedback_dataset_view(
     )
     source_manifest = json.loads(source_bytes)
     source_evidence = source_manifest.get("source_event_evidence")
+    source_records_name = source_manifest.get("records_path")
+    if (
+        not isinstance(source_records_name, str)
+        or Path(source_records_name).name != source_records_name
+    ):
+        raise ValueError("source dataset records path is unsafe")
+    source_records_path = Path(os.path.abspath(source_manifest_path)).with_name(
+        source_records_name
+    )
+    source_records_bytes = _read_private_regular(
+        source_records_path,
+        max_bytes=_MAX_DATASET_VIEW_BYTES,
+        require_private=False,
+    )
+    try:
+        source_records = [
+            json.loads(line) for line in source_records_bytes.splitlines() if line.strip()
+        ]
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise ValueError("source dataset records are invalid") from exc
+    if not isinstance(source_evidence, dict):
+        raise ValueError("source dataset lacks sealed single-session evidence")
+    source_session_id = _bounded_id(str(source_evidence.get("session_id") or ""))
+    expected_records = _records_with_global_training_feedback(
+        records=source_records,
+        attachments=attachments,
+        session_id=source_session_id,
+        task_id=task_id,
+    )
+    expected_records_bytes = b"".join(
+        _canonical_line(record) for record in expected_records
+    )
     if (
         not isinstance(manifest, dict)
-        or not isinstance(source_evidence, dict)
         or manifest.get("create_identity") != resolution_id
         or manifest.get("derived_from_dataset_id") != source_manifest.get("dataset_id")
         or manifest.get("source_dataset_manifest_sha256")
@@ -1328,18 +1382,11 @@ def validate_training_feedback_dataset_view(
         or manifest.get("records_byte_size") != len(records_bytes)
         or manifest.get("records_sha256") != hashlib.sha256(records_bytes).hexdigest()
         or not records
+        or records_bytes != expected_records_bytes
     ):
         raise ValueError("published training feedback view authority is inconsistent")
-    serialized = json.dumps(records, ensure_ascii=True, allow_nan=False)
     for attachment in attachments:
-        if (
-            attachment.task_id != task_id
-            or attachment.task_local_feedback
-            and any(
-                json.dumps(value, ensure_ascii=True, allow_nan=False) in serialized
-                for value in attachment.task_local_feedback.values()
-            )
-        ):
+        if attachment.task_id != task_id:
             raise ValueError("task-local feedback leaked into the evolution dataset view")
     overlay = [item.task_local_feedback for item in attachments if item.task_local_feedback]
     return EvolutionDatasetViewReceipt(
