@@ -2023,6 +2023,20 @@ class GatewayNodeManager:
 
     async def start(self) -> None:
         await DockerRuntime.recover_ownership_root(self._docker_ownership_root)
+        if self._service_identity is not None:
+            # The managed Candidate readiness probe stores its no-model
+            # evidence below the cleanup-journal parent.  Initialize that
+            # authority first so ``mkdir(parents=True)`` in the probe cannot
+            # publish a default-0755 parent that later makes real session
+            # admission fail closed.
+            cleanup_authority = self._open_cleanup_journal_authority(
+                initialize=True,
+            )
+            if cleanup_authority is None:
+                raise RuntimeError(
+                    "release Gateway cleanup journal authority is unavailable"
+                )
+            cleanup_authority.close()
         self._load_cleanup_retries()
         await self._reconcile_cleanup_retries()
         if self._service_identity is not None:

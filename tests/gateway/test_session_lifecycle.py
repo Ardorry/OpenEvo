@@ -3,12 +3,15 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import stat
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from openevo.gateway import node as node_module
+from openevo.gateway import session_files
 from openevo.gateway.dispatcher import ManagedSession, SessionDispatcher, SessionStage
-from openevo.gateway import node as node_module, session_files
 from openevo.gateway.node import GatewayNodeManager, GatewayReadinessError
 from openevo.gateway.session import SessionRegistry
 from openevo.gateway.session_files import CredentialRedactor, HeldCodexCredentialAuthority
@@ -18,12 +21,12 @@ from openevo.rollout.models import SessionDispatchRequest, SessionStatus
 from openevo.rollout.timer import StageTimer
 from openevo.runtime.base import BaseRuntime
 from openevo.runtime.docker import DockerRuntime
-from openevo.runtime.models import ExecInput, ExecResult, PrepareAction, RuntimeSpec
 from openevo.runtime.managed import (
     MANAGED_RUNTIME_RELEASES,
     MANAGED_SUBSCRIPTION_PREPARE_COMMAND,
     MANAGED_WORKSPACE,
 )
+from openevo.runtime.models import ExecInput, ExecResult, PrepareAction, RuntimeSpec
 from openevo.trajectory.models import EvaluatorSpec, StrategySpec
 from openevo.trajectory.registry import (
     default_builder_registry,
@@ -95,6 +98,58 @@ class RecordingRuntime(BaseRuntime):
     ) -> None:
         del remote_path, local_path
         raise AssertionError("download_dir was not requested")
+
+
+@pytest.mark.asyncio
+async def test_release_start_initializes_private_cleanup_parent_before_readiness(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, object] = {}
+
+    async def recover_ownership_root(_root: Path) -> None:
+        return None
+
+    class Probe:
+        def __init__(self, *, root: Path, **_kwargs: object) -> None:
+            observed["root"] = root
+            observed["parent_mode"] = stat.S_IMODE(root.parent.parent.stat().st_mode)
+
+        async def verify(self) -> object:
+            return object()
+
+    monkeypatch.setattr(
+        DockerRuntime,
+        "recover_ownership_root",
+        recover_ownership_root,
+    )
+    monkeypatch.setattr(node_module, "ManagedCandidateRuntimeProbe", Probe)
+    manager = GatewayNodeManager(
+        node_id="release-cleanup-order",
+        gateway_url="http://gateway.test",
+        max_init_workers=1,
+        max_run_workers=1,
+        max_postrun_workers=1,
+        storage=SessionStore(),
+        session_registry=SessionRegistry(),
+        builders=default_builder_registry(),
+        evaluators=default_evaluator_registry(),
+        session_base_dir=str(tmp_path / "sessions"),
+        credential_authority=object(),
+        service_identity=SimpleNamespace(
+            generation_digest="1" * 64,
+            registry_digest="2" * 64,
+            framework_lock_digest="3" * 64,
+        ),
+    )
+    manager._docker_host_path = object()
+    try:
+        await manager.start()
+        assert observed["parent_mode"] == 0o700
+        assert manager._cleanup_journal_dir.is_dir()
+        assert stat.S_IMODE(manager._cleanup_journal_dir.stat().st_mode) == 0o700
+    finally:
+        await manager.close()
 
 
 def _subscription_dispatch_request(session_id: str) -> SessionDispatchRequest:
