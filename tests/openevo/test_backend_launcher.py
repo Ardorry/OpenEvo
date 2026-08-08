@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import socket
+from pathlib import Path
 
 import pytest
 
@@ -13,7 +13,6 @@ from openevo.backend import launcher
 from openevo.backend.runtime_identity import CoreReleaseIdentity
 from openevo.experiments.models import ExperimentConfig
 from openevo.runtime.managed import MANAGED_RUNTIME_RELEASES
-
 
 _MANAGED_SCIENCE_RUNTIME = {
     "kind": "docker",
@@ -422,6 +421,7 @@ def test_supervised_launcher_builds_release_core_control_app(
         "source_commit": release.source_commit,
         "executable_registry": registry,
         "service_supervisor": service_supervisor,
+        "daemon_release_identity": release.digest,
         "runtime_contract_sha256": launcher.release_runtime_contract_sha256(),
     }
     assert len(create["bearer_token"]) == 64
@@ -431,6 +431,7 @@ def test_supervised_launcher_builds_release_core_control_app(
         "service_root": service_root / "managed-services",
         "framework_lock": tmp_path / "framework-lock.json",
         "verified_registry": registry,
+        "daemon_release_identity": release.digest,
         "run_admission_url": (
             f"http://127.0.0.1:{server['socket'][1]}"
             "/internal/v1/run-admissions/verify"
