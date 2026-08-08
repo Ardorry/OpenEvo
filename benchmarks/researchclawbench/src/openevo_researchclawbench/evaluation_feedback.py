@@ -19,11 +19,19 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any, Protocol
 
+from .baseline_evidence_capsule import (
+    admit_baseline_evidence_capsule,
+    build_baseline_evidence_capsule,
+    build_reflector_capsule_view,
+)
+from .run_manifest import atomic_write_json
 from .training_state_store import canonical_bytes, canonical_sha256
 
 FEEDBACK_CLASS = "sanitized_evaluation_feedback_v1"
 FEEDBACK_SCHEMA = "openevo.researchclawbench.sanitized_evaluation_feedback.v1"
 ADMISSION_SCHEMA = "openevo.researchclawbench.feedback_admission.v1"
+RETENTION_FEEDBACK_CLASS = "candidate_specific_retention_v2"
+RETENTION_FEEDBACK_SCHEMA = "openevo.researchclawbench.candidate_specific_retention.v2"
 
 ALLOWED_DIMENSIONS = frozenset(
     {
@@ -607,16 +615,80 @@ def project_sanitized_evaluation_feedback(
         public_corpus=public_corpus,
         ground_truth_entries=ground_truth_entries,
     )
+    capsule = build_baseline_evidence_capsule(
+        task_id=task_id,
+        candidate=candidate,
+        sanitized_feedback=feedback,
+        ground_truth_entries=ground_truth_entries,
+    ).to_dict()
+    capsule_admission = admit_baseline_evidence_capsule(
+        capsule,
+        candidate_root=root,
+        ground_truth_entries=ground_truth_entries,
+    )
+    reflector_sanitized_feedback = {
+        "feedback_class": feedback["feedback_class"],
+        "evaluation_summary": feedback["evaluation_summary"],
+        "preserve_before_improve": feedback["preserve_before_improve"],
+        "diagnoses": [
+            {
+                key: diagnosis[key]
+                for key in (
+                    "dimension",
+                    "severity",
+                    "candidate_observation",
+                    "improvement_direction",
+                    "evidence_refs",
+                )
+            }
+            for diagnosis in feedback["diagnoses"][:1]
+        ],
+    }
+    reflector_capsule = build_reflector_capsule_view(capsule)
+    reflector_feedback = {
+        "schema_version": RETENTION_FEEDBACK_SCHEMA,
+        "status": "available_for_evolution",
+        "feedback_class": RETENTION_FEEDBACK_CLASS,
+        "task_id": task_id,
+        "sanitized_evaluation_feedback": reflector_sanitized_feedback,
+        "baseline_evidence_capsule": reflector_capsule,
+        "fresh_workspace_guidance": [
+            "The next Candidate will run in a fresh workspace without baseline files.",
+            "Distill a useful baseline strategy, observed weakness, and executable next-run action.",
+            "Do not reconstruct hidden evaluation targets.",
+        ],
+        "policy": {
+            "candidate_grounded": True,
+            "public_or_candidate_provenance_required": True,
+            "answer_reconstruction_allowed": False,
+        },
+    }
     return {
         "sanitized_feedback": feedback,
         "sanitized_feedback_sha256": canonical_sha256(feedback),
         "admission": admission,
+        "baseline_evidence_capsule": capsule,
+        "baseline_evidence_capsule_sha256": canonical_sha256(capsule),
+        "baseline_evidence_capsule_admission": capsule_admission,
+        "reflector_sanitized_feedback": reflector_sanitized_feedback,
+        "reflector_sanitized_feedback_sha256": canonical_sha256(
+            reflector_sanitized_feedback
+        ),
+        "reflector_baseline_evidence_capsule": reflector_capsule,
+        "reflector_baseline_evidence_capsule_sha256": canonical_sha256(
+            reflector_capsule
+        ),
+        "reflector_feedback": reflector_feedback,
+        "reflector_feedback_sha256": canonical_sha256(reflector_feedback),
         "quality_contract": {
             "generic_only_advice": False,
             "candidate_specific_references_present": True,
             "candidate_evidence_refs_present": True,
             "preserve_strength_guidance_present": True,
             "targeted_improvement_guidance_present": True,
+            "baseline_evidence_capsule_present": True,
+            "fresh_workspace_reconstruction_required": True,
+            "weakness_to_action_mapping_present": True,
             "gt_leakage": False,
         },
     }
@@ -700,16 +772,27 @@ class EvaluationFeedbackProjectionPort:
             public_task_info=task_info,
             ground_truth_entries=entries,
         )
+        capsule = projection["baseline_evidence_capsule"]
+        capsule_path = (
+            self.root
+            / "capsules"
+            / str(task_id)
+            / f"{projection['baseline_evidence_capsule_sha256']}.baseline_evidence_capsule.json"
+        )
+        # Candidate-derived only; this is intentionally separate from private
+        # evaluator output and contains neither raw GT nor Judge reasoning.
+        atomic_write_json(capsule_path, capsule)
         body = {
-            "schema_version": "openevo.researchclawbench.feedback_projection_receipt.v1",
+            "schema_version": "openevo.researchclawbench.feedback_projection_receipt.v2",
             "feedback_projection_id": (
-                "feedback-projection-" + projection["sanitized_feedback_sha256"][:24]
+                "feedback-projection-" + projection["reflector_feedback_sha256"][:24]
             ),
             "task_id": task_id,
             "source_evaluation_receipt_id": evaluation.get("evaluation_receipt_id"),
             "source_candidate_session_id": candidate.get("session_id"),
             "source_candidate_core_task_id": candidate.get("core_task_id"),
             "ground_truth_sha256": gt.get("ground_truth_sha256"),
+            "baseline_evidence_capsule_path": os.fspath(capsule_path),
             **projection,
             "feedback_projector_model_calls": 0,
             "openevo_state_mutations": 0,
@@ -748,6 +831,8 @@ __all__ = [
     "ALLOWED_DIMENSIONS",
     "FEEDBACK_CLASS",
     "FEEDBACK_SCHEMA",
+    "RETENTION_FEEDBACK_CLASS",
+    "RETENTION_FEEDBACK_SCHEMA",
     "EvaluationFeedbackProjectionPort",
     "FeedbackAdmissionError",
     "FeedbackProjectionError",

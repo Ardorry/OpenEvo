@@ -55,7 +55,12 @@ from .community_evaluator import (
     build_production_community_evaluator,
 )
 from .config import ARTIFACT_TYPES, FROZEN_TASKS, ExperimentConfig
-from .evaluation_feedback import EvaluationFeedbackProjectionPort
+from .evaluation_feedback import (
+    RETENTION_FEEDBACK_CLASS,
+    RETENTION_FEEDBACK_SCHEMA,
+    EvaluationFeedbackProjectionPort,
+)
+from .gt_supervision import load_current_task_gt_supervision
 from .managed_core_control import ManagedCoreControlAuthority
 from .production_training_operations import (
     ProductionOperationPort,
@@ -65,6 +70,7 @@ from .production_training_operations import (
 from .prompt_composer import compose_native_instruction
 from .reflector_runner import NATIVE_METHODS
 from .run_manifest import atomic_write_json
+from .task_specific_artifact_quality import assess_task_specific_artifact_quality
 from .training_state_store import canonical_bytes, canonical_sha256
 from .training_supervisor import CandidateAuthorityUnavailable
 from .workspace import (
@@ -3143,6 +3149,103 @@ class CoreFeedbackPort(ProductionOperationPort):
                 "judge_reasoning_projected": False,
                 "target_image_projected": False,
             }
+        if feedback_source == "candidate_specific_retention_v2":
+            gt = request.get("gt_supervision")
+            projection = request.get("feedback_projection")
+            reflector_feedback = (
+                projection.get("reflector_feedback") if isinstance(projection, dict) else None
+            )
+            sanitized = (
+                projection.get("sanitized_feedback") if isinstance(projection, dict) else None
+            )
+            reflector_sanitized = (
+                projection.get("reflector_sanitized_feedback")
+                if isinstance(projection, dict)
+                else None
+            )
+            capsule = (
+                projection.get("baseline_evidence_capsule")
+                if isinstance(projection, dict)
+                else None
+            )
+            reflector_capsule = (
+                projection.get("reflector_baseline_evidence_capsule")
+                if isinstance(projection, dict)
+                else None
+            )
+            admission = projection.get("admission") if isinstance(projection, dict) else None
+            capsule_admission = (
+                projection.get("baseline_evidence_capsule_admission")
+                if isinstance(projection, dict)
+                else None
+            )
+            if (
+                not isinstance(gt, dict)
+                or gt.get("task_id") != request.get("task_id")
+                or gt.get("feedback_class") != "HARD_GT"
+                or gt.get("global_feedback") != {}
+                or not isinstance(gt.get("task_local_feedback"), dict)
+                or gt.get("judge_feedback_included") is not False
+                or not isinstance(gt.get("ground_truth_sha256"), str)
+                or not _SHA256.fullmatch(gt["ground_truth_sha256"])
+                or not isinstance(projection, dict)
+                or projection.get("task_id") != request.get("task_id")
+                or projection.get("ground_truth_sha256") != gt["ground_truth_sha256"]
+                or projection.get("reflector_feedback_sha256") != canonical_sha256(reflector_feedback)
+                or projection.get("sanitized_feedback_sha256") != canonical_sha256(sanitized)
+                or projection.get("baseline_evidence_capsule_sha256") != canonical_sha256(capsule)
+                or projection.get("reflector_sanitized_feedback_sha256")
+                != canonical_sha256(reflector_sanitized)
+                or projection.get("reflector_baseline_evidence_capsule_sha256")
+                != canonical_sha256(reflector_capsule)
+                or not isinstance(admission, dict)
+                or admission.get("status") != "ADMITTED"
+                or not isinstance(capsule_admission, dict)
+                or capsule_admission.get("status") != "ADMITTED"
+                or capsule_admission.get("capsule_sha256")
+                != projection.get("baseline_evidence_capsule_sha256")
+                or projection.get("raw_gt_projected") is not False
+                or projection.get("judge_reasoning_projected") is not False
+                or projection.get("target_image_projected") is not False
+                or not isinstance(sanitized, dict)
+                or sanitized.get("feedback_class") != "sanitized_evaluation_feedback_v1"
+                or not isinstance(reflector_sanitized, dict)
+                or reflector_sanitized.get("feedback_class")
+                != "sanitized_evaluation_feedback_v1"
+                or not isinstance(capsule, dict)
+                or capsule.get("schema_version")
+                != "openevo.researchclawbench.baseline_evidence_capsule.v1"
+                or not isinstance(reflector_capsule, dict)
+                or reflector_capsule.get("schema_version")
+                != "openevo.researchclawbench.baseline_evidence_capsule_reflector_view.v1"
+                or reflector_capsule.get("capsule_sha256")
+                != projection.get("baseline_evidence_capsule_sha256")
+                or not isinstance(reflector_feedback, dict)
+                or reflector_feedback.get("schema_version") != RETENTION_FEEDBACK_SCHEMA
+                or reflector_feedback.get("feedback_class") != RETENTION_FEEDBACK_CLASS
+                or reflector_feedback.get("task_id") != request.get("task_id")
+                or reflector_feedback.get("sanitized_evaluation_feedback")
+                != reflector_sanitized
+                or reflector_feedback.get("baseline_evidence_capsule") != reflector_capsule
+            ):
+                raise CoreControlError("candidate-specific retention feedback authority is invalid")
+            return {
+                "feedback_class": "HARD_GT",
+                "feedback_source": feedback_source,
+                "judge_calls": 0,
+                "ground_truth_sha256": gt["ground_truth_sha256"],
+                "sanitized_feedback_sha256": projection["sanitized_feedback_sha256"],
+                "reflector_feedback_sha256": projection["reflector_feedback_sha256"],
+                "baseline_evidence_capsule_sha256": projection[
+                    "baseline_evidence_capsule_sha256"
+                ],
+                "sanitized_feedback_included": True,
+                "baseline_evidence_capsule_included": True,
+                "judge_feedback_included": False,
+                "raw_gt_projected": False,
+                "judge_reasoning_projected": False,
+                "target_image_projected": False,
+            }
         evaluation = request.get("evaluation")
         if not isinstance(evaluation, dict):
             raise CoreControlError("community evaluator feedback authority is absent")
@@ -3196,6 +3299,13 @@ class CoreFeedbackPort(ProductionOperationPort):
             gt = request["gt_supervision"]
             projection = request["feedback_projection"]
             global_feedback = projection["sanitized_feedback"]
+            task_local_feedback = gt["task_local_feedback"]
+            feedback_class = metadata["feedback_class"]
+        elif feedback_source == "candidate_specific_retention_v2":
+            metadata = self._feedback_receipt_fields(request)
+            gt = request["gt_supervision"]
+            projection = request["feedback_projection"]
+            global_feedback = projection["reflector_feedback"]
             task_local_feedback = gt["task_local_feedback"]
             feedback_class = metadata["feedback_class"]
         else:
@@ -3778,6 +3888,152 @@ class CoreSuccessorPort(ProductionOperationPort):
                 "project_head_id": manifest["successor_project_head_id"],
                 "manifest_sha256": manifest["successor_manifest_sha256"],
             },
+        }
+
+
+class CoreArtifactQualityPort(ProductionOperationPort):
+    """Read registered successor artifacts through Core's bounded audit bridge.
+
+    The port is deliberately post-registration and pre-injection.  It cannot
+    create, promote, mutate, or materialize artifacts; Core checks successor
+    ownership and Evolution revalidates every payload through its scanner.
+    Returned receipts retain only hashes and deterministic quality metrics,
+    never artifact text or hidden GT.
+    """
+
+    def __init__(
+        self,
+        config: ExperimentConfig,
+        *,
+        root: Path,
+        core_authority: ManagedCoreControlAuthority,
+    ) -> None:
+        self.config = config
+        self.root = root
+        self.core_authority = core_authority
+
+    def recover(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> dict[str, Any] | None:
+        # OperationReceiptStore is the durable authority for this pure read.
+        # There is no remote mutation to recover or replay.
+        return None
+
+    def execute(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+        task_id = request.get("task_id")
+        evolution = request.get("evolution")
+        capsule = request.get("baseline_evidence_capsule")
+        if (
+            task_id not in FROZEN_TASKS
+            or not isinstance(evolution, dict)
+            or not isinstance(capsule, dict)
+            or not isinstance(evolution.get("successor_transition_id"), str)
+        ):
+            raise CoreControlError("ARTIFACT_QUALITY_REQUEST_INVALID")
+        jobs = evolution.get("jobs")
+        if not isinstance(jobs, list) or len(jobs) != len(ARTIFACT_TYPES):
+            raise CoreControlError("ARTIFACT_QUALITY_NATIVE_TRIPLE_INVALID")
+        by_type = {
+            item.get("artifact_type"): item
+            for item in jobs
+            if isinstance(item, dict)
+            and isinstance(item.get("artifact_type"), str)
+            and isinstance(item.get("successor_registry_id"), str)
+        }
+        if set(by_type) != set(ARTIFACT_TYPES):
+            raise CoreControlError("ARTIFACT_QUALITY_NATIVE_TRIPLE_INVALID")
+        transition_id = evolution["successor_transition_id"]
+        artifact_texts: dict[str, str] = {}
+        snapshot_authority: dict[str, dict[str, Any]] = {}
+        client = CoreControlV2Client(self.core_authority)
+        try:
+            for artifact_type in ARTIFACT_TYPES:
+                job = by_type[artifact_type]
+                snapshot = client.json(
+                    "GET",
+                    "/v2/internal/training-successors/"
+                    f"{quote(transition_id, safe='')}/artifacts/"
+                    f"{quote(job['successor_registry_id'], safe='')}/text-snapshot",
+                )
+                documents = snapshot.get("documents")
+                if (
+                    snapshot.get("schema_version")
+                    != "openevo.internal.artifact_text_snapshot.v1"
+                    or snapshot.get("artifact_id") != job["successor_registry_id"]
+                    or snapshot.get("artifact_type") != artifact_type
+                    or not isinstance(snapshot.get("payload_manifest_sha256"), str)
+                    or not isinstance(documents, list)
+                    or len(documents) != 1
+                    or not isinstance(documents[0], dict)
+                    or not isinstance(documents[0].get("text"), str)
+                    or not documents[0]["text"].strip()
+                    or not isinstance(documents[0].get("content_sha256"), str)
+                    or not isinstance(documents[0].get("utf8_byte_size"), int)
+                    or documents[0]["utf8_byte_size"] != len(
+                        documents[0]["text"].encode("utf-8")
+                    )
+                    or hashlib.sha256(
+                        documents[0]["text"].encode("utf-8")
+                    ).hexdigest()
+                    != documents[0]["content_sha256"]
+                    or snapshot.get("total_utf8_bytes")
+                    != documents[0]["utf8_byte_size"]
+                ):
+                    raise CoreControlError("ARTIFACT_QUALITY_SNAPSHOT_INVALID")
+                if job.get("successor_sha256") not in {
+                    snapshot["payload_manifest_sha256"],
+                    None,
+                }:
+                    raise CoreControlError("ARTIFACT_QUALITY_SNAPSHOT_AUTHORITY_DRIFT")
+                artifact_texts[artifact_type] = documents[0]["text"]
+                snapshot_authority[artifact_type] = {
+                    "artifact_id": snapshot["artifact_id"],
+                    "payload_manifest_sha256": snapshot["payload_manifest_sha256"],
+                    "document_sha256": documents[0]["content_sha256"],
+                    "document_utf8_byte_size": documents[0]["utf8_byte_size"],
+                }
+        finally:
+            client.close()
+        # This private adapter read is intentionally not placed in a side
+        # effect request or receipt.  It is solely an exact-literal leakage
+        # audit of the three already-native registered texts.
+        gt = load_current_task_gt_supervision(self.config, task_id=task_id)
+        task_local = gt.get("task_local_feedback")
+        entries = (
+            task_local.get("ground_truth_entries")
+            if isinstance(task_local, dict)
+            else None
+        )
+        if not isinstance(entries, list):
+            raise CoreControlError("ARTIFACT_QUALITY_GT_AUTHORITY_INVALID")
+        report = assess_task_specific_artifact_quality(
+            capsule=capsule,
+            artifact_texts=artifact_texts,
+            ground_truth_entries=entries,
+        )
+        report_path = (
+            self.root
+            / "artifact_quality"
+            / str(task_id)
+            / f"{hashlib.sha256(idempotency_key.encode()).hexdigest()}.artifact_quality_report.json"
+        )
+        # The report is safe to archive: it deliberately contains only
+        # candidate-derived concept metrics, native artifact hashes, and
+        # leakage/provenance verdicts, never the artifact or GT text itself.
+        atomic_write_json(report_path, report)
+        return {
+            # ``status`` belongs to ProductionTrainingOperations' durable
+            # operation envelope.  Keep the gate verdict distinct so a PASS
+            # cannot overwrite the operation's SUCCEEDED/RECOVERED state.
+            "quality_gate_status": report["status"],
+            "quality_report": report,
+            "quality_report_sha256": report["content_sha256"],
+            "quality_report_path": os.fspath(report_path),
+            "successor_transition_id": transition_id,
+            "artifact_snapshot_authority": snapshot_authority,
+            "provider_calls": 0,
+            "artifact_text_persisted": False,
+            "raw_gt_persisted": False,
         }
 
 
@@ -4878,6 +5134,11 @@ def build_production_ports(
             evaluator=evaluator,
         ),
         evolution=CoreSuccessorPort(config, core_authority=core_authority),
+        artifact_quality=CoreArtifactQualityPort(
+            config,
+            root=run_root,
+            core_authority=core_authority,
+        ),
         composite=composite,
         per_item_evolved=PerItemEvolvedWorkspacePort(
             composite,

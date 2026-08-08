@@ -224,6 +224,12 @@ class EvolutionClientProtocol(Protocol):
         artifact_id: str,
     ) -> dict[str, Any]: ...
 
+    def get_internal_successor_artifact_text_snapshot(
+        self,
+        successor_transition_id: str,
+        artifact_id: str,
+    ) -> dict[str, Any]: ...
+
     def discard_successor_transition_outputs(
         self,
         successor_transition_id: str,
@@ -919,6 +925,23 @@ class EvolutionHttpClient:
         result = response.json()
         if not isinstance(result, dict):
             raise ValueError("successor artifact authority was not a JSON object")
+        return result
+
+    def get_internal_successor_artifact_text_snapshot(
+        self,
+        successor_transition_id: str,
+        artifact_id: str,
+    ) -> dict[str, Any]:
+        encoded_transition_id = quote(successor_transition_id, safe="")
+        encoded_artifact_id = quote(artifact_id, safe="")
+        response = self._client.get(
+            f"{self.base_url}/v1/internal/successor-transitions/"
+            f"{encoded_transition_id}/artifacts/{encoded_artifact_id}/text-snapshot"
+        )
+        self._raise_for_status(response)
+        result = response.json()
+        if not isinstance(result, dict):
+            raise ValueError("successor artifact text snapshot was not a JSON object")
         return result
 
     def discard_successor_transition_outputs(

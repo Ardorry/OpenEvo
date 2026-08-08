@@ -21,6 +21,7 @@ from openevo.evolution.models import (
     ArtifactPromotionUpdateRequest,
     ArtifactRegisterRequest,
     ArtifactResponse,
+    ArtifactTextSnapshotResponse,
     ContextResolveRequest,
     ContextResolveResponse,
     DatasetCreateHttpRequest,
@@ -43,9 +44,9 @@ from openevo.evolution.models import (
     ReviewRequestCreateRequest,
     ReviewRequestResponse,
     ReviewStatus,
+    SucceededPlanBoundJobAuthorityResponse,
     SuccessorArtifactAuthorityResponse,
     SuccessorTransitionJobInventoryResponse,
-    SucceededPlanBoundJobAuthorityResponse,
     WorkerClaimRequest,
     WorkerClaimResponse,
     WorkerCompleteRequest,
@@ -942,6 +943,31 @@ def create_app(
             raise HTTPException(
                 status_code=404,
                 detail="successor transition artifact authority not found",
+            ) from exc
+
+    @app.get(
+        "/v1/internal/successor-transitions/{successor_transition_id}"
+        "/artifacts/{artifact_id}/text-snapshot",
+        response_model=ArtifactTextSnapshotResponse,
+        include_in_schema=False,
+    )
+    def get_internal_successor_artifact_text_snapshot(
+        successor_transition_id: str,
+        artifact_id: str,
+        request: Request,
+    ) -> ArtifactTextSnapshotResponse:
+        """Bounded verified text transport for one Core-authorized audit."""
+
+        require_core_control_caller(request)
+        try:
+            return store.get_internal_successor_artifact_text_snapshot(
+                successor_transition_id,
+                artifact_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail="successor transition artifact text snapshot not found",
             ) from exc
 
     @app.post(

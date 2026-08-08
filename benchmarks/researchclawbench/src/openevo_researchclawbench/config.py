@@ -171,15 +171,17 @@ class ExperimentConfig:
         if value is None:
             return None
         expected = {
-            "contract_version": "openevo.researchclawbench.per_item_reset.v1",
+            "contract_version": "openevo.researchclawbench.per_item_reset.v2",
             "only_per_item_reset": True,
             "dataset": "community",
             "passes": [
                 "baseline",
                 "judge_baseline",
-                "project_sanitized_evaluation_feedback",
-                "admit_sanitized_evaluation_feedback",
-                "evolve_once_sanitized_evaluation_feedback",
+                "project_candidate_specific_retention_feedback",
+                "admit_candidate_specific_retention_feedback",
+                "build_baseline_evidence_capsule",
+                "evolve_once_candidate_specific_retention_feedback",
+                "verify_task_specific_native_artifacts",
                 "evolved",
                 "judge_evolved",
                 "paired_result",

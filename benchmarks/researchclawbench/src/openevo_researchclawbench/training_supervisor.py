@@ -68,6 +68,10 @@ class TrainingOperations(Protocol):
         self, request: dict[str, Any], idempotency_key: str
     ) -> dict[str, Any]: ...
 
+    def assess_artifact_quality(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> dict[str, Any]: ...
+
     def admit_composite(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]: ...
 
     def prepare_evolved_workspace(
@@ -163,7 +167,7 @@ class CommunityTrainingSupervisor:
                 "per_item_reset" if self.per_item_reset_enabled else "standard_training"
             ),
             "supervision_mode": (
-                "sanitized_evaluation_feedback_v1"
+                "candidate_specific_retention_v2"
                 if self.per_item_reset_enabled
                 else "current_task_gt"
                 if self.current_task_gt_supervision_enabled
@@ -199,6 +203,8 @@ class CommunityTrainingSupervisor:
             "paired_result": None,
             "item_reset_receipt": None,
             "active_feedback_projection_receipt": None,
+            "active_baseline_capsule": None,
+            "active_artifact_quality_receipt": None,
         }
 
     def initialize(self) -> dict[str, Any]:
@@ -2431,14 +2437,33 @@ class CommunityTrainingSupervisor:
                 or quality.get("candidate_specific_references_present") is not True
                 or quality.get("preserve_strength_guidance_present") is not True
                 or quality.get("targeted_improvement_guidance_present") is not True
+                or quality.get("baseline_evidence_capsule_present") is not True
+                or quality.get("fresh_workspace_reconstruction_required") is not True
+                or quality.get("weakness_to_action_mapping_present") is not True
                 or quality.get("gt_leakage") is not False
+                or not isinstance(projection.get("baseline_evidence_capsule"), dict)
+                or not isinstance(projection.get("baseline_evidence_capsule_admission"), dict)
+                or projection["baseline_evidence_capsule_admission"].get("status")
+                != "ADMITTED"
+                or projection.get("baseline_evidence_capsule_admission", {}).get(
+                    "projector_model_calls"
+                )
+                != 0
+                or not isinstance(projection.get("reflector_feedback"), dict)
+                or projection["reflector_feedback"].get("feedback_class")
+                != "candidate_specific_retention_v2"
             ):
-                raise ValueError("sanitized evaluation feedback admission is incomplete")
+                raise ValueError("candidate-specific retention feedback admission is incomplete")
             return self._transition(
                 stage,
                 TrainingStage.FEEDBACK_ADMITTED,
-                "sanitized-evaluation-feedback-admitted",
-                updates={"active_feedback_projection_receipt": projection},
+                "candidate-specific-retention-feedback-admitted",
+                updates={
+                    "active_feedback_projection_receipt": projection,
+                    "active_baseline_capsule": projection[
+                        "baseline_evidence_capsule"
+                    ],
+                },
                 receipt=projection,
             )
         if stage is TrainingStage.FEEDBACK_ADMITTED:
@@ -2467,10 +2492,10 @@ class CommunityTrainingSupervisor:
                     ),
                     "candidate": state["active_candidate_receipt"],
                     "validation": state["active_validation_receipt"],
-                    "feedback_source": "sanitized_evaluation_feedback_v1",
+                    "feedback_source": "candidate_specific_retention_v2",
                     "gt_supervision": gt,
                     "feedback_projection": projection,
-                    "authority": "evaluator_sanitized_projection_only",
+                    "authority": "evaluator_sanitized_projection_and_candidate_capsule_only",
                     "judge_feedback": None,
                 },
                 execute=self.operations.attach_feedback,
@@ -2479,22 +2504,27 @@ class CommunityTrainingSupervisor:
                 not attachment.get("attachment_id")
                 or not attachment.get("resolved_view_sha256")
                 or attachment.get("feedback_class") != "HARD_GT"
-                or attachment.get("feedback_source") != "sanitized_evaluation_feedback_v1"
+                or attachment.get("feedback_source") != "candidate_specific_retention_v2"
                 or attachment.get("judge_calls") != 0
                 or attachment.get("ground_truth_sha256") != gt["ground_truth_sha256"]
                 or attachment.get("sanitized_feedback_sha256")
                 != projection.get("sanitized_feedback_sha256")
                 or attachment.get("sanitized_feedback_included") is not True
+                or attachment.get("baseline_evidence_capsule_included") is not True
+                or attachment.get("baseline_evidence_capsule_sha256")
+                != projection.get("baseline_evidence_capsule_sha256")
+                or attachment.get("reflector_feedback_sha256")
+                != projection.get("reflector_feedback_sha256")
                 or attachment.get("judge_feedback_included") is not False
                 or attachment.get("raw_gt_projected") is not False
                 or attachment.get("judge_reasoning_projected") is not False
                 or attachment.get("target_image_projected") is not False
             ):
-                raise ValueError("sanitized evaluation feedback attachment is incomplete")
+                raise ValueError("candidate-specific retention feedback attachment is incomplete")
             return self._transition(
                 stage,
                 TrainingStage.ATTACHMENT_SEALED,
-                "sanitized-evaluation-feedback-attachment-sealed",
+                "candidate-specific-retention-feedback-attachment-sealed",
                 updates={
                     "attachment_ids": [
                         *state["attachment_ids"],
@@ -2503,7 +2533,7 @@ class CommunityTrainingSupervisor:
                     "active_attachment_receipt": attachment,
                     "current_task_local_overlay_id": None,
                     "current_task_local_overlay_scope_id": None,
-                    "training_signal_status": ("ATTACHED_FROM_SANITIZED_EVALUATION_FEEDBACK"),
+                    "training_signal_status": ("ATTACHED_FROM_CANDIDATE_SPECIFIC_RETENTION"),
                     "judge_feedback_included": False,
                 },
                 receipt={
@@ -2525,8 +2555,12 @@ class CommunityTrainingSupervisor:
                 or state.get("active_attachment_receipt", {}).get("judge_feedback_included")
                 is not False
                 or state.get("active_attachment_receipt", {}).get("feedback_source")
-                != "sanitized_evaluation_feedback_v1"
+                != "candidate_specific_retention_v2"
                 or state.get("active_attachment_receipt", {}).get("sanitized_feedback_included")
+                is not True
+                or state.get("active_attachment_receipt", {}).get(
+                    "baseline_evidence_capsule_included"
+                )
                 is not True
                 or state.get("active_attachment_receipt", {}).get("raw_gt_projected") is not False
                 or state.get("active_attachment_receipt", {}).get("judge_reasoning_projected")
@@ -2642,7 +2676,52 @@ class CommunityTrainingSupervisor:
                 },
                 receipt=evolved,
             )
-        if stage is TrainingStage.EVOLUTION_COMPLETED:
+        if stage is TrainingStage.EVOLUTION_COMPLETED and self.per_item_reset_enabled:
+            capsule = state.get("active_baseline_capsule")
+            quality = self._effect(
+                kind="artifact-quality",
+                request={
+                    "task_id": task,
+                    "attempt_index": attempt,
+                    "evolution": state["active_evolution_receipt"],
+                    "baseline_evidence_capsule": capsule,
+                    "phase": "post-native-registration-pre-evolved-injection",
+                },
+                execute=self.operations.assess_artifact_quality,
+            )
+            report = quality.get("quality_report")
+            if (
+                quality.get("status") not in {"PASS", "SUCCEEDED", "RECOVERED"}
+                or quality.get("quality_gate_status", quality.get("status")) != "PASS"
+                or quality.get("provider_calls") != 0
+                or quality.get("artifact_text_persisted") is not False
+                or quality.get("raw_gt_persisted") is not False
+                or not isinstance(report, dict)
+                or report.get("status") != "PASS"
+                or report.get("gt_leakage_findings") != []
+                or report.get("provenance_violations") != []
+                or quality.get("quality_report_sha256") != report.get("content_sha256")
+            ):
+                raise ValueError("task-specific native artifact quality gate failed")
+            return self._transition(
+                stage,
+                TrainingStage.ARTIFACT_QUALITY_ADMITTED,
+                "task-specific-native-artifact-quality-admitted",
+                updates={"active_artifact_quality_receipt": quality},
+                receipt=quality,
+            )
+        if stage in {
+            TrainingStage.EVOLUTION_COMPLETED,
+            TrainingStage.ARTIFACT_QUALITY_ADMITTED,
+        }:
+            if self.per_item_reset_enabled:
+                quality = state.get("active_artifact_quality_receipt")
+                if (
+                    not isinstance(quality, dict)
+                    or quality.get("status") not in {"PASS", "SUCCEEDED", "RECOVERED"}
+                    or quality.get("quality_gate_status", quality.get("status")) != "PASS"
+                ):
+                    raise ValueError("evolved artifact injection lacks quality admission")
             admitted = self._effect(
                 kind="composite-admission",
                 request={
@@ -2972,6 +3051,7 @@ class CommunityTrainingSupervisor:
                 "active_workspace": None,
                 "active_gt_supervision": None,
                 "active_evaluation_feedback": None,
+                "active_baseline_capsule": None,
                 "cross_project_fork_to_next_task": False,
             }
             return self._transition(
@@ -2992,8 +3072,10 @@ class CommunityTrainingSupervisor:
                     "active_validation_receipt": None,
                     "active_evaluation_receipt": None,
                     "active_feedback_projection_receipt": None,
+                    "active_baseline_capsule": None,
                     "active_attachment_receipt": None,
                     "active_evolution_receipt": None,
+                    "active_artifact_quality_receipt": None,
                     "active_admission_receipt": None,
                     "active_evolved_workspace_receipt": None,
                     "item_reset_receipt": reset,
@@ -3106,6 +3188,7 @@ def supervisor_capability_audit(package_root: str | Path) -> dict[str, Any]:
         "create_feedback_attachment",
         "prepare_successor",
         "collect_artifact_jobs",
+        "assess_evolution_artifact_quality",
         "construct_composite",
         "sanitize_cross_task",
         "freeze_final_artifact",
@@ -3128,6 +3211,7 @@ def supervisor_capability_audit(package_root: str | Path) -> dict[str, Any]:
             and "DurableCommunityEvaluatorPort" in port_source
             and "CoreFeedbackPort" in port_source
             and "CoreSuccessorPort" in port_source
+            and "CoreArtifactQualityPort" in port_source
             and "historical-restores" in port_source
             and "register_restored" in port_source
             and "build_production_ports" in port_source

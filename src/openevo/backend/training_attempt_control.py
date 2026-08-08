@@ -9,26 +9,28 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, Callable, Literal, Protocol
+from collections.abc import Callable
+from typing import Any, Literal, Protocol
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from openevo.backend.contracts.v2.models import ProjectHeadRefV2, SuccessorTransitionV2
+from openevo.backend.project_freeze_control import FrozenProjectArtifactV1
 from openevo.backend.science_execution_v2 import (
     ScienceAttemptExecutionEvidenceV2,
-    ScienceAttemptFailureAuthorityV1,
     ScienceAttemptExecutionReceiptV2,
+    ScienceAttemptFailureAuthorityV1,
 )
-from openevo.backend.contracts.v2.models import ProjectHeadRefV2, SuccessorTransitionV2
 from openevo.backend.science_successor import ScienceSuccessorTransitionAttemptV2
-from openevo.backend.project_freeze_control import FrozenProjectArtifactV1
-from openevo.evolution.revisions import AtomicSuccessorCommitV2
 from openevo.evolution.models import (
     ArtifactContentAdmissionReceipt,
     ArtifactResponse,
+    ArtifactTextSnapshotResponse,
     SuccessorArtifactAuthorityResponse,
 )
+from openevo.evolution.revisions import AtomicSuccessorCommitV2
 from openevo.experiments.clients import EvolutionHttpClient
 from openevo.rollout.models import SessionResult
 
@@ -263,6 +265,10 @@ class TrainingAttemptEvolutionClient(Protocol):
     def get_artifact(self, artifact_id: str) -> dict[str, Any]: ...
 
     def get_internal_successor_artifact_authority(
+        self, successor_transition_id: str, artifact_id: str
+    ) -> dict[str, Any]: ...
+
+    def get_internal_successor_artifact_text_snapshot(
         self, successor_transition_id: str, artifact_id: str
     ) -> dict[str, Any]: ...
 
@@ -614,6 +620,68 @@ def install_core_training_attempt_endpoint(
             artifacts=artifacts,
         )
 
+    @app.get(
+        "/v2/internal/training-successors/{successor_transition_id}"
+        "/artifacts/{artifact_id}/text-snapshot",
+        response_model=ArtifactTextSnapshotResponse,
+        include_in_schema=False,
+    )
+    async def get_training_successor_artifact_text_snapshot(
+        successor_transition_id: str,
+        artifact_id: str,
+    ) -> ArtifactTextSnapshotResponse:
+        """Expose one successor-owned payload only for bounded adapter audit.
+
+        This route is bearer-authenticated by Core v2 and keeps payload text
+        out of public artifact APIs and all durable Core receipts.
+        """
+
+        transition = owner.get_successor_transition(successor_transition_id)
+        commit = owner.successor_commit(successor_transition_id)
+        if transition.state != "committed" or commit is None:
+            raise HTTPException(
+                status_code=409,
+                detail="committed successor artifact authority is unavailable",
+            )
+        try:
+            authorities = artifact_authorities(commit)
+            selected = [
+                item for item in authorities if item.artifact_id == artifact_id
+            ]
+            if len(selected) != 1:
+                raise ValueError("successor artifact is not commit-owned")
+            authority = selected[0]
+            if authority.artifact_type not in {
+                "text_memory",
+                "skill_bundle",
+                "agent_system",
+            }:
+                raise ValueError("successor artifact is not a text evolution output")
+            binding = service_control.run_binding()
+            client = factory(binding)
+            try:
+                snapshot = ArtifactTextSnapshotResponse.model_validate(
+                    client.get_internal_successor_artifact_text_snapshot(
+                        successor_transition_id,
+                        artifact_id,
+                    )
+                )
+            finally:
+                client.close()
+            if (
+                snapshot.artifact_id != authority.artifact_id
+                or snapshot.artifact_type.value != authority.artifact_type
+                or snapshot.payload_manifest_sha256
+                != authority.payload_manifest_sha256
+            ):
+                raise ValueError("successor artifact text snapshot authority drifted")
+            return snapshot
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="successor artifact text snapshot authority is inconsistent",
+            ) from exc
+
     @app.post(
         "/v2/internal/training-successors/{successor_transition_id}"
         "/completed-methods-reconcile",
@@ -737,13 +805,13 @@ def install_core_training_attempt_endpoint(
 
 __all__ = [
     "CapturedTrainingAttemptAuthorityV2",
-    "TrainingAttemptExecutionStatusV1",
     "CapturedTrainingAttemptOwner",
     "CapturedWorkspaceResultStore",
     "HistoricalProjectHeadRestoreAuthorityV2",
     "HistoricalProjectHeadRestoreRequestV2",
     "ProductionProjectFreezeArtifactReader",
-    "TrainingSuccessorAuthorityV2",
+    "TrainingAttemptExecutionStatusV1",
     "TrainingSuccessorArtifactAuthorityV2",
+    "TrainingSuccessorAuthorityV2",
     "install_core_training_attempt_endpoint",
 ]

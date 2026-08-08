@@ -1,18 +1,20 @@
 experiment_id: sequential_task_reflector_evolution_v0
 refactor_id: PRODUCTION_TRAINING_OPERATIONS_DRIVER_V1
-protocol_name: per_item_supervised_one_step_reset_v1
-protocol_version: 1.0.0
+protocol_name: per_item_candidate_specific_retention_evolution_v2
+protocol_version: 2.0.0
 status: PER_ITEM_CONFIGURED_NOT_STARTED
 per_item_reset:
-  contract_version: openevo.researchclawbench.per_item_reset.v1
+  contract_version: openevo.researchclawbench.per_item_reset.v2
   only_per_item_reset: true
   dataset: community
   passes:
     - baseline
     - judge_baseline
-    - project_sanitized_evaluation_feedback
-    - admit_sanitized_evaluation_feedback
-    - evolve_once_sanitized_evaluation_feedback
+    - project_candidate_specific_retention_feedback
+    - admit_candidate_specific_retention_feedback
+    - build_baseline_evidence_capsule
+    - evolve_once_candidate_specific_retention_feedback
+    - verify_task_specific_native_artifacts
     - evolved
     - judge_evolved
     - paired_result
@@ -190,8 +192,11 @@ teacher:
 feedback:
   native_post_run_attachment_status: ATTACHED_TO_NATIVE_COMPLETED_TASK_DATASET
   private_target_study: true
-  boundary: SANITIZED_EVALUATION_FEEDBACK_BOUNDARY_V1
-  feedback_class: sanitized_evaluation_feedback_v1
+  boundary: SANITIZED_EVALUATION_FEEDBACK_BOUNDARY_V1_PLUS_BASELINE_EVIDENCE_CAPSULE_V1
+  feedback_class: candidate_specific_retention_v2
+  baseline_evidence_capsule: baseline_evidence_capsule_v1
+  artifact_quality_gate: TASK_SPECIFIC_ARTIFACT_QUALITY_V1
+  capsule_projector_model_calls: 0
   raw_gt_visible_to_reflector: false
   judge_reasoning_visible_to_reflector: false
   target_image_visible_to_reflector: false

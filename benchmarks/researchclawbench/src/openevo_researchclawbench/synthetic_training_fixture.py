@@ -267,11 +267,28 @@ class DurableFakeAuthority(ProductionOperationPort):
                 "feedback_class": "sanitized_evaluation_feedback_v1",
             }
             feedback_sha256 = canonical_sha256(feedback)
+            capsule = {
+                "schema_version": "openevo.researchclawbench.baseline_evidence_capsule.v1",
+                "candidate_concepts": [{"text": "synthetic analysis"}],
+            }
+            reflector = {
+                "feedback_class": "candidate_specific_retention_v2",
+                "sanitized_evaluation_feedback": feedback,
+                "baseline_evidence_capsule": capsule,
+            }
             return {
                 "task_id": task,
                 "ground_truth_sha256": request["gt_supervision"]["ground_truth_sha256"],
                 "sanitized_feedback": feedback,
                 "sanitized_feedback_sha256": feedback_sha256,
+                "baseline_evidence_capsule": capsule,
+                "baseline_evidence_capsule_sha256": canonical_sha256(capsule),
+                "baseline_evidence_capsule_admission": {
+                    "status": "ADMITTED",
+                    "projector_model_calls": 0,
+                },
+                "reflector_feedback": reflector,
+                "reflector_feedback_sha256": canonical_sha256(reflector),
                 "admission": {
                     "status": "ADMITTED",
                     "feedback_sha256": feedback_sha256,
@@ -282,6 +299,9 @@ class DurableFakeAuthority(ProductionOperationPort):
                     "candidate_evidence_refs_present": True,
                     "preserve_strength_guidance_present": True,
                     "targeted_improvement_guidance_present": True,
+                    "baseline_evidence_capsule_present": True,
+                    "fresh_workspace_reconstruction_required": True,
+                    "weakness_to_action_mapping_present": True,
                     "gt_leakage": False,
                 },
                 "feedback_projector_model_calls": 0,
@@ -312,17 +332,24 @@ class DurableFakeAuthority(ProductionOperationPort):
                         "judge_feedback_included": False,
                     }
                 )
-            if request.get("feedback_source") == "sanitized_evaluation_feedback_v1":
+            if request.get("feedback_source") == "candidate_specific_retention_v2":
                 gt = request["gt_supervision"]
                 projection = request["feedback_projection"]
                 result.update(
                     {
                         "feedback_class": "HARD_GT",
-                        "feedback_source": "sanitized_evaluation_feedback_v1",
+                        "feedback_source": "candidate_specific_retention_v2",
                         "judge_calls": 0,
                         "ground_truth_sha256": gt["ground_truth_sha256"],
                         "sanitized_feedback_sha256": projection["sanitized_feedback_sha256"],
                         "sanitized_feedback_included": True,
+                        "baseline_evidence_capsule_included": True,
+                        "baseline_evidence_capsule_sha256": projection[
+                            "baseline_evidence_capsule_sha256"
+                        ],
+                        "reflector_feedback_sha256": projection[
+                            "reflector_feedback_sha256"
+                        ],
                         "judge_feedback_included": False,
                         "raw_gt_projected": False,
                         "judge_reasoning_projected": False,
@@ -348,7 +375,41 @@ class DurableFakeAuthority(ProductionOperationPort):
                         "dataset_view_sha256": request["attachment"]["resolved_view_sha256"],
                     }
                 )
-            return {"jobs": jobs, "successor_receipt_id": f"successor-{seed[:16]}"}
+            return {
+                "jobs": jobs,
+                "successor_receipt_id": f"successor-{seed[:16]}",
+                "successor_transition_id": f"transition-{task}-a{attempt}",
+            }
+        if self.kind == "artifact_quality":
+            report = {
+                "schema_version": (
+                    "openevo.researchclawbench.task_specific_artifact_quality.v1"
+                ),
+                "status": "PASS",
+                "candidate_concepts": ["synthetic analysis"],
+                "artifact_metrics": {},
+                "aggregate": {
+                    "candidate_specific_reference_count": 2,
+                    "baseline_strength_count": 1,
+                    "observed_weakness_count": 1,
+                    "weakness_to_action_mapping_count": 1,
+                    "overall_retention_ratio": 1.0,
+                },
+                "gt_leakage_findings": [],
+                "provenance_violations": [],
+                "artifact_text_sha256": {},
+            }
+            report["content_sha256"] = canonical_sha256(report)
+            return {
+                "quality_gate_status": "PASS",
+                "quality_report": report,
+                "quality_report_sha256": report["content_sha256"],
+                "successor_transition_id": request["evolution"]["successor_transition_id"],
+                "artifact_snapshot_authority": {},
+                "provider_calls": 0,
+                "artifact_text_persisted": False,
+                "raw_gt_persisted": False,
+            }
         if self.kind == "composite":
             jobs = request["evolution"]["jobs"]
             revision = attempt + 1
@@ -461,6 +522,7 @@ def build_synthetic_ports(
             "feedback_projection",
             "attachment",
             "evolution",
+            "artifact_quality",
             "composite",
             "per_item_evolved",
             "task_local",
@@ -476,6 +538,7 @@ def build_synthetic_ports(
             feedback_projection=authorities["feedback_projection"],
             attachment=authorities["attachment"],
             evolution=authorities["evolution"],
+            artifact_quality=authorities["artifact_quality"],
             composite=authorities["composite"],
             per_item_evolved=authorities["per_item_evolved"],
             task_local=authorities["task_local"],

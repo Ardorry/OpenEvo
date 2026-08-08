@@ -23,6 +23,7 @@ class TrainingStage(StrEnum):
     EVOLUTION_PENDING = "EVOLUTION_PENDING"
     EVOLUTION_RUNNING = "EVOLUTION_RUNNING"
     EVOLUTION_COMPLETED = "EVOLUTION_COMPLETED"
+    ARTIFACT_QUALITY_ADMITTED = "ARTIFACT_QUALITY_ADMITTED"
     COMPOSITE_ADMITTED = "COMPOSITE_ADMITTED"
     EVOLVED_WORKSPACE_PREPARED = "EVOLVED_WORKSPACE_PREPARED"
     NEXT_ATTEMPT_READY = "NEXT_ATTEMPT_READY"
@@ -114,7 +115,12 @@ _ALLOWED: dict[TrainingStage, frozenset[TrainingStage]] = {
     TrainingStage.EVOLUTION_RUNNING: frozenset(
         {TrainingStage.EVOLUTION_COMPLETED, TrainingStage.BLOCKED, TrainingStage.FAILED}
     ),
-    TrainingStage.EVOLUTION_COMPLETED: frozenset({TrainingStage.COMPOSITE_ADMITTED}),
+    TrainingStage.EVOLUTION_COMPLETED: frozenset(
+        {TrainingStage.ARTIFACT_QUALITY_ADMITTED, TrainingStage.COMPOSITE_ADMITTED}
+    ),
+    TrainingStage.ARTIFACT_QUALITY_ADMITTED: frozenset(
+        {TrainingStage.COMPOSITE_ADMITTED}
+    ),
     TrainingStage.COMPOSITE_ADMITTED: frozenset(
         {
             TrainingStage.NEXT_ATTEMPT_READY,

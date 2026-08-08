@@ -13,6 +13,9 @@ from openevo_researchclawbench.evaluation_feedback import (
     objective_outcome_signal,
     project_sanitized_evaluation_feedback,
 )
+from openevo_researchclawbench.task_specific_artifact_quality import (
+    require_task_specific_artifact_quality,
+)
 
 from openevo.evolution import methods as methods_module
 from openevo.evolution.framework.execution import (
@@ -268,11 +271,11 @@ def _dataset(tmp_path: Path, feedback: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def test_native_reflector_requests_see_only_sanitized_feedback(
+def test_native_reflector_requests_see_candidate_specific_retention_feedback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _root, projection = _projection(tmp_path / "projection")
-    feedback = projection["sanitized_feedback"]
+    feedback = projection["reflector_feedback"]
     dataset = _dataset(tmp_path, feedback)
     runtime = default_managed_reflector_runtime()
     captured: list[ReflectorInferenceRequest] = []
@@ -282,16 +285,28 @@ def test_native_reflector_requests_see_only_sanitized_feedback(
             captured.append(request)
             if "ExpeL" in request.prompt:
                 text = (
-                    "# Memory\n\n## Do\nPreserve useful evidence.\n\n"
-                    "## Avoid\nAvoid unsupported claims.\n\n"
-                    "## Validate\nAdd independent checks.\n\n"
+                    "# Memory\n\n## Do\nReconstruct the candidate_summary visual "
+                    "analysis route in the fresh workspace.\n\n"
+                    "## Avoid\nDo not leave the visual evidence weakness unchecked.\n\n"
+                    "## Validate\nAdd an independent numeric aggregation for the "
+                    "candidate_summary figure.\n\n"
                     "## When Applicable\nUse for public-data analysis.\n\n"
                     "## Retired Or Superseded\nNone.\n"
                 )
             elif "Skill Bundle" in request.prompt:
-                text = "# Evidence Validation Skill\n\nPreserve outputs and add checks.\n"
+                text = (
+                    "# Candidate Summary Validation\n\n"
+                    "1. Reconstruct the analyze route from public inputs.\n"
+                    "2. Generate the candidate_summary figure.\n"
+                    "3. Add a numeric aggregation to validate the visual evidence.\n"
+                )
             else:
-                text = "# Evolved Agent System\n\nPreserve valid work and verify additions.\n"
+                text = (
+                    "# Evolved Agent System\n\n"
+                    "- Before finalizing a fresh workspace, preserve the candidate_summary "
+                    "baseline strategy by reconstructing the analyze route and verify "
+                    "the visual evidence weakness with a numeric validation.\n"
+                )
             receipt = ReflectorRuntimeReceipt(
                 request_id=request.request_id,
                 session_id=f"capture-{len(captured)}",
@@ -326,12 +341,13 @@ def test_native_reflector_requests_see_only_sanitized_feedback(
         },
         "candidate_count": 1,
     }
+    outputs: dict[str, str] = {}
     for method in (
         "text_memory_expel_reflector",
         "skill_bundle_reflector",
         "agent_system_gepa_reflector",
     ):
-        run_method(
+        artifacts = run_method(
             WorkerClaimedJob(
                 job_id=f"job-{method}",
                 lease_id=f"lease-{method}",
@@ -342,15 +358,36 @@ def test_native_reflector_requests_see_only_sanitized_feedback(
             ),
             artifact_root=tmp_path / "artifacts",
         )
+        produced = [item for item in artifacts if item.type.value in {
+            "text_memory", "skill_bundle", "agent_system"
+        }]
+        assert produced
+        artifact = produced[0]
+        path = Path(artifact.uri.removeprefix("file://"))
+        if path.is_dir():
+            relative = artifact.manifest.get("content_path") or artifact.manifest.get(
+                "target_path"
+            ) or "SKILL.md"
+            path = path / str(relative)
+        outputs[artifact.type.value] = path.read_text(encoding="utf-8")
 
     assert len(captured) == 3
     prompts = "\n".join(request.prompt for request in captured)
     assert all(request.model_name == "gpt-5.5" for request in captured)
-    assert prompts.count("sanitized_evaluation_feedback_v1") >= 3
+    assert prompts.count("candidate_specific_retention_v2") >= 3
+    assert prompts.count("baseline_evidence_capsule") >= 3
     assert "submitted report relies on its produced figures" in prompts
+    assert "fresh workspace without baseline files" in prompts
+    assert "candidate_summary" in prompts
     assert "PRESERVE VERIFIED STRENGTHS BEFORE ADDING IMPROVEMENTS" in prompts
     assert "candidate_summary.png" in prompts
     assert "quasiflux" not in prompts.casefold()
     assert "private_target_figure" not in prompts.casefold()
     assert "private Judge reasoning" not in prompts
     assert "ground_truth_entries" not in prompts
+    quality = require_task_specific_artifact_quality(
+        capsule=projection["baseline_evidence_capsule"],
+        artifact_texts=outputs,
+        ground_truth_entries=_gt(),
+    )
+    assert quality["status"] == "PASS"

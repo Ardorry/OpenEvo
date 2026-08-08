@@ -563,7 +563,7 @@ def _print_per_item_runner_summary(
             "    - memory",
             "    - skill",
             "    - agent-system",
-            "  supervision: sanitized evaluator feedback",
+            "  supervision: sanitized evaluator feedback + baseline evidence capsule",
             "  raw GT: excluded from reflector",
             "  Judge reasoning: excluded",
         )
@@ -582,8 +582,11 @@ def _print_per_item_runner_summary(
         if baseline_only
         else (
             "  judge baseline",
-            "  project and admit sanitized evaluation feedback",
-            "  evolve once with sanitized feedback",
+            "  project candidate-specific retention feedback",
+            "  build baseline evidence capsule",
+            "  admit candidate-specific retention feedback",
+            "  evolve once with candidate-specific retention feedback",
+            "  verify task-specific native artifacts",
             "  evolved",
             "  judge evolved",
             "  paired result",
@@ -621,7 +624,7 @@ def _print_per_item_runner_summary(
                 "  fresh state per task",
                 "  GT hidden from Candidate",
                 "  raw GT and Judge reasoning excluded from Evolution",
-                "  sanitized evaluation feedback visible only to Reflector",
+                "  sanitized evaluation feedback plus baseline evidence capsule visible only to Reflector",
                 "  cross-task artifacts excluded",
                 "",
                 "Output:",
@@ -671,9 +674,11 @@ def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> 
             "fresh-generation-zero",
             "fresh-codex-baseline",
             "baseline-judge",
-            "sanitized-evaluation-feedback-projection",
+            "candidate-specific-retention-feedback-projection",
+            "baseline-evidence-capsule",
             "feedback-admission",
-            "native-evolve-once-with-sanitized-feedback",
+            "native-evolve-once-with-candidate-specific-retention-feedback",
+            "task-specific-native-artifact-quality",
             "fresh-codex-evolved",
             "evolved-judge",
             "paired-result",
@@ -695,11 +700,12 @@ def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> 
                 "provider_calls": 0,
                 "managed_runtime_ready": host_profile["ready"],
                 "managed_runtime_reason_code": host_profile["reason_code"],
-                "supervision": "sanitized_evaluation_feedback_v1",
+                "supervision": "candidate_specific_retention_v2",
                 "judge_feedback_in_evolution": False,
                 "judge_reasoning_in_evolution": False,
                 "raw_gt_in_reflector": False,
                 "sanitized_feedback_in_reflector": True,
+                "baseline_evidence_capsule_in_reflector": True,
                 "gt_visible_to_candidate": False,
                 "one_evolution_cycle": not baseline_only,
                 "fresh_codex_per_pass": True,
@@ -717,6 +723,26 @@ def command_run_per_item(config: ExperimentConfig, args: argparse.Namespace) -> 
                 "task_id": task_id,
                 "run_id": args.run_id,
                 "reason_code": host_profile["reason_code"],
+                "model_started": False,
+                "provider_calls": 0,
+                "secret_recorded": False,
+            }
+        )
+        return 5
+    # A live per-item pair is bound to the source trees and release assets in
+    # the protocol.  ``run-per-item`` used to check only Docker readiness here,
+    # which could create a new state namespace while the local adapter or Core
+    # source had drifted from the pinned identities.  Keep this a no-provider
+    # preflight and fail before any mutable control-plane operation.
+    readiness = config.environment_readiness()
+    if readiness.get("ready") is not True:
+        print_closed_json(
+            {
+                "status": "BLOCKED_PER_ITEM_PRODUCTION_READINESS",
+                "task_id": task_id,
+                "run_id": args.run_id,
+                "blockers": list(readiness.get("blockers", [])),
+                "source_identity_matches": readiness.get("source_identity_matches"),
                 "model_started": False,
                 "provider_calls": 0,
                 "secret_recorded": False,
@@ -885,9 +911,11 @@ def _per_item_community_plan(config: ExperimentConfig, run_id: str) -> list[dict
             "stages": [
                 "baseline",
                 "judge_baseline",
-                "project_sanitized_evaluation_feedback",
-                "admit_sanitized_evaluation_feedback",
-                "evolve_once_sanitized_evaluation_feedback",
+                "project_candidate_specific_retention_feedback",
+                "admit_candidate_specific_retention_feedback",
+                "build_baseline_evidence_capsule",
+                "evolve_once_candidate_specific_retention_feedback",
+                "verify_task_specific_native_artifacts",
                 "evolved",
                 "judge_evolved",
                 "paired_result",

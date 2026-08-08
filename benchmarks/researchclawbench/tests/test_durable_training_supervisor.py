@@ -174,15 +174,34 @@ class SyntheticOperations:
         )
 
     def project_feedback(self, request, idempotency_key):
-        feedback_sha256 = canonical_sha256(
-            {"status": "available_for_evolution", "task": request["task_id"]}
-        )
+        sanitized = {
+            "status": "available_for_evolution",
+            "feedback_class": "sanitized_evaluation_feedback_v1",
+        }
+        capsule = {
+            "schema_version": "openevo.researchclawbench.baseline_evidence_capsule.v1",
+            "candidate_concepts": [{"text": "synthetic analysis"}],
+        }
+        reflector = {
+            "feedback_class": "candidate_specific_retention_v2",
+            "sanitized_evaluation_feedback": sanitized,
+            "baseline_evidence_capsule": capsule,
+        }
+        feedback_sha256 = canonical_sha256(sanitized)
         return self._once(
             idempotency_key,
             {
                 "task_id": request["task_id"],
                 "ground_truth_sha256": "7" * 64,
                 "sanitized_feedback_sha256": feedback_sha256,
+                "baseline_evidence_capsule": capsule,
+                "baseline_evidence_capsule_sha256": canonical_sha256(capsule),
+                "baseline_evidence_capsule_admission": {
+                    "status": "ADMITTED",
+                    "projector_model_calls": 0,
+                },
+                "reflector_feedback": reflector,
+                "reflector_feedback_sha256": canonical_sha256(reflector),
                 "admission": {
                     "status": "ADMITTED",
                     "feedback_sha256": feedback_sha256,
@@ -193,6 +212,9 @@ class SyntheticOperations:
                     "candidate_evidence_refs_present": True,
                     "preserve_strength_guidance_present": True,
                     "targeted_improvement_guidance_present": True,
+                    "baseline_evidence_capsule_present": True,
+                    "fresh_workspace_reconstruction_required": True,
+                    "weakness_to_action_mapping_present": True,
                     "gt_leakage": False,
                 },
                 "feedback_projector_model_calls": 0,
@@ -222,17 +244,22 @@ class SyntheticOperations:
                     "judge_feedback_included": False,
                 }
             )
-        if request.get("feedback_source") == "sanitized_evaluation_feedback_v1":
+        if request.get("feedback_source") == "candidate_specific_retention_v2":
             gt = request["gt_supervision"]
             projection = request["feedback_projection"]
             result.update(
                 {
                     "feedback_class": "HARD_GT",
-                    "feedback_source": "sanitized_evaluation_feedback_v1",
+                    "feedback_source": "candidate_specific_retention_v2",
                     "judge_calls": 0,
                     "ground_truth_sha256": gt["ground_truth_sha256"],
                     "sanitized_feedback_sha256": projection["sanitized_feedback_sha256"],
                     "sanitized_feedback_included": True,
+                    "baseline_evidence_capsule_included": True,
+                    "baseline_evidence_capsule_sha256": projection[
+                        "baseline_evidence_capsule_sha256"
+                    ],
+                    "reflector_feedback_sha256": projection["reflector_feedback_sha256"],
                     "judge_feedback_included": False,
                     "raw_gt_projected": False,
                     "judge_reasoning_projected": False,
@@ -264,6 +291,40 @@ class SyntheticOperations:
                     }
                     for artifact_type in ("agent_system", "text_memory", "skill_bundle")
                 ]
+            },
+        )
+
+    def assess_artifact_quality(self, request, idempotency_key):
+        report = {
+            "schema_version": (
+                "openevo.researchclawbench.task_specific_artifact_quality.v1"
+            ),
+            "status": "PASS",
+            "candidate_concepts": ["synthetic analysis"],
+            "artifact_metrics": {},
+            "aggregate": {
+                "candidate_specific_reference_count": 2,
+                "baseline_strength_count": 1,
+                "observed_weakness_count": 1,
+                "weakness_to_action_mapping_count": 1,
+                "overall_retention_ratio": 1.0,
+            },
+            "gt_leakage_findings": [],
+            "provenance_violations": [],
+            "artifact_text_sha256": {},
+        }
+        report["content_sha256"] = canonical_sha256(report)
+        return self._once(
+            idempotency_key,
+            {
+                "status": "PASS",
+                "quality_report": report,
+                "quality_report_sha256": report["content_sha256"],
+                "successor_transition_id": "successor-synthetic",
+                "artifact_snapshot_authority": {},
+                "provider_calls": 0,
+                "artifact_text_persisted": False,
+                "raw_gt_persisted": False,
             },
         )
 
@@ -440,7 +501,7 @@ def test_per_item_reset_closes_exact_pair_and_clears_active_state(
     assert len(operations.evaluation_requests) == 2
     assert len(operations.attachment_requests) == 1
     attachment = operations.attachment_requests[0]
-    assert attachment["feedback_source"] == "sanitized_evaluation_feedback_v1"
+    assert attachment["feedback_source"] == "candidate_specific_retention_v2"
     assert attachment["judge_feedback"] is None
     assert attachment["gt_supervision"]["ground_truth_sha256"] == "7" * 64
     assert attachment["feedback_projection"]["raw_gt_projected"] is False

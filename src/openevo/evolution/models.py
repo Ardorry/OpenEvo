@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime
-from enum import StrEnum
 import hashlib
 import json
 import re
+from datetime import datetime
+from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -153,6 +153,54 @@ class ArtifactResponse(BaseModel):
     scores: dict[str, float] = Field(default_factory=dict)
     tags: list[str] = Field(default_factory=list)
     promoted: bool = False
+
+
+class ArtifactTextSnapshotDocument(BaseModel):
+    """One bounded, verified UTF-8 payload read for internal audit only."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    relative_path: str = Field(min_length=1, max_length=512)
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    utf8_byte_size: int = Field(ge=1, le=32 * 1024)
+    text: str = Field(min_length=1, max_length=32 * 1024)
+
+    @model_validator(mode="after")
+    def _exact_utf8_size(self) -> "ArtifactTextSnapshotDocument":
+        if len(self.text.encode("utf-8")) != self.utf8_byte_size:
+            raise ValueError("artifact text snapshot byte size is inconsistent")
+        if hashlib.sha256(self.text.encode("utf-8")).hexdigest() != self.content_sha256:
+            raise ValueError("artifact text snapshot digest is inconsistent")
+        return self
+
+
+class ArtifactTextSnapshotResponse(BaseModel):
+    """Ephemeral Core-to-adapter audit view of one sealed artifact payload.
+
+    This is deliberately an internal transport object: the artifact registry
+    remains the authority and neither the public v2 contract nor durable
+    receipts receive the payload text.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["openevo.internal.artifact_text_snapshot.v1"] = (
+        "openevo.internal.artifact_text_snapshot.v1"
+    )
+    artifact_id: str = Field(min_length=1, max_length=255)
+    artifact_type: ArtifactType
+    payload_manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    documents: tuple[ArtifactTextSnapshotDocument, ...] = Field(
+        min_length=1,
+        max_length=1,
+    )
+    total_utf8_bytes: int = Field(ge=1, le=32 * 1024)
+
+    @model_validator(mode="after")
+    def _closed_snapshot(self) -> "ArtifactTextSnapshotResponse":
+        if sum(item.utf8_byte_size for item in self.documents) != self.total_utf8_bytes:
+            raise ValueError("artifact text snapshot total byte size is inconsistent")
+        return self
 
 
 class ArtifactContentAdmissionReceipt(BaseModel):

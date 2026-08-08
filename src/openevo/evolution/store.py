@@ -1,55 +1,56 @@
 from __future__ import annotations
 
-from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 import hashlib
 import json
 import math
 import os
-from pathlib import Path
 import re
 import sqlite3
 import stat
-from typing import Any, Callable, Iterator, NotRequired, TypedDict
+from collections.abc import Callable, Iterator
+from contextlib import ExitStack, contextmanager
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any, NotRequired, TypedDict
 from urllib.parse import urlparse, urlunparse
 
-from openevo.evolution.agent_system import normalize_agent_system_target_path
 from openevo.evolution.admission import (
     ArtifactProposalDecisionReceipt,
     ArtifactProposalDecisionRequest,
     ProposalAction,
     artifact_content_admission_receipt,
 )
+from openevo.evolution.agent_system import normalize_agent_system_target_path
 from openevo.evolution.artifact_payloads import ArtifactPayloadService
 from openevo.evolution.context import (
     artifact_manifest,
     artifact_matches,
     artifact_type,
-    requested_context_artifact_order,
-    requested_context_artifact_ids,
     request_uses_subscription_auth,
+    requested_context_artifact_ids,
+    requested_context_artifact_order,
     sort_candidates,
+)
+from openevo.evolution.context_materialization import (
+    _PRESERVED_ENTRY_PREFIX,
+    MAX_CONTEXT_MANIFEST_BYTES,
+    ContextMaterializer,
+    MaterializedBlobLease,
+    MaterializedContext,
+    PersistedContextDiscardReceipt,
+    _private_file_identity,
+    _PrivateFileIdentity,
+    _remove_materialized_entry_if_identity,
 )
 from openevo.evolution.context_projection import (
     MAX_ARTIFACT_ROUTING_JSON_BYTES,
     MAX_CONTEXT_ARTIFACT_NAME_BYTES,
     MAX_CONTEXT_ARTIFACT_URI_BYTES,
     MAX_CONTEXT_PROJECTION_CANDIDATES,
+    ContextProjectionResolver,
     ContextProjectionResolveRequest,
     ContextProjectionResolveResponse,
-    ContextProjectionResolver,
-)
-from openevo.evolution.context_materialization import (
-    MAX_CONTEXT_MANIFEST_BYTES,
-    ContextMaterializer,
-    MaterializedBlobLease,
-    MaterializedContext,
-    PersistedContextDiscardReceipt,
-    _PRESERVED_ENTRY_PREFIX,
-    _PrivateFileIdentity,
-    _private_file_identity,
-    _remove_materialized_entry_if_identity,
 )
 from openevo.evolution.context_snapshot_recovery import (
     MAX_CONTEXT_SNAPSHOT_BYTES,
@@ -60,27 +61,42 @@ from openevo.evolution.context_snapshot_recovery import (
     write_context_snapshot,
 )
 from openevo.evolution.files import ARTIFACT_TYPE_DIRECTORIES, ArtifactFileStore
+from openevo.evolution.framework.builtins import (
+    VerifiedExecutableRegistry,
+    require_verified_executable_registry,
+)
+from openevo.evolution.framework.contracts import (
+    MAX_CONTRACT_JSON_BYTES,
+    MAX_CONTRIBUTION_TEXT,
+    MAX_HANDLER_ARTIFACTS,
+    canonical_digest,
+    canonical_json,
+)
+from openevo.evolution.framework.execution import (
+    MethodExecutionEnvelope,
+    worker_input_artifact_digest,
+)
+from openevo.evolution.framework.plan import EvolutionPlan, ResolvedEvolutionSelection
+from openevo.evolution.framework.registry import RegistrySnapshot
 from openevo.evolution.ids import new_id
 from openevo.evolution.materialization_root_lock import get_materialization_root_lock
-from openevo.evolution.store_schema_identity import classify_store_schema
 from openevo.evolution.models import (
+    AdapterMergeSpec,
     ArtifactContentAdmissionReceipt,
     ArtifactPromotionUpdateRequest,
-    AdapterMergeSpec,
     ArtifactRegisterRequest,
     ArtifactResponse,
     ArtifactState,
+    ArtifactTextSnapshotDocument,
+    ArtifactTextSnapshotResponse,
     ArtifactType,
-    FailedPlanBoundJobAuthorityResponse,
-    SuccessorTransitionJobInventoryResponse,
-    SucceededPlanBoundJobAuthorityResponse,
-    SuccessorArtifactAuthorityResponse,
     ContextResolveRequest,
     ContextResolveResponse,
     DatasetCreateRequest,
     DatasetCreateResponse,
     EventIngestRequest,
     EventIngestResponse,
+    FailedPlanBoundJobAuthorityResponse,
     FeedbackApplicationCreateRequest,
     FeedbackApplicationResponse,
     FeedbackApplicationTargetType,
@@ -99,8 +115,11 @@ from openevo.evolution.models import (
     ReviewRequestCreateRequest,
     ReviewRequestResponse,
     ReviewStatus,
-    WorkerClaimRequest,
+    SucceededPlanBoundJobAuthorityResponse,
+    SuccessorArtifactAuthorityResponse,
+    SuccessorTransitionJobInventoryResponse,
     WorkerClaimInputArtifact,
+    WorkerClaimRequest,
     WorkerClaimResponse,
     WorkerCompleteRequest,
     WorkerFailRequest,
@@ -116,12 +135,12 @@ from openevo.evolution.planned_jobs import (
     validate_plan_against_snapshot,
 )
 from openevo.evolution.revisions import (
+    MAX_EXECUTION_SNAPSHOT_BYTES,
+    MAX_REVISION_MANIFEST_BYTES,
     AdmissionQueueReason,
     AdmissionStatus,
     ExecutionSnapshotRecord,
     ExecutionSnapshotV1,
-    MAX_EXECUTION_SNAPSHOT_BYTES,
-    MAX_REVISION_MANIFEST_BYTES,
     RevisionCapacityError,
     RevisionConflictError,
     RevisionIntegrityError,
@@ -140,25 +159,8 @@ from openevo.evolution.revisions import (
     require_verified_execution_snapshot,
     revision_id_for_manifest,
 )
+from openevo.evolution.store_schema_identity import classify_store_schema
 from openevo.evolution.time import utc_now_iso
-from openevo.evolution.framework.contracts import (
-    MAX_CONTRIBUTION_TEXT,
-    MAX_CONTRACT_JSON_BYTES,
-    MAX_HANDLER_ARTIFACTS,
-    canonical_digest,
-    canonical_json,
-)
-from openevo.evolution.framework.builtins import (
-    VerifiedExecutableRegistry,
-    require_verified_executable_registry,
-)
-from openevo.evolution.framework.execution import (
-    MethodExecutionEnvelope,
-    worker_input_artifact_digest,
-)
-from openevo.evolution.framework.plan import EvolutionPlan, ResolvedEvolutionSelection
-from openevo.evolution.framework.registry import RegistrySnapshot
-
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
@@ -6202,6 +6204,89 @@ class EvolutionStore:
                 if admission_decision is None
                 else admission_decision.content_admission
             ),
+        )
+
+    def get_internal_successor_artifact_text_snapshot(
+        self,
+        successor_transition_id: str,
+        artifact_id: str,
+    ) -> ArtifactTextSnapshotResponse:
+        """Return one bounded verified payload read for Core-owned audit only."""
+
+        authority = self.get_internal_successor_artifact_authority(
+            successor_transition_id,
+            artifact_id,
+        )
+        artifact = authority.artifact
+        if (
+            artifact.type
+            not in {
+                ArtifactType.TEXT_MEMORY,
+                ArtifactType.SKILL_BUNDLE,
+                ArtifactType.AGENT_SYSTEM,
+            }
+            or artifact.promoted is not True
+            or artifact.state not in {ArtifactState.SEALED, ArtifactState.ACTIVE}
+            or not authority.payload_manifest_sha256
+        ):
+            raise ValueError("successor artifact is not eligible for text snapshot")
+        with ArtifactPayloadService(self.files.root) as payloads:
+            snapshot = payloads.issue_snapshot(
+                artifact_id=artifact.artifact_id,
+                artifact_type=artifact.type.value,
+                name=artifact.name,
+                uri=artifact.uri,
+                manifest=artifact.manifest,
+                scores=artifact.scores,
+                rank_index=0,
+            )
+            if snapshot.payload_manifest_digest != authority.payload_manifest_sha256:
+                raise ValueError("successor artifact payload manifest authority drifted")
+            paths = [entry.relative_path for entry in snapshot.payload_entries]
+            content_path = artifact.manifest.get("content_path")
+            if isinstance(content_path, str) and content_path in paths:
+                selected_path = content_path
+            elif artifact.type is ArtifactType.SKILL_BUNDLE and "SKILL.md" in paths:
+                selected_path = "SKILL.md"
+            elif len(paths) == 1:
+                selected_path = paths[0]
+            else:
+                raise ValueError("successor artifact has no unambiguous text payload")
+            selected = next(
+                entry
+                for entry in snapshot.payload_entries
+                if entry.relative_path == selected_path
+            )
+            if (
+                selected.size_bytes < 1
+                or selected.size_bytes > 32 * 1024
+                or not (
+                    selected.media_type.startswith("text/")
+                    or selected.media_type
+                    in {"application/json", "application/toml", "application/yaml"}
+                )
+            ):
+                raise ValueError("successor artifact text snapshot exceeds closed bounds")
+            text = payloads.read_utf8_prefix(
+                snapshot.payload_handle,
+                selected_path,
+                max_chars=32 * 1024,
+                max_bytes=selected.size_bytes,
+            )
+            if len(text.encode("utf-8")) != selected.size_bytes:
+                raise ValueError("successor artifact text snapshot was truncated")
+            document = ArtifactTextSnapshotDocument(
+                relative_path=selected_path,
+                content_sha256=selected.sha256,
+                utf8_byte_size=selected.size_bytes,
+                text=text,
+            )
+        return ArtifactTextSnapshotResponse(
+            artifact_id=artifact.artifact_id,
+            artifact_type=artifact.type,
+            payload_manifest_sha256=authority.payload_manifest_sha256,
+            documents=(document,),
+            total_utf8_bytes=document.utf8_byte_size,
         )
 
     def discard_successor_transition_outputs(

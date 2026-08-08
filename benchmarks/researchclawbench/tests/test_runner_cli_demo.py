@@ -33,6 +33,13 @@ class _MeetingConfig:
             "tasks": list(cli.FROZEN_TASKS),
         }[key]
 
+    def environment_readiness(self) -> dict[str, object]:
+        return {
+            "ready": True,
+            "blockers": [],
+            "source_identity_matches": True,
+        }
+
 
 def _host_profile(*, ready: bool) -> dict[str, Any]:
     return {
@@ -60,6 +67,22 @@ def test_per_item_community17_protocol_is_closed_and_has_no_official_flow() -> N
     config = ExperimentConfig.load(PER_ITEM_COMMUNITY17_PROTOCOL)
 
     assert config.per_item_reset is not None
+    assert config.per_item_reset["contract_version"] == (
+        "openevo.researchclawbench.per_item_reset.v2"
+    )
+    assert config.per_item_reset["passes"] == [
+        "baseline",
+        "judge_baseline",
+        "project_candidate_specific_retention_feedback",
+        "admit_candidate_specific_retention_feedback",
+        "build_baseline_evidence_capsule",
+        "evolve_once_candidate_specific_retention_feedback",
+        "verify_task_specific_native_artifacts",
+        "evolved",
+        "judge_evolved",
+        "paired_result",
+        "reset",
+    ]
     assert config.require("attempts_per_task") == 2
     assert config.require("reflector_rounds_per_task") == 1
     assert config.require("candidate_runs") == 34
@@ -156,6 +179,55 @@ def test_run_per_item_live_fails_before_control_when_runtime_is_unavailable(
     assert result == 5
     assert payload["status"] == "BLOCKED_OPEN_EVO_HARNESS_RUNTIME"
     assert payload["model_started"] is False
+    assert payload["provider_calls"] == 0
+
+
+def test_run_per_item_live_fails_closed_on_source_or_release_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = _MeetingConfig(tmp_path)
+    monkeypatch.setattr(cli.ExperimentConfig, "load", lambda _path: config)
+    monkeypatch.setattr(
+        cli,
+        "managed_core_profile_readiness",
+        lambda _config: _host_profile(ready=True),
+    )
+    monkeypatch.setattr(
+        config,
+        "environment_readiness",
+        lambda: {
+            "ready": False,
+            "blockers": ["SOURCE_IDENTITY_DRIFT"],
+            "source_identity_matches": False,
+        },
+    )
+    monkeypatch.setattr(
+        cli,
+        "judge_credential_readiness",
+        lambda _config: (_ for _ in ()).throw(
+            AssertionError("Judge readiness ran after source drift")
+        ),
+    )
+
+    result = cli.main(
+        [
+            "run-per-item",
+            "--protocol",
+            str(tmp_path / "protocol.yaml"),
+            "--run-id",
+            "rcb_oe_v0_source_drift_life_005",
+            "--task",
+            "Life_005",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    payload = json.loads(output[output.index("{") :])
+    assert result == 5
+    assert payload["status"] == "BLOCKED_PER_ITEM_PRODUCTION_READINESS"
+    assert payload["blockers"] == ["SOURCE_IDENTITY_DRIFT"]
     assert payload["provider_calls"] == 0
 
 

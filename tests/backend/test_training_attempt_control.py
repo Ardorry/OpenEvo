@@ -294,6 +294,28 @@ class _Evolution:
     def get_artifact(self, artifact_id: str) -> dict:
         raise AssertionError(f"unexpected inherited artifact lookup: {artifact_id}")
 
+    def get_internal_successor_artifact_text_snapshot(
+        self, successor_transition_id: str, artifact_id: str
+    ) -> dict:
+        assert successor_transition_id == "successor-1"
+        assert artifact_id == "artifact-agent-system-1"
+        text = "Reconstruct the candidate-specific analysis strategy."
+        return {
+            "schema_version": "openevo.internal.artifact_text_snapshot.v1",
+            "artifact_id": artifact_id,
+            "artifact_type": "agent_system",
+            "payload_manifest_sha256": "7" * 64,
+            "documents": [
+                {
+                    "relative_path": "AGENTS.md",
+                    "content_sha256": hashlib.sha256(text.encode()).hexdigest(),
+                    "utf8_byte_size": len(text.encode()),
+                    "text": text,
+                }
+            ],
+            "total_utf8_bytes": len(text.encode()),
+        }
+
     def close(self) -> None:
         self.closed = True
 
@@ -333,6 +355,30 @@ def test_training_successor_endpoint_returns_exact_native_admission_authority() 
         mode="json"
     )
     assert evolution.closed is True
+
+
+def test_successor_artifact_text_snapshot_is_bearer_protected_and_authority_bound() -> None:
+    commit = _commit()
+    evolution = _Evolution(commit)
+    path = (
+        "/v2/internal/training-successors/successor-1/"
+        "artifacts/artifact-agent-system-1/text-snapshot"
+    )
+    with _client(commit, evolution) as client:
+        denied = client.get(path)
+        accepted = client.get(
+            path,
+            headers={"Authorization": "Bearer training-attempt-control-test"},
+        )
+    assert denied.status_code == 401
+    assert accepted.status_code == 200
+    body = accepted.json()
+    assert body["artifact_id"] == "artifact-agent-system-1"
+    assert body["artifact_type"] == "agent_system"
+    assert body["documents"][0]["relative_path"] == "AGENTS.md"
+    assert body["documents"][0]["text"] == (
+        "Reconstruct the candidate-specific analysis strategy."
+    )
 
 
 def test_completed_method_reconciliation_endpoint_is_bearer_protected_and_typed() -> None:
