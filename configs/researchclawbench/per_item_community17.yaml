@@ -10,7 +10,9 @@ per_item_reset:
   passes:
     - baseline
     - judge_baseline
-    - evolve_once_current_task_gt
+    - project_sanitized_evaluation_feedback
+    - admit_sanitized_evaluation_feedback
+    - evolve_once_sanitized_evaluation_feedback
     - evolved
     - judge_evolved
     - paired_result
@@ -65,9 +67,9 @@ paths:
   researchclawbench_root: /home/lhy-h/work/researchclaw_openevo/ResearchClawBench
 source_identity:
   openevo_commit: e406515bad7976795b60f96418e729f9cd53d35c
-  adapter_implementation_commit: 837062ba925b1603a5ddf1ef664f3ae3ca2b96c0
+  adapter_implementation_commit: 6658861aee230f0d5f7d3a046a2d635782f61385
   openevo_core_source_tree_sha256: 3a45d6292dbfdc329da654b024945a12163c1b35ad8b791f6948d2ed6fefea4b
-  adapter_tree_sha256: e7953ccaa612d13b4ce4eaf81cc9c7419d14698eeca8f6212d31df318bd52b6d
+  adapter_tree_sha256: 6123a2e490e2fa37e3afd8c79d5d2625b1217a934680d1de07c31663ed9940e0
   researchclawbench_commit: b1175eca3deb78ff8b2c839070874474051d2261
   canonical_scorer_sha256: 9492317443acc069744330f27aac693d162f1aa6837d512e40419704197c6022
 native_openevo:
@@ -188,6 +190,12 @@ teacher:
 feedback:
   native_post_run_attachment_status: ATTACHED_TO_NATIVE_COMPLETED_TASK_DATASET
   private_target_study: true
+  boundary: SANITIZED_EVALUATION_FEEDBACK_BOUNDARY_V1
+  feedback_class: sanitized_evaluation_feedback_v1
+  raw_gt_visible_to_reflector: false
+  judge_reasoning_visible_to_reflector: false
+  target_image_visible_to_reflector: false
+  feedback_projector_model_calls: 0
 pairing:
   same_task_only: true
   score_direction: maximize
