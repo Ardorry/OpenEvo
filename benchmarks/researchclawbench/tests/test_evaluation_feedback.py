@@ -374,12 +374,16 @@ def test_native_reflector_requests_see_candidate_specific_retention_feedback(
     assert len(captured) == 3
     prompts = "\n".join(request.prompt for request in captured)
     assert all(request.model_name == "gpt-5.5" for request in captured)
-    assert prompts.count("candidate_specific_retention_v2") >= 3
-    assert prompts.count("baseline_evidence_capsule") >= 3
+    # The real native renderer bounds a reflected record.  The adapter must
+    # therefore place the concrete candidate strategy/action ahead of the
+    # verbose capsule, rather than only proving that the full JSON exists.
+    assert prompts.count("Actionable Candidate Evolution") >= 3
+    assert prompts.count("candidate_summary") >= 3
     assert "submitted report relies on its produced figures" in prompts
-    assert "fresh workspace without baseline files" in prompts
+    assert "fresh workspace" in prompts
+    assert "concrete next-run action" in prompts
     assert "candidate_summary" in prompts
-    assert "PRESERVE VERIFIED STRENGTHS BEFORE ADDING IMPROVEMENTS" in prompts
+    assert "candidate-proven strategy" in prompts
     assert "candidate_summary.png" in prompts
     assert "quasiflux" not in prompts.casefold()
     assert "private_target_figure" not in prompts.casefold()

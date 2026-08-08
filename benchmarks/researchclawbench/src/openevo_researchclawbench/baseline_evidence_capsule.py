@@ -49,10 +49,12 @@ _GENERIC_STEM_TOKENS = frozenset(
         "figure",
         "image",
         "manifest",
+        "meta",
         "output",
         "report",
         "result",
         "summary",
+        "validation",
     }
 )
 
@@ -88,10 +90,15 @@ def build_reflector_capsule_view(capsule: Mapping[str, Any]) -> dict[str, Any]:
     """
 
     _require_schema(capsule)
-    concepts = capsule["candidate_concepts"][:2]
-    strengths = capsule["successful_work"][:1]
-    weaknesses = capsule["observed_weaknesses"][:1]
-    actions = capsule["improvement_actions"][:1]
+    # Keep the view compact, but preserve enough of the candidate's actual
+    # strategy for a native reflector to name it rather than silently
+    # distilling it into generic research advice.  This is one bundle-level
+    # concrete-evolution contract; it does not prescribe separate roles for
+    # memory, skill, and agent-system artifacts.
+    concepts = capsule["candidate_concepts"][:3]
+    strengths = capsule["successful_work"][:2]
+    weaknesses = capsule["observed_weaknesses"][:2]
+    actions = capsule["improvement_actions"][:2]
     actions_by_weakness = {
         item["addresses"]: item
         for item in actions
@@ -116,6 +123,27 @@ def build_reflector_capsule_view(capsule: Mapping[str, Any]) -> dict[str, Any]:
         )
     if not concepts or not strengths or not pairs:
         raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_REFLECTOR_VIEW_INVALID")
+    candidate_proven_strategies = []
+    strength_by_concept = {
+        item.get("concept_id"): item
+        for item in strengths
+        if isinstance(item, dict) and isinstance(item.get("concept_id"), str)
+    }
+    for concept in concepts:
+        if not isinstance(concept, dict):
+            continue
+        strength = strength_by_concept.get(concept.get("concept_id"))
+        if not isinstance(strength, dict):
+            continue
+        candidate_proven_strategies.append(
+            {
+                "concept": concept["text"],
+                "reconstruction": strength["summary"],
+                "evidence_refs": concept["evidence_refs"][:1],
+            }
+        )
+    if not candidate_proven_strategies:
+        raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_REFLECTOR_VIEW_INVALID")
     return {
         "schema_version": REFLECTOR_CAPSULE_SCHEMA,
         "capsule_sha256": canonical_sha256(dict(capsule)),
@@ -136,6 +164,25 @@ def build_reflector_capsule_view(capsule: Mapping[str, Any]) -> dict[str, Any]:
             for item in strengths
         ],
         "weakness_to_action": pairs,
+        "concrete_evolution": {
+            "objective": (
+                "Retain candidate-proven analysis paths as concrete fresh-workspace "
+                "lessons, rather than replacing them with generic workflow advice."
+            ),
+            "candidate_proven_strategies": candidate_proven_strategies,
+            "bundle_semantics": [
+                (
+                    "Across the evolved artifact bundle, name a candidate-proven "
+                    "analysis concept in a substantive reconstruction or improvement "
+                    "statement; a bare source-file list is insufficient."
+                ),
+                (
+                    "Connect an observed candidate weakness to a concrete next-run "
+                    "action that can be performed from public inputs in a fresh workspace."
+                ),
+                "Do not reconstruct hidden evaluation targets.",
+            ],
+        },
     }
 
 
@@ -182,7 +229,7 @@ def _target_names(ground_truth_entries: list[dict[str, Any]]) -> set[str]:
     return result
 
 
-def _concept_from_path(relative: str) -> str | None:
+def _concept_from_path(relative: str, *, kind: str) -> str | None:
     path = Path(relative)
     tokens = [token.casefold() for token in _TOKEN.findall(path.stem)]
     tokens = [token for token in tokens if not token.isdigit()]
@@ -190,7 +237,17 @@ def _concept_from_path(relative: str) -> str | None:
     selected = specific or tokens
     if not selected:
         return None
-    return " ".join(selected[:6])
+    stem = " ".join(selected[:6])
+    # A semantic label is safer and more useful to a fresh candidate than an
+    # instruction to preserve a vanished filename.  It remains provenance
+    # checked against the candidate-owned path below.
+    if kind == "analysis" and "analysis" not in selected:
+        return f"{stem} analysis"
+    if kind == "figure":
+        return f"{stem} visual evidence"
+    if kind == "result" and "summary" not in selected:
+        return f"{stem} data summary"
+    return stem
 
 
 def _concepts(root: Path, files: list[str], targets: set[str]) -> list[dict[str, Any]]:
@@ -206,7 +263,7 @@ def _concepts(root: Path, files: list[str], targets: set[str]) -> list[dict[str,
             path = Path(relative)
             if path.suffix.casefold() not in suffixes or path.name.casefold() in targets:
                 continue
-            concept = _concept_from_path(relative)
+            concept = _concept_from_path(relative, kind=kind)
             if concept is None or concept in seen:
                 continue
             seen.add(concept)

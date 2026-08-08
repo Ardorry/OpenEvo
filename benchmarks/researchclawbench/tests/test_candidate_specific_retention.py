@@ -171,8 +171,7 @@ def test_candidate_specific_artifact_triple_is_accepted(tmp_path: Path) -> None:
     assert report["status"] == "PASS"
     assert report["aggregate"]["candidate_specific_reference_count"] >= 2
     assert report["aggregate"]["weakness_to_action_mapping_count"] >= 1
-    assert report["artifact_metrics"]["text_memory"]["retained_concepts"]
-    assert report["artifact_metrics"]["skill_bundle"]["validation_step_count"] >= 1
+    assert report["bundle_requirements"]["per_artifact_role_prescription"] is False
 
 
 def test_gt_specific_artifact_is_rejected(tmp_path: Path) -> None:
@@ -195,9 +194,12 @@ def test_gt_specific_artifact_is_rejected(tmp_path: Path) -> None:
 def test_artifact_requires_weakness_to_action_mapping(tmp_path: Path) -> None:
     _root, projection = _projection(tmp_path)
     artifacts = _artifact_texts()
-    artifacts["text_memory"] = (
-        "The custom analysis route has a visual evidence weakness without a next step."
-    )
+    artifacts = {
+        artifact_type: (
+            "The custom analysis route has a visual evidence weakness without a next step."
+        )
+        for artifact_type in artifacts
+    }
     report = assess_task_specific_artifact_quality(
         capsule=projection["baseline_evidence_capsule"],
         artifact_texts=artifacts,
@@ -205,7 +207,37 @@ def test_artifact_requires_weakness_to_action_mapping(tmp_path: Path) -> None:
     )
 
     assert report["status"] == QUALITY_FAILURE
-    assert report["artifact_metrics"]["text_memory"]["weakness_to_action_mapping_count"] == 0
+    assert report["aggregate"]["weakness_to_action_mapping_count"] == 0
+
+
+def test_low_signal_concepts_do_not_turn_generic_advice_into_fidelity(
+    tmp_path: Path,
+) -> None:
+    _root, projection = _projection(tmp_path)
+    capsule = deepcopy(projection["baseline_evidence_capsule"])
+    capsule["candidate_concepts"] = [
+        {
+            "concept_id": "concept_01",
+            "text": "validation",
+            "kind": "figure",
+            "evidence_refs": ["report/images/custom_trend.png"],
+            "provenance": "candidate_workspace",
+        }
+    ]
+    artifacts = {
+        artifact_type: (
+            "In a fresh workspace, preserve validation and add a validation step "
+            "for the visual evidence weakness."
+        )
+        for artifact_type in _artifact_texts()
+    }
+    with pytest.raises(TaskSpecificArtifactQualityError) as caught:
+        require_task_specific_artifact_quality(
+            capsule=capsule,
+            artifact_texts=artifacts,
+            ground_truth_entries=_gt(),
+        )
+    assert caught.value.reason_code == "ARTIFACT_QUALITY_CAPSULE_INVALID"
 
 
 def test_production_quality_port_reads_only_bounded_core_snapshots_and_archives_no_text(

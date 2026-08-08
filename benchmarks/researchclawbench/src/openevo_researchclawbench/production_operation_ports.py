@@ -3155,6 +3155,11 @@ class CoreFeedbackPort(ProductionOperationPort):
             reflector_feedback = (
                 projection.get("reflector_feedback") if isinstance(projection, dict) else None
             )
+            actionable = (
+                reflector_feedback.get("actionable_candidate_evolution")
+                if isinstance(reflector_feedback, dict)
+                else None
+            )
             sanitized = (
                 projection.get("sanitized_feedback") if isinstance(projection, dict) else None
             )
@@ -3173,6 +3178,55 @@ class CoreFeedbackPort(ProductionOperationPort):
                 if isinstance(projection, dict)
                 else None
             )
+            expected_actionable: dict[str, Any] | None = None
+            if isinstance(reflector_capsule, dict):
+                strategies = reflector_capsule.get("successful_work")
+                mappings = reflector_capsule.get("weakness_to_action")
+                concepts = reflector_capsule.get("candidate_concepts")
+                if (
+                    isinstance(strategies, list)
+                    and strategies
+                    and isinstance(strategies[0], dict)
+                    and isinstance(mappings, list)
+                    and mappings
+                    and isinstance(mappings[0], dict)
+                    and isinstance(concepts, list)
+                    and concepts
+                    and all(isinstance(item, dict) for item in concepts[:2])
+                    and isinstance(reflector_capsule.get("fresh_workspace_requirement"), str)
+                    and all(
+                        isinstance(strategies[0].get(field), str)
+                        for field in ("summary",)
+                    )
+                    and all(
+                        isinstance(mappings[0].get(field), str)
+                        for field in (
+                            "next_run_action",
+                            "candidate_observation",
+                        )
+                    )
+                    and all(
+                        isinstance(item.get("text"), str) for item in concepts[:2]
+                    )
+                ):
+                    expected_actionable = {
+                        "action": mappings[0]["next_run_action"],
+                        "candidate_specific_concepts": [
+                            item["text"] for item in concepts[:2]
+                        ],
+                        "candidate_strategy": strategies[0]["summary"],
+                        "fresh_workspace": reflector_capsule[
+                            "fresh_workspace_requirement"
+                        ],
+                        "observed_weakness": mappings[0]["candidate_observation"],
+                        "requirement": (
+                            "Across the evolved artifact bundle, retain the named "
+                            "candidate-proven strategy in a substantive reconstruction "
+                            "or improvement statement and connect the observed weakness "
+                            "to this concrete next-run action. Do not replace it with "
+                            "generic workflow advice or reconstruct hidden targets."
+                        ),
+                    }
             admission = projection.get("admission") if isinstance(projection, dict) else None
             capsule_admission = (
                 projection.get("baseline_evidence_capsule_admission")
@@ -3224,6 +3278,8 @@ class CoreFeedbackPort(ProductionOperationPort):
                 or reflector_feedback.get("schema_version") != RETENTION_FEEDBACK_SCHEMA
                 or reflector_feedback.get("feedback_class") != RETENTION_FEEDBACK_CLASS
                 or reflector_feedback.get("task_id") != request.get("task_id")
+                or expected_actionable is None
+                or actionable != expected_actionable
                 or reflector_feedback.get("sanitized_evaluation_feedback")
                 != reflector_sanitized
                 or reflector_feedback.get("baseline_evidence_capsule") != reflector_capsule

@@ -36,6 +36,20 @@ _GENERIC_PATTERNS = (
     "check results",
     "follow instructions",
 )
+_LOW_SIGNAL_CONCEPTS = frozenset(
+    {
+        "analysis",
+        "data",
+        "figure",
+        "image",
+        "meta",
+        "output",
+        "report",
+        "result",
+        "summary",
+        "validation",
+    }
+)
 _SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+(?=[#*-]|\S)")
 
 
@@ -78,8 +92,16 @@ def _concepts(capsule: Mapping[str, Any]) -> list[str]:
         if not isinstance(text, str) or not _normalize(text):
             raise TaskSpecificArtifactQualityError("ARTIFACT_QUALITY_CAPSULE_INVALID")
         normalized = _normalize(text)
+        # A one-word generic label such as "validation" cannot establish that
+        # native reflection retained a candidate-specific strategy.  It stays
+        # in the capsule for traceability, but is not counted as fidelity.
+        tokens = normalized.split()
+        if not any(token not in _LOW_SIGNAL_CONCEPTS for token in tokens):
+            continue
         if normalized not in concepts:
             concepts.append(normalized)
+    if not concepts:
+        raise TaskSpecificArtifactQualityError("ARTIFACT_QUALITY_CAPSULE_INVALID")
     return concepts
 
 
@@ -100,7 +122,18 @@ def _concept_units(text: str, concepts: list[str]) -> dict[str, list[str]]:
     units = _semantic_units(text)
     result: dict[str, list[str]] = {}
     for concept in concepts:
-        matches = [unit for unit in units if concept in _normalize(unit)]
+        concept_tokens = [
+            token for token in concept.split() if token not in _LOW_SIGNAL_CONCEPTS
+        ]
+        matches = [
+            unit
+            for unit in units
+            if concept in _normalize(unit)
+            or (
+                concept_tokens
+                and all(token in _normalize(unit) for token in concept_tokens)
+            )
+        ]
         if matches:
             result[concept] = matches
     return result
@@ -241,25 +274,21 @@ def assess_task_specific_artifact_quality(
         ),
         "overall_retention_ratio": round(len(overall_retained) / len(concepts), 6),
     }
-    memory = metrics["text_memory"]
-    skill = metrics["skill_bundle"]
-    agent = metrics["agent_system"]
     passed = (
         not leakage
         and aggregate["candidate_specific_reference_count"] >= 2
         and aggregate["baseline_strength_count"] >= 1
         and aggregate["observed_weakness_count"] >= 1
         and aggregate["weakness_to_action_mapping_count"] >= 1
-        and bool(memory["retained_concepts"])
-        and memory["baseline_strength_count"] >= 1
-        and memory["observed_weakness_count"] >= 1
-        and memory["weakness_to_action_mapping_count"] >= 1
-        and bool(skill["retained_concepts"])
-        and skill["executable_task_local_step_count"] >= 2
-        and skill["validation_step_count"] >= 1
-        and agent["fresh_workspace_reconstruction_present"] is True
-        and agent["preserve_baseline_strategy_present"] is True
-        and agent["weakness_driven_improvement_present"] is True
+        and any(
+            metric["fresh_workspace_reconstruction_present"] for metric in metrics.values()
+        )
+        and any(
+            metric["preserve_baseline_strategy_present"] for metric in metrics.values()
+        )
+        and any(
+            metric["weakness_driven_improvement_present"] for metric in metrics.values()
+        )
     )
     body = {
         "schema_version": QUALITY_SCHEMA,
@@ -267,6 +296,12 @@ def assess_task_specific_artifact_quality(
         "candidate_concepts": concepts,
         "artifact_metrics": metrics,
         "aggregate": aggregate,
+        "bundle_requirements": {
+            "concrete_candidate_strategy": True,
+            "observed_weakness_to_action": True,
+            "fresh_workspace_reconstruction": True,
+            "per_artifact_role_prescription": False,
+        },
         "gt_leakage_findings": leakage,
         "provenance_violations": [],
         "artifact_text_sha256": {

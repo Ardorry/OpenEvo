@@ -645,16 +645,42 @@ def project_sanitized_evaluation_feedback(
         ],
     }
     reflector_capsule = build_reflector_capsule_view(capsule)
+    first_strategy = reflector_capsule["successful_work"][0]
+    first_action = reflector_capsule["weakness_to_action"][0]
+    actionable_candidate_evolution = {
+        # Core's native renderer bounds each reflected record.  Keep the
+        # candidate-specific strategy and its next-run action at the front of
+        # the sorted feedback mapping so they survive that existing bounded
+        # renderer without changing the Core template.
+        "action": first_action["next_run_action"],
+        "candidate_specific_concepts": [
+            item["text"] for item in reflector_capsule["candidate_concepts"][:2]
+        ],
+        "candidate_strategy": first_strategy["summary"],
+        "fresh_workspace": reflector_capsule["fresh_workspace_requirement"],
+        "observed_weakness": first_action["candidate_observation"],
+        "requirement": (
+            "Across the evolved artifact bundle, retain the named candidate-proven "
+            "strategy in a substantive reconstruction or improvement statement and "
+            "connect the observed weakness to this concrete next-run action. Do not "
+            "replace it with generic workflow advice or reconstruct hidden targets."
+        ),
+    }
     reflector_feedback = {
         "schema_version": RETENTION_FEEDBACK_SCHEMA,
         "status": "available_for_evolution",
         "feedback_class": RETENTION_FEEDBACK_CLASS,
         "task_id": task_id,
+        "actionable_candidate_evolution": actionable_candidate_evolution,
         "sanitized_evaluation_feedback": reflector_sanitized_feedback,
         "baseline_evidence_capsule": reflector_capsule,
         "fresh_workspace_guidance": [
             "The next Candidate will run in a fresh workspace without baseline files.",
-            "Distill a useful baseline strategy, observed weakness, and executable next-run action.",
+            (
+                "Distill concrete candidate-proven analysis lessons: retain a named "
+                "baseline strategy, connect an observed weakness to an executable "
+                "next-run action, and do not reduce this to generic workflow advice."
+            ),
             "Do not reconstruct hidden evaluation targets.",
         ],
         "policy": {
