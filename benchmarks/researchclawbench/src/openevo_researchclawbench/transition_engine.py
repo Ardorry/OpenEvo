@@ -136,7 +136,12 @@ _ALLOWED: dict[TrainingStage, frozenset[TrainingStage]] = {
         }
     ),
     TrainingStage.EVOLUTION_RUNNING: frozenset(
-        {TrainingStage.EVOLUTION_COMPLETED, TrainingStage.BLOCKED, TrainingStage.FAILED}
+        {
+            TrainingStage.EVOLUTION_COMPLETED,
+            TrainingStage.ITEM_INVALIDATED_RESET,
+            TrainingStage.BLOCKED,
+            TrainingStage.FAILED,
+        }
     ),
     TrainingStage.EVOLUTION_COMPLETED: frozenset(
         {TrainingStage.ARTIFACT_QUALITY_ADMITTED, TrainingStage.COMPOSITE_ADMITTED}

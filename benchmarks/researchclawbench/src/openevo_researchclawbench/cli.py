@@ -1469,6 +1469,16 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         choices=("MECHANISM_CHANGE_AFTER_TASK_3",),
     )
+    per_item_failed_invalidate = sub.add_parser(
+        "per-item-invalidate-failed-evolution"
+    )
+    per_item_failed_invalidate.add_argument("--protocol", required=True, type=Path)
+    per_item_failed_invalidate.add_argument("--run-id", required=True)
+    per_item_failed_invalidate.add_argument(
+        "--reason",
+        required=True,
+        choices=("R3_CONTENT_ADMISSION_SCOPE_CONFLICT",),
+    )
     minimal = sub.add_parser("minimal-per-item")
     minimal.add_argument("--protocol", required=True, type=Path)
     minimal.add_argument("--run-id", required=True)
@@ -1583,6 +1593,17 @@ def main(argv: list[str] | None = None) -> int:
                 production=False,
             )
             result = control.invalidate_undispatched_per_item_evolution(reason=args.reason)
+            print_closed_json(result)
+            return 0
+        if args.command == "per-item-invalidate-failed-evolution":
+            control = DurableTrainingControl(
+                config=config,
+                run_id=args.run_id,
+                require_existing=True,
+                production=False,
+                core_control_authority=acquire_managed_core_control(config),
+            )
+            result = control.invalidate_failed_per_item_evolution(reason=args.reason)
             print_closed_json(result)
             return 0
         if getattr(config, "formal_runs_v11", None) is not None and args.command in {

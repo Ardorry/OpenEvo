@@ -238,6 +238,9 @@ class SyntheticOperations:
             "attachment_id": f"attachment-{request['task_id']}-{attempt}",
             "resolved_view_sha256": f"{attempt + 4}" * 64,
             "task_local_overlay_id": f"overlay-{request['task_id']}",
+            "successor_transition_id": (
+                f"successor-{request['task_id']}-{attempt}"
+            ),
         }
         if request.get("feedback_source") == "current_task_gt":
             gt = request["gt_supervision"]
@@ -594,6 +597,41 @@ def test_per_item_mechanism_invalidation_preserves_baseline_and_resets_pre_evolu
         supervisor.invalidate_undispatched_per_item_evolution(
             reason="MECHANISM_CHANGE_AFTER_TASK_3"
         )
+
+
+def test_failed_per_item_evolution_invalidation_requires_core_terminal_proof(
+    tmp_path: Path,
+) -> None:
+    operations = SyntheticOperations()
+    supervisor = _per_item_supervisor(tmp_path, operations, task="Astronomy_004")
+    _drive_to(supervisor, "EVOLUTION_RUNNING")
+    receipt = {
+        "schema_version": "openevo.researchclawbench.failed_evolution_closure.v1",
+        "terminal_proven": True,
+        "kind": "evolution",
+        "successor_transition_id": "successor-Astronomy_004-0",
+        "successor_artifact_count": 0,
+        "core_abandonment": "succeeded",
+        "candidate_model_calls_reexecuted": 0,
+        "reflector_model_calls_reexecuted": 0,
+        "judge_calls_reexecuted": 0,
+    }
+    supervisor.store.fail_side_effect(
+        idempotency_key="synthetic-per-item:Astronomy_004:a0:evolution",
+        receipt=receipt,
+    )
+
+    closed = supervisor.invalidate_failed_per_item_evolution(
+        reason="R3_CONTENT_ADMISSION_SCOPE_CONFLICT",
+        terminal_evolution_receipt=receipt,
+    )
+    verified = supervisor.verify()
+
+    assert closed["stage"] == "ITEM_INVALIDATED_RESET"
+    assert closed["item_invalidation_receipt"]["evolution_dispatched"] is True
+    assert closed["item_invalidation_receipt"]["failed_side_effects"] == 1
+    assert closed["active_attachment_receipt"] is None
+    assert verified["execution_status"] == "COMPLETED_INVALIDATED"
 
 
 def test_next_per_item_namespace_starts_clean_after_prior_item_reset(

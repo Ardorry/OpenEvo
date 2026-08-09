@@ -18,9 +18,9 @@ from typing import Any
 from .config import FROZEN_TASKS, ExperimentConfig
 from .managed_core_control import ManagedCoreControlAuthority
 from .owned_resource_registry import OwnedResourceRegistry
-from .production_operation_ports import build_production_ports
+from .production_operation_ports import CoreControlV2Client, build_production_ports
 from .production_training_operations import ProductionTrainingOperations
-from .training_state_store import TrainingStateStore
+from .training_state_store import TrainingStateStore, canonical_sha256
 from .training_supervisor import (
     CommunityTrainingSupervisor,
     SupervisorIdentity,
@@ -97,6 +97,7 @@ class DurableTrainingControl:
                 raise ValueError("requested task scope differs from persisted supervisor state")
             task_ids = persisted_tasks
         task_ids = task_ids or FROZEN_TASKS
+        self.core_control_authority = core_control_authority
         if production and operations is None:
             if core_control_authority is None:
                 raise TrainingOperationsUnavailable(
@@ -169,6 +170,108 @@ class DurableTrainingControl:
 
     def invalidate_undispatched_per_item_evolution(self, *, reason: str) -> dict[str, Any]:
         return self.supervisor.invalidate_undispatched_per_item_evolution(reason=reason)
+
+    def invalidate_failed_per_item_evolution(self, *, reason: str) -> dict[str, Any]:
+        """Use the owned Core transition lifecycle to close a failed R3 item."""
+
+        if reason != "R3_CONTENT_ADMISSION_SCOPE_CONFLICT":
+            raise ValueError("failed per-item invalidation reason is not allowlisted")
+        if self.core_control_authority is None:
+            raise TrainingOperationsUnavailable(
+                "failed per-item invalidation requires managed Core authority"
+            )
+        state = self.status()
+        attachment = state.get("active_attachment_receipt")
+        if not isinstance(attachment, dict):
+            raise ValueError("failed per-item invalidation lacks sealed attachment")
+        transition_id = attachment.get("successor_transition_id")
+        if not isinstance(transition_id, str) or not transition_id:
+            raise ValueError("failed per-item invalidation lacks successor transition")
+        client = CoreControlV2Client(self.core_control_authority)
+        try:
+            authority = client.json(
+                "GET", f"/v2/internal/training-successors/{transition_id}"
+            )
+            transition = authority.get("transition")
+            attempts = authority.get("attempts")
+            artifacts = authority.get("artifacts")
+            commit = authority.get("commit")
+            if (
+                not isinstance(transition, dict)
+                or transition.get("state") != "failed"
+                or not isinstance(transition.get("error"), dict)
+                or transition["error"].get("retryable") is not False
+                or not isinstance(attempts, list)
+                or not attempts
+                or not isinstance(attempts[-1], dict)
+                or attempts[-1].get("state") != "failed"
+                or not isinstance(attempts[-1].get("error"), dict)
+                or attempts[-1]["error"].get("retryable") is not False
+                or artifacts != []
+                or commit is not None
+            ):
+                raise ValueError("failed successor terminal authority is incomplete")
+            transition_ref = transition.get("transition")
+            predecessor = (
+                transition_ref.get("predecessor_project_head")
+                if isinstance(transition_ref, dict)
+                else None
+            )
+            if not isinstance(predecessor, dict) or not isinstance(
+                predecessor.get("project_head_id"), str
+            ):
+                raise ValueError("failed successor predecessor authority is incomplete")
+            key = f"{self.supervisor.experiment_id}:failed-evolution-abandon"
+            abandoned = client.json(
+                "POST",
+                f"/v2/transitions/{transition_id}/abandon",
+                payload={"expected_project_head_id": predecessor["project_head_id"]},
+                headers={"Idempotency-Key": key},
+            )
+            if (
+                abandoned.get("kind") != "transition_abandon"
+                or abandoned.get("status") != "succeeded"
+            ):
+                raise ValueError("failed successor abandonment is not authoritative")
+            terminal_receipt = {
+                "schema_version": "openevo.researchclawbench.failed_evolution_closure.v1",
+                "terminal_proven": True,
+                "kind": "evolution",
+                "reason_code": "r3_content_admission_scope_conflict",
+                "successor_transition_id": transition_id,
+                "latest_transition_attempt_id": attempts[-1].get(
+                    "transition_attempt_id"
+                ),
+                "terminal_error_code": attempts[-1]["error"].get("code"),
+                "successor_artifact_count": 0,
+                "core_abandonment": "succeeded",
+                "core_abandon_operation_id": abandoned.get("operation_id"),
+                "terminal_authority_sha256": canonical_sha256(
+                    {
+                        "transition": transition,
+                        "attempts": attempts,
+                        "artifacts": artifacts,
+                        "commit": commit,
+                    }
+                ),
+                "candidate_model_calls_reexecuted": 0,
+                "reflector_model_calls_reexecuted": 0,
+                "judge_calls_reexecuted": 0,
+            }
+        finally:
+            client.close()
+        task = self.supervisor.task_ids[state["current_task_index"]]
+        self.store.fail_side_effect(
+            idempotency_key=(
+                f"{self.supervisor.experiment_id}:{task}:"
+                f"a{state['current_attempt']}:evolution"
+            ),
+            receipt=terminal_receipt,
+        )
+        return self.supervisor.invalidate_failed_per_item_evolution(
+            reason=reason,
+            terminal_evolution_receipt=terminal_receipt,
+        )
 
     def stop_owned(self) -> dict[str, Any]:
         stopped: list[str] = []

@@ -1438,14 +1438,35 @@ class CommunityTrainingSupervisor:
             or not isinstance(state.get("item_reset_receipt"), dict)
         ):
             raise ValueError("per-item reset terminal inventory is incomplete")
+        invalidation_receipt = state.get("item_invalidation_receipt")
+        failed_evolution_invalidation = (
+            isinstance(invalidation_receipt, dict)
+            and invalidation_receipt.get("reason")
+            == "R3_CONTENT_ADMISSION_SCOPE_CONFLICT"
+        )
+        failed_evolution_effect_valid = (
+            len(evolution_effects) == 1
+            and evolution_effects[0].get("status") == "failed"
+            and len(failed_effects) == 1
+            and evolution_effects[0].get("receipt")
+            == (
+                invalidation_receipt.get("failed_evolution")
+                if isinstance(invalidation_receipt, dict)
+                else None
+            )
+        )
         if state["stage"] == TrainingStage.ITEM_INVALIDATED_RESET.value and (
             not self.per_item_reset_enabled
             or len(self.task_ids) != 1
             or attempts != 1
-            or evolution_effects
+            or (
+                failed_evolution_invalidation
+                and not failed_evolution_effect_valid
+            )
+            or (not failed_evolution_invalidation and evolution_effects)
             or state.get("evolution_job_ids") != []
             or pending
-            or failed_effects
+            or (not failed_evolution_invalidation and failed_effects)
             or resources
             or state.get("active_artifact_ids") != []
             or state.get("current_composite_id") is not None
@@ -3285,6 +3306,114 @@ class CommunityTrainingSupervisor:
             TrainingStage.EVOLUTION_PENDING,
             TrainingStage.ITEM_INVALIDATED_RESET,
             "per-item-mechanism-invalidated-reset",
+            updates={
+                "current_task_index": len(self.task_ids),
+                "current_composite_id": None,
+                "core_project_id": None,
+                "preseeded_workspace_authority": None,
+                "current_task_local_overlay_id": None,
+                "current_task_local_overlay_scope_id": None,
+                "active_artifact_ids": [],
+                "active_candidate_intent": None,
+                "active_candidate_receipt": None,
+                "active_validation_receipt": None,
+                "active_evaluation_receipt": None,
+                "active_feedback_projection_receipt": None,
+                "active_baseline_capsule": None,
+                "active_attachment_receipt": None,
+                "active_evolution_receipt": None,
+                "active_artifact_quality_receipt": None,
+                "active_baseline_equivalence_receipt": None,
+                "active_admission_receipt": None,
+                "active_evolved_workspace_receipt": None,
+                "item_reset_receipt": None,
+                "item_invalidation_receipt": receipt,
+            },
+            receipt=receipt,
+        )
+
+    def invalidate_failed_per_item_evolution(
+        self,
+        *,
+        reason: str,
+        terminal_evolution_receipt: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Archive one failed, artifact-free native evolution attempt.
+
+        The Core owner must first abandon the exact failed successor and seal
+        the planned evolution side effect as terminal.  This supervisor method
+        only clears task-local ownership after validating that durable proof.
+        """
+
+        if reason != "R3_CONTENT_ADMISSION_SCOPE_CONFLICT":
+            raise ValueError("failed per-item invalidation reason is not allowlisted")
+        state = self.status()
+        if not self.per_item_reset_enabled or len(self.task_ids) != 1:
+            raise ValueError("failed per-item invalidation requires one reset-scoped task")
+        if TrainingStage(state["stage"]) is not TrainingStage.EVOLUTION_RUNNING:
+            raise ValueError("failed per-item invalidation requires running evolution")
+        if state.get("current_attempt") != 0:
+            raise ValueError("failed per-item invalidation is only allowed for baseline evolution")
+        attachment = state.get("active_attachment_receipt")
+        if not isinstance(attachment, dict):
+            raise ValueError("failed per-item invalidation lacks sealed attachment")
+        transition_id = attachment.get("successor_transition_id")
+        if (
+            not isinstance(terminal_evolution_receipt, dict)
+            or terminal_evolution_receipt.get("terminal_proven") is not True
+            or terminal_evolution_receipt.get("successor_transition_id") != transition_id
+            or terminal_evolution_receipt.get("core_abandonment") != "succeeded"
+            or terminal_evolution_receipt.get("successor_artifact_count") != 0
+            or terminal_evolution_receipt.get("reflector_model_calls_reexecuted") != 0
+            or terminal_evolution_receipt.get("candidate_model_calls_reexecuted") != 0
+            or terminal_evolution_receipt.get("judge_calls_reexecuted") != 0
+        ):
+            raise ValueError("failed per-item invalidation terminal proof is incomplete")
+        effects = self.store.side_effects_for_experiment(self.experiment_id)
+        evolution_effects = [item for item in effects if item.get("kind") == "evolution"]
+        if (
+            len(evolution_effects) != 1
+            or evolution_effects[0].get("status") != "failed"
+            or evolution_effects[0].get("receipt") != terminal_evolution_receipt
+            or any(
+                item.get("kind") != "evolution" and item.get("status") != "completed"
+                for item in effects
+            )
+            or self.store.active_resources(self.experiment_id)
+            or state.get("evolution_job_ids") != []
+            or state.get("registry_artifact_ids") != []
+            or state.get("active_artifact_ids") != []
+        ):
+            raise ValueError("failed per-item invalidation ownership inventory is incomplete")
+        task = self.task_ids[0]
+        receipt = {
+            "schema_version": "openevo.researchclawbench.failed_per_item_invalidation.v1",
+            "task_id": task,
+            "reason": reason,
+            "archive_preserved": True,
+            "evolution_dispatched": True,
+            "evolution_job_ids": [],
+            "failed_evolution": terminal_evolution_receipt,
+            "pending_side_effects": 0,
+            "failed_side_effects": 1,
+            "active_owned_resources": 0,
+            "budget_usage": self.store.budget_usage(self.experiment_id),
+            "reset": {
+                "active_artifacts": [],
+                "active_candidate": None,
+                "active_workspace": None,
+                "active_gt_supervision": None,
+                "active_evaluation_feedback": None,
+                "active_baseline_capsule": None,
+                "active_successor_head": None,
+                "active_project_head": None,
+                "active_reflector": None,
+            },
+        }
+        return self._transition(
+            TrainingStage.EVOLUTION_RUNNING,
+            TrainingStage.ITEM_INVALIDATED_RESET,
+            "per-item-failed-evolution-invalidated-reset",
             updates={
                 "current_task_index": len(self.task_ids),
                 "current_composite_id": None,
