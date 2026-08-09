@@ -83,6 +83,10 @@ _TERM_NOISE = frozenset(
         "with",
     }
 )
+_PRESENTATION_PARAMETER_TARGET = re.compile(
+    r"(?i)^(?:x|y|x0|x1|y0|y1|cx|cy|r|row|col|left|right|top|bottom|"
+    r"width|height|margin|padding|color|rgb|font|pixel|canvas|bar_width|tick)$"
+)
 
 
 class MinimalSemanticEvolutionError(RuntimeError):
@@ -153,17 +157,36 @@ def _literal_refs(source: str, known_files: set[str]) -> list[str]:
 
 
 def _parameter_expressions(source: str, nodes: Iterable[ast.AST]) -> list[str]:
+    nodes = list(nodes)
     ranked: list[tuple[int, int, str]] = []
     seen: set[str] = set()
+    candidate_classes = {
+        child.name
+        for child in ast.parse(source).body
+        if isinstance(child, ast.ClassDef)
+    }
+
+    def add(priority: int, node: ast.AST, *, limit: int = 520) -> None:
+        rendered = _compact(_function_source(source, node), limit=limit)
+        if not rendered or not _NUMBER.search(rendered) or rendered in seen:
+            return
+        seen.add(rendered)
+        ranked.append((priority, getattr(node, "lineno", 0), rendered))
+
+    def assignment_target(node: ast.Assign | ast.AnnAssign) -> str:
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        names = [item.id for item in targets if isinstance(item, ast.Name)]
+        return names[0] if len(names) == 1 else ""
+
     for node in nodes:
         for child in ast.walk(node):
-            candidate: ast.AST | None = None
             if (
                 isinstance(child, ast.BoolOp)
                 and any(isinstance(part, ast.Compare) for part in child.values)
             ) or isinstance(child, ast.Compare):
-                candidate = child
-            elif isinstance(child, ast.arguments):
+                add(0, child, limit=320)
+                continue
+            if isinstance(child, ast.arguments):
                 positional = [*child.posonlyargs, *child.args]
                 defaults = [None] * (len(positional) - len(child.defaults)) + list(child.defaults)
                 for argument, default in zip(positional, defaults, strict=True):
@@ -174,24 +197,60 @@ def _parameter_expressions(source: str, nodes: Iterable[ast.AST]) -> list[str]:
                         value = f"{argument.arg}={rendered}"
                         if value not in seen:
                             seen.add(value)
-                            ranked.append((1, getattr(default, "lineno", 0), value))
+                            ranked.append((0, getattr(default, "lineno", 0), value))
                 continue
-            elif isinstance(child, (ast.Assign, ast.AnnAssign)):
+            if isinstance(child, (ast.Assign, ast.AnnAssign)):
                 rendered = _function_source(source, child)
-                if re.search(
-                    r"(?i)\b(?:threshold|cutoff|margin|epoch|alpha|beta|bins?|lr|l2|width)\b",
+                target = assignment_target(child)
+                value = child.value
+                if (
+                    not _NUMBER.search(rendered)
+                    or (target and _PRESENTATION_PARAMETER_TARGET.fullmatch(target))
+                ):
+                    continue
+                target_terms = set(target.casefold().split("_"))
+                scientific_terms = {
+                    "threshold", "cutoff", "fraction", "margin", "epoch", "alpha", "beta",
+                    "bin", "bins", "lr", "l2", "weight", "score", "onset", "potential",
+                    "propensity", "center", "scale",
+                }
+                priority = 0 if target_terms.intersection(scientific_terms) or re.search(
+                    r"(?i)\b(?:threshold|cutoff|fraction|margin|epoch|alpha|beta|bins?|"
+                    r"lr|l2|weight|score|onset|potential|propensity|center|scale)\b",
                     rendered,
-                ) and _NUMBER.search(rendered):
-                    candidate = child
-            if candidate is None:
+                ) else 1
+                if (
+                    priority == 0
+                    and isinstance(value, ast.Constant)
+                    and not isinstance(value.value, bool)
+                    and isinstance(value.value, (int, float))
+                ) or isinstance(
+                    value,
+                    (ast.BinOp, ast.BoolOp, ast.Compare, ast.Call, ast.IfExp, ast.List, ast.Tuple, ast.Dict),
+                ):
+                    add(priority, child)
                 continue
-            rendered = _compact(_function_source(source, candidate), limit=220)
-            if not rendered or not _NUMBER.search(rendered) or rendered in seen:
+            if not isinstance(child, ast.Call):
                 continue
-            seen.add(rendered)
-            signal = len(set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", rendered)))
-            ranked.append((-signal, getattr(candidate, "lineno", 0), rendered))
-    return [value for _signal, _line, value in sorted(ranked)[:16]]
+            call_name = (
+                child.func.id
+                if isinstance(child.func, ast.Name)
+                else child.func.attr
+                if isinstance(child.func, ast.Attribute)
+                else ""
+            )
+            numeric_literals = sum(
+                isinstance(item, ast.Constant)
+                and not isinstance(item.value, bool)
+                and isinstance(item.value, (int, float))
+                for item in ast.walk(child)
+            )
+            if call_name in candidate_classes and numeric_literals >= 2:
+                # Candidate-authored table rows and scientific constructors carry
+                # method-defining values that a fresh workspace cannot recover
+                # from a function name alone.
+                add(2, child, limit=1_000)
+    return [value for _priority, _line, value in sorted(ranked)[:24]]
 
 
 def _report_sections(report: str) -> list[tuple[str, str]]:
@@ -227,6 +286,33 @@ def _report_role(report: str, outputs: list[str], methods: list[str]) -> str:
     return (
         "; ".join(dict.fromkeys(matches))[:240] or "Executable evidence used by report/report.md"
     )
+
+
+def _report_evidence_excerpt(report: str, outputs: list[str], methods: list[str]) -> str:
+    """Keep a bounded Candidate explanation of why an executed path mattered."""
+
+    output_names = [Path(ref).name.casefold() for ref in outputs]
+    method_terms = {
+        token
+        for method in methods
+        for token in method.casefold().split("_")
+        if len(token) >= 4
+    }
+    ranked: list[tuple[int, int, str]] = []
+    order = 0
+    for _heading, body in _report_sections(report):
+        for paragraph in re.split(r"\n\s*\n", body):
+            compact = _compact(paragraph, limit=700)
+            if not compact or compact.startswith("!["):
+                continue
+            corpus = compact.casefold()
+            score = 3 * sum(name in corpus for name in output_names)
+            score += len(method_terms.intersection(re.findall(r"[a-z0-9]+", corpus)))
+            if score:
+                ranked.append((-score, order, compact))
+            order += 1
+    excerpts = [value for _score, _order, value in sorted(ranked)[:2]]
+    return " ".join(excerpts)[:1_100].rstrip()
 
 
 def _transcript_executed_scripts(root: Path, scripts: list[str]) -> set[str]:
@@ -356,6 +442,12 @@ def build_minimal_baseline_trace(*, candidate_root: str | Path) -> dict[str, Any
                 if title == "Evidence production path"
                 else _parameter_expressions(source, nodes)
             )
+            if title == "Scientific analysis and decision path" and main is not None:
+                parameters = list(
+                    dict.fromkeys(
+                        [*parameters, *_parameter_expressions(source, [main])]
+                    )
+                )[:24]
             steps = [
                 f"Call `{name}` from `{script}`." for name in ordered if name not in _METHOD_NOISE
             ][:12]
@@ -369,10 +461,14 @@ def build_minimal_baseline_trace(*, candidate_root: str | Path) -> dict[str, Any
                     "report-linked outputs."
                 )
             )
+            report_evidence = _report_evidence_excerpt(report, outputs, ordered)
+            why = transcript_status
+            if report_evidence:
+                why += f" Candidate report evidence: {report_evidence}"
             paths.append(
                 {
                     "summary": f"{title}: execute `{script}` with " + ", ".join(ordered[:8]),
-                    "why": transcript_status,
+                    "why": why,
                     "inputs": list(dict.fromkeys(inputs))[:8],
                     "steps": steps,
                     "parameters": parameters,
@@ -519,7 +615,14 @@ def _important_parameter_values(parameters: Iterable[str]) -> list[str]:
             rendered,
         ):
             values.extend(value for value in numbers if value not in {"0", "1", "-1"})
-    return list(dict.fromkeys(values))[:4]
+            continue
+        if re.search(
+            r"(?i)(?:threshold|cutoff|fraction|weight|score|onset|potential|"
+            r"propensity|center|scale|alpha|beta)",
+            rendered,
+        ):
+            values.extend(value for value in numbers if value not in {"0", "1", "-1"})
+    return list(dict.fromkeys(values))[:8]
 
 
 def _path_fidelity(path: Mapping[str, Any], artifact_text: str) -> dict[str, Any]:

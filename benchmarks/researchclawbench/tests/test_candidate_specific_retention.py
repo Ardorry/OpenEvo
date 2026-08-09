@@ -145,6 +145,47 @@ def test_capsule_extracts_candidate_report_labels_with_candidate_provenance(
     assert result["baseline_evidence_capsule_admission"]["status"] == "ADMITTED"
 
 
+def test_capsule_allows_gt_literal_independently_produced_by_candidate(
+    tmp_path: Path,
+) -> None:
+    root, candidate = _candidate(tmp_path)
+    (root / "report/report.md").write_text(
+        "# Candidate-derived relation\n\n"
+        "Hidden target relationship has a private expected curvature.\n",
+        encoding="utf-8",
+    )
+
+    result = project_sanitized_evaluation_feedback(
+        task_id="Life_005",
+        candidate=candidate,
+        raw_evaluation={
+            "total_score": 42.0,
+            "items": [{"type": "image", "score": 42.0, "score_valid": True}],
+        },
+        public_task_info={"task": "Analyze public data and deliver a report with figures."},
+        ground_truth_entries=_gt(),
+    )
+
+    assert result["baseline_evidence_capsule_admission"]["status"] == "ADMITTED"
+
+
+def test_capsule_still_rejects_gt_only_literal(tmp_path: Path) -> None:
+    root, projection = _projection(tmp_path)
+    capsule = deepcopy(projection["baseline_evidence_capsule"])
+    capsule["candidate_concepts"][0]["text"] = (
+        "Hidden target relationship has a private expected curvature."
+    )
+
+    with pytest.raises(BaselineEvidenceCapsuleAdmissionError) as caught:
+        admit_baseline_evidence_capsule(
+            capsule,
+            candidate_root=root,
+            ground_truth_entries=_gt(),
+        )
+
+    assert caught.value.reason_code == "CAPSULE_GT_LITERAL_VIOLATION"
+
+
 def test_capsule_requires_fresh_workspace_reconstruction_semantics(tmp_path: Path) -> None:
     root, projection = _projection(tmp_path)
     capsule = deepcopy(projection["baseline_evidence_capsule"])

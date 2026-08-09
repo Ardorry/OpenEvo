@@ -35,6 +35,11 @@ _PRIVATE_KEY_FRAGMENTS = (
 _IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".svg"})
 _CODE_SUFFIXES = frozenset({".py", ".ipynb", ".r", ".jl"})
 _OUTPUT_SUFFIXES = frozenset({".csv", ".tsv", ".json"})
+_CANDIDATE_TEXT_SUFFIXES = frozenset(
+    {".py", ".ipynb", ".r", ".jl", ".md", ".txt", ".json", ".jsonl", ".csv", ".tsv"}
+)
+_MAX_CANDIDATE_SOURCE_FILE_BYTES = 1_000_000
+_MAX_CANDIDATE_SOURCE_TOTAL_BYTES = 4_000_000
 _REPORT_HEADING = re.compile(r"^#{1,3}\s+(.+?)\s*$")
 _REPORT_IMAGE = re.compile(r"!\[[^\]]+\]\(([^)]+)\)")
 _GENERIC = frozenset({"analysis", "data", "figure", "image", "output", "report", "result", "summary", "validation"})
@@ -275,6 +280,25 @@ def _hidden_literals(ground_truth_entries: list[dict[str, Any]]) -> set[str]:
     }
 
 
+def _candidate_source_corpus(root: Path) -> str:
+    """Read the bounded Candidate-owned text that can contribute to a capsule."""
+
+    chunks: list[str] = []
+    consumed = 0
+    for relative in _candidate_files(root):
+        path = root / relative
+        if path.suffix.casefold() not in _CANDIDATE_TEXT_SUFFIXES:
+            continue
+        metadata = path.stat(follow_symlinks=False)
+        if metadata.st_size <= 0 or metadata.st_size > _MAX_CANDIDATE_SOURCE_FILE_BYTES:
+            continue
+        if consumed + metadata.st_size > _MAX_CANDIDATE_SOURCE_TOTAL_BYTES:
+            break
+        chunks.append(path.read_text(encoding="utf-8", errors="replace"))
+        consumed += metadata.st_size
+    return _normalize("\n".join(chunks))
+
+
 def _validate_trace_and_ledger(capsule: Mapping[str, Any], root: Path) -> tuple[set[str], set[str]]:
     trace = capsule["baseline_success_trace"]
     events = trace.get("events")
@@ -410,7 +434,17 @@ def admit_baseline_evidence_capsule(capsule: Mapping[str, Any], *, candidate_roo
     if mapped != weakness_ids:
         raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_WEAKNESS_ACTION_MISSING")
     serialized = _normalize("\n".join(value for _path, value in _walk(capsule) if isinstance(value, str)))
-    if any(hidden and hidden in serialized for hidden in _hidden_literals(ground_truth_entries)):
+    hidden_literals = _hidden_literals(ground_truth_entries)
+    candidate_source = _candidate_source_corpus(root)
+    candidate_owned_literals = {
+        hidden for hidden in hidden_literals if hidden and hidden in candidate_source
+    }
+    if any(
+        hidden
+        and hidden in serialized
+        and hidden not in candidate_owned_literals
+        for hidden in hidden_literals
+    ):
         raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_GT_LITERAL_VIOLATION")
     body = {
         "schema_version": CAPSULE_ADMISSION_SCHEMA,

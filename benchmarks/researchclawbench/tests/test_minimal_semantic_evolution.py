@@ -184,10 +184,102 @@ if __name__ == "__main__":
     assert "fit_method" in serialized
     assert "confusion_analysis" in serialized
     assert "probability_threshold=0.90" in serialized
+    assert "selected = fit_method([0.8, 0.95])" in serialized
     assert "pwd && ls" not in serialized
     assert "scratch.py" not in serialized
     assert "unrelated_replacement_pipeline" not in serialized
     assert admit_minimal_baseline_trace(trace, candidate_root=root)["status"] == "ADMITTED"
+
+
+def test_trace_keeps_candidate_table_values_scoring_formula_and_report_reasoning(
+    tmp_path: Path,
+) -> None:
+    root = _workspace(
+        tmp_path,
+        '''
+from dataclasses import dataclass
+
+@dataclass
+class Candidate:
+    name: str
+    homo: float
+    lumo: float
+
+def candidate_table():
+    return [
+        Candidate("BNE", -7.55, -0.28),
+        Candidate("DNE", -7.82, -0.42),
+    ]
+
+def sigmoid(x, midpoint, scale):
+    return 1.0 / (1.0 + x)
+
+def compute_descriptors(candidate):
+    reduction_propensity = sigmoid(-candidate.lumo, 0.05, 0.18)
+    oxidation_propensity = sigmoid(candidate.homo, -8.05, 0.22)
+    additive_score = 0.34 * oxidation_propensity + 0.26 * reduction_propensity
+    return additive_score
+
+def main():
+    for candidate in candidate_table():
+        compute_descriptors(candidate)
+''',
+    )
+    (root / "report/report.md").write_text(
+        "# Results\n\n"
+        "The candidate_descriptors.csv screen retained BNE as the leading baseline "
+        "because the explicit frontier-orbital scoring route produced the strongest score.\n",
+        encoding="utf-8",
+    )
+
+    trace = build_minimal_baseline_trace(candidate_root=root)
+    serialized = json.dumps(trace, ensure_ascii=False)
+    parameter_text = "\n".join(
+        parameter
+        for path in trace["successful_paths"]
+        for parameter in path["parameters"]
+    )
+
+    assert 'Candidate("BNE", -7.55, -0.28)' in parameter_text
+    assert "reduction_propensity = sigmoid(-candidate.lumo, 0.05, 0.18)" in parameter_text
+    assert (
+        "additive_score = 0.34 * oxidation_propensity + 0.26 * reduction_propensity"
+        in parameter_text
+    )
+    assert "retained BNE as the leading baseline" in serialized
+
+
+def test_trace_ignores_external_presentation_constructors(tmp_path: Path) -> None:
+    root = _workspace(
+        tmp_path,
+        '''
+class Candidate:
+    def __init__(self, name, onset, scale):
+        self.name = name
+        self.onset = onset
+        self.scale = scale
+
+def main():
+    return analyze_candidate()
+
+def analyze_candidate():
+    decision_threshold = 0.90
+    candidate = Candidate("BNE", 0.05, 0.18)
+    Rectangle((0, 0), 12, 8)
+    return candidate, decision_threshold
+''',
+    )
+
+    trace = build_minimal_baseline_trace(candidate_root=root)
+    parameter_text = "\n".join(
+        parameter
+        for path in trace["successful_paths"]
+        for parameter in path["parameters"]
+    )
+
+    assert 'Candidate("BNE", 0.05, 0.18)' in parameter_text
+    assert "decision_threshold = 0.90" in parameter_text
+    assert "Rectangle((0, 0), 12, 8)" not in parameter_text
 
 
 def test_astronomy_semantic_regression_requires_methods_and_thresholds() -> None:
@@ -221,6 +313,45 @@ def test_astronomy_semantic_regression_requires_methods_and_thresholds() -> None
                 "Run selection_rules, train_logistic, and confusion; write metrics.csv, "
                 "then add an independent quantitative validation comparison."
             ),
+        ),
+        content_admission_findings=[],
+        provenance_violations=[],
+    )
+
+    assert generic["status"] != "PASS"
+    assert concrete["status"] == "PASS"
+
+
+def test_scientific_formula_parameters_are_not_erased_by_underscores() -> None:
+    trace = _trace(
+        summary="Descriptor scoring with explicit propensity and score formulas.",
+        steps=["Call `compute_descriptors` from `code/screen_additives.py`."],
+        parameters=[
+            "reduction_propensity = sigmoid(-lumo, 0.05, 0.18)",
+            "additive_score = 0.34 * oxidation_propensity + 0.26 * reduction_propensity",
+        ],
+        outputs=["outputs/candidate_descriptors.csv"],
+    )
+    feedback = _feedback("quantitative_validation")
+    generic = assess_minimal_semantic_artifact_quality(
+        trace=trace,
+        sanitized_feedback=feedback,
+        artifact_texts=_artifact_texts(
+            "Retain compute_descriptors and candidate_descriptors.csv.",
+            "Reconstruct compute_descriptors, then add quantitative validation.",
+        ),
+        content_admission_findings=[],
+        provenance_violations=[],
+    )
+    concrete = assess_minimal_semantic_artifact_quality(
+        trace=trace,
+        sanitized_feedback=feedback,
+        artifact_texts=_artifact_texts(
+            (
+                "Retain compute_descriptors and candidate_descriptors.csv with the baseline "
+                "sigmoid settings 0.05 and 0.18 and score weights 0.34 and 0.26."
+            ),
+            "Reconstruct compute_descriptors, then add quantitative validation.",
         ),
         content_admission_findings=[],
         provenance_violations=[],
@@ -311,7 +442,11 @@ def test_native_r4_reflector_prompts_keep_methods_parameters_and_all_feedback(
             "Call `train_logistic` from `code/analysis.py`.",
             "Call `confusion` from `code/analysis.py`.",
         ],
-        parameters=['row["p_QSO"] >= 0.90 and row["p_WISE_QSO"] >= 0.97'],
+        parameters=[
+            'row["p_QSO"] >= 0.90 and row["p_WISE_QSO"] >= 0.97',
+            "reduction_propensity = sigmoid(-lumo, 0.05, 0.18)",
+            "additive_score = 0.34 * oxidation_propensity + 0.26 * reduction_propensity",
+        ],
         outputs=["outputs/metrics.csv"],
     )
     feedback = _feedback("visual_evidence", "quantitative_validation", "coverage")
@@ -375,7 +510,8 @@ def test_native_r4_reflector_prompts_keep_methods_parameters_and_all_feedback(
             if "ExpeL" in request.prompt:
                 text = (
                     "# Memory\n\n## Do\nKeep selection_rules at p_QSO 0.90 and "
-                    "p_WISE_QSO 0.97, plus train_logistic and confusion.\n\n"
+                    "p_WISE_QSO 0.97, plus train_logistic and confusion; retain sigmoid "
+                    "settings 0.05 and 0.18 and score weights 0.34 and 0.26.\n\n"
                     "## Avoid\nDo not replace the fitted-model path.\n\n"
                     "## Validate\nAdd the independent quantitative comparison.\n\n"
                     "## When Applicable\nUse for this catalog analysis.\n\n"
@@ -385,6 +521,7 @@ def test_native_r4_reflector_prompts_keep_methods_parameters_and_all_feedback(
                 text = (
                     "# Catalog skill\n\nRun selection_rules with p_QSO 0.90 and "
                     "p_WISE_QSO 0.97, then train_logistic and inspect confusion; "
+                    "rebuild sigmoid settings 0.05 and 0.18 and score weights 0.34 and 0.26; "
                     "add the independent quantitative comparison without dropping coverage.\n"
                 )
             else:
@@ -470,6 +607,10 @@ def test_native_r4_reflector_prompts_keep_methods_parameters_and_all_feedback(
             "confusion",
             "0.90",
             "0.97",
+            "0.05",
+            "0.18",
+            "0.34",
+            "0.26",
             "visual_evidence",
             "quantitative_validation",
             "coverage",
@@ -481,6 +622,10 @@ def test_native_r4_reflector_prompts_keep_methods_parameters_and_all_feedback(
         assert "judge reasoning" not in prompt.casefold()
     assert "selection_rules" in outputs["text_memory"]
     assert "selection_rules" in outputs["skill_bundle"]
+    assert all(
+        value in outputs["text_memory"] and value in outputs["skill_bundle"]
+        for value in ("0.05", "0.18", "0.34", "0.26")
+    )
     assert "feedback-requested comparison" in outputs["agent_system"]
 
 

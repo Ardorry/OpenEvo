@@ -18,10 +18,11 @@ value, new value, evidence, and reason.
 ## Life_005 — positive V2 reference
 
 ```text
-trace_sha256   = 93a66d5c61d4c13dd7c150bf6d486e9654cfa9b3cf5da65000c425a1fa1d67b6
-context_sha256 = 0ac362bd1497b2bf2e4fff4f562355db56b1285e19b44e65bcfe8b30bfb61138
-context_bytes  = 5189
+trace_sha256   = 49896780211c0048a11b4567fbde06272dda5fd97e3f1c7ae7b9daa3ec4df03c
+context_sha256 = 54e05f53bb61c3f0564de5f4dc5bcb0dbcbead26e10147e42c716ece44a80173
+context_bytes  = 9190
 successful_paths = 4
+parameter_entries = 8
 diagnoses = 1
 ```
 
@@ -55,10 +56,11 @@ private markers visible = false
 ## Astronomy_004 — negative R3.14 reference
 
 ```text
-trace_sha256   = 05ea10e96ba0abebbb88d5e517d546228ca157c5b14b09753e11626b67b80cfa
-context_sha256 = e9749d78293a8709c2e9a920970a378fd3f3d57da045097a30e930fafa05d2ca
-context_bytes  = 8117
+trace_sha256   = 9a613b68b85e33f4782706eec4cb643cabe175898cc8503501573605aef2200e
+context_sha256 = 531c72ce22846ee9201a90d2eaccf0597b73af3e17652e397afadc891f6f002f
+context_bytes  = 12216
 successful_paths = 4
+parameter_entries = 48
 diagnoses = 2
 ```
 
@@ -106,10 +108,11 @@ private markers visible = false
 ## Chemistry_004 — negative R3.14 reference
 
 ```text
-trace_sha256   = 3d0ad9a0722753588feed9371ec87a5ed45ddd38d71207c483e60d19c6aa8cce
-context_sha256 = 20ee48e7c378e3562accff1fe347423182745f47b6af23737a798f2b07df0376
-context_bytes  = 6558
+trace_sha256   = a002ae960cd368610c5d8ab89ce87592bc627075408c28bdcb146a53a689902a
+context_sha256 = f97cb9fffb9aaf93c81b97d403f0bd7aeb6302a944890a9c3835299b48c8e4b9
+context_bytes  = 10779
 successful_paths = 4
+parameter_entries = 39
 diagnoses = 2
 ```
 
@@ -147,7 +150,7 @@ private markers visible = false
 ## Differential conclusion
 
 R4's preview does not multiply one script into 7–12 achievement rows and does not truncate
-method signatures to six tokens. The important methods and Candidate-selected parameters
-remain verbatim in a 5–8 kB context, while feedback stays a separate additive view. Legacy
+method signatures to six tokens. The important methods, Candidate-selected parameters, and
+bounded report rationale remain verbatim in a 9–12 kB context, while feedback stays a separate additive view. Legacy
 R3 capsule/ledger/equivalence records remain historical diagnostics and are not native
 Reflector input or a Judge-dispatch hard gate.

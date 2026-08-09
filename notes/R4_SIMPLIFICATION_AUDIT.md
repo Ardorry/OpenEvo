@@ -72,6 +72,28 @@ Thus one replacement script plus a sufficiently broad report satisfied 12/12 or 
 the baseline scientific capability had changed. This is a confirmed false positive, not a
 borderline score interpretation.
 
+### R4.2 live finding: method names were not enough
+
+R4.2 improved Astronomy (`5.15 -> 6.00`) but Chemistry fell from `0.8 -> 0.0`.
+The Chemistry memory and skill were task-specific: they retained real PDF extraction, named
+functions, the descriptor CSV, all three baseline figures, and an additive validation request.
+The failure was subtler. Its live `MinimalBaselineTrace` had `parameters=[]` for the scientific
+paths, so the fresh Candidate had to reinvent the implementation behind those names. It changed
+the Candidate table values and scoring equations, shortened the report from 87 to 51 lines, and
+silently flipped the baseline recommendation from BNE to DNE. The legacy equivalence diagnostic
+still passed 5/5 because it recognized the same function/file/output shape.
+
+Earth then exposed an independent admission bug. One hidden literal collided with a phrase that
+the sealed Candidate had independently written in its transcript, code, and report. The capsule
+gate treated GT scan sources and Candidate provenance as the same set and rejected this
+Candidate-owned source. No GT leakage was demonstrated, no Reflector ran, and the run was reset
+at the undispatched evolution boundary.
+
+R4.3 therefore changes no schema and adds no new preservation layer. It only makes the existing
+trace retain bounded numeric constructors, scientific formula assignments, main-pipeline
+parameters, and report-linked Candidate reasoning; and it applies Candidate-source reuse to the
+capsule literal scan without removing provenance or GT-only rejection.
+
 ## Production classification for R4
 
 | Mechanism | R4 classification | Reason |
@@ -100,10 +122,10 @@ The native Reflector sees two visibly separate sections:
    Candidate-chosen parameters.
 2. `WHAT NEEDS IMPROVEMENT`: every existing admitted sanitized diagnosis, unchanged.
 
-The production artifact check asks only whether the major baseline scientific paths remain
-recognizable in memory/skill, at least one sanitized weakness has a concrete improvement, and
-leakage/provenance findings are empty. Legacy R3 percentages and equivalence remain archived
-diagnostics and do not decide dispatch.
+The production artifact check asks only whether the major baseline scientific paths and their
+bounded parameter anchors remain recognizable in memory/skill, at least one sanitized weakness
+has a concrete improvement, and leakage/provenance findings are empty. Legacy R3 percentages and
+equivalence remain archived diagnostics and do not decide dispatch.
 
 ## Conclusion
 
