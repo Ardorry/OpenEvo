@@ -84,7 +84,9 @@ _PRODUCTION_V2_LIFECYCLE_COMPATIBILITY = 10
 # sealed Candidate source while retaining exact rejection for GT-only values.
 # Lifecycle 111 scans manifest-bound sealed Candidate dataset records while
 # retaining the same fail-closed provenance and GT-only rejection.
-V2_DAEMON_LIFECYCLE_COMPATIBILITY = 111
+# Lifecycle 112 acknowledges readiness cancellation before any terminal-frame
+# drain wait, keeping managed service rollback within its bounded deadline.
+V2_DAEMON_LIFECYCLE_COMPATIBILITY = 112
 _MAX_CORE_SERVICE_ENSURE_DEADLINE_SECONDS = 1800.0
 _ONEFILE_LAUNCHER_CLEANUP_SECONDS = 10.0
 _ORPHANED_SERVICE_CHILDREN_GUARD = threading.Lock()

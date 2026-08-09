@@ -2914,10 +2914,16 @@ class CoreServiceSupervisor:
                         self._rollback(started, deadline)
                         return self._group_snapshot()
                     process_alive = self._process_backend.is_alive(identity)
-                    if not health.ready or not process_alive:
+                    if (
+                        (not health.ready or not process_alive)
+                        and not cancellation.is_set()
+                    ):
                         # A child that already exited may have emitted a
                         # redacted structured terminal frame. Drain its output
-                        # callback before using a generic health code.
+                        # callback before using a generic health code.  A
+                        # cancellation instead proceeds directly to the
+                        # bounded rollback below; waiting here would consume a
+                        # full readiness wait before acknowledging cancel.
                         self._process_backend.wait(
                             identity,
                             min(1.0, max(0.0, deadline - time.monotonic())),
