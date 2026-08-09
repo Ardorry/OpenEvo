@@ -14,7 +14,7 @@ from typing import Any
 
 from .training_state_store import canonical_sha256
 
-QUALITY_SCHEMA = "openevo.researchclawbench.task_specific_artifact_quality.v1"
+QUALITY_SCHEMA = "openevo.researchclawbench.task_specific_artifact_quality.v2"
 QUALITY_FAILURE = "TASK_SPECIFIC_ARTIFACT_QUALITY_FAILED"
 _ARTIFACT_TYPES = ("text_memory", "skill_bundle", "agent_system")
 _PRIVATE_MARKERS = (
@@ -168,7 +168,7 @@ def _artifact_metrics(
     artifact_type: str,
     text: str,
     concepts: list[str],
-    weakness_dimensions: list[str],
+    weakness_references: list[str],
 ) -> dict[str, Any]:
     units = _semantic_units(text)
     concept_units = _concept_units(text, concepts)
@@ -192,7 +192,15 @@ def _artifact_metrics(
     weakness_units = [
         unit
         for unit in units
-        if _contains_any(unit, [dimension.replace("_", " ") for dimension in weakness_dimensions])
+        if any(
+            _normalize(reference) in _normalize(unit)
+            or (
+                len(_specific_stems(reference)) >= 2
+                and len(_specific_stems(reference).intersection(_specific_stems(unit)))
+                >= 2
+            )
+            for reference in weakness_references
+        )
     ]
     validation_units = [
         unit
@@ -260,15 +268,25 @@ def assess_task_specific_artifact_quality(
     raw_weaknesses = capsule.get("observed_weaknesses")
     if not isinstance(raw_weaknesses, list) or not raw_weaknesses:
         raise TaskSpecificArtifactQualityError("ARTIFACT_QUALITY_CAPSULE_INVALID")
-    dimensions = [
-        item.get("dimension")
+    weakness_references = [
+        value
         for item in raw_weaknesses
-        if isinstance(item, dict) and isinstance(item.get("dimension"), str)
+        if isinstance(item, dict)
+        for value in (
+            str(item.get("dimension", "")).replace("_", " "),
+            item.get("candidate_observation"),
+        )
+        if isinstance(value, str) and _normalize(value)
     ]
-    if not dimensions:
+    if not weakness_references:
         raise TaskSpecificArtifactQualityError("ARTIFACT_QUALITY_CAPSULE_INVALID")
     metrics = {
-        artifact_type: _artifact_metrics(artifact_type, artifact_texts[artifact_type], concepts, dimensions)
+        artifact_type: _artifact_metrics(
+            artifact_type,
+            artifact_texts[artifact_type],
+            concepts,
+            weakness_references,
+        )
         for artifact_type in _ARTIFACT_TYPES
     }
     leakage = _leakage_findings(artifact_texts, ground_truth_entries)

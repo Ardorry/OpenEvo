@@ -253,6 +253,45 @@ def test_quality_accepts_semantic_retention_of_candidate_report_strategy(
     assert report["gt_leakage_findings"] == []
 
 
+def test_quality_accepts_candidate_observation_paraphrase_without_dimension_label(
+    tmp_path: Path,
+) -> None:
+    """Weakness fidelity is semantic, not an exact machine-label match.
+
+    Reflector artifacts receive the candidate-grounded observation as prose.
+    They need not repeat an internal dimension tag such as ``visual_evidence``
+    verbatim when they preserve the same weakness and concrete next-run action.
+    """
+
+    _root, projection = _projection(tmp_path)
+    artifacts = {
+        "text_memory": (
+            "Reconstruct the baseline custom analysis in a fresh workspace. "
+            "Do not rely primarily on produced figures when documented supporting "
+            "checks remain limited. Add an independent numeric aggregation."
+        ),
+        "skill_bundle": (
+            "Rebuild the custom trend analysis from public inputs, then generate a "
+            "numeric summary that cross-checks conclusions previously supported "
+            "mainly by produced figures."
+        ),
+        "agent_system": (
+            "Preserve the prior custom analysis strategy. When produced figures have "
+            "limited supporting checks, calculate an independent quantitative summary."
+        ),
+    }
+
+    report = require_task_specific_artifact_quality(
+        capsule=projection["baseline_evidence_capsule"],
+        artifact_texts=artifacts,
+        ground_truth_entries=_gt(),
+    )
+
+    assert report["status"] == "PASS"
+    assert report["aggregate"]["observed_weakness_count"] >= 1
+    assert report["aggregate"]["weakness_to_action_mapping_count"] >= 1
+
+
 def test_gt_specific_artifact_is_rejected(tmp_path: Path) -> None:
     _root, projection = _projection(tmp_path)
     artifacts = _artifact_texts()

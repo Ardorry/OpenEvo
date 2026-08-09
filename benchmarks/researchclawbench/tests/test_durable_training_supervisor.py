@@ -297,7 +297,7 @@ class SyntheticOperations:
     def assess_artifact_quality(self, request, idempotency_key):
         report = {
             "schema_version": (
-                "openevo.researchclawbench.task_specific_artifact_quality.v1"
+                "openevo.researchclawbench.task_specific_artifact_quality.v2"
             ),
             "status": "PASS",
             "candidate_concepts": ["synthetic analysis"],

@@ -383,7 +383,7 @@ class DurableFakeAuthority(ProductionOperationPort):
         if self.kind == "artifact_quality":
             report = {
                 "schema_version": (
-                    "openevo.researchclawbench.task_specific_artifact_quality.v1"
+                    "openevo.researchclawbench.task_specific_artifact_quality.v2"
                 ),
                 "status": "PASS",
                 "candidate_concepts": ["synthetic analysis"],
