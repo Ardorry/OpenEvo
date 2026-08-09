@@ -475,6 +475,42 @@ def _candidate_workspace_binding_receipt(
     return {**body, "content_sha256": canonical_sha256(body)}
 
 
+def _may_recover_unbound_genesis_workspace_binding(
+    *,
+    request: dict[str, Any],
+    recovery: bool,
+    binding: dict[str, Any],
+) -> bool:
+    """Allow only the one binding record unavailable before first genesis upload.
+
+    A fresh generation-zero request has no Core project ID when the supervisor
+    persists its immutable candidate intent.  If the process stops after Core
+    has idempotently published the input workspace but before a Candidate task
+    is created, the exact replay sees an active head for the first time.  There
+    consequently cannot be a preflight binding in that immutable intent.
+
+    This is not a relaxation for successor or preseeded workspaces: the
+    replay must be an exact recovery, remain generation-zero/cross-task
+    genesis, and independently prove that Core's active snapshot is the
+    locally reconstructed archive before proceeding to the same idempotent
+    task request.
+    """
+
+    return (
+        recovery
+        and request.get("candidate_workspace_binding") is None
+        and request.get("core_project_id") is None
+        and request.get("preseeded_workspace_authority") is None
+        and request.get("successor_workspace_authority") is None
+        and binding.get("workspace_source") == "cross_task_genesis"
+        and binding.get("workspace_snapshot_match") is True
+        and binding.get("expected_workspace_snapshot")
+        == binding.get("actual_workspace_snapshot")
+        and binding.get("model_started") is False
+        and binding.get("core_task_created") is False
+    )
+
+
 def build_validator_feedback_layers(
     candidate: dict[str, Any], validation: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -2372,7 +2408,12 @@ class CoreV2CandidatePort(ProductionOperationPort):
                     expected_snapshot=expected_snapshot,
                     task_local_overlay_id=request.get("task_local_overlay_id"),
                 )
-                if request.get("candidate_workspace_binding") != binding:
+                expected_binding = request.get("candidate_workspace_binding")
+                if expected_binding != binding and not _may_recover_unbound_genesis_workspace_binding(
+                    request=request,
+                    recovery=recovery,
+                    binding=binding,
+                ):
                     raise CoreControlError(
                         "CANDIDATE_WORKSPACE_BINDING_DRIFT",
                         reason_code="candidate_workspace_binding_drift",

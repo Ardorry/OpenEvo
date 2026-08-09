@@ -43,6 +43,7 @@ from openevo_researchclawbench.production_operation_ports import (
     _compose_candidate_objective,
     _cross_task_content_admission_authority,
     _materialize_successor_workspace,
+    _may_recover_unbound_genesis_workspace_binding,
     _project_config,
     _require_existing_workspace_snapshot,
     _require_preseeded_workspace_authority,
@@ -1173,6 +1174,44 @@ def test_candidate_successor_workspace_strips_empty_c000_runtime_directories(
             payload=polluted_archive_path.read_bytes(),
             destination=tmp_path / "c000-polluted-successor",
             expected_archive=polluted_archive.model_dump(mode="json"),
+        )
+
+
+def test_candidate_recovery_accepts_only_unbound_verified_genesis_binding() -> None:
+    snapshot = {
+        "workspace_snapshot_id": "workspace-genesis",
+        "manifest_sha256": "a" * 64,
+    }
+    binding = {
+        "workspace_source": "cross_task_genesis",
+        "workspace_snapshot_match": True,
+        "expected_workspace_snapshot": snapshot,
+        "actual_workspace_snapshot": snapshot,
+        "model_started": False,
+        "core_task_created": False,
+    }
+    request = {
+        "core_project_id": None,
+        "preseeded_workspace_authority": None,
+        "successor_workspace_authority": None,
+    }
+    assert _may_recover_unbound_genesis_workspace_binding(
+        request=request,
+        recovery=True,
+        binding=binding,
+    )
+
+    for rejected_request, rejected_binding, recovery in (
+        ({**request, "core_project_id": "project-existing"}, binding, True),
+        ({**request, "successor_workspace_authority": {"sealed": True}}, binding, True),
+        (request, {**binding, "workspace_snapshot_match": False}, True),
+        (request, {**binding, "core_task_created": True}, True),
+        (request, binding, False),
+    ):
+        assert not _may_recover_unbound_genesis_workspace_binding(
+            request=rejected_request,
+            recovery=recovery,
+            binding=rejected_binding,
         )
 
 
