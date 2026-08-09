@@ -68,6 +68,7 @@ from openevo.evolution.admission import (
     NativeArtifactAdmissionService,
     NativeArtifactProposalSet,
     ProposalAction,
+    task_local_preservation_allows_candidate_source_reuse,
 )
 from openevo.evolution.context_materialization import MaterializedContext
 from openevo.evolution.context_projection import ContextProjectionResolveRequest
@@ -867,7 +868,12 @@ class ProductionScienceSuccessorPreparerV2:
                         if prior_context.get(spec.artifact_type)
                         else None
                     ),
-                    content_admission_basis=content_admission_basis,
+                    content_admission_basis=(
+                        self._content_admission_basis_for_method(
+                            content_admission_basis,
+                            spec.selection.config(),
+                        )
+                    ),
                     retry_terminal_job=True,
                 ).output
                 for spec, legacy_payload in zip(
@@ -1415,6 +1421,27 @@ class ProductionScienceSuccessorPreparerV2:
                 key: _sorted_literals(values)
                 for key, values in classified.items()
             },
+        )
+
+    @staticmethod
+    def _content_admission_basis_for_method(
+        basis: ArtifactContentAdmissionBasis,
+        method_config: Mapping[str, Any],
+    ) -> ArtifactContentAdmissionBasis:
+        """Bind candidate-source reuse to the exact verified target config."""
+
+        if not isinstance(method_config, Mapping):
+            raise ScienceSuccessorPreparationV2Error(
+                "compiled evolution method config is invalid"
+            )
+        return basis.model_copy(
+            update={
+                "candidate_source_reuse_authorized": (
+                    task_local_preservation_allows_candidate_source_reuse(
+                        method_config
+                    )
+                )
+            }
         )
 
     @staticmethod

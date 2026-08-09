@@ -66,14 +66,11 @@ _SERVICE_GENERATION_HEADER = "X-OpenEvo-Core-Generation"
 _RELEASE_IDENTITY_HEADER = "X-OpenEvo-Core-Release-Identity"
 _PROCESS_GROUP_LIFECYCLE_COMPATIBILITY = 3
 _PRODUCTION_V2_LIFECYCLE_COMPATIBILITY = 10
-# Lifecycle 101 carries task-local, next-session-only preservation reflection
-# scope plus pre-inference redaction of protected literals for agent-system
-# reflection. The increment is intentional: a lifecycle-100 daemon must never
-# accept a different bundle at the same no-downgrade floor. Lifecycle 99's
-# Core-bearer-only bounded successor-artifact snapshot, lifecycle 98's short
-# identity probing, lifecycle 97's bounded large-store verification, and the
-# earlier terminal-attempt safeguards remain intact.
-V2_DAEMON_LIFECYCLE_COMPATIBILITY = 101
+# Lifecycle 102 binds next-session-only preservation scope to Core admission:
+# candidate/public source evidence may be retained only in that closed scope,
+# while evaluator literals and ordinary transferable artifacts remain denied.
+# It also retains lifecycle 101's pre-inference protected-literal redaction.
+V2_DAEMON_LIFECYCLE_COMPATIBILITY = 102
 _MAX_CORE_SERVICE_ENSURE_DEADLINE_SECONDS = 1800.0
 _ONEFILE_LAUNCHER_CLEANUP_SECONDS = 10.0
 _ORPHANED_SERVICE_CHILDREN_GUARD = threading.Lock()

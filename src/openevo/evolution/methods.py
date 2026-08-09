@@ -19,6 +19,9 @@ from urllib.parse import unquote, urlparse
 
 import httpx
 
+from openevo.evolution.admission import (
+    task_local_preservation_allows_candidate_source_reuse,
+)
 from openevo.evolution.agent_system import (
     DEFAULT_AGENT_SYSTEM_TARGET_PATH,
     normalize_agent_system_target_path,
@@ -188,8 +191,6 @@ _MAX_DATASET_RECORDS_BYTES = 128 * 1024 * 1024
 _MAX_LEAKAGE_SCAN_RECORDS = 64
 _MAX_LEAKAGE_SCAN_CHARS = 2 * 1024 * 1024
 _MAX_TRACE_LITERAL_COUNT = 512
-_TASK_LOCAL_PRESERVATION_SCHEMA = "openevo.task_local_preservation.v1"
-_TASK_LOCAL_PRESERVATION_SCOPE = "next_session_only"
 _TASK_LOCAL_ALLOWED_PATH_KEYS = frozenset(
     {"data_file", "data_files", "file_name", "file_names", "source_file", "source_files"}
 )
@@ -324,18 +325,7 @@ def _task_local_preservation_enabled(job: WorkerClaimedJob) -> bool:
     artifact policy.
     """
 
-    value = job.config.get("task_local_preservation")
-    if value is None:
-        return False
-    if (
-        not isinstance(value, dict)
-        or set(value) != {"schema_version", "scope"}
-        or value.get("schema_version") != _TASK_LOCAL_PRESERVATION_SCHEMA
-        or value.get("scope") != _TASK_LOCAL_PRESERVATION_SCOPE
-        or job.config.get("training_feedback_required") is not True
-    ):
-        raise ValueError("task_local_preservation config is invalid")
-    return True
+    return task_local_preservation_allows_candidate_source_reuse(job.config)
 
 
 def text_memory(job: WorkerClaimedJob, artifact_root: Path) -> list[ArtifactRegisterRequest]:

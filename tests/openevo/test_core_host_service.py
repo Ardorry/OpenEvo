@@ -2935,9 +2935,9 @@ def test_daemon_floor_allows_legacy_upgrade_and_rejects_same_abi_downgrade(
 
 
 def test_current_daemon_lifecycle_advances_past_preservation_scope_floor() -> None:
-    """A changed preservation-scoped Daemon cannot reuse the lifecycle-100 floor."""
+    """A changed preservation-admission Daemon cannot reuse lifecycle 101."""
 
-    assert service.V2_DAEMON_LIFECYCLE_COMPATIBILITY > 100
+    assert service.V2_DAEMON_LIFECYCLE_COMPATIBILITY > 101
 
 
 def test_pending_process_is_recovered_before_restart(

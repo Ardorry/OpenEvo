@@ -300,6 +300,32 @@ def _admission_request(
     )
 
 
+def _scoped_skill_request(
+    request: PlanBoundJobCreateRequest,
+) -> PlanBoundJobCreateRequest:
+    selection = request.plan.selections[0]
+    plan = _snapshot().compile_plan(
+        plan_id="plan-skill-task-local-preservation",
+        selections=(
+            EvolutionTargetSelection(
+                target_id=selection.target_id,
+                enabled=True,
+                method_id=selection.method_id,
+                config={
+                    **selection.config(),
+                    "training_feedback_required": True,
+                    "task_local_preservation": {
+                        "schema_version": "openevo.task_local_preservation.v1",
+                        "scope": "next_session_only",
+                    },
+                },
+            ),
+        ),
+        profile=_profile(),
+    )
+    return request.model_copy(update={"plan": plan})
+
+
 def _request_using_sealed_artifact(
     base: PlanBoundJobCreateRequest,
     *,
@@ -393,6 +419,55 @@ def test_sealed_successor_admission_is_atomic_and_replayable_after_response_loss
     assert row["receipt_sha256"] == committed.content_sha256
     # Admission cannot invalidate the still-active predecessor project head.
     assert parent["promoted"] == 1
+
+
+def test_admission_binds_candidate_source_reuse_to_task_local_plan_scope(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    request, _dataset_id = _request_with_sealed_dataset(store)
+    job_id, proposal_id = _complete_transition_bound_skill_job(
+        store,
+        request,
+        payload_name="ordinary-source-reuse",
+        promoted=False,
+    )
+    ordinary = _admission_request(
+        job_id=job_id,
+        selected_artifact_id=proposal_id,
+        parent_artifact_id=request.input_bindings[1].artifact_ids[0],
+    ).model_copy(
+        update={
+            "content_admission_basis": ArtifactContentAdmissionBasis(
+                candidate_source_reuse_authorized=True
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="scope differs from the plan-bound job"):
+        store.apply_internal_artifact_admission(ordinary)
+
+    scoped_request = _scoped_skill_request(request).model_copy(
+        update={"successor_transition_id": "successor-transition-task-local"}
+    )
+    scoped_job, scoped_artifact = _complete_transition_bound_skill_job(
+        store,
+        scoped_request,
+        payload_name="scoped-source-reuse",
+        promoted=False,
+    )
+    scoped = _admission_request(
+        job_id=scoped_job,
+        selected_artifact_id=scoped_artifact,
+        parent_artifact_id=scoped_request.input_bindings[1].artifact_ids[0],
+    ).model_copy(
+        update={
+            "content_admission_basis": ArtifactContentAdmissionBasis(
+                candidate_source_reuse_authorized=True
+            )
+        }
+    )
+
+    assert store.apply_internal_artifact_admission(scoped).admission.passed is True
 
 
 def test_succeeded_plan_bound_authority_closes_exact_request_and_result(

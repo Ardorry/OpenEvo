@@ -347,6 +347,46 @@ def test_content_admission_passes_generic_transferable_artifact() -> None:
     assert receipt.finding_count == 0
 
 
+def test_task_local_preservation_keeps_candidate_sources_but_not_basis_literals() -> None:
+    source = json.dumps(
+        {
+            "task_id": "Astronomy_004",
+            "candidate_report": "Generated analysis used candidate_plot.png.",
+            "output_file": "candidate_plot.png",
+        }
+    )
+    scoped = ArtifactContentAdmissionBasis(
+        task_ids=("Astronomy_004",),
+        file_names=("evaluator_private.csv",),
+        candidate_source_reuse_authorized=True,
+    )
+
+    preserved = artifact_content_admission_receipt(
+        basis=scoped,
+        payloads={
+            "proposal-1": {
+                "SKILL.md": "Reconstruct the analysis that produced candidate_plot.png."
+            }
+        },
+        source_payloads={"dataset-1": {"records.jsonl": source}},
+    )
+    blocked = artifact_content_admission_receipt(
+        basis=scoped,
+        payloads={
+            "proposal-2": {
+                "SKILL.md": "Do not expose evaluator_private.csv to the candidate."
+            }
+        },
+        source_payloads={"dataset-1": {"records.jsonl": source}},
+    )
+
+    assert preserved.passed is True
+    assert preserved.source_artifact_ids == ()
+    assert preserved.source_payload_sha256 is None
+    assert blocked.passed is False
+    assert blocked.finding_categories == ("file_name",)
+
+
 def test_content_admission_allows_only_the_exact_managed_workspace_root() -> None:
     transferable = artifact_content_admission_receipt(
         basis=ArtifactContentAdmissionBasis(),

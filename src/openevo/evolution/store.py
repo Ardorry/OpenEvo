@@ -20,6 +20,7 @@ from openevo.evolution.admission import (
     ArtifactProposalDecisionRequest,
     ProposalAction,
     artifact_content_admission_receipt,
+    task_local_preservation_allows_candidate_source_reuse,
 )
 from openevo.evolution.agent_system import normalize_agent_system_target_path
 from openevo.evolution.artifact_payloads import ArtifactPayloadService
@@ -6833,6 +6834,28 @@ class EvolutionStore:
                 if job_row is None or job_row["state"] != str(JobState.SUCCEEDED):
                     raise ValueError(
                         "proposal decision requires a succeeded native job"
+                    )
+                try:
+                    job_config = json.loads(str(job_row["config_json"]))
+                except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                    raise ValueError(
+                        "proposal decision job config is not a closed JSON object"
+                    ) from exc
+                if not isinstance(job_config, dict):
+                    raise ValueError(
+                        "proposal decision job config is not a closed JSON object"
+                    )
+                scope_allows_reuse = (
+                    task_local_preservation_allows_candidate_source_reuse(
+                        job_config
+                    )
+                )
+                if (
+                    request.content_admission_basis.candidate_source_reuse_authorized
+                    != scope_allows_reuse
+                ):
+                    raise ValueError(
+                        "proposal content admission scope differs from the plan-bound job"
                     )
                 validated = self._validate_plan_bound_job_contract(
                     conn,

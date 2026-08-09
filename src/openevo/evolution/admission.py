@@ -30,6 +30,32 @@ from openevo.evolution.models import (
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$")
 _SHA_RE = re.compile(r"^[0-9a-f]{64}$")
+_TASK_LOCAL_PRESERVATION_SCHEMA = "openevo.task_local_preservation.v1"
+_TASK_LOCAL_PRESERVATION_SCOPE = "next_session_only"
+
+
+def task_local_preservation_allows_candidate_source_reuse(
+    config: Mapping[str, object],
+) -> bool:
+    """Return the closed one-session exception to generic source reuse.
+
+    Candidate and public evidence are reusable only when a verified reflector
+    target declares this exact scope and waits for post-evaluator feedback.
+    Ordinary global artifacts retain their source-literal ban.
+    """
+
+    value = config.get("task_local_preservation")
+    if value is None:
+        return False
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"schema_version", "scope"}
+        or value.get("schema_version") != _TASK_LOCAL_PRESERVATION_SCHEMA
+        or value.get("scope") != _TASK_LOCAL_PRESERVATION_SCOPE
+        or config.get("training_feedback_required") is not True
+    ):
+        raise ValueError("task_local_preservation config is invalid")
+    return True
 
 
 class ProposalAction(StrEnum):
@@ -159,6 +185,7 @@ class ArtifactContentAdmissionBasis(BaseModel):
     report_sentences: tuple[str, ...] = Field(default=(), max_length=512)
     evaluator_terms: tuple[str, ...] = Field(default=(), max_length=128)
     absolute_paths: tuple[str, ...] = Field(default=(), max_length=128)
+    candidate_source_reuse_authorized: bool = False
 
     @field_validator(
         "task_ids",
@@ -223,7 +250,13 @@ def artifact_content_admission_receipt(
     scanned_byte_count = 0
 
     source_payloads = source_payloads or {}
-    source_literals = _sealed_source_literals(source_payloads)
+    # The one-session scope may retain candidate/public evidence. Its exact
+    # task/evaluator basis below still blocks private feedback, task IDs,
+    # protected paths, Judge markers, and every classified literal.
+    source_payloads_for_literal_scan = (
+        {} if basis.candidate_source_reuse_authorized else source_payloads
+    )
+    source_literals = _sealed_source_literals(source_payloads_for_literal_scan)
     exact_by_category = {
         "task_id": _merged_literals(basis.task_ids, source_literals["task_id"]),
         "file_name": _merged_literals(basis.file_names, source_literals["file_name"]),
@@ -275,9 +308,11 @@ def artifact_content_admission_receipt(
         "schema_version": "openevo.artifact_content_admission.v1",
         "basis_sha256": basis.content_sha256,
         "proposal_artifact_ids": list(proposal_ids),
-        "source_artifact_ids": sorted(source_payloads),
+        "source_artifact_ids": sorted(source_payloads_for_literal_scan),
         "source_payload_sha256": (
-            _source_payload_sha256(source_payloads) if source_payloads else None
+            _source_payload_sha256(source_payloads_for_literal_scan)
+            if source_payloads_for_literal_scan
+            else None
         ),
         "scanned_file_count": scanned_file_count,
         "scanned_byte_count": scanned_byte_count,
