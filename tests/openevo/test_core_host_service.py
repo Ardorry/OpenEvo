@@ -2935,9 +2935,9 @@ def test_daemon_floor_allows_legacy_upgrade_and_rejects_same_abi_downgrade(
 
 
 def test_current_daemon_lifecycle_advances_past_pre_artifact_audit_floor() -> None:
-    """A changed audit-capable Daemon cannot reuse the lifecycle-98 floor."""
+    """A changed preservation-scoped Daemon cannot reuse the lifecycle-99 floor."""
 
-    assert service.V2_DAEMON_LIFECYCLE_COMPATIBILITY > 98
+    assert service.V2_DAEMON_LIFECYCLE_COMPATIBILITY > 99
 
 
 def test_pending_process_is_recovered_before_restart(
