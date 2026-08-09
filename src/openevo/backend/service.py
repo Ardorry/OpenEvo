@@ -78,7 +78,9 @@ _PRODUCTION_V2_LIFECYCLE_COMPATIBILITY = 10
 # Lifecycle 107 preserves the complete bounded task-local preservation context.
 # Lifecycle 108 removes obsolete R3 artifact templates while retaining the
 # task-local Candidate-source admission and leakage boundary.
-V2_DAEMON_LIFECYCLE_COMPATIBILITY = 108
+# Lifecycle 109 compares protected numeric literals as complete numeric tokens,
+# preventing Candidate-produced values such as 0.12 from colliding with 0.1.
+V2_DAEMON_LIFECYCLE_COMPATIBILITY = 109
 _MAX_CORE_SERVICE_ENSURE_DEADLINE_SECONDS = 1800.0
 _ONEFILE_LAUNCHER_CLEANUP_SECONDS = 10.0
 _ORPHANED_SERVICE_CHILDREN_GUARD = threading.Lock()

@@ -16,6 +16,7 @@ import re
 import secrets
 import stat
 from collections.abc import Mapping
+from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Protocol
@@ -215,6 +216,15 @@ class ArtifactContentAdmissionBasis(BaseModel):
 _DOI_PATTERN = re.compile(r"\b10\.\d{4,9}/[-._;()/:A-Z0-9]+\b", re.IGNORECASE)
 _ABSOLUTE_PATH_PATTERN = re.compile(
     r"(?<![A-Za-z0-9_])/(?:[A-Za-z0-9._-]+/)+[A-Za-z0-9._-]+"
+)
+_NUMERIC_LITERAL_PATTERN = re.compile(
+    r"[+-]?(?:(?:\d+(?:\.\d+)?)|(?:\.\d+))(?:e[+-]?\d+)?",
+    re.IGNORECASE,
+)
+_NUMERIC_TOKEN_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_.])[+-]?(?:(?:\d+(?:\.\d+)?)|(?:\.\d+))"
+    r"(?:e[+-]?\d+)?(?![A-Za-z0-9_]|\.\d)",
+    re.IGNORECASE,
 )
 _DEFAULT_EVALUATOR_TERMS = (
     "_score.json",
@@ -519,6 +529,15 @@ def _protected_literal_present(folded_text: str, literal: str) -> bool:
         return False
     if len(normalized) < 4 and not any(character.isdigit() for character in normalized):
         return False
+    if _NUMERIC_LITERAL_PATTERN.fullmatch(normalized):
+        try:
+            protected_value = Decimal(normalized)
+        except InvalidOperation:
+            return False
+        return any(
+            Decimal(match.group(0)) == protected_value
+            for match in _NUMERIC_TOKEN_PATTERN.finditer(folded_text)
+        )
     return normalized in folded_text
 
 

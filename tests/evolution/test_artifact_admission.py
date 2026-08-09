@@ -412,6 +412,62 @@ def test_task_local_preservation_allows_candidate_overlap_not_private_literals()
     assert evaluator_blocked.finding_categories == ("evaluator_term",)
 
 
+def test_task_local_candidate_numeric_parameter_does_not_match_gt_prefix() -> None:
+    source = json.dumps(
+        {
+            "candidate_report": (
+                "The baseline logistic fit used a Candidate-selected learning rate 0.12."
+            )
+        }
+    )
+    receipt = artifact_content_admission_receipt(
+        basis=ArtifactContentAdmissionBasis(
+            values=("0.1",),
+            candidate_source_reuse_authorized=True,
+        ),
+        payloads={
+            "proposal-1": {
+                "SKILL.md": "Reconstruct the logistic fit with learning rate 0.12."
+            }
+        },
+        source_payloads={"dataset-1": {"records.jsonl": source}},
+    )
+
+    assert receipt.passed is True
+    assert receipt.finding_count == 0
+    assert receipt.source_artifact_ids == ("dataset-1",)
+    assert receipt.source_payload_sha256 is not None
+
+
+@pytest.mark.parametrize("equivalent_literal", ("0.1", "0.10", ".1", "1e-1"))
+def test_task_local_candidate_reuse_still_rejects_gt_only_numeric_literal(
+    equivalent_literal: str,
+) -> None:
+    receipt = artifact_content_admission_receipt(
+        basis=ArtifactContentAdmissionBasis(
+            values=("0.1",),
+            candidate_source_reuse_authorized=True,
+        ),
+        payloads={
+            "proposal-1": {
+                "SKILL.md": f"Use the evaluator-only value {equivalent_literal}."
+            }
+        },
+        source_payloads={
+            "dataset-1": {
+                "records.jsonl": json.dumps(
+                    {"candidate_report": "The baseline used learning rate 0.12."}
+                )
+            }
+        },
+    )
+
+    assert receipt.passed is False
+    assert receipt.finding_categories == ("value",)
+    assert receipt.source_artifact_ids == ("dataset-1",)
+    assert receipt.source_payload_sha256 is not None
+
+
 def test_content_admission_allows_only_the_exact_managed_workspace_root() -> None:
     transferable = artifact_content_admission_receipt(
         basis=ArtifactContentAdmissionBasis(),
