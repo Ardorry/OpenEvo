@@ -45,19 +45,27 @@ def test_task_local_reflector_boundary_removes_evaluator_labels_from_prompt_and_
     assert audit["remaining_finding_count"] == 0
 
 
-def test_task_local_reflector_keeps_bounded_multi_achievement_feedback() -> None:
-    achievement_lines = [
-        f"achievement_{index:02d} REQUIRED method public evidence role "
-        + ("x" * 120)
-        for index in range(1, 13)
-    ]
+def test_task_local_reflector_keeps_bounded_methods_parameters_and_all_feedback() -> None:
     record = {
         "task_id": "task",
         "session_id": "session",
         "status": "COMPLETED",
         "evolution_feedback": {
-            "balanced_context": achievement_lines
-            + ["FINAL_SANITIZED_DIAGNOSIS_AND_TRACE"],
+            "a00_what_already_worked": {
+                "successful_paths": [
+                    "read_catalog -> selection_rules(p_QSO>=0.90, p_WISE_QSO>=0.97)",
+                    "train_logistic -> confusion analysis",
+                    "render_probability_and_validation_figures",
+                ]
+            },
+            "a01_what_needs_improvement": {
+                "diagnoses": [
+                    "VISUAL_EVIDENCE_DIAGNOSIS",
+                    "QUANTITATIVE_VALIDATION_DIAGNOSIS",
+                    "COVERAGE_DIAGNOSIS",
+                ]
+            },
+            "z99_duplicate_log": [f"duplicate-{index}-" + "x" * 180 for index in range(20)],
         },
     }
     task_local_job = SimpleNamespace(
@@ -82,7 +90,15 @@ def test_task_local_reflector_keeps_bounded_multi_achievement_feedback() -> None
 
     assert task_local is not None
     assert ordinary is not None
-    assert "achievement_12" in task_local["evolution_feedback"]
-    assert "FINAL_SANITIZED_DIAGNOSIS_AND_TRACE" in task_local["evolution_feedback"]
-    assert "FINAL_SANITIZED_DIAGNOSIS_AND_TRACE" not in ordinary["evolution_feedback"]
+    for expected in (
+        "selection_rules",
+        "p_QSO>=0.90",
+        "p_WISE_QSO>=0.97",
+        "train_logistic",
+        "confusion analysis",
+        "VISUAL_EVIDENCE_DIAGNOSIS",
+        "QUANTITATIVE_VALIDATION_DIAGNOSIS",
+        "COVERAGE_DIAGNOSIS",
+    ):
+        assert expected in task_local["evolution_feedback"]
     assert len(ordinary["evolution_feedback"]) == 2_000

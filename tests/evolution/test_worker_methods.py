@@ -1228,18 +1228,16 @@ def _task_local_preservation_config() -> dict[str, Any]:
     [
         (
             "text_memory_reflector",
-            "# Preservation Memory\n\n"
-            "- PRESERVE achievement_01: use data/public.csv with code/analyze.py to "
-            "reconstruct the numeric table, figure, and report evidence; do not drop "
-            "this baseline capability.\n",
+            "# Task Memory\n\n"
+            "- Keep the successful numeric table and figure analysis that reads "
+            "data/public.csv with code/analyze.py, and improve it additively.\n",
             "memory.md",
         ),
         (
             "skill_bundle_reflector",
-            "# Preservation Skill\n\n"
-            "## Phase 1 — Reconstruct baseline capabilities\n"
-            "- Reconstruct achievement_01 with data/public.csv and code/analyze.py, "
-            "then verify numeric, figure, and report evidence.\n",
+            "# Task Skill\n\n"
+            "- Reproduce the successful numeric table and figure analysis from "
+            "data/public.csv with code/analyze.py before adding feedback improvements.\n",
             "SKILL.md",
         ),
     ],
@@ -1276,6 +1274,8 @@ def test_task_local_preservation_scope_keeps_public_reconstruction_paths_in_fina
     prompt = captured["json"]["messages"][1]["content"]
     assert "task-local" in prompt.casefold()
     assert "cross-task" in prompt.casefold()
+    assert "required achievement" not in prompt.casefold()
+    assert "baseline equivalence" not in prompt.casefold()
     assert "task-local successor" in captured["json"]["messages"][0]["content"].casefold()
 
 
@@ -1285,10 +1285,9 @@ def test_task_local_preservation_scope_keeps_paths_but_not_answers_in_agent_syst
 ) -> None:
     captured = _patch_reflector_llm(
         monkeypatch,
-        "# Preservation Gate\n\n"
-        "- Before finalizing, RECONSTRUCT achievement_01 from data/public.csv with "
-        "code/analyze.py, PRESERVE its evidence, EXTEND only additively, and VERIFY "
-        "baseline equivalence.\n",
+        "# Task-Local Gate\n\n"
+        "- Before finalizing, keep the successful analysis using data/public.csv with "
+        "code/analyze.py, add feedback-driven improvements, and verify broad task coverage.\n",
     )
     dataset = _history_round_dataset_artifact(
         tmp_path,
@@ -1332,8 +1331,10 @@ def test_task_local_preservation_scope_keeps_paths_but_not_answers_in_agent_syst
     prompt = captured["json"]["messages"][1]["content"]
     assert "internal_task" not in prompt
     assert "short submission constraints" in prompt
-    assert "RECONSTRUCT, PRESERVE" in prompt
-    assert "baseline equivalence" in prompt
+    assert "successful baseline methods" in prompt
+    assert "feedback-requested improvements" in prompt
+    assert "baseline equivalence" not in prompt
+    assert "required achievement" not in prompt
     assert "task-local successor" in captured["json"]["messages"][0]["content"].casefold()
 
 

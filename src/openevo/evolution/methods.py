@@ -3412,13 +3412,12 @@ def _render_text_memory_reflection_prompt(
                 "## Output Contract",
                 "",
                 "- Return only the Markdown for memory.md.",
-                "- For every supplied required achievement, emit one `PRESERVE <achievement_id>` "
-                "bullet that keeps its method/capability, candidate/public evidence role, and "
-                "do-not-drop instruction in the same bullet.",
-                "- Preserve candidate-derived method signatures and public/candidate paths when "
-                "they are supplied as reconstruction anchors; never invent a path or conclusion.",
-                "- Keep evaluator feedback additive: map every admitted weakness to an extension "
-                "after reconstruction, never a replacement research plan.",
+                "- Remember the concrete scientific methods, parameter choices, inputs, outputs, "
+                "and evidence roles supplied by the Candidate/public baseline trace.",
+                "- Keep successful baseline paths by default. Treat evaluator feedback as a "
+                "reason to improve those paths, not as a reason to replace the research plan.",
+                "- A method or parameter may change only when Candidate/public evidence justifies "
+                "the revision; retain the original choice and explain the reason for the change.",
                 "- Do not copy held-out answers, private source rows, exact expected outputs, "
                 "Judge reasoning, target-image information, or verifier-private records.",
                 "",
@@ -3493,10 +3492,10 @@ def _render_text_memory_expel_reflection_prompt(
             "- Ground every item in the supplied trajectories or existing memory.",
             *(
                 [
-                    "- Each `## Do` preservation bullet must retain one required achievement's "
-                    "ID, method, evidence role, and do-not-drop instruction as one semantic unit.",
-                    "- Keep each admitted weakness additive; it cannot discard or replace a "
-                    "required baseline path.",
+                    "- Keep the baseline trace's concrete methods and parameters visible rather "
+                    "than compressing them into generic scientific advice.",
+                    "- Add improvements for the admitted feedback after describing how to retain "
+                    "the successful baseline work.",
                 ]
                 if task_local_preservation
                 else []
@@ -3552,14 +3551,12 @@ def _render_skill_bundle_reflection_prompt(
             "what helper checks to run, and what final validation proves completion.",
             *(
                 [
-                    "- Use exactly these phases: `Phase 1 — Reconstruct baseline capabilities`, "
-                    "`Phase 2 — Verify reconstruction`, `Phase 3 — Add evaluator-driven "
-                    "improvements`, and `Phase 4 — Integrate without deleting preserved work`.",
-                    "- In Phase 1 and Phase 2, name every required achievement ID with its "
-                    "candidate/public method, evidence role, and concrete reconstruction and "
-                    "verification steps.",
-                    "- In Phase 3, map every admitted weakness ID to one additive action tied "
-                    "to the preserved achievement; never replace or discard that path.",
+                    "- Explain how to reproduce the baseline trace's concrete scientific methods, "
+                    "including its Candidate-selected parameters, inputs, and expected outputs.",
+                    "- Then explain how to address the admitted feedback additively without "
+                    "discarding successful baseline paths or narrowing the rest of the task.",
+                    "- If changing a baseline method or parameter, require Candidate/public "
+                    "evidence and an explicit explanation of the revision.",
                     "- This skill is next-session task-local, not generic cross-task advice.",
                 ]
                 if task_local_preservation
@@ -3630,12 +3627,10 @@ def _render_agent_system_reflection_prompt(
             "- Prefer focused verification tied to the changed behavior before broad cleanup.",
             *(
                 [
-                    "- This artifact is for one fresh next session: RECONSTRUCT every required "
-                    "baseline achievement, PRESERVE it, EXTEND only additively, then VERIFY "
-                    "baseline equivalence before submission.",
-                    "- Do not replace a required baseline path with a new generic plan. If a "
-                    "candidate conclusion changes after public-data reconstruction, retain the "
-                    "method and document the verification reason.",
+                    "- For the next fresh session, keep the supplied successful baseline methods "
+                    "and task coverage while adding the evaluator-requested improvements.",
+                    "- Do not silently replace a baseline method or parameter. If Candidate/public "
+                    "evidence supports a change, document what changed and why.",
                 ]
                 if task_local_preservation
                 else []
@@ -3652,8 +3647,9 @@ def _render_agent_system_reflection_prompt(
                 else "- Do not copy exact held-out literals, source filenames, source sheet names, row numbers, article titles, answer counts, sequences, or reference records."
             ),
             (
-                "- Each preservation rule must be concrete enough to identify the required "
-                "achievement, reconstruction action, and baseline-equivalence check."
+                "- Keep this artifact concise: state the constraint to retain successful "
+                "baseline work and add feedback-driven improvements without repeating the "
+                "memory or skill."
                 if task_local_preservation
                 else "- Each methodology rule should be general across task instances but concrete enough to include a trigger, action, and validation check."
             ),
@@ -3700,10 +3696,10 @@ def _render_agent_system_history_reflection_prompt(
     task_local_preservation = _task_local_preservation_enabled(job)
     if task_local_preservation:
         lines = [
-            "# Task-Local Agent-System Constraint Context",
+            "# Task-Local Agent-System Context",
             "",
             "Write only the short constraints that must hold before submission. The "
-            "memory preserves learned content and the skill owns reconstruction steps; "
+            "memory records learned baseline methods and the skill owns execution guidance; "
             "do not repeat either artifact as a handbook or workflow.",
             "",
         ]
@@ -3719,9 +3715,10 @@ def _render_agent_system_history_reflection_prompt(
                 "## Output Contract",
                 "",
                 "- Return only a concise Markdown agent-system file of at most 250 words.",
-                "- State RECONSTRUCT, PRESERVE, additive EXTEND, and VERIFY in that order.",
-                "- Require baseline equivalence before submission and prohibit tunnel vision "
-                "on one weakness.",
+                "- Require the fresh agent to retain the successful baseline scientific paths "
+                "and add the admitted feedback improvements.",
+                "- Prohibit silently replacing baseline methods or focusing on one weakness at "
+                "the expense of broad task coverage.",
                 "- Do not restate the reconstruction workflow, inventory procedure, or generic "
                 "research SOP.",
                 "- Do not copy held-out literals, private source rows, restricted evaluation "
@@ -3817,41 +3814,13 @@ def _render_agent_system_history_reflection_prompt(
             "- Preserve stable improvements from better rounds before adding new rules.",
             "- Compare each proposed rule against earlier rounds; do not keep a rule that explains a later regression unless it also has stronger counter-evidence.",
             "- Treat negative metric deltas as regression evidence and identify which methodology changed or disappeared.",
-            (
-                "- Use shared evaluator feedback only as sanitized additive guidance. "
-                "Preserve supplied candidate/public reconstruction anchors but do not copy "
-                "held-out literals, private source rows, restricted evaluation-side material, "
-                "or answers."
-                if task_local_preservation
-                else "- Use shared evaluator feedback only as sanitized methodology guidance; do not copy exact held-out literals, article titles, row identifiers, filenames, or tables."
-            ),
+            "- Use shared evaluator feedback only as sanitized methodology guidance; do not copy exact held-out literals, article titles, row identifiers, filenames, or tables.",
             "- Prefer rules that improve component boundaries, canonical article/package identifiers, other task-provided source identifiers, deduplication, and final-output discipline across rounds.",
-            *(
-                [
-                    "- For this next-session task-local artifact, require RECONSTRUCT, PRESERVE, "
-                    "EXTEND, and VERIFY in that order; baseline equivalence is mandatory before "
-                    "submission and new analysis cannot replace required baseline capability.",
-                ]
-                if task_local_preservation
-                else []
-            ),
             "",
             "## Agent-System Rule Quality Gate",
             "",
-            (
-                "- Do not copy exact held-out literals, private source rows, article titles, "
-                "answer counts, sequences, restricted evaluation-side material, or reference "
-                "records. Candidate/public reconstruction paths supplied by the task-local "
-                "attachment may be retained."
-                if task_local_preservation
-                else "- Do not copy exact held-out literals, source filenames, source sheet names, row numbers, article titles, answer counts, sequences, or reference records."
-            ),
-            (
-                "- Each task-local preservation rule must identify a required achievement, "
-                "a reconstruction or additive action, and a baseline-equivalence check."
-                if task_local_preservation
-                else "- Each methodology rule should be general across task instances but concrete enough to include a trigger, action, and validation check."
-            ),
+            "- Do not copy exact held-out literals, source filenames, source sheet names, row numbers, article titles, answer counts, sequences, or reference records.",
+            "- Each methodology rule should be general across task instances but concrete enough to include a trigger, action, and validation check.",
             "- Replace slogans such as broad coverage reminders with executable checks, for example recursive file-level source inventory, general structured evidence formats such as tables/spreadsheets/CSV/TSV/XLS/XLSX/supplementary files, and per-source final validation when the task involves package-like inputs.",
             "",
         ]
@@ -4126,8 +4095,8 @@ def _render_agent_system_gepa_candidate_prompt(
             f"- Mutation strategy: {strategy}\n"
             "- Produce only short submission constraints; memory owns retained knowledge "
             "and skill owns executable reconstruction.\n"
-            "- Keep RECONSTRUCT, PRESERVE, additive EXTEND, VERIFY, broad coverage, and "
-            "baseline equivalence explicit.\n\n"
+            "- Keep successful baseline methods and broad task coverage while adding the "
+            "feedback-requested improvements; do not silently replace methods or parameters.\n\n"
             "Return only the candidate Markdown agent-system file, at most 250 words."
         )
     return (
@@ -4142,24 +4111,10 @@ def _render_agent_system_gepa_candidate_prompt(
         f"- Mutation strategy: {strategy}\n"
         "- Reflection rule: each added instruction must name a trigger, an action, "
         "and a validation check.\n"
-        + (
-            "- Leakage rule: do not copy exact held-out literals, private source rows, "
-            "task answers, restricted evaluation-side material, or verifier-specific hidden "
-            "records. Candidate/public reconstruction paths supplied by the "
-            "task-local attachment may be retained.\n"
-            if task_local_preservation
-            else "- Leakage rule: do not copy exact held-out literals, filenames, source row "
-            "numbers, task answers, or verifier-specific hidden records.\n"
-        )
+        + "- Leakage rule: do not copy exact held-out literals, filenames, source row "
+        "numbers, task answers, or verifier-specific hidden records.\n"
         + "- Selection rule: prefer candidates that directly address observed verifier "
         "failures while preserving successful prior behavior.\n\n"
-        + (
-            "- Preservation rule: output the short R3 invariant that RECONSTRUCT comes "
-            "before PRESERVE, then EXTEND only additively and VERIFY baseline equivalence "
-            "before submission.\n\n"
-            if task_local_preservation
-            else ""
-        )
         + "Return only the candidate Markdown agent-system instruction file."
     )
 
@@ -4470,8 +4425,8 @@ def _generate_agent_system_reflection(
         prompt,
         llm_config,
         system_message=(
-            "You are a reflector for one task-local successor agent system. Require "
-            "RECONSTRUCT, PRESERVE, additive EXTEND, and baseline-equivalence VERIFY. "
+            "You are a reflector for one task-local successor agent system. Keep successful "
+            "baseline scientific work while adding feedback-driven improvements. "
             "Return only the Markdown file content."
             if task_local_preservation
             else "You are a reflector for an agent system. Read prior task trajectories, "
@@ -4724,8 +4679,8 @@ def _codex_cli_reflector_prompt(
         "This artifact is task-local and will be installed only for one fresh next "
         "session. Write at most 250 words of submission constraints only. Memory owns "
         "retained knowledge and skill owns reconstruction steps; do not repeat them as "
-        "a generic handbook. Require RECONSTRUCT, PRESERVE, additive EXTEND, VERIFY, "
-        "broad coverage, and baseline equivalence.\n\n"
+        "a generic handbook. Require successful baseline scientific paths and broad task "
+        "coverage to remain while feedback-driven improvements are added.\n\n"
         if task_local_preservation
         else (
             "Every new methodology rule should be general enough to transfer across "
@@ -4750,9 +4705,9 @@ def _codex_cli_text_memory_reflector_prompt(
     task_local_preservation: bool = False,
 ) -> str:
     scope = (
-        "Write next-session task-local preservation memory. Keep every required "
-        "candidate/public reconstruction anchor concrete and distinct; do not replace "
-        "it with reusable cross-task SOP.\n\n"
+        "Write next-session task-local memory. Keep the supplied Candidate/public methods, "
+        "parameters, inputs, outputs, and scientific reasoning concrete; do not compress "
+        "them into reusable cross-task SOP.\n\n"
         if task_local_preservation
         else "Focus on recurring failure modes, successful task habits, and validation checks that transfer across tasks.\n\n"
     )
@@ -4773,9 +4728,9 @@ def _codex_cli_skill_bundle_reflector_prompt(
     task_local_preservation: bool = False,
 ) -> str:
     scope = (
-        "This is a task-local next-session skill. Materialize every supplied "
-        "reconstruction anchor and each additive feedback action, rather than a generic "
-        "transferable workflow.\n\n"
+        "This is a task-local next-session skill. Explain how to reproduce the supplied "
+        "baseline scientific paths and then add the feedback-requested improvements, rather "
+        "than replacing them with a generic workflow.\n\n"
         if task_local_preservation
         else ""
     )
@@ -5496,14 +5451,13 @@ def _render_agent_system_audit_repair_prompt(
         lines.append(f"- {finding['message']}")
     if task_local_preservation:
         rules = [
-            "- Retain supplied candidate/public reconstruction paths only when they are "
-            "needed to reconstruct a required achievement. Do not name held-out answers, "
+            "- Retain supplied Candidate/public scientific paths without naming held-out answers, "
             "private source rows, restricted evaluation-side material, answer counts, sequences, "
             "or reference records.",
-            "- Replace generic slogans with concise preservation rules that name the "
-            "achievement, reconstruction action, and baseline-equivalence verification.",
-            "- Keep new evaluator-driven work additive: reconstruct and preserve required "
-            "baseline capability before extending it.",
+            "- Replace generic slogans with a concise constraint that keeps successful baseline "
+            "methods and broad task coverage.",
+            "- Keep evaluator-driven work additive; do not silently replace a baseline method "
+            "or parameter.",
         ]
     else:
         rules = [

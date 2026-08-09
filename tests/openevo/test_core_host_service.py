@@ -2934,10 +2934,10 @@ def test_daemon_floor_allows_legacy_upgrade_and_rejects_same_abi_downgrade(
     }
 
 
-def test_current_daemon_lifecycle_advances_past_reflector_boundary_floor() -> None:
-    """A changed preservation reflector boundary cannot reuse lifecycle 103."""
+def test_current_daemon_lifecycle_advances_for_minimal_semantic_reflector() -> None:
+    """The simplified task-local Reflector contract has a distinct lifecycle."""
 
-    assert service.V2_DAEMON_LIFECYCLE_COMPATIBILITY == 107
+    assert service.V2_DAEMON_LIFECYCLE_COMPATIBILITY == 108
 
 
 def test_pending_process_is_recovered_before_restart(
