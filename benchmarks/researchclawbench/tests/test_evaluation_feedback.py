@@ -5,6 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+import openevo_researchclawbench.evaluation_feedback as feedback_module
 import pytest
 from openevo_researchclawbench.evaluation_feedback import (
     EvaluationFeedbackProjectionPort,
@@ -156,6 +157,33 @@ def test_paraphrased_answer_reconstruction_is_rejected(tmp_path: Path) -> None:
         )
 
     assert caught.value.reason_code == "FEEDBACK_ANSWER_RECONSTRUCTION_VIOLATION"
+
+
+def test_candidate_evidence_filename_with_digits_is_not_a_numeric_claim(
+    tmp_path: Path,
+) -> None:
+    root, result = _projection(tmp_path)
+    evidence = root / "report/images/figure_1_validation.png"
+    evidence.write_bytes(b"candidate figure")
+    feedback = deepcopy(result["sanitized_feedback"])
+    feedback["diagnoses"][0]["candidate_observation"] = (
+        "Candidate report links report/images/figure_1_validation.png as evidence."
+    )
+    feedback["diagnoses"][0]["evidence_refs"] = [
+        "report/report.md",
+        "report/images/figure_1_validation.png",
+    ]
+
+    files = feedback_module._candidate_files(root)
+    public_corpus = feedback_module._bounded_text_corpus(root, files) + "\n" + "\n".join(files)
+    admission = admit_sanitized_feedback(
+        feedback,
+        candidate_root=root,
+        public_corpus=public_corpus,
+        ground_truth_entries=_gt(),
+    )
+
+    assert admission["status"] == "ADMITTED"
 
 
 def test_projection_port_persists_only_sanitized_output(tmp_path: Path) -> None:

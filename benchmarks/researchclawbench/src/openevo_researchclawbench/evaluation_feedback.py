@@ -424,8 +424,20 @@ def admit_sanitized_feedback(
         for item in [*feedback["preserve_strengths"], *feedback["diagnoses"]]:
             text = item[field]
             # Numeric claims in free-form learning text are disallowed.  The
-            # only admitted score is the typed evaluation_summary.score.
-            if any(character.isdigit() for character in text):
+            # only admitted score is the typed evaluation_summary.score.  A
+            # sealed Candidate can legitimately name an evidence file such as
+            # ``figure_1_validation.png``; its already-verified path is a
+            # provenance reference, not a numeric scientific claim.
+            numeric_claim_text = text
+            for ref in item["evidence_refs"]:
+                for candidate_ref in (ref, Path(ref).name):
+                    numeric_claim_text = re.sub(
+                        re.escape(candidate_ref),
+                        "",
+                        numeric_claim_text,
+                        flags=re.IGNORECASE,
+                    )
+            if any(character.isdigit() for character in numeric_claim_text):
                 raise FeedbackAdmissionError("FEEDBACK_PROVENANCE_VIOLATION")
             unknown = {
                 token.casefold()
