@@ -45,7 +45,11 @@ def _candidate(tmp_path: Path) -> tuple[Path, dict[str, object]]:
     (root / "report/images").mkdir(parents=True)
     (root / "data/public.csv").write_text("x,y\n1,2\n", encoding="utf-8")
     (root / "code/analyze.py").write_text(
-        "# candidate-designed public-data comparison\nprint('metrics')\n",
+        "# candidate-designed public-data comparison\n"
+        "def build_public_features():\n    return 'features'\n"
+        "def compare_trends():\n    return 'outputs/metrics.csv', 'report/images/trend.png'\n"
+        "def verify_numeric_evidence():\n    return build_public_features(), compare_trends()\n"
+        "print(verify_numeric_evidence())\n",
         encoding="utf-8",
     )
     (root / "outputs/metrics.csv").write_text("metric,value\ntrend,1\n", encoding="utf-8")
@@ -142,6 +146,32 @@ def _complete_artifacts(capsule: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _four_required_achievements(capsule: dict[str, Any]) -> dict[str, Any]:
+    """Exercise coverage independently of how many real scripts a fixture has."""
+
+    expanded = deepcopy(capsule)
+    original = expanded["baseline_achievement_ledger"]["achievements"][0]
+    achievements = []
+    for index in range(1, 5):
+        item = deepcopy(original)
+        item["achievement_id"] = f"achievement_{index:02d}"
+        item["method_signature"] = [f"method_{index}", "public", "evidence"]
+        item["capability"] = f"Reconstruct candidate method_{index} from public evidence."
+        achievements.append(item)
+    expanded["baseline_achievement_ledger"]["achievements"] = achievements
+    expanded["baseline_achievement_ledger"]["achievement_count"] = len(achievements)
+    expanded["baseline_achievement_ledger"]["required_achievement_count"] = len(achievements)
+    expanded["successful_work"] = [
+        {**deepcopy(expanded["successful_work"][0]), "achievement_id": item["achievement_id"]}
+        for item in achievements
+    ]
+    expanded["improvement_actions"] = [
+        {**deepcopy(action), "achievement_id": achievements[index % len(achievements)]["achievement_id"]}
+        for index, action in enumerate(expanded["improvement_actions"])
+    ]
+    return expanded
+
+
 def test_success_trace_extracts_real_successes_and_filters_noise(tmp_path: Path) -> None:
     root, _candidate_record = _candidate(tmp_path)
     trace = build_baseline_success_trace(candidate_root=root)
@@ -163,6 +193,12 @@ def test_achievement_ledger_uses_trajectory_capability_not_report_heading(tmp_pa
 
     assert ledger["projector_model_calls"] == 0
     assert "code/analyze.py" in encoded
+    assert "build_public_features" in encoded
+    assert "compare_trends" in encoded
+    assert "verify_numeric_evidence" in encoded
+    assert "data/public.csv" in encoded
+    assert "outputs/metrics.csv" in encoded
+    assert "report/images/trend.png" in encoded
     assert "modeling and evaluation" not in {item["capability"].casefold() for item in ledger["achievements"]}
     assert all(item["reconstruction_steps"] for item in ledger["achievements"])
 
@@ -193,7 +229,7 @@ def test_reflector_view_keeps_all_three_admitted_diagnoses(tmp_path: Path) -> No
 
 def test_memory_gate_requires_unique_required_achievement_coverage(tmp_path: Path) -> None:
     _root, projection = _projection(tmp_path)
-    capsule = projection["baseline_evidence_capsule"]
+    capsule = _four_required_achievements(projection["baseline_evidence_capsule"])
     artifacts = _complete_artifacts(capsule)
     first = capsule["baseline_achievement_ledger"]["achievements"][0]
     artifacts["text_memory"] = (
@@ -210,7 +246,7 @@ def test_memory_gate_requires_unique_required_achievement_coverage(tmp_path: Pat
 
 def test_skill_gate_requires_reconstruction_and_every_additive_mapping(tmp_path: Path) -> None:
     _root, projection = _projection(tmp_path)
-    capsule = projection["baseline_evidence_capsule"]
+    capsule = _four_required_achievements(projection["baseline_evidence_capsule"])
     artifacts = _complete_artifacts(capsule)
     artifacts["skill_bundle"] = "Phase 3 — Add more validation."
 
@@ -242,7 +278,7 @@ def test_earth_style_bundle_pass_cannot_bypass_r3_per_artifact_gate(tmp_path: Pa
 
 def test_duplicate_achievement_mentions_count_once(tmp_path: Path) -> None:
     _root, projection = _projection(tmp_path)
-    capsule = projection["baseline_evidence_capsule"]
+    capsule = _four_required_achievements(projection["baseline_evidence_capsule"])
     artifacts = _complete_artifacts(capsule)
     first = capsule["baseline_achievement_ledger"]["achievements"][0]
     artifacts["text_memory"] = " ".join(
@@ -263,7 +299,12 @@ def test_candidate_detail_is_allowed_but_hidden_detail_is_rejected(tmp_path: Pat
     capsule = projection["baseline_evidence_capsule"]
     prompt_contract = projection["reflector_feedback"]["a00_preservation_first_prompt_contract"]
     assert "analyze" in json.dumps(prompt_contract).casefold()
-    assert "trend.png" in json.dumps(prompt_contract)
+    assert "figure" in json.dumps(prompt_contract).casefold()
+    assert any(
+        "trend.png" in ref
+        for item in capsule["baseline_achievement_ledger"]["achievements"]
+        for ref in item["candidate_evidence_refs"]
+    )
 
     poisoned = deepcopy(capsule)
     poisoned["candidate_concepts"][0]["text"] = "Hidden target relation with private curvature."
@@ -364,4 +405,3 @@ def test_final_artifact_gate_accepts_complete_r3_roles_without_provider_calls(tm
     assert report["aggregate"]["skill_required_achievement_reconstruction_coverage"] >= 0.80
     assert report["aggregate"]["feedback_action_coverage"] == 1
     assert report["gt_leakage_findings"] == []
-

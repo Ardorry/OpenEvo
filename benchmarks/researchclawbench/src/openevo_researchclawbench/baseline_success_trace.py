@@ -7,6 +7,7 @@ evaluation authority and it does not replay a command or call a model.
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 from collections.abc import Iterable, Mapping
@@ -28,6 +29,7 @@ _SUCCESS_WORDS = frozenset(
 _LOW_SIGNAL = frozenset(
     {"analysis", "artifact", "candidate", "data", "file", "figure", "image", "output", "report", "result", "run", "script", "summary", "the", "with"}
 )
+_CODE_NOISE = frozenset({"ensure_dirs", "main", "run", "run_pipeline", "save", "write"})
 
 
 class BaselineSuccessTraceError(RuntimeError):
@@ -192,25 +194,99 @@ def _classify_outputs(refs: Iterable[str]) -> list[str]:
     return sorted(output_classes)
 
 
+def _script_evidence(
+    root: Path,
+    script: str,
+    outputs: list[str],
+) -> tuple[list[str], list[str], str]:
+    """Recover a bounded candidate-created method signature from source code.
+
+    Core's transcript capture can legitimately contain only the terminal
+    response message.  In that case, the sealed candidate script itself is
+    the strongest candidate-owned record of the analysis route.  We parse
+    only Python syntax and literal output references; no code is executed and
+    no evaluator authority is consulted.
+    """
+
+    path = root / script
+    try:
+        payload = path.read_text(encoding="utf-8", errors="replace")[:1_000_000]
+        tree = ast.parse(payload, filename=script)
+    except (OSError, SyntaxError, ValueError):
+        return [], [], "Candidate-created analysis script with sealed output evidence."
+    functions = [
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name.casefold() not in _CODE_NOISE
+    ]
+    calls = [
+        _short(ast.unparse(node.func), limit=72)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+    ]
+    literals = [
+        node.value.replace("\\", "/").lstrip("./")
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and len(node.value) <= 240
+    ]
+    output_by_name = {Path(item).name: item for item in outputs}
+    linked = [
+        output_by_name[Path(value).name]
+        for value in literals
+        if Path(value).name in output_by_name
+    ]
+    if not linked and len([item for item in root.glob("code/*") if item.is_file()]) == 1:
+        # A single candidate script is the sole executable analysis route, so
+        # its sealed output inventory belongs to its capability rather than to
+        # disconnected title-level events.
+        linked = outputs
+    signature = [
+        token
+        for value in [*functions[:12], *calls[:12], *linked[:16]]
+        for token in _TOKEN.findall(value.casefold())
+        if token not in _LOW_SIGNAL and len(token) > 2
+    ]
+    signature = list(dict.fromkeys(signature))[:24]
+    method_bits = list(dict.fromkeys([*functions[:6], *calls[:5]]))[:10]
+    summary = (
+        "Candidate script executes " + ", ".join(method_bits)
+        if method_bits
+        else "Candidate-created analysis script with sealed output evidence."
+    )
+    return list(dict.fromkeys(linked))[:24], signature, summary
+
+
 def _file_events(root: Path, files: list[str]) -> list[dict[str, Any]]:
     public_inputs = [item for item in files if item.startswith(("data/", "related_work/", "inputs/"))][:6]
     reports = [item for item in files if item == "report/report.md"]
     outputs = [item for item in files if Path(item).suffix.casefold() in (_IMAGE_SUFFIXES | _NUMERIC_SUFFIXES)]
     events: list[dict[str, Any]] = []
+    script_events: list[dict[str, Any]] = []
     for script in [item for item in files if Path(item).suffix.casefold() in _CODE_SUFFIXES]:
         stem = Path(script).stem.replace("_", " ")
-        linked = [item for item in outputs if any(token in Path(item).stem.casefold() for token in _TOKEN.findall(stem.casefold()))]
-        refs = list(dict.fromkeys([script, *linked[:4], *reports]))
-        events.append(
+        linked, signature, method_summary = _script_evidence(root, script, outputs)
+        refs = list(dict.fromkeys([script, *linked, *reports]))
+        script_events.append(
             {
                 "decision_context": "Candidate created a concrete analysis route from the visible task inputs.",
-                "action": f"Reconstruct and execute the candidate-created `{script}` analysis route.",
+                "action": (
+                    f"Reconstruct and execute candidate-created `{script}`: {method_summary}."
+                ),
                 "public_input_refs": public_inputs,
                 "candidate_artifact_refs": refs,
-                "result_summary": f"The route produced candidate-owned evidence associated with {stem}.",
+                "method_signature": signature,
+                "method_summary": method_summary,
+                "result_summary": (
+                    f"The `{script}` route produced candidate-owned evidence associated with "
+                    f"{stem}: {', '.join(linked[:8]) or 'sealed report-linked outputs'}."
+                ),
                 "verification": "The sealed workspace contains the script, produced outputs, and report evidence.",
             }
         )
+    events.extend(script_events)
     for output in outputs:
         if len(events) >= 28:
             break
@@ -303,31 +379,64 @@ def build_baseline_achievement_ledger(
         raise BaselineSuccessTraceError("ACHIEVEMENT_LEDGER_TRACE_INVALID")
     achievements: list[dict[str, Any]] = []
     seen_methods: set[str] = set()
+    workspace_outputs = [
+        item
+        for item in files
+        if Path(item).suffix.casefold() in (_IMAGE_SUFFIXES | _NUMERIC_SUFFIXES)
+    ]
+    code_methods_present = any(
+        any(Path(ref).suffix.casefold() in _CODE_SUFFIXES for ref in event.get("candidate_artifact_refs", []))
+        for event in raw_events
+        if isinstance(event, dict)
+    )
     for event in raw_events:
         if not isinstance(event, dict):
             continue
         refs = [ref for ref in event.get("candidate_artifact_refs", []) if isinstance(ref, str) and ref in files]
+        method_refs = [ref for ref in refs if Path(ref).suffix.casefold() in _CODE_SUFFIXES]
+        source_signature: list[str] = []
+        source_summary = ""
+        if method_refs:
+            linked, source_signature, source_summary = _script_evidence(
+                root, method_refs[0], workspace_outputs
+            )
+            # The transcript can record only the command that invoked a
+            # script.  Bind its sealed outputs here so the ledger describes a
+            # complete method/evidence chain rather than an isolated path.
+            refs = list(dict.fromkeys([*refs, *linked, "report/report.md"]))
         classes = _classify_outputs(refs)
         if not classes:
             continue
-        method_refs = [ref for ref in refs if Path(ref).suffix.casefold() in _CODE_SUFFIXES]
+        if not method_refs and code_methods_present:
+            # Output-only events support trace coverage, but are not separate
+            # capabilities when a candidate-created script already binds the
+            # method, outputs, and report evidence into one analysis route.
+            continue
         method_ref = method_refs[0] if method_refs else refs[0]
         method_key = method_ref.casefold()
         if method_key in seen_methods:
             continue
         seen_methods.add(method_key)
         action = str(event.get("action", ""))
-        signature = _signature(f"{method_ref} {action} {' '.join(refs)}")
+        raw_signature = event.get("method_signature")
+        if source_signature:
+            signature = source_signature
+        elif isinstance(raw_signature, list):
+            signature = [item for item in raw_signature if isinstance(item, str)]
+        else:
+            signature = _signature(f"{method_ref} {action} {' '.join(refs)}")
+        signature = list(dict.fromkeys(signature))[:24]
         if len(signature) < 2:
             continue
         achievement_id = f"achievement_{len(achievements) + 1:02d}"
+        method_summary = str(source_summary or event.get("method_summary") or action)
         capability = (
-            f"Use candidate-created method `{method_ref}` to produce the linked "
-            f"{', '.join(classes)} evidence path."
+            f"Reconstruct candidate-created `{method_ref}` analysis route: {method_summary}. "
+            f"It must regenerate the linked {', '.join(classes)} evidence path."
         )
         reconstruction_steps = [
             "Start from the original public inputs in a fresh workspace.",
-            f"Reconstruct and execute the capability represented by `{method_ref}`.",
+            f"Reconstruct and execute `{method_ref}` using this candidate-derived method: {method_summary}.",
             "Regenerate the required evidence outputs and connect them to the report discussion.",
             "Verify that the regenerated method and evidence chain are present before adding improvements.",
         ]

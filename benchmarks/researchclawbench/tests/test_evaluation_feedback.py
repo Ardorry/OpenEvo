@@ -277,7 +277,14 @@ def test_native_reflector_requests_see_candidate_specific_retention_feedback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _root, projection = _projection(tmp_path / "projection")
-    feedback = projection["reflector_feedback"]
+    feedback = deepcopy(projection["reflector_feedback"])
+    # The actual Core renderer receives a bounded string.  Exercise the
+    # regression case in which a third admitted diagnosis must remain visible
+    # rather than disappearing behind diagnoses[0].
+    feedback["a00_preservation_first_prompt_contract"]["02_all_sanitized_diagnoses"].append(
+        "weakness_03 -> achievement_01: reproducibility; candidate=report-linked rerun; "
+        "ADD public rerun verification"
+    )
     dataset = _dataset(tmp_path, feedback)
     runtime = default_managed_reflector_runtime()
     captured: list[ReflectorInferenceRequest] = []
@@ -384,15 +391,16 @@ def test_native_reflector_requests_see_candidate_specific_retention_feedback(
     # The real native renderer bounds a reflected record.  The adapter must
     # therefore place the concrete candidate strategy/action ahead of the
     # verbose capsule, rather than only proving that the full JSON exists.
-    assert prompts.count("RECONSTRUCT required baseline capabilities") >= 3
+    assert prompts.count("R3 TASK-LOCAL; NOT generic SOP") >= 3
+    assert prompts.count("Memory: PRESERVE each ID with method+evidence") >= 3
     assert prompts.count("candidate_summary") >= 3
     assert "Candidate report links report/images/candidate_summary.png" in prompts
     assert "fresh workspace" in prompts
     assert prompts.count("Baseline Success Trace") >= 3
-    assert prompts.count("Baseline Achievement Ledger") >= 3
-    assert prompts.count("RECONSTRUCT required baseline capabilities") >= 3
     assert prompts.count("weakness_01") >= 3
     assert prompts.count("weakness_02") >= 3
+    assert prompts.count("weakness_03") >= 3
+    assert prompts.count("achievement_01 REQUIRED") >= 3
     assert "candidate_summary.png" in prompts
     assert "quasiflux" not in prompts.casefold()
     assert "private_target_figure" not in prompts.casefold()

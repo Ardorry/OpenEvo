@@ -201,7 +201,12 @@ def test_candidate_specific_artifact_triple_is_accepted(tmp_path: Path) -> None:
     )
 
     assert report["status"] == "PASS"
-    assert report["aggregate"]["candidate_specific_reference_count"] >= 2
+    # R3 counts unique required capabilities rather than repeated terms.  A
+    # one-script Candidate can legitimately have one concrete analysis route;
+    # it must not be forced to manufacture a second one for this metric.
+    assert report["aggregate"]["candidate_specific_reference_count"] >= min(
+        2, report["aggregate"]["required_achievement_count"]
+    )
     assert report["aggregate"]["weakness_to_action_mapping_count"] >= 1
     assert report["artifact_role_contract"]["duplicate_mentions_count_once"] is True
 

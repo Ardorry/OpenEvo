@@ -758,37 +758,41 @@ def _build_reflector_prompt_contract(reflector_capsule: Mapping[str, Any]) -> di
     mappings = reflector_capsule["weakness_to_action"]
     diagnoses = [
         (
-            f"{item['weakness_id']}: {item['dimension']}; candidate observation: "
-            f"{compact(item['candidate_observation'], limit=94)}; additive action: "
-            f"{compact(item['next_run_action'], limit=88)}"
+            f"{item['weakness_id']} -> {item['achievement_id']}: {item['dimension']}; "
+            f"candidate={compact(item['candidate_observation'], limit=32)}; ADD "
+            f"{compact(item['next_run_action'], limit=48)}"
         )
         for item in mappings
     ]
     achievements = [
         (
-            f"{item['achievement_id']} REQUIRED: method={' '.join(item['method_signature'][:6])}; "
+            f"{item['achievement_id']} REQUIRED: method={' '.join(item['method_signature'][:7])}; "
             f"outputs={','.join(item['required_output_classes'])}; evidence role="
-            f"{compact(item['scientific_role'], limit=72)}"
+            f"{compact(item['scientific_role'], limit=28)}"
         )
         for item in reflector_capsule["baseline_achievement_ledger"]["achievements"]
     ]
     trace_events = [
         (
-            f"{item['trace_id']} successful: action={compact(item['action'], limit=98)}; "
-            f"evidence={','.join(item['candidate_artifact_refs'][:3])}; "
-            f"verify={compact(item['verification'], limit=58)}"
+            f"{item['trace_id']} successful: action={compact(item['action'], limit=48)}; "
+            f"evidence={','.join(item['candidate_artifact_refs'][:2])}; "
+            f"verify={compact(item['verification'], limit=24)}"
         )
-        for item in reflector_capsule["baseline_success_trace"]["events"]
+        for item in reflector_capsule["baseline_success_trace"]["events"][:3]
     ]
     return {
-        "00_reconstruct_preserve_extend_verify": (
-            "RECONSTRUCT required baseline capabilities in a fresh workspace; PRESERVE "
-            "every required achievement; EXTEND only through additive diagnosed actions; "
-            "VERIFY baseline equivalence before submission. Never replace a baseline path "
-            "or restart the research plan."
+        "00_task_local_final_artifact_contract": (
+            "R3 TASK-LOCAL; NOT generic SOP. RECONSTRUCT/PRESERVE all achievements; EXTEND "
+            "only additive weaknesses in a fresh workspace; VERIFY baseline equivalence. Final artifact must use "
+            "required achievement IDs, methods, and evidence roles."
         ),
-        "01_all_sanitized_diagnoses": diagnoses,
-        "02_baseline_achievement_ledger": achievements,
+        "00a_destination_role_contract": (
+            "Memory: PRESERVE each ID with method+evidence. Skill: reconstruct+verify each ID; "
+            "map every weakness additively. Agent-system: RECONSTRUCT, PRESERVE, EXTEND, VERIFY, "
+            "and baseline equivalence."
+        ),
+        "01_required_baseline_achievements": achievements,
+        "02_all_sanitized_diagnoses": diagnoses,
         "03_baseline_success_trace": trace_events,
         "04_artifact_roles": (
             "memory=what must not be lost; skill=how to reconstruct then extend; "
