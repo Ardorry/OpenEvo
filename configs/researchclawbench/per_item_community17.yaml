@@ -1,7 +1,7 @@
 experiment_id: sequential_task_reflector_evolution_v0
 refactor_id: PRODUCTION_TRAINING_OPERATIONS_DRIVER_V1
 protocol_name: preservation_first_evolution_r3
-protocol_version: 3.0.0
+protocol_version: 3.0.1
 status: PER_ITEM_CONFIGURED_NOT_STARTED
 per_item_reset:
   contract_version: openevo.researchclawbench.per_item_reset.v2
@@ -72,9 +72,9 @@ paths:
   researchclawbench_root: /home/lhy-h/work/researchclaw_openevo/ResearchClawBench
 source_identity:
   openevo_commit: caa247268e525cab6b8d4760da2d012c10d98b36
-  adapter_implementation_commit: 39c325b6f15fd60f26ed0149f73c6051bf74445a
+  adapter_implementation_commit: ebea1f2a34b255786091d1fbea8a92b57c607d63
   openevo_core_source_tree_sha256: 37cb9908be06716a9b5b51e05de8d48745d136b11f27223a83b486b6e8e48bbf
-  adapter_tree_sha256: 9b1bad5197a5ae1c023cebb971c83f3d9156b4e653c3d69b66df6414fe1c4c01
+  adapter_tree_sha256: 110a9a640152a7f0bba388c63e6b60e96770bcad4b9fcd936c6a70b3fc033621
   researchclawbench_commit: b1175eca3deb78ff8b2c839070874474051d2261
   canonical_scorer_sha256: 9492317443acc069744330f27aac693d162f1aa6837d512e40419704197c6022
 native_openevo:
@@ -202,6 +202,8 @@ feedback:
   baseline_evidence_capsule: baseline_evidence_capsule_v2
   artifact_quality_gate: PRESERVATION_ARTIFACT_QUALITY_V3
   baseline_equivalence_gate: BASELINE_EQUIVALENCE_V1
+  reflector_success_trace_selection: high_information_candidate_evidence_v1
+  reflector_preservation_anchor_contract: task_local_required_anchor_v1
   capsule_projector_model_calls: 0
   raw_gt_visible_to_reflector: false
   judge_reasoning_visible_to_reflector: false
