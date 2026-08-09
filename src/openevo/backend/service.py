@@ -80,7 +80,9 @@ _PRODUCTION_V2_LIFECYCLE_COMPATIBILITY = 10
 # task-local Candidate-source admission and leakage boundary.
 # Lifecycle 109 compares protected numeric literals as complete numeric tokens,
 # preventing Candidate-produced values such as 0.12 from colliding with 0.1.
-V2_DAEMON_LIFECYCLE_COMPATIBILITY = 109
+# Lifecycle 110 recognizes equivalent numeric spellings already present in the
+# sealed Candidate source while retaining exact rejection for GT-only values.
+V2_DAEMON_LIFECYCLE_COMPATIBILITY = 110
 _MAX_CORE_SERVICE_ENSURE_DEADLINE_SECONDS = 1800.0
 _ONEFILE_LAUNCHER_CLEANUP_SECONDS = 10.0
 _ORPHANED_SERVICE_CHILDREN_GUARD = threading.Lock()

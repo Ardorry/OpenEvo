@@ -439,6 +439,34 @@ def test_task_local_candidate_numeric_parameter_does_not_match_gt_prefix() -> No
     assert receipt.source_payload_sha256 is not None
 
 
+def test_task_local_candidate_numeric_parameter_reuses_equivalent_spelling() -> None:
+    source = json.dumps(
+        {
+            "candidate_report": (
+                "The baseline measured top-k recall at fractions 0.01, 0.05, "
+                "0.10, and 0.20."
+            )
+        }
+    )
+    receipt = artifact_content_admission_receipt(
+        basis=ArtifactContentAdmissionBasis(
+            values=("0.1",),
+            candidate_source_reuse_authorized=True,
+        ),
+        payloads={
+            "proposal-1": {
+                "SKILL.md": "Preserve top-k recall at the baseline fraction 0.10."
+            }
+        },
+        source_payloads={"dataset-1": {"records.jsonl": source}},
+    )
+
+    assert receipt.passed is True
+    assert receipt.finding_count == 0
+    assert receipt.source_artifact_ids == ("dataset-1",)
+    assert receipt.source_payload_sha256 is not None
+
+
 @pytest.mark.parametrize("equivalent_literal", ("0.1", "0.10", ".1", "1e-1"))
 def test_task_local_candidate_reuse_still_rejects_gt_only_numeric_literal(
     equivalent_literal: str,

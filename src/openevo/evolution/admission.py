@@ -300,7 +300,15 @@ def artifact_content_admission_receipt(
             item.casefold()
             for item in candidate_source_literals[category]
         }
-        return tuple(item for item in literals if item.casefold() not in reusable)
+        return tuple(
+            item
+            for item in literals
+            if item.casefold() not in reusable
+            and not (
+                category == "value"
+                and _candidate_source_contains_numeric_literal(source_payloads, item)
+            )
+        )
 
     exact_by_category = {
         "task_id": _merged_literals(basis.task_ids, source_literals["task_id"]),
@@ -539,6 +547,30 @@ def _protected_literal_present(folded_text: str, literal: str) -> bool:
             for match in _NUMERIC_TOKEN_PATTERN.finditer(folded_text)
         )
     return normalized in folded_text
+
+
+def _candidate_source_contains_numeric_literal(
+    source_payloads: Mapping[str, Mapping[str, str]],
+    literal: str,
+) -> bool:
+    """Recognize a bounded Candidate-produced numeric value semantically."""
+
+    normalized = literal.strip().casefold()
+    if not _NUMERIC_LITERAL_PATTERN.fullmatch(normalized):
+        return False
+    remaining = 4 * 1024 * 1024
+    for artifact_id in sorted(source_payloads):
+        files = source_payloads[artifact_id]
+        for path in sorted(files):
+            text = files[path]
+            if remaining <= 0:
+                return False
+            encoded = text.encode("utf-8")
+            bounded = encoded[:remaining].decode("utf-8", errors="ignore")
+            remaining -= len(bounded.encode("utf-8"))
+            if _protected_literal_present(bounded.casefold(), normalized):
+                return True
+    return False
 
 
 class NativeArtifactAdmissionPolicy(Protocol):

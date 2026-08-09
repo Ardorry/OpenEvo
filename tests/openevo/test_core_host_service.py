@@ -2934,10 +2934,10 @@ def test_daemon_floor_allows_legacy_upgrade_and_rejects_same_abi_downgrade(
     }
 
 
-def test_current_daemon_lifecycle_advances_for_numeric_literal_boundary() -> None:
-    """The protected numeric-token boundary has a distinct lifecycle."""
+def test_current_daemon_lifecycle_advances_for_candidate_numeric_reuse() -> None:
+    """Candidate-produced equivalent numeric spellings have a distinct lifecycle."""
 
-    assert service.V2_DAEMON_LIFECYCLE_COMPATIBILITY == 109
+    assert service.V2_DAEMON_LIFECYCLE_COMPATIBILITY == 110
 
 
 def test_pending_process_is_recovered_before_restart(
