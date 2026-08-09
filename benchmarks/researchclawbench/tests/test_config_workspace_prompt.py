@@ -10,8 +10,8 @@ from openevo_researchclawbench.prompt_composer import compose_native_instruction
 from openevo_researchclawbench.task_loader import load_public_task
 from openevo_researchclawbench.workspace import build_official_workspace
 
-PROJECT_ROOT = Path(__file__).resolve().parents[4]
-PROTOCOL = PROJECT_ROOT / "experiments/sequential_task_reflector_evolution_v0/protocol/protocol.yaml"
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+PROTOCOL = REPOSITORY_ROOT / "configs/researchclawbench/per_item_community17.yaml"
 
 
 def _fake_task(root: Path, task_id: str = "Life_005") -> Path:
@@ -33,7 +33,7 @@ def test_protocol_parser_is_frozen_and_has_closed_budget_configuration() -> None
     assert config.require("candidate.codex_cli_version") == "0.144.1"
     assert config.unresolved_fields() == []
     assert config.require("candidate.max_tool_steps") == 300
-    assert config.require("budgets.max_reflector_model_calls") == 170
+    assert config.require("budgets.max_reflector_model_calls") == 85
     readiness = config.environment_readiness({})
     assert readiness["ready"] is False
     assert readiness["reflector_runtime_receipt_valid"] is True
@@ -41,9 +41,10 @@ def test_protocol_parser_is_frozen_and_has_closed_budget_configuration() -> None
     assert "NATIVE_POST_RUN_TRAINING_FEEDBACK_ATTACHMENT_UNAVAILABLE" not in readiness["blockers"]
     assert "PRODUCTION_TRAINING_FEEDBACK_TRANSPORT_UNAVAILABLE" not in readiness["blockers"]
     assert "FORMAL_TRAINING_ORCHESTRATOR_UNAVAILABLE" not in readiness["blockers"]
-    assert readiness["formal_training_orchestrator_status"] == "READY"
+    assert readiness["formal_training_orchestrator_status"] is None
     assert readiness["framework_lock_present"] is True
-    assert "JUDGE_CREDENTIALS_MISSING" in readiness["blockers"]
+    assert "SOURCE_IDENTITY_DRIFT" in readiness["blockers"]
+    assert "JUDGE_CREDENTIALS_MISSING" not in readiness["blockers"]
 
 
 def test_config_rejects_judge_environment_in_candidate() -> None:
