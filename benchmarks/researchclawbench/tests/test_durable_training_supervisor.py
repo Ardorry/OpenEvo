@@ -535,6 +535,37 @@ def test_evaluation_is_frozen_before_feedback_projection(tmp_path: Path) -> None
     assert receipt["feedback_projector_model_calls"] == 0
 
 
+def test_per_item_mechanism_invalidation_preserves_baseline_and_resets_pre_evolution(
+    tmp_path: Path,
+) -> None:
+    operations = SyntheticOperations()
+    supervisor = _per_item_supervisor(tmp_path, operations, task="Earth_005")
+    _drive_to(supervisor, "EVOLUTION_PENDING")
+
+    closed = supervisor.invalidate_undispatched_per_item_evolution(
+        reason="MECHANISM_CHANGE_AFTER_TASK_3"
+    )
+    verified = supervisor.verify()
+
+    assert closed["stage"] == "ITEM_INVALIDATED_RESET"
+    assert closed["item_invalidation_receipt"]["archive_preserved"] is True
+    assert closed["item_invalidation_receipt"]["evolution_dispatched"] is False
+    assert closed["item_invalidation_receipt"]["pending_side_effects"] == 0
+    assert closed["active_candidate_receipt"] is None
+    assert closed["active_evaluation_receipt"] is None
+    assert closed["active_baseline_capsule"] is None
+    assert closed["active_attachment_receipt"] is None
+    assert closed["evolution_job_ids"] == []
+    assert not any(":evolution" in key for key in operations.calls)
+    assert verified["execution_status"] == "COMPLETED_INVALIDATED"
+    assert verified["pending_side_effects"] == 0
+
+    with pytest.raises(ValueError, match="only allowed before evolution dispatch"):
+        supervisor.invalidate_undispatched_per_item_evolution(
+            reason="MECHANISM_CHANGE_AFTER_TASK_3"
+        )
+
+
 def test_next_per_item_namespace_starts_clean_after_prior_item_reset(
     tmp_path: Path,
 ) -> None:

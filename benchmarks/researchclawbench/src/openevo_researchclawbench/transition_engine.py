@@ -38,6 +38,7 @@ class TrainingStage(StrEnum):
     FINAL_FROZEN = "FINAL_FROZEN"
     ITEM_CLOSED = "ITEM_CLOSED"
     ITEM_RESET = "ITEM_RESET"
+    ITEM_INVALIDATED_RESET = "ITEM_INVALIDATED_RESET"
     BUDGET_EXHAUSTED = "BUDGET_EXHAUSTED"
     BLOCKED = "BLOCKED"
     FAILED = "FAILED"
@@ -110,7 +111,15 @@ _ALLOWED: dict[TrainingStage, frozenset[TrainingStage]] = {
         {TrainingStage.EVOLUTION_PENDING, TrainingStage.TASK_SELECTION_PENDING}
     ),
     TrainingStage.EVOLUTION_PENDING: frozenset(
-        {TrainingStage.EVOLUTION_RUNNING, TrainingStage.BUDGET_EXHAUSTED}
+        {
+            TrainingStage.EVOLUTION_RUNNING,
+            TrainingStage.BUDGET_EXHAUSTED,
+            # A per-item protocol revision may be retired before its first
+            # evolution side effect.  This is deliberately not a generic
+            # cancellation edge: the supervisor validates the closed
+            # no-evolution inventory before it can use this terminal reset.
+            TrainingStage.ITEM_INVALIDATED_RESET,
+        }
     ),
     TrainingStage.EVOLUTION_RUNNING: frozenset(
         {TrainingStage.EVOLUTION_COMPLETED, TrainingStage.BLOCKED, TrainingStage.FAILED}
@@ -146,6 +155,7 @@ _ALLOWED: dict[TrainingStage, frozenset[TrainingStage]] = {
     TrainingStage.FINAL_FROZEN: frozenset(),
     TrainingStage.ITEM_CLOSED: frozenset({TrainingStage.ITEM_RESET}),
     TrainingStage.ITEM_RESET: frozenset(),
+    TrainingStage.ITEM_INVALIDATED_RESET: frozenset(),
     TrainingStage.BUDGET_EXHAUSTED: frozenset(),
     TrainingStage.BLOCKED: frozenset(),
     TrainingStage.FAILED: frozenset(),
@@ -166,6 +176,7 @@ def evolution_allowed(stage: TrainingStage) -> bool:
         TrainingStage.FINAL_FROZEN,
         TrainingStage.ITEM_CLOSED,
         TrainingStage.ITEM_RESET,
+        TrainingStage.ITEM_INVALIDATED_RESET,
         TrainingStage.BUDGET_EXHAUSTED,
         TrainingStage.CANDIDATE_SETUP_BLOCKED,
         TrainingStage.BLOCKED,

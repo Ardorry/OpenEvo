@@ -1450,6 +1450,14 @@ def main(argv: list[str] | None = None) -> int:
             )
         if name in {"training-start", "run-next", "resume"}:
             control.add_argument("--until", choices=tuple(item.value for item in TrainingStage))
+    per_item_invalidate = sub.add_parser("per-item-invalidate-undispatched-evolution")
+    per_item_invalidate.add_argument("--protocol", required=True, type=Path)
+    per_item_invalidate.add_argument("--run-id", required=True)
+    per_item_invalidate.add_argument(
+        "--reason",
+        required=True,
+        choices=("MECHANISM_CHANGE_AFTER_TASK_3",),
+    )
     minimal = sub.add_parser("minimal-per-item")
     minimal.add_argument("--protocol", required=True, type=Path)
     minimal.add_argument("--run-id", required=True)
@@ -1556,6 +1564,16 @@ def main(argv: list[str] | None = None) -> int:
             return command_per_item_community_inspect(config, args)
         if args.command == "recover-native-evolution":
             return command_recover_native_evolution(config, args)
+        if args.command == "per-item-invalidate-undispatched-evolution":
+            control = DurableTrainingControl(
+                config=config,
+                run_id=args.run_id,
+                require_existing=True,
+                production=False,
+            )
+            result = control.invalidate_undispatched_per_item_evolution(reason=args.reason)
+            print_closed_json(result)
+            return 0
         if getattr(config, "formal_runs_v11", None) is not None and args.command in {
             "training-start",
             "run-next",

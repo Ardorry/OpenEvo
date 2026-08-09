@@ -202,6 +202,7 @@ class CommunityTrainingSupervisor:
             "archived_artifact_ids": [],
             "paired_result": None,
             "item_reset_receipt": None,
+            "item_invalidation_receipt": None,
             "active_feedback_projection_receipt": None,
             "active_baseline_capsule": None,
             "active_artifact_quality_receipt": None,
@@ -1346,6 +1347,7 @@ class CommunityTrainingSupervisor:
             TrainingStage.FINAL_FREEZE_PENDING.value,
             TrainingStage.FINAL_FROZEN.value,
             TrainingStage.ITEM_RESET.value,
+            TrainingStage.ITEM_INVALIDATED_RESET.value,
         }:
             raise ValueError("training state task cursor is invalid")
         for task, records in attempts_by_task.items():
@@ -1429,6 +1431,35 @@ class CommunityTrainingSupervisor:
             or not isinstance(state.get("item_reset_receipt"), dict)
         ):
             raise ValueError("per-item reset terminal inventory is incomplete")
+        if state["stage"] == TrainingStage.ITEM_INVALIDATED_RESET.value and (
+            not self.per_item_reset_enabled
+            or len(self.task_ids) != 1
+            or attempts != 1
+            or evolution_effects
+            or state.get("evolution_job_ids") != []
+            or pending
+            or failed_effects
+            or resources
+            or state.get("active_artifact_ids") != []
+            or state.get("current_composite_id") is not None
+            or state.get("core_project_id") is not None
+            or state.get("preseeded_workspace_authority") is not None
+            or state.get("current_task_local_overlay_id") is not None
+            or state.get("current_task_local_overlay_scope_id") is not None
+            or state.get("active_candidate_intent") is not None
+            or state.get("active_candidate_receipt") is not None
+            or state.get("active_validation_receipt") is not None
+            or state.get("active_evaluation_receipt") is not None
+            or state.get("active_feedback_projection_receipt") is not None
+            or state.get("active_baseline_capsule") is not None
+            or state.get("active_attachment_receipt") is not None
+            or state.get("active_evolution_receipt") is not None
+            or state.get("active_artifact_quality_receipt") is not None
+            or state.get("active_admission_receipt") is not None
+            or state.get("active_evolved_workspace_receipt") is not None
+            or not isinstance(state.get("item_invalidation_receipt"), dict)
+        ):
+            raise ValueError("per-item invalidated reset inventory is incomplete")
         terminal_failure = state.get("active_terminal_failure")
         terminal_failure = terminal_failure if isinstance(terminal_failure, dict) else {}
         core_failure = terminal_failure.get("core_failure")
@@ -1440,6 +1471,8 @@ class CommunityTrainingSupervisor:
             TrainingStage.ITEM_RESET.value,
         }:
             execution_status = "COMPLETED"
+        elif state["stage"] == TrainingStage.ITEM_INVALIDATED_RESET.value:
+            execution_status = "COMPLETED_INVALIDATED"
         elif state["stage"] in {
             TrainingStage.BLOCKED.value,
             TrainingStage.FAILED.value,
@@ -1478,6 +1511,7 @@ class CommunityTrainingSupervisor:
             "identity_verified": True,
             "paired_result": state.get("paired_result"),
             "item_reset_receipt": state.get("item_reset_receipt"),
+            "item_invalidation_receipt": state.get("item_invalidation_receipt"),
         }
 
     @staticmethod
@@ -1673,6 +1707,7 @@ class CommunityTrainingSupervisor:
             TrainingStage.TASK_NO_VALID_ATTEMPT,
             TrainingStage.BUDGET_EXHAUSTED,
             TrainingStage.ITEM_RESET,
+            TrainingStage.ITEM_INVALIDATED_RESET,
         }:
             raise TrainingPaused(f"supervisor is terminal at {stage.value}")
         if (
@@ -3083,6 +3118,103 @@ class CommunityTrainingSupervisor:
                 receipt=reset,
             )
         raise ValueError(f"unhandled training stage: {stage.value}")
+
+    def invalidate_undispatched_per_item_evolution(self, *, reason: str) -> dict[str, Any]:
+        """Archive a per-item baseline at the pre-evolution boundary.
+
+        This terminal path is intentionally narrow.  It is used when a
+        protocol-level mechanism change retires a paired experiment before
+        Reflector jobs have been dispatched; candidate, Judge, feedback and
+        capsule receipts remain immutable historical evidence.
+        """
+
+        if reason != "MECHANISM_CHANGE_AFTER_TASK_3":
+            raise ValueError("per-item invalidation reason is not allowlisted")
+        state = self.status()
+        if not self.per_item_reset_enabled or len(self.task_ids) != 1:
+            raise ValueError("per-item invalidation requires one reset-scoped task")
+        if TrainingStage(state["stage"]) is not TrainingStage.EVOLUTION_PENDING:
+            raise ValueError("per-item invalidation is only allowed before evolution dispatch")
+        if state.get("current_attempt") != 0:
+            raise ValueError("per-item invalidation is only allowed for the baseline attempt")
+        effects = self.store.side_effects_for_experiment(self.experiment_id)
+        resources = self.store.active_resources(self.experiment_id)
+        evolution_effects = [item for item in effects if item.get("kind") == "evolution"]
+        required = {
+            "active_candidate_receipt": state.get("active_candidate_receipt"),
+            "active_validation_receipt": state.get("active_validation_receipt"),
+            "active_evaluation_receipt": state.get("active_evaluation_receipt"),
+            "active_feedback_projection_receipt": state.get("active_feedback_projection_receipt"),
+            "active_baseline_capsule": state.get("active_baseline_capsule"),
+            "active_attachment_receipt": state.get("active_attachment_receipt"),
+        }
+        if (
+            any(not isinstance(value, dict) for value in required.values())
+            or evolution_effects
+            or state.get("evolution_job_ids") != []
+            or any(item.get("status") != "completed" for item in effects)
+            or resources
+        ):
+            raise ValueError("per-item invalidation requires a sealed no-evolution inventory")
+        task = self.task_ids[0]
+        receipt = {
+            "schema_version": "openevo.researchclawbench.per_item_invalidation.v1",
+            "task_id": task,
+            "reason": reason,
+            "archive_preserved": True,
+            "evolution_dispatched": False,
+            "evolution_job_ids": [],
+            "pending_side_effects": 0,
+            "failed_side_effects": 0,
+            "active_owned_resources": 0,
+            "candidate_model_calls_reexecuted": 0,
+            "reflector_model_calls_reexecuted": 0,
+            "judge_calls_reexecuted": 0,
+            "preserved_evidence_sha256": {
+                key.removeprefix("active_"): canonical_sha256(value)
+                for key, value in required.items()
+            },
+            "budget_usage": self.store.budget_usage(self.experiment_id),
+            "reset": {
+                "active_artifacts": [],
+                "active_candidate": None,
+                "active_workspace": None,
+                "active_gt_supervision": None,
+                "active_evaluation_feedback": None,
+                "active_baseline_capsule": None,
+                "active_successor_head": None,
+                "active_project_head": None,
+                "active_reflector": None,
+            },
+        }
+        return self._transition(
+            TrainingStage.EVOLUTION_PENDING,
+            TrainingStage.ITEM_INVALIDATED_RESET,
+            "per-item-mechanism-invalidated-reset",
+            updates={
+                "current_task_index": len(self.task_ids),
+                "current_composite_id": None,
+                "core_project_id": None,
+                "preseeded_workspace_authority": None,
+                "current_task_local_overlay_id": None,
+                "current_task_local_overlay_scope_id": None,
+                "active_artifact_ids": [],
+                "active_candidate_intent": None,
+                "active_candidate_receipt": None,
+                "active_validation_receipt": None,
+                "active_evaluation_receipt": None,
+                "active_feedback_projection_receipt": None,
+                "active_baseline_capsule": None,
+                "active_attachment_receipt": None,
+                "active_evolution_receipt": None,
+                "active_artifact_quality_receipt": None,
+                "active_admission_receipt": None,
+                "active_evolved_workspace_receipt": None,
+                "item_reset_receipt": None,
+                "item_invalidation_receipt": receipt,
+            },
+            receipt=receipt,
+        )
 
     def run_until_pause(self, *, max_transitions: int = 10_000) -> dict[str, Any]:
         for _ in range(max_transitions):

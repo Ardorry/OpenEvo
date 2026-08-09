@@ -167,6 +167,9 @@ class DurableTrainingControl:
     def resume(self) -> dict[str, Any]:
         return self.supervisor.resume()
 
+    def invalidate_undispatched_per_item_evolution(self, *, reason: str) -> dict[str, Any]:
+        return self.supervisor.invalidate_undispatched_per_item_evolution(reason=reason)
+
     def stop_owned(self) -> dict[str, Any]:
         stopped: list[str] = []
         already_gone: list[str] = []
