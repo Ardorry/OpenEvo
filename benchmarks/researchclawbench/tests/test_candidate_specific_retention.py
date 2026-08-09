@@ -40,6 +40,7 @@ def _candidate(tmp_path: Path) -> tuple[Path, dict[str, object]]:
     (root / "report/images").mkdir(parents=True)
     (root / "code").mkdir()
     (root / "outputs").mkdir()
+    (root / "data").mkdir()
     (root / "report/report.md").write_text(
         "# Methods\nCandidate analysis and public figures.\n",
         encoding="utf-8",
@@ -47,6 +48,7 @@ def _candidate(tmp_path: Path) -> tuple[Path, dict[str, object]]:
     (root / "report/images/custom_trend.png").write_bytes(b"image")
     (root / "code/custom_analysis.py").write_text("print('public data')\n", encoding="utf-8")
     (root / "outputs/summary.csv").write_text("value\n1\n", encoding="utf-8")
+    (root / "data/public.csv").write_text("x,y\n1,2\n", encoding="utf-8")
     (root / "_agent_output.jsonl").write_text(
         json.dumps({"response": "created custom analysis and trend figure"}) + "\n",
         encoding="utf-8",
@@ -79,21 +81,26 @@ def _artifact_texts() -> dict[str, str]:
     return {
         "text_memory": (
             "# Memory\n"
-            "Reconstruct the baseline custom analysis route before changing the plan. "
-            "The visual evidence weakness needs an independent numeric aggregation. "
-            "Add that aggregation to validate the custom analysis conclusion.\n"
+            "PRESERVE achievement_01: retain the custom analysis script and its report evidence role. "
+            "PRESERVE achievement_02: retain the public csv numeric summary and its report evidence role. "
+            "PRESERVE achievement_03: retain the numeric summary output and report evidence role. "
+            "PRESERVE achievement_04: retain the custom trend figure and its report evidence role.\n"
         ),
         "skill_bundle": (
             "# Skill\n"
-            "1. Reconstruct custom analysis from public inputs.\n"
-            "2. Generate the custom trend figure from that analysis.\n"
-            "3. Add a numeric aggregation to validate the custom trend evidence.\n"
+            "Phase 1 — Reconstruct baseline capabilities. RECONSTRUCT achievement_01 custom analysis script and verify its report evidence. "
+            "RECONSTRUCT achievement_02 public csv numeric summary and verify its report evidence. "
+            "RECONSTRUCT achievement_03 numeric summary table and verify its report evidence. "
+            "RECONSTRUCT achievement_04 custom trend figure and verify its report evidence.\n"
+            "Phase 2 — Verify reconstruction.\n"
+            "Phase 3 — Add evaluator-driven improvements. For weakness_01 and achievement_01, add an independent quantitative cross-check. "
+            "For weakness_02 and achievement_02, add a public-input comparison validation.\n"
+            "Phase 4 — Integrate without deleting preserved work.\n"
         ),
         "agent_system": (
             "# Agent system\n"
-            "In a fresh workspace, reconstruct the proven custom analysis strategy. "
-            "Preserve that baseline strategy before additions. "
-            "For each visual evidence weakness, add a validation step tied to the custom trend output.\n"
+            "RECONSTRUCT required work, PRESERVE required achievements, EXTEND only additively, and VERIFY baseline equivalence before submission. "
+            "New analyses are additive and must not replace required baseline achievements.\n"
         ),
     }
 
@@ -196,10 +203,10 @@ def test_candidate_specific_artifact_triple_is_accepted(tmp_path: Path) -> None:
     assert report["status"] == "PASS"
     assert report["aggregate"]["candidate_specific_reference_count"] >= 2
     assert report["aggregate"]["weakness_to_action_mapping_count"] >= 1
-    assert report["bundle_requirements"]["per_artifact_role_prescription"] is False
+    assert report["artifact_role_contract"]["duplicate_mentions_count_once"] is True
 
 
-def test_quality_accepts_semantic_retention_of_candidate_report_strategy(
+def test_quality_rejects_partial_strategy_that_drops_required_achievements(
     tmp_path: Path,
 ) -> None:
     """A substantive paraphrase of Candidate report terminology is retained.
@@ -242,18 +249,17 @@ def test_quality_accepts_semantic_retention_of_candidate_report_strategy(
         ),
     }
 
-    report = require_task_specific_artifact_quality(
+    report = assess_task_specific_artifact_quality(
         capsule=projection["baseline_evidence_capsule"],
         artifact_texts=artifacts,
         ground_truth_entries=_gt(),
     )
 
-    assert report["status"] == "PASS"
-    assert report["aggregate"]["candidate_specific_reference_count"] >= 2
-    assert report["gt_leakage_findings"] == []
+    assert report["status"] == QUALITY_FAILURE
+    assert report["aggregate"]["memory_required_achievement_coverage"] < 0.80
 
 
-def test_quality_accepts_candidate_observation_paraphrase_without_dimension_label(
+def test_quality_rejects_weakness_only_strategy_without_reconstruction(
     tmp_path: Path,
 ) -> None:
     """Weakness fidelity is semantic, not an exact machine-label match.
@@ -281,15 +287,14 @@ def test_quality_accepts_candidate_observation_paraphrase_without_dimension_labe
         ),
     }
 
-    report = require_task_specific_artifact_quality(
+    report = assess_task_specific_artifact_quality(
         capsule=projection["baseline_evidence_capsule"],
         artifact_texts=artifacts,
         ground_truth_entries=_gt(),
     )
 
-    assert report["status"] == "PASS"
-    assert report["aggregate"]["observed_weakness_count"] >= 1
-    assert report["aggregate"]["weakness_to_action_mapping_count"] >= 1
+    assert report["status"] == QUALITY_FAILURE
+    assert report["aggregate"]["skill_required_achievement_reconstruction_coverage"] < 0.80
 
 
 def test_gt_specific_artifact_is_rejected(tmp_path: Path) -> None:
@@ -328,20 +333,11 @@ def test_artifact_requires_weakness_to_action_mapping(tmp_path: Path) -> None:
     assert report["aggregate"]["weakness_to_action_mapping_count"] == 0
 
 
-def test_low_signal_concepts_do_not_turn_generic_advice_into_fidelity(
+def test_generic_advice_does_not_turn_into_preservation_fidelity(
     tmp_path: Path,
 ) -> None:
     _root, projection = _projection(tmp_path)
     capsule = deepcopy(projection["baseline_evidence_capsule"])
-    capsule["candidate_concepts"] = [
-        {
-            "concept_id": "concept_01",
-            "text": "validation",
-            "kind": "figure",
-            "evidence_refs": ["report/images/custom_trend.png"],
-            "provenance": "candidate_workspace",
-        }
-    ]
     artifacts = {
         artifact_type: (
             "In a fresh workspace, preserve validation and add a validation step "
@@ -349,13 +345,13 @@ def test_low_signal_concepts_do_not_turn_generic_advice_into_fidelity(
         )
         for artifact_type in _artifact_texts()
     }
-    with pytest.raises(TaskSpecificArtifactQualityError) as caught:
-        require_task_specific_artifact_quality(
-            capsule=capsule,
-            artifact_texts=artifacts,
-            ground_truth_entries=_gt(),
-        )
-    assert caught.value.reason_code == "ARTIFACT_QUALITY_CAPSULE_INVALID"
+    report = assess_task_specific_artifact_quality(
+        capsule=capsule,
+        artifact_texts=artifacts,
+        ground_truth_entries=_gt(),
+    )
+    assert report["status"] == QUALITY_FAILURE
+    assert report["aggregate"]["candidate_specific_reference_count"] == 0
 
 
 def test_production_quality_port_reads_only_bounded_core_snapshots_and_archives_no_text(

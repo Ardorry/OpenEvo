@@ -1,7 +1,7 @@
 experiment_id: sequential_task_reflector_evolution_v0
 refactor_id: PRODUCTION_TRAINING_OPERATIONS_DRIVER_V1
-protocol_name: per_item_candidate_specific_retention_evolution_v2
-protocol_version: 2.0.0
+protocol_name: preservation_first_evolution_r3
+protocol_version: 3.0.0
 status: PER_ITEM_CONFIGURED_NOT_STARTED
 per_item_reset:
   contract_version: openevo.researchclawbench.per_item_reset.v2
@@ -10,12 +10,15 @@ per_item_reset:
   passes:
     - baseline
     - judge_baseline
-    - project_candidate_specific_retention_feedback
-    - admit_candidate_specific_retention_feedback
+    - project_sanitized_evaluator_feedback
+    - admit_sanitized_evaluator_feedback
+    - build_baseline_success_trace
+    - build_baseline_achievement_ledger
     - build_baseline_evidence_capsule
-    - evolve_once_candidate_specific_retention_feedback
-    - verify_task_specific_native_artifacts
+    - evolve_once_preservation_first
+    - verify_preservation_native_artifacts
     - evolved
+    - baseline_equivalence
     - judge_evolved
     - paired_result
     - reset
@@ -71,7 +74,7 @@ source_identity:
   openevo_commit: caa247268e525cab6b8d4760da2d012c10d98b36
   adapter_implementation_commit: 4b645651bab02d69d5d41594d51ef2995d56af95
   openevo_core_source_tree_sha256: 37cb9908be06716a9b5b51e05de8d48745d136b11f27223a83b486b6e8e48bbf
-  adapter_tree_sha256: f80a77620a3a21d8b74fc53e3e881f4ee81f366d291516a917761860037eb540
+  adapter_tree_sha256: 5b2e3e252f826f8df7f1ef095081c1aae1f10e35aa759ccdf14211056d5a38e7
   researchclawbench_commit: b1175eca3deb78ff8b2c839070874474051d2261
   canonical_scorer_sha256: 9492317443acc069744330f27aac693d162f1aa6837d512e40419704197c6022
 native_openevo:
@@ -192,10 +195,13 @@ teacher:
 feedback:
   native_post_run_attachment_status: ATTACHED_TO_NATIVE_COMPLETED_TASK_DATASET
   private_target_study: true
-  boundary: SANITIZED_EVALUATION_FEEDBACK_BOUNDARY_V1_PLUS_BASELINE_EVIDENCE_CAPSULE_V1
-  feedback_class: candidate_specific_retention_v2
-  baseline_evidence_capsule: baseline_evidence_capsule_v1
-  artifact_quality_gate: TASK_SPECIFIC_ARTIFACT_QUALITY_V1
+  boundary: SANITIZED_EVALUATION_FEEDBACK_BOUNDARY_V1_PLUS_PRESERVATION_FIRST_R3
+  feedback_class: preservation_first_evolution_r3
+  baseline_success_trace: baseline_success_trace_v1
+  baseline_achievement_ledger: baseline_achievement_ledger_v2
+  baseline_evidence_capsule: baseline_evidence_capsule_v2
+  artifact_quality_gate: PRESERVATION_ARTIFACT_QUALITY_V3
+  baseline_equivalence_gate: BASELINE_EQUIVALENCE_V1
   capsule_projector_model_calls: 0
   raw_gt_visible_to_reflector: false
   judge_reasoning_visible_to_reflector: false

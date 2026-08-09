@@ -50,6 +50,7 @@ from openevo.runtime.codex_isolation import (
 from openevo.workspace_archive import write_workspace_archive
 
 from .artifact_validator import freeze_candidate_outputs, validate_workspace
+from .baseline_equivalence import assess_baseline_equivalence
 from .community_evaluator import (
     DurableCommunityEvaluatorPort,
     build_production_community_evaluator,
@@ -3149,7 +3150,7 @@ class CoreFeedbackPort(ProductionOperationPort):
                 "judge_reasoning_projected": False,
                 "target_image_projected": False,
             }
-        if feedback_source == "candidate_specific_retention_v2":
+        if feedback_source == RETENTION_FEEDBACK_CLASS:
             gt = request.get("gt_supervision")
             projection = request.get("feedback_projection")
             reflector_feedback = (
@@ -3180,51 +3181,45 @@ class CoreFeedbackPort(ProductionOperationPort):
             )
             expected_actionable: dict[str, Any] | None = None
             if isinstance(reflector_capsule, dict):
-                strategies = reflector_capsule.get("successful_work")
+                ledger = reflector_capsule.get("baseline_achievement_ledger")
                 mappings = reflector_capsule.get("weakness_to_action")
-                concepts = reflector_capsule.get("candidate_concepts")
                 if (
-                    isinstance(strategies, list)
-                    and strategies
-                    and isinstance(strategies[0], dict)
+                    reflector_capsule.get("preservation_contract")
+                    == "RECONSTRUCT_PRESERVE_EXTEND_VERIFY"
+                    and isinstance(ledger, dict)
+                    and isinstance(ledger.get("achievements"), list)
+                    and ledger["achievements"]
+                    and all(
+                        isinstance(item, dict)
+                        and isinstance(item.get("achievement_id"), str)
+                        for item in ledger["achievements"]
+                    )
                     and isinstance(mappings, list)
                     and mappings
-                    and isinstance(mappings[0], dict)
-                    and isinstance(concepts, list)
-                    and concepts
-                    and all(isinstance(item, dict) for item in concepts[:2])
+                    and all(
+                        isinstance(item, dict)
+                        and item.get("feedback_action_mode") == "additive"
+                        and isinstance(item.get("weakness_id"), str)
+                        and isinstance(item.get("achievement_id"), str)
+                        and isinstance(item.get("next_run_action"), str)
+                        for item in mappings
+                    )
                     and isinstance(reflector_capsule.get("fresh_workspace_requirement"), str)
-                    and all(
-                        isinstance(strategies[0].get(field), str)
-                        for field in ("summary",)
-                    )
-                    and all(
-                        isinstance(mappings[0].get(field), str)
-                        for field in (
-                            "next_run_action",
-                            "candidate_observation",
-                        )
-                    )
-                    and all(
-                        isinstance(item.get("text"), str) for item in concepts[:2]
-                    )
                 ):
                     expected_actionable = {
-                        "action": mappings[0]["next_run_action"],
-                        "candidate_specific_concepts": [
-                            item["text"] for item in concepts[:2]
+                        "preservation_contract": "RECONSTRUCT_PRESERVE_EXTEND_VERIFY",
+                        "required_achievement_ids": [
+                            item["achievement_id"] for item in ledger["achievements"]
                         ],
-                        "candidate_strategy": strategies[0]["summary"],
+                        "all_feedback_actions": mappings,
                         "fresh_workspace": reflector_capsule[
                             "fresh_workspace_requirement"
                         ],
-                        "observed_weakness": mappings[0]["candidate_observation"],
                         "requirement": (
-                            "Across the evolved artifact bundle, retain the named "
-                            "candidate-proven strategy in a substantive reconstruction "
-                            "or improvement statement and connect the observed weakness "
-                            "to this concrete next-run action. Do not replace it with "
-                            "generic workflow advice or reconstruct hidden targets."
+                            "RECONSTRUCT every required baseline achievement before PRESERVE it. "
+                            "EXTEND only through each additive feedback action, then VERIFY baseline "
+                            "equivalence. Do not replace baseline paths, restart the research plan, "
+                            "or reconstruct hidden targets."
                         ),
                     }
             admission = projection.get("admission") if isinstance(projection, dict) else None
@@ -3268,10 +3263,10 @@ class CoreFeedbackPort(ProductionOperationPort):
                 != "sanitized_evaluation_feedback_v1"
                 or not isinstance(capsule, dict)
                 or capsule.get("schema_version")
-                != "openevo.researchclawbench.baseline_evidence_capsule.v1"
+                != "openevo.researchclawbench.baseline_evidence_capsule.v2"
                 or not isinstance(reflector_capsule, dict)
                 or reflector_capsule.get("schema_version")
-                != "openevo.researchclawbench.baseline_evidence_capsule_reflector_view.v1"
+                != "openevo.researchclawbench.baseline_evidence_capsule_reflector_view.v2"
                 or reflector_capsule.get("capsule_sha256")
                 != projection.get("baseline_evidence_capsule_sha256")
                 or not isinstance(reflector_feedback, dict)
@@ -3357,7 +3352,7 @@ class CoreFeedbackPort(ProductionOperationPort):
             global_feedback = projection["sanitized_feedback"]
             task_local_feedback = gt["task_local_feedback"]
             feedback_class = metadata["feedback_class"]
-        elif feedback_source == "candidate_specific_retention_v2":
+        elif feedback_source == RETENTION_FEEDBACK_CLASS:
             metadata = self._feedback_receipt_fields(request)
             gt = request["gt_supervision"]
             projection = request["feedback_projection"]
@@ -4090,6 +4085,54 @@ class CoreArtifactQualityPort(ProductionOperationPort):
             "provider_calls": 0,
             "artifact_text_persisted": False,
             "raw_gt_persisted": False,
+        }
+
+
+class LocalBaselineEquivalencePort(ProductionOperationPort):
+    """Read a fresh evolved workspace before Judge dispatch, with no Core mutation."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+
+    def recover(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any] | None:
+        del request, idempotency_key
+        # ProductionTrainingOperations' immutable receipt store is the sole
+        # replay authority for this deterministic local read.
+        return None
+
+    def execute(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+        task_id = request.get("task_id")
+        candidate = request.get("candidate")
+        validation = request.get("validation")
+        capsule = request.get("baseline_evidence_capsule")
+        if (
+            task_id not in FROZEN_TASKS
+            or not isinstance(candidate, dict)
+            or not isinstance(validation, dict)
+            or not isinstance(capsule, dict)
+            or not isinstance(capsule.get("baseline_achievement_ledger"), dict)
+            or not isinstance(candidate.get("candidate_output_root"), str)
+        ):
+            raise CoreControlError("BASELINE_EQUIVALENCE_REQUEST_INVALID")
+        report = assess_baseline_equivalence(
+            ledger=capsule["baseline_achievement_ledger"],
+            evolved_candidate_root=candidate["candidate_output_root"],
+            validation=validation,
+        )
+        destination = (
+            self.root / "baseline_equivalence" / str(task_id)
+            / f"{hashlib.sha256(idempotency_key.encode()).hexdigest()}.baseline_equivalence_report.json"
+        )
+        atomic_write_json(destination, report)
+        return {
+            "equivalence_gate_status": report["status"],
+            "equivalence_report": report,
+            "equivalence_report_sha256": report["content_sha256"],
+            "equivalence_report_path": os.fspath(destination),
+            "provider_calls": 0,
+            "raw_gt_persisted": False,
+            "judge_reasoning_persisted": False,
+            "artifact_text_persisted": False,
         }
 
 
@@ -5195,6 +5238,7 @@ def build_production_ports(
             root=run_root,
             core_authority=core_authority,
         ),
+        baseline_equivalence=LocalBaselineEquivalencePort(run_root),
         composite=composite,
         per_item_evolved=PerItemEvolvedWorkspacePort(
             composite,

@@ -179,11 +179,13 @@ class SyntheticOperations:
             "feedback_class": "sanitized_evaluation_feedback_v1",
         }
         capsule = {
-            "schema_version": "openevo.researchclawbench.baseline_evidence_capsule.v1",
+            "schema_version": "openevo.researchclawbench.baseline_evidence_capsule.v2",
             "candidate_concepts": [{"text": "synthetic analysis"}],
+            "baseline_success_trace": {"schema_version": "openevo.researchclawbench.baseline_success_trace.v1"},
+            "baseline_achievement_ledger": {"schema_version": "openevo.researchclawbench.baseline_achievement_ledger.v2"},
         }
         reflector = {
-            "feedback_class": "candidate_specific_retention_v2",
+            "feedback_class": "preservation_first_evolution_r3",
             "sanitized_evaluation_feedback": sanitized,
             "baseline_evidence_capsule": capsule,
         }
@@ -215,6 +217,10 @@ class SyntheticOperations:
                     "baseline_evidence_capsule_present": True,
                     "fresh_workspace_reconstruction_required": True,
                     "weakness_to_action_mapping_present": True,
+                    "all_sanitized_diagnoses_visible": True,
+                    "baseline_success_trace_present": True,
+                    "baseline_achievement_ledger_present": True,
+                    "preservation_first_contract": True,
                     "gt_leakage": False,
                 },
                 "feedback_projector_model_calls": 0,
@@ -244,13 +250,13 @@ class SyntheticOperations:
                     "judge_feedback_included": False,
                 }
             )
-        if request.get("feedback_source") == "candidate_specific_retention_v2":
+        if request.get("feedback_source") == "preservation_first_evolution_r3":
             gt = request["gt_supervision"]
             projection = request["feedback_projection"]
             result.update(
                 {
                     "feedback_class": "HARD_GT",
-                    "feedback_source": "candidate_specific_retention_v2",
+                    "feedback_source": "preservation_first_evolution_r3",
                     "judge_calls": 0,
                     "ground_truth_sha256": gt["ground_truth_sha256"],
                     "sanitized_feedback_sha256": projection["sanitized_feedback_sha256"],
@@ -297,7 +303,7 @@ class SyntheticOperations:
     def assess_artifact_quality(self, request, idempotency_key):
         report = {
             "schema_version": (
-                "openevo.researchclawbench.task_specific_artifact_quality.v2"
+                "openevo.researchclawbench.preservation_artifact_quality.v3"
             ),
             "status": "PASS",
             "candidate_concepts": ["synthetic analysis"],
@@ -312,6 +318,7 @@ class SyntheticOperations:
             "gt_leakage_findings": [],
             "provenance_violations": [],
             "artifact_text_sha256": {},
+            "artifact_role_contract": {"duplicate_mentions_count_once": True},
         }
         report["content_sha256"] = canonical_sha256(report)
         return self._once(
@@ -325,6 +332,29 @@ class SyntheticOperations:
                 "provider_calls": 0,
                 "artifact_text_persisted": False,
                 "raw_gt_persisted": False,
+            },
+        )
+
+    def assess_baseline_equivalence(self, request, idempotency_key):
+        del request
+        report = {
+            "schema_version": "openevo.researchclawbench.baseline_equivalence.v1",
+            "status": "PASS",
+            "required_achievement_count": 1,
+            "reconstructed_required_achievement_count": 1,
+            "dropped_required_achievement_ids": [],
+        }
+        report["content_sha256"] = canonical_sha256(report)
+        return self._once(
+            idempotency_key,
+            {
+                "equivalence_gate_status": "PASS",
+                "equivalence_report": report,
+                "equivalence_report_sha256": report["content_sha256"],
+                "provider_calls": 0,
+                "raw_gt_persisted": False,
+                "judge_reasoning_persisted": False,
+                "artifact_text_persisted": False,
             },
         )
 
@@ -501,7 +531,7 @@ def test_per_item_reset_closes_exact_pair_and_clears_active_state(
     assert len(operations.evaluation_requests) == 2
     assert len(operations.attachment_requests) == 1
     attachment = operations.attachment_requests[0]
-    assert attachment["feedback_source"] == "candidate_specific_retention_v2"
+    assert attachment["feedback_source"] == "preservation_first_evolution_r3"
     assert attachment["judge_feedback"] is None
     assert attachment["gt_supervision"]["ground_truth_sha256"] == "7" * 64
     assert attachment["feedback_projection"]["raw_gt_projected"] is False

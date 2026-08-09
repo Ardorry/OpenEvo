@@ -93,11 +93,12 @@ from openevo.evolution.training_feedback import (
 from openevo.workspace_archive import write_workspace_archive
 
 ROOT = Path(__file__).resolve().parents[4]
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 RESEARCHCLAWBENCH_ROOT = (ROOT / "researchclaw_openevo" / "ResearchClawBench").resolve(strict=True)
 PROTOCOL = Path(
     os.environ.get(
         "OPENEVORESEARCHCLAWBENCH_TEST_PROTOCOL",
-        ROOT / "experiments/sequential_task_reflector_evolution_v0/protocol/protocol.yaml",
+        REPOSITORY_ROOT / "configs/researchclawbench/native_life005_engineering.yaml",
     )
 )
 
@@ -1670,6 +1671,10 @@ def _build(tmp_path: Path, monkeypatch, *, crash_point: str | None = None):
     monkeypatch.setenv("JUDGE_API_BASE", "https://synthetic.invalid")
     monkeypatch.setenv("JUDGE_MODEL_NAME", "synthetic-no-model")
     config = ExperimentConfig.load(PROTOCOL)
+    # This suite exercises operation ownership with durable fake authorities.
+    # The real generation-bound mount is separately covered by the protocol
+    # readiness tests; do not make this fixture impersonate its host receipt.
+    config.raw["reflector"]["require_credential_mount_readiness"] = False
     ports, authorities = build_synthetic_ports(tmp_path / "external", crash_point=crash_point)
     operations = ProductionTrainingOperations(
         config=config,
@@ -3349,6 +3354,7 @@ def test_full_synthetic_community17_pipeline_has_closed_51_34_102_inventory(
     monkeypatch.setenv("JUDGE_API_BASE", "https://synthetic.invalid")
     monkeypatch.setenv("JUDGE_MODEL_NAME", "synthetic-no-model")
     config = ExperimentConfig.load(PROTOCOL)
+    config.raw["reflector"]["require_credential_mount_readiness"] = False
     ports, authorities = build_synthetic_ports(tmp_path / "full-external")
     run_id = "rcb_oe_v0_synthetic_community17_v11"
     operations = ProductionTrainingOperations(
@@ -3409,6 +3415,7 @@ def test_community17_final_freeze_is_directly_accepted_by_official40_plan(
     monkeypatch.setenv("JUDGE_API_BASE", "https://synthetic.invalid")
     monkeypatch.setenv("JUDGE_MODEL_NAME", "synthetic-no-model")
     config = ExperimentConfig.load(PROTOCOL)
+    config.raw["reflector"]["require_credential_mount_readiness"] = False
     ports, _authorities = build_synthetic_ports(tmp_path / "handoff-external")
     identity = _identity(config)
     run_id = "rcb_oe_v0_synthetic_community17_official_handoff_v11"
@@ -3525,7 +3532,11 @@ def test_crash_recovery_matrix_has_no_duplicate_external_side_effect(
         "evaluation": 3,
         "attachment": 2,
         "evolution": 2,
+        "feedback_projection": 0,
+        "artifact_quality": 0,
+        "baseline_equivalence": 0,
         "composite": 2,
+        "per_item_evolved": 0,
         "task_local": 1,
         "sanitizer": 1,
         "freeze": 1,

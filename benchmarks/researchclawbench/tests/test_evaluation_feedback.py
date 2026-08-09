@@ -32,6 +32,7 @@ def _candidate(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
     root = tmp_path / "candidate"
     (root / "report/images").mkdir(parents=True)
     (root / "code").mkdir()
+    (root / "data").mkdir()
     (root / "report/report.md").write_text(
         "# Methods\n\nWe analyze public data.\n\n"
         "# Results\n\nFigure evidence is presented.\n\n"
@@ -40,6 +41,7 @@ def _candidate(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
     )
     (root / "report/images/candidate_summary.png").write_bytes(b"candidate-image")
     (root / "code/analyze.py").write_text("print('public analysis')\n", encoding="utf-8")
+    (root / "data/public.csv").write_text("x,y\n1,2\n", encoding="utf-8")
     (root / "_agent_output.jsonl").write_text(
         json.dumps({"response": "created report and figure"}) + "\n",
         encoding="utf-8",
@@ -285,27 +287,32 @@ def test_native_reflector_requests_see_candidate_specific_retention_feedback(
             captured.append(request)
             if "ExpeL" in request.prompt:
                 text = (
-                    "# Memory\n\n## Do\nReconstruct the candidate_summary visual "
-                    "analysis route in the fresh workspace.\n\n"
-                    "## Avoid\nDo not leave the visual evidence weakness unchecked.\n\n"
-                    "## Validate\nAdd an independent numeric aggregation for the "
-                    "candidate_summary figure.\n\n"
+                    "# Memory\n\n## Do\nPRESERVE achievement_01 analyze script and report evidence. "
+                    "PRESERVE achievement_02 public csv numeric table and report evidence. "
+                    "PRESERVE achievement_03 candidate summary figure and report evidence.\n\n"
+                    "## Avoid\nDo not replace required baseline achievements.\n\n"
+                    "## Validate\nKeep achievement_01 while weakness_01 adds an independent numeric cross-check; "
+                    "keep achievement_02 while weakness_02 adds a public-input comparison.\n\n"
                     "## When Applicable\nUse for public-data analysis.\n\n"
                     "## Retired Or Superseded\nNone.\n"
                 )
             elif "Skill Bundle" in request.prompt:
                 text = (
-                    "# Candidate Summary Validation\n\n"
-                    "1. Reconstruct the analyze route from public inputs.\n"
-                    "2. Generate the candidate_summary figure.\n"
-                    "3. Add a numeric aggregation to validate the visual evidence.\n"
+                    "# Preservation-first skill\n\n"
+                    "Phase 1 — Reconstruct baseline capabilities. RECONSTRUCT achievement_01 analyze script and verify report evidence. "
+                    "RECONSTRUCT achievement_02 public csv numeric table and verify report evidence. "
+                    "RECONSTRUCT achievement_03 candidate summary figure and verify report evidence.\n"
+                    "Phase 2 — Verify reconstruction.\n"
+                    "Phase 3 — Add evaluator-driven improvements. For weakness_01 and achievement_01, add a numeric cross-check. "
+                    "For weakness_02 and achievement_02, add a public-input comparison validation.\n"
+                    "Phase 4 — Integrate without deleting preserved work.\n"
                 )
             else:
                 text = (
                     "# Evolved Agent System\n\n"
-                    "- Before finalizing a fresh workspace, preserve the candidate_summary "
-                    "baseline strategy by reconstructing the analyze route and verify "
-                    "the visual evidence weakness with a numeric validation.\n"
+                    "- RECONSTRUCT, PRESERVE, EXTEND, and VERIFY before submission. "
+                    "Pass baseline equivalence; new analyses are additive and must not replace "
+                    "required baseline achievements.\n"
                 )
             receipt = ReflectorRuntimeReceipt(
                 request_id=request.request_id,
@@ -377,13 +384,15 @@ def test_native_reflector_requests_see_candidate_specific_retention_feedback(
     # The real native renderer bounds a reflected record.  The adapter must
     # therefore place the concrete candidate strategy/action ahead of the
     # verbose capsule, rather than only proving that the full JSON exists.
-    assert prompts.count("Actionable Candidate Evolution") >= 3
+    assert prompts.count("RECONSTRUCT required baseline capabilities") >= 3
     assert prompts.count("candidate_summary") >= 3
-    assert "submitted report relies on its produced figures" in prompts
+    assert "Candidate report links report/images/candidate_summary.png" in prompts
     assert "fresh workspace" in prompts
-    assert "concrete next-run action" in prompts
-    assert "candidate_summary" in prompts
-    assert "candidate-proven strategy" in prompts
+    assert prompts.count("Baseline Success Trace") >= 3
+    assert prompts.count("Baseline Achievement Ledger") >= 3
+    assert prompts.count("RECONSTRUCT required baseline capabilities") >= 3
+    assert prompts.count("weakness_01") >= 3
+    assert prompts.count("weakness_02") >= 3
     assert "candidate_summary.png" in prompts
     assert "quasiflux" not in prompts.casefold()
     assert "private_target_figure" not in prompts.casefold()

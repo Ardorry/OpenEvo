@@ -1,9 +1,7 @@
-"""Benchmark-local quality gate for native per-item evolution artifacts.
+"""Per-artifact preservation gate for R3 native evolution outputs.
 
-This is an adapter admission check, not a replacement for OpenEvo's native
-artifact registry/admission.  It consumes read-only text snapshots of the
-already registered three artifacts and never creates, modifies, or promotes an
-artifact.
+The gate reads bounded snapshots of already registered artifacts.  It is an
+adapter admission control, never a replacement for Core artifact admission.
 """
 
 from __future__ import annotations
@@ -14,51 +12,23 @@ from typing import Any
 
 from .training_state_store import canonical_sha256
 
-QUALITY_SCHEMA = "openevo.researchclawbench.task_specific_artifact_quality.v2"
-QUALITY_FAILURE = "TASK_SPECIFIC_ARTIFACT_QUALITY_FAILED"
+QUALITY_SCHEMA = "openevo.researchclawbench.preservation_artifact_quality.v3"
+QUALITY_FAILURE = "PRESERVATION_ARTIFACT_QUALITY_FAILED"
 _ARTIFACT_TYPES = ("text_memory", "skill_bundle", "agent_system")
 _PRIVATE_MARKERS = (
-    "ground_truth_entries",
-    "criterion.content",
-    "criterion.keywords",
-    "criterion.path",
-    "criterion.weight",
-    "target image",
-    "judge reasoning",
-    "judge raw response",
+    "ground_truth_entries", "criterion.content", "criterion.keywords", "criterion.path",
+    "criterion.weight", "target image", "judge reasoning", "judge raw response",
 )
 _GENERIC_PATTERNS = (
-    "inspect the task",
-    "inventory workspace",
-    "verify outputs",
-    "ensure reproducibility",
-    "validate claims",
-    "check results",
-    "follow instructions",
+    "inspect the task", "inventory workspace", "ensure reproducibility", "validate outputs",
+    "verify outputs", "check results", "follow instructions", "link evidence", "run scripts",
+    "verify paths", "review files", "check files",
 )
-_LOW_SIGNAL_CONCEPTS = frozenset(
-    {
-        "analysis",
-        "data",
-        "figure",
-        "image",
-        "meta",
-        "output",
-        "report",
-        "result",
-        "summary",
-        "validation",
-        "visual",
-        "evidence",
-        "analyze",
-    }
-)
-_SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+(?=[#*-]|\S)")
+_LOW_SIGNAL = frozenset({"analysis", "artifact", "candidate", "data", "figure", "image", "output", "report", "result", "summary", "validation", "visual", "evidence", "the", "with"})
+_SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+(?=[#*\-\d]|\S)")
 
 
 class TaskSpecificArtifactQualityError(RuntimeError):
-    """A native artifact triple is unsafe or too generic for fresh rerun use."""
-
     def __init__(self, reason_code: str, report: dict[str, Any] | None = None) -> None:
         self.reason_code = reason_code
         self.report = report
@@ -80,272 +50,216 @@ def _string_leaves(value: Any) -> Iterable[str]:
             yield from _string_leaves(child)
 
 
-def _concepts(capsule: Mapping[str, Any]) -> list[str]:
-    raw = capsule.get("candidate_concepts")
-    if not isinstance(raw, list) or not raw:
-        raise TaskSpecificArtifactQualityError("ARTIFACT_QUALITY_CAPSULE_INVALID")
-    concepts: list[str] = []
-    for item in raw:
-        if not isinstance(item, dict) or item.get("provenance") not in {
-            "candidate_workspace",
-            "public_task",
-        }:
-            raise TaskSpecificArtifactQualityError("ARTIFACT_QUALITY_CAPSULE_INVALID")
-        text = item.get("text")
-        if not isinstance(text, str) or not _normalize(text):
-            raise TaskSpecificArtifactQualityError("ARTIFACT_QUALITY_CAPSULE_INVALID")
-        normalized = _normalize(text)
-        # A one-word generic label such as "validation" cannot establish that
-        # native reflection retained a candidate-specific strategy.  It stays
-        # in the capsule for traceability, but is not counted as fidelity.
-        tokens = normalized.split()
-        if not any(token not in _LOW_SIGNAL_CONCEPTS for token in tokens):
-            continue
-        if normalized not in concepts:
-            concepts.append(normalized)
-    if not concepts:
-        raise TaskSpecificArtifactQualityError("ARTIFACT_QUALITY_CAPSULE_INVALID")
-    return concepts
-
-
-def _hidden_literals(ground_truth_entries: list[dict[str, Any]]) -> list[str]:
-    values: list[str] = []
-    for value in _string_leaves(ground_truth_entries):
-        normalized = _normalize(value)
-        if len(normalized) >= 12 or len(normalized.split()) >= 3:
-            values.append(normalized)
-    return values
-
-
-def _semantic_units(text: str) -> list[str]:
+def _units(text: str) -> list[str]:
     return [unit.strip() for unit in _SENTENCE.split(text) if unit.strip()]
 
 
-def _concept_units(text: str, concepts: list[str]) -> dict[str, list[str]]:
-    units = _semantic_units(text)
-    result: dict[str, list[str]] = {}
-    for concept in concepts:
-        concept_tokens = _specific_stems(concept)
-        matches = [
-            unit
-            for unit in units
-            if concept in _normalize(unit)
-            or (
-                concept_tokens
-                and len(concept_tokens.intersection(_specific_stems(unit)))
-                >= min(2, len(concept_tokens))
-            )
-        ]
-        if matches:
-            result[concept] = matches
-    return result
-
-
-def _stem(token: str) -> str:
-    if len(token) > 4 and token.endswith("ies"):
-        return f"{token[:-3]}y"
-    if len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
-        return token[:-1]
-    return token
-
-
-def _specific_stems(value: str) -> set[str]:
+def _terms(value: str) -> set[str]:
     return {
-        _stem(token)
-        for token in _normalize(value).split()
-        if token not in _LOW_SIGNAL_CONCEPTS
-        and not token.startswith("figure")
-        and not token.startswith("fig")
+        token for token in _normalize(value).split()
+        if token not in _LOW_SIGNAL and len(token) > 2 and not token.isdigit()
     }
 
 
-def _contains_any(value: str, terms: Iterable[str]) -> bool:
-    normalized = _normalize(value)
-    return any(_normalize(term) in normalized for term in terms)
+def _required_achievements(capsule: Mapping[str, Any]) -> list[dict[str, Any]]:
+    ledger = capsule.get("baseline_achievement_ledger")
+    if not isinstance(ledger, dict) or ledger.get("schema_version") != "openevo.researchclawbench.baseline_achievement_ledger.v2":
+        raise TaskSpecificArtifactQualityError("ARTIFACT_QUALITY_CAPSULE_INVALID")
+    raw = ledger.get("achievements")
+    if not isinstance(raw, list) or not raw:
+        raise TaskSpecificArtifactQualityError("ARTIFACT_QUALITY_CAPSULE_INVALID")
+    achievements: list[dict[str, Any]] = []
+    ids: set[str] = set()
+    for item in raw:
+        if (
+            not isinstance(item, dict)
+            or item.get("preservation_priority") != "required"
+            or not isinstance(item.get("achievement_id"), str)
+            or item["achievement_id"] in ids
+            or not isinstance(item.get("method_signature"), list)
+            or not isinstance(item.get("required_output_classes"), list)
+            or not isinstance(item.get("capability"), str)
+        ):
+            raise TaskSpecificArtifactQualityError("ARTIFACT_QUALITY_CAPSULE_INVALID")
+        ids.add(item["achievement_id"])
+        achievements.append(item)
+    return achievements
 
 
-def _artifact_metrics(
-    artifact_type: str,
-    text: str,
-    concepts: list[str],
-    weakness_references: list[str],
-) -> dict[str, Any]:
-    units = _semantic_units(text)
-    concept_units = _concept_units(text, concepts)
-    retained = sorted(concept_units)
-    candidate_specific_units = [
-        unit
-        for matches in concept_units.values()
-        for unit in matches
-        if not _contains_any(unit, ("source files", "evidence refs", "references:"))
-    ]
-    strength_units = [
-        unit
-        for unit in candidate_specific_units
-        if _contains_any(unit, ("reconstruct", "preserve", "baseline", "prior", "successful"))
-    ]
-    action_units = [
-        unit
-        for unit in candidate_specific_units
-        if _contains_any(unit, ("reconstruct", "add", "generate", "build", "repeat", "calculate"))
-    ]
-    weakness_units = [
-        unit
-        for unit in units
-        if any(
-            _normalize(reference) in _normalize(unit)
-            or (
-                len(_specific_stems(reference)) >= 2
-                and len(_specific_stems(reference).intersection(_specific_stems(unit)))
-                >= 2
-            )
-            for reference in weakness_references
-        )
-    ]
-    validation_units = [
-        unit
-        for unit in units
-        if _contains_any(unit, ("validate", "validation", "cross check", "cross-check", "quantitative", "numeric", "aggregation"))
-    ]
-    generic_units = [
-        unit
-        for unit in units
-        if _contains_any(unit, _GENERIC_PATTERNS)
-        and not any(concept in _normalize(unit) for concept in concepts)
-    ]
-    procedure_units = [
-        unit
-        for unit in action_units
-        if _contains_any(unit, ("reconstruct", "add", "generate", "build", "repeat", "calculate"))
-    ]
-    return {
-        "artifact_type": artifact_type,
-        "retained_concepts": retained,
-        "candidate_specific_reference_count": len(candidate_specific_units),
-        "baseline_strength_count": len(strength_units),
-        "observed_weakness_count": len(weakness_units),
-        "weakness_to_action_mapping_count": int(bool(weakness_units and action_units)),
-        "executable_task_local_step_count": len(procedure_units),
-        "validation_step_count": len(validation_units),
-        "fresh_workspace_reconstruction_present": _contains_any(
-            text, ("fresh workspace", "fresh run", "reconstruct")
-        ),
-        "preserve_baseline_strategy_present": _contains_any(
-            text, ("preserve", "reconstruct", "baseline strategy", "prior strategy")
-        ),
-        "weakness_driven_improvement_present": bool(weakness_units and action_units),
-        "generic_advice_ratio": (
-            0.0 if not units else round(len(generic_units) / len(units), 6)
-        ),
-    }
+def _weaknesses(capsule: Mapping[str, Any]) -> list[dict[str, Any]]:
+    raw = capsule.get("observed_weaknesses")
+    if not isinstance(raw, list) or not raw:
+        raise TaskSpecificArtifactQualityError("ARTIFACT_QUALITY_CAPSULE_INVALID")
+    return [item for item in raw if isinstance(item, dict) and isinstance(item.get("weakness_id"), str)]
 
 
-def _leakage_findings(texts: Mapping[str, str], ground_truth_entries: list[dict[str, Any]]) -> list[str]:
+def _hidden_literals(entries: list[dict[str, Any]]) -> list[str]:
+    return list({
+        _normalize(value)
+        for value in _string_leaves(entries)
+        if len(_normalize(value)) >= 12 or len(_normalize(value).split()) >= 3
+    })
+
+
+def _leakage(texts: Mapping[str, str], entries: list[dict[str, Any]]) -> list[str]:
     combined = _normalize("\n".join(texts.values()))
-    findings: list[str] = []
-    for marker in _PRIVATE_MARKERS:
-        if _normalize(marker) in combined:
-            findings.append("PRIVATE_MARKER")
-    for literal in _hidden_literals(ground_truth_entries):
-        if literal and literal in combined:
-            findings.append("GT_LITERAL")
+    findings = ["PRIVATE_MARKER" for marker in _PRIVATE_MARKERS if _normalize(marker) in combined]
+    if any(literal and literal in combined for literal in _hidden_literals(entries)):
+        findings.append("GT_LITERAL")
     return sorted(set(findings))
 
 
-def assess_task_specific_artifact_quality(
-    *,
-    capsule: Mapping[str, Any],
-    artifact_texts: Mapping[str, str],
-    ground_truth_entries: list[dict[str, Any]],
-) -> dict[str, Any]:
-    """Return a deterministic pre-injection quality report for native outputs."""
+def _achievement_terms(achievement: Mapping[str, Any]) -> set[str]:
+    signature = " ".join(str(value) for value in achievement.get("method_signature", []))
+    return _terms(signature + " " + str(achievement.get("capability", "")))
 
-    if set(artifact_texts) != set(_ARTIFACT_TYPES) or not all(
-        isinstance(value, str) and value.strip() for value in artifact_texts.values()
-    ):
-        raise TaskSpecificArtifactQualityError("ARTIFACT_QUALITY_ARTIFACT_INVENTORY_INVALID")
-    concepts = _concepts(capsule)
-    raw_weaknesses = capsule.get("observed_weaknesses")
-    if not isinstance(raw_weaknesses, list) or not raw_weaknesses:
-        raise TaskSpecificArtifactQualityError("ARTIFACT_QUALITY_CAPSULE_INVALID")
-    weakness_references = [
-        value
-        for item in raw_weaknesses
-        if isinstance(item, dict)
-        for value in (
-            str(item.get("dimension", "")).replace("_", " "),
-            item.get("candidate_observation"),
-        )
-        if isinstance(value, str) and _normalize(value)
-    ]
-    if not weakness_references:
-        raise TaskSpecificArtifactQualityError("ARTIFACT_QUALITY_CAPSULE_INVALID")
-    metrics = {
-        artifact_type: _artifact_metrics(
-            artifact_type,
-            artifact_texts[artifact_type],
-            concepts,
-            weakness_references,
-        )
-        for artifact_type in _ARTIFACT_TYPES
+
+def _matches_achievement(unit: str, achievement: Mapping[str, Any]) -> bool:
+    normalized = _normalize(unit)
+    identifier = _normalize(str(achievement["achievement_id"]))
+    # An explicit achievement reference is a structured identity claim.  Do
+    # not let generic output-role words in the same sentence make that claim
+    # accidentally cover a different required achievement.
+    mentioned = set(re.findall(r"\bachievement\s+[a-z0-9]+\b", normalized))
+    if mentioned:
+        return identifier in mentioned
+    terms = _achievement_terms(achievement)
+    if len(terms) < 2:
+        return False
+    overlap = len(terms.intersection(_terms(unit)))
+    return overlap >= min(3, len(terms))
+
+
+def _has_output_role(unit: str, achievement: Mapping[str, Any]) -> bool:
+    classes = set(achievement.get("required_output_classes", []))
+    vocabulary = {
+        "script": ("script", "code", "execute"),
+        "numeric_output": ("numeric", "table", "csv", "summary", "metric"),
+        "figure": ("figure", "plot", "chart", "image"),
+        "report_section": ("report", "discussion", "section"),
     }
-    leakage = _leakage_findings(artifact_texts, ground_truth_entries)
-    overall_retained = sorted(
-        {
-            concept
-            for metric in metrics.values()
-            for concept in metric["retained_concepts"]
-        }
+    return any(any(word in _normalize(unit) for word in vocabulary[item]) for item in classes if item in vocabulary)
+
+
+def _matches_memory(unit: str, achievement: Mapping[str, Any]) -> bool:
+    normalized = _normalize(unit)
+    return _matches_achievement(unit, achievement) and _has_output_role(unit, achievement) and any(
+        marker in normalized for marker in ("preserve", "retain", "must not lose", "do not drop")
     )
-    aggregate = {
-        "candidate_specific_reference_count": sum(
-            metric["candidate_specific_reference_count"] for metric in metrics.values()
-        ),
-        "baseline_strength_count": sum(
-            metric["baseline_strength_count"] for metric in metrics.values()
-        ),
-        "observed_weakness_count": sum(
-            metric["observed_weakness_count"] for metric in metrics.values()
-        ),
-        "weakness_to_action_mapping_count": sum(
-            metric["weakness_to_action_mapping_count"] for metric in metrics.values()
-        ),
-        "overall_retention_ratio": round(len(overall_retained) / len(concepts), 6),
+
+
+def _matches_skill(unit: str, achievement: Mapping[str, Any]) -> bool:
+    normalized = _normalize(unit)
+    return _matches_achievement(unit, achievement) and _has_output_role(unit, achievement) and "reconstruct" in normalized and any(
+        marker in normalized for marker in ("verify", "validation", "check", "confirm")
+    )
+
+
+def _feedback_mapping(unit: str, weakness: Mapping[str, Any], achievements: list[dict[str, Any]]) -> bool:
+    normalized = _normalize(unit)
+    weakness_id = _normalize(str(weakness["weakness_id"]))
+    weakness_terms = _terms(str(weakness.get("dimension", "")) + " " + str(weakness.get("candidate_observation", "")))
+    weakness_present = weakness_id in normalized or len(weakness_terms.intersection(_terms(unit))) >= min(2, len(weakness_terms))
+    return weakness_present and any(_matches_achievement(unit, achievement) for achievement in achievements) and any(
+        marker in normalized for marker in ("add", "extend", "cross check", "crosscheck", "validate", "compare")
+    ) and not any(marker in normalized for marker in ("replace", "discard", "restart"))
+
+
+def _generic_ratio(units: list[str], achievements: list[dict[str, Any]]) -> float:
+    generic = [
+        unit for unit in units
+        if any(_normalize(pattern) in _normalize(unit) for pattern in _GENERIC_PATTERNS)
+        and not any(_matches_achievement(unit, achievement) for achievement in achievements)
+    ]
+    return 0.0 if not units else round(len(generic) / len(units), 6)
+
+
+def _coverage(units: list[str], achievements: list[dict[str, Any]], matcher) -> tuple[list[str], float]:
+    matched = [
+        achievement["achievement_id"] for achievement in achievements
+        if any(matcher(unit, achievement) for unit in units)
+    ]
+    return matched, round(len(matched) / len(achievements), 6)
+
+
+def assess_task_specific_artifact_quality(*, capsule: Mapping[str, Any], artifact_texts: Mapping[str, str], ground_truth_entries: list[dict[str, Any]]) -> dict[str, Any]:
+    if set(artifact_texts) != set(_ARTIFACT_TYPES) or not all(isinstance(value, str) and value.strip() for value in artifact_texts.values()):
+        raise TaskSpecificArtifactQualityError("ARTIFACT_QUALITY_ARTIFACT_INVENTORY_INVALID")
+    achievements = _required_achievements(capsule)
+    weaknesses = _weaknesses(capsule)
+    by_type = {artifact_type: _units(artifact_texts[artifact_type]) for artifact_type in _ARTIFACT_TYPES}
+    memory_ids, memory_coverage = _coverage(by_type["text_memory"], achievements, _matches_memory)
+    skill_ids, skill_coverage = _coverage(by_type["skill_bundle"], achievements, _matches_skill)
+    skill_feedback_ids = [
+        weakness["weakness_id"] for weakness in weaknesses
+        if any(_feedback_mapping(unit, weakness, achievements) for unit in by_type["skill_bundle"])
+    ]
+    agent_normalized = _normalize(artifact_texts["agent_system"])
+    agent_semantics = {
+        key: key in agent_normalized
+        for key in ("reconstruct", "preserve", "extend", "verify")
     }
+    agent_equivalence = "baseline equivalence" in agent_normalized or "baseline-equivalence" in agent_normalized
+    metrics = {
+        "text_memory": {
+            "role": "what_must_not_be_lost",
+            "unique_required_achievements": memory_ids,
+            "required_achievement_memory_coverage": memory_coverage,
+            "generic_advice_ratio": _generic_ratio(by_type["text_memory"], achievements),
+        },
+        "skill_bundle": {
+            "role": "how_to_reconstruct_and_extend",
+            "unique_required_achievements": skill_ids,
+            "required_achievement_reconstruction_coverage": skill_coverage,
+            "feedback_action_coverage": round(len(skill_feedback_ids) / len(weaknesses), 6),
+            "feedback_action_weakness_ids": skill_feedback_ids,
+            "generic_advice_ratio": _generic_ratio(by_type["skill_bundle"], achievements),
+        },
+        "agent_system": {
+            "role": "what_must_be_true_before_submission",
+            "reconstruct_preserve_extend_verify": agent_semantics,
+            "baseline_equivalence_before_submission": agent_equivalence,
+            "generic_advice_ratio": _generic_ratio(by_type["agent_system"], achievements),
+        },
+    }
+    leakage = _leakage(artifact_texts, ground_truth_entries)
+    threshold = 0.80
     passed = (
         not leakage
-        and aggregate["candidate_specific_reference_count"] >= 2
-        and aggregate["baseline_strength_count"] >= 1
-        and aggregate["observed_weakness_count"] >= 1
-        and aggregate["weakness_to_action_mapping_count"] >= 1
-        and any(
-            metric["fresh_workspace_reconstruction_present"] for metric in metrics.values()
-        )
-        and any(
-            metric["preserve_baseline_strategy_present"] for metric in metrics.values()
-        )
-        and any(
-            metric["weakness_driven_improvement_present"] for metric in metrics.values()
-        )
+        and memory_coverage >= threshold
+        and skill_coverage >= threshold
+        and len(skill_feedback_ids) == len(weaknesses)
+        and all(agent_semantics.values())
+        and agent_equivalence
     )
+    aggregate = {
+        "required_achievement_count": len(achievements),
+        "memory_required_achievement_coverage": memory_coverage,
+        "skill_required_achievement_reconstruction_coverage": skill_coverage,
+        "feedback_action_coverage": round(len(skill_feedback_ids) / len(weaknesses), 6),
+        "candidate_specific_reference_count": len(set(memory_ids) | set(skill_ids)),
+        "baseline_strength_count": len(memory_ids),
+        "observed_weakness_count": len(skill_feedback_ids),
+        "weakness_to_action_mapping_count": len(skill_feedback_ids),
+        "overall_retention_ratio": round((memory_coverage + skill_coverage) / 2, 6),
+        "generic_advice_ratio": round(sum(item["generic_advice_ratio"] for item in metrics.values()) / 3, 6),
+    }
     body = {
         "schema_version": QUALITY_SCHEMA,
         "status": "PASS" if passed else QUALITY_FAILURE,
-        "candidate_concepts": concepts,
+        "required_achievement_ids": [item["achievement_id"] for item in achievements],
         "artifact_metrics": metrics,
         "aggregate": aggregate,
-        "bundle_requirements": {
-            "concrete_candidate_strategy": True,
-            "observed_weakness_to_action": True,
-            "fresh_workspace_reconstruction": True,
-            "per_artifact_role_prescription": False,
+        "artifact_role_contract": {
+            "memory": "required achievement preservation",
+            "skill": "required reconstruction plus one additive mapping per weakness",
+            "agent_system": "RECONSTRUCT PRESERVE EXTEND VERIFY plus baseline equivalence",
+            "duplicate_mentions_count_once": True,
+            "two_stem_overlap_is_not_sufficient": True,
         },
         "gt_leakage_findings": leakage,
         "provenance_violations": [],
-        "artifact_text_sha256": {
-            artifact_type: canonical_sha256(text)
-            for artifact_type, text in artifact_texts.items()
-        },
+        "artifact_text_sha256": {kind: canonical_sha256(text) for kind, text in artifact_texts.items()},
     }
     return {**body, "content_sha256": canonical_sha256(body)}
 
@@ -357,10 +271,4 @@ def require_task_specific_artifact_quality(**kwargs: Any) -> dict[str, Any]:
     return report
 
 
-__all__ = [
-    "QUALITY_FAILURE",
-    "QUALITY_SCHEMA",
-    "TaskSpecificArtifactQualityError",
-    "assess_task_specific_artifact_quality",
-    "require_task_specific_artifact_quality",
-]
+__all__ = ["QUALITY_FAILURE", "QUALITY_SCHEMA", "TaskSpecificArtifactQualityError", "assess_task_specific_artifact_quality", "require_task_specific_artifact_quality"]

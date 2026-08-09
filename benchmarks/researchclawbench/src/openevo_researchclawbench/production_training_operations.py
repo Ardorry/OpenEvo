@@ -201,6 +201,10 @@ class TrainingOperations(Protocol):
         self, request: dict[str, Any], idempotency_key: str
     ) -> OperationResult: ...
 
+    def assess_evolved_baseline_equivalence(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> OperationResult: ...
+
     def construct_composite(
         self, request: dict[str, Any], idempotency_key: str
     ) -> OperationResult: ...
@@ -233,6 +237,7 @@ class ProductionPorts:
     per_item_evolved: ProductionOperationPort | None = None
     feedback_projection: ProductionOperationPort | None = None
     artifact_quality: ProductionOperationPort | None = None
+    baseline_equivalence: ProductionOperationPort | None = None
 
 
 def _utc_now() -> str:
@@ -871,6 +876,18 @@ class ProductionTrainingOperations:
             idempotency_key=idempotency_key,
         )
 
+    def assess_evolved_baseline_equivalence(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> OperationResult:
+        if self.ports.baseline_equivalence is None:
+            raise ProductionOperationError("baseline equivalence authority is unavailable")
+        return self._run(
+            kind="baseline_equivalence",
+            port=self.ports.baseline_equivalence,
+            request=request,
+            idempotency_key=idempotency_key,
+        )
+
     def construct_composite(
         self, request: dict[str, Any], idempotency_key: str
     ) -> OperationResult:
@@ -934,6 +951,11 @@ class ProductionTrainingOperations:
         self, request: dict[str, Any], idempotency_key: str
     ) -> dict[str, Any]:
         return self.assess_evolution_artifact_quality(request, idempotency_key).to_dict()
+
+    def assess_baseline_equivalence(
+        self, request: dict[str, Any], idempotency_key: str
+    ) -> dict[str, Any]:
+        return self.assess_evolved_baseline_equivalence(request, idempotency_key).to_dict()
 
     def admit_composite(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
         return self.construct_composite(request, idempotency_key).to_dict()

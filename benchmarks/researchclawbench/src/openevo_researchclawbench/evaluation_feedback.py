@@ -30,8 +30,8 @@ from .training_state_store import canonical_bytes, canonical_sha256
 FEEDBACK_CLASS = "sanitized_evaluation_feedback_v1"
 FEEDBACK_SCHEMA = "openevo.researchclawbench.sanitized_evaluation_feedback.v1"
 ADMISSION_SCHEMA = "openevo.researchclawbench.feedback_admission.v1"
-RETENTION_FEEDBACK_CLASS = "candidate_specific_retention_v2"
-RETENTION_FEEDBACK_SCHEMA = "openevo.researchclawbench.candidate_specific_retention.v2"
+RETENTION_FEEDBACK_CLASS = "preservation_first_evolution_r3"
+RETENTION_FEEDBACK_SCHEMA = "openevo.researchclawbench.preservation_first_evolution.r3"
 
 ALLOWED_DIMENSIONS = frozenset(
     {
@@ -96,6 +96,10 @@ actual produced report figures code sanitized evaluator diagnoses identify what 
 concrete weaknesses visible own output which validation strategy change next time do not
 reconstruct hidden gt high medium low score task source status policy true false
 form point improvements relies documents presents
+baseline capability forming report-linked accompanying links after cross-check
+figure-producing public-data reconstructing replace
+keep route public-input comparison extends
+independently present
 """
 _POLICY_TOKENS = frozenset(token.casefold() for token in _TOKEN.findall(_POLICY_LANGUAGE))
 _COMMON_TOKENS = frozenset(
@@ -551,12 +555,17 @@ def project_sanitized_evaluation_feedback(
     outcome = "underperforming" if score < 50 else "competitive" if score < 75 else "strong"
     source_refs = [report_ref, *image_refs[:1], *code_refs[:1], *trajectory_refs[:1]]
     source_refs = list(dict.fromkeys(source_refs))
+    image_reference = image_refs[0] if image_refs else report_ref
+    code_reference = code_refs[0] if code_refs else (trajectory_refs[0] if trajectory_refs else report_ref)
     preserve = [
         _feedback_item(
             "delivery_quality",
             "low",
-            "The submitted report and its produced outputs form a complete starting point.",
-            "Preserve the existing valid files and useful evidence before adding improvements.",
+            (
+                f"The Candidate produced {code_reference} and report-linked evidence "
+                f"at {image_reference}, forming a concrete baseline analysis path."
+            ),
+            "Preserve the baseline capability and evidence chain before adding any new validation.",
             source_refs,
         )
     ]
@@ -567,8 +576,12 @@ def project_sanitized_evaluation_feedback(
             _feedback_item(
                 "visual_evidence",
                 "high" if image_score < 50 else "medium",
-                "The submitted report relies on its produced figures while the documented supporting checks remain limited.",
-                "Preserve the existing figures then add independent quantitative checks using public data and connect each conclusion to candidate-produced evidence.",
+                (
+                    f"The Candidate report links {image_reference} as evidence while "
+                    f"the accompanying candidate path {code_reference} documents limited "
+                    "independent supporting checks."
+                ),
+                "After reconstructing the existing figure-producing path, add an independent public-data quantitative cross-check; do not replace the baseline path.",
                 [report_ref, image_refs[0]],
             )
         )
@@ -577,8 +590,11 @@ def project_sanitized_evaluation_feedback(
             _feedback_item(
                 "quantitative_validation",
                 "high" if score < 50 else "medium",
-                "The report presents a focused analysis but documents limited independent cross-checks for its conclusions.",
-                "Expand validation across publicly available inputs and verify conclusions through more than one analysis path.",
+                (
+                    f"The Candidate report and {code_reference} present one focused "
+                    "analysis route with limited independently documented cross-checks."
+                ),
+                "Keep the existing route, then add one independent public-input validation or comparison that extends its evidence chain.",
                 [report_ref, *(code_refs[:1] or trajectory_refs[:1])],
             )
         )
@@ -641,32 +657,34 @@ def project_sanitized_evaluation_feedback(
                     "evidence_refs",
                 )
             }
-            for diagnosis in feedback["diagnoses"][:1]
+            for diagnosis in feedback["diagnoses"]
         ],
     }
     reflector_capsule = build_reflector_capsule_view(capsule)
-    first_strategy = reflector_capsule["successful_work"][0]
-    first_action = reflector_capsule["weakness_to_action"][0]
     actionable_candidate_evolution = {
-        # Core's native renderer bounds each reflected record.  Keep the
-        # candidate-specific strategy and its next-run action at the front of
-        # the sorted feedback mapping so they survive that existing bounded
-        # renderer without changing the Core template.
-        "action": first_action["next_run_action"],
-        "candidate_specific_concepts": [
-            item["text"] for item in reflector_capsule["candidate_concepts"][:2]
+        "preservation_contract": "RECONSTRUCT_PRESERVE_EXTEND_VERIFY",
+        "required_achievement_ids": [
+            item["achievement_id"]
+            for item in reflector_capsule["baseline_achievement_ledger"]["achievements"]
         ],
-        "candidate_strategy": first_strategy["summary"],
+        "all_feedback_actions": reflector_capsule["weakness_to_action"],
         "fresh_workspace": reflector_capsule["fresh_workspace_requirement"],
-        "observed_weakness": first_action["candidate_observation"],
         "requirement": (
-            "Across the evolved artifact bundle, retain the named candidate-proven "
-            "strategy in a substantive reconstruction or improvement statement and "
-            "connect the observed weakness to this concrete next-run action. Do not "
-            "replace it with generic workflow advice or reconstruct hidden targets."
+            "RECONSTRUCT every required baseline achievement before PRESERVE it. "
+            "EXTEND only through each additive feedback action, then VERIFY baseline "
+            "equivalence. Do not replace baseline paths, restart the research plan, "
+            "or reconstruct hidden targets."
         ),
     }
+    # Core's native reflector renderer correctly bounds feedback records.  Put
+    # the complete preservation contract first in a compact, data-only view so
+    # that all three native reflector prompts receive it before any verbose
+    # trajectory JSON can consume that bounded rendering budget.  The full
+    # typed capsule remains attached below for durable provenance and adapter
+    # admission; this compact view is not a second source of authority.
+    prompt_contract = _build_reflector_prompt_contract(reflector_capsule)
     reflector_feedback = {
+        "a00_preservation_first_prompt_contract": prompt_contract,
         "schema_version": RETENTION_FEEDBACK_SCHEMA,
         "status": "available_for_evolution",
         "feedback_class": RETENTION_FEEDBACK_CLASS,
@@ -677,9 +695,10 @@ def project_sanitized_evaluation_feedback(
         "fresh_workspace_guidance": [
             "The next Candidate will run in a fresh workspace without baseline files.",
             (
-                "Distill concrete candidate-proven analysis lessons: retain a named "
-                "baseline strategy, connect an observed weakness to an executable "
-                "next-run action, and do not reduce this to generic workflow advice."
+                "For memory write WHAT MUST NOT BE LOST; for skill write HOW TO "
+                "RECONSTRUCT AND EXTEND; for agent-system write WHAT MUST BE TRUE "
+                "BEFORE SUBMISSION. Keep all required achievements and all admitted "
+                "diagnoses visible in the final artifacts."
             ),
             "Do not reconstruct hidden evaluation targets.",
         ],
@@ -715,8 +734,66 @@ def project_sanitized_evaluation_feedback(
             "baseline_evidence_capsule_present": True,
             "fresh_workspace_reconstruction_required": True,
             "weakness_to_action_mapping_present": True,
+            "all_sanitized_diagnoses_visible": True,
+            "baseline_success_trace_present": True,
+            "baseline_achievement_ledger_present": True,
+            "preservation_first_contract": True,
             "gt_leakage": False,
         },
+    }
+
+
+def _build_reflector_prompt_contract(reflector_capsule: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the compact, ordered R3 view consumed by native reflectors.
+
+    Values stay below Core's per-leaf feedback rendering bound.  The ordered
+    keys deliberately place the semantic rule, every admitted diagnosis, the
+    required-achievement ledger, and successful trace evidence ahead of the
+    verbose durable capsule fields.
+    """
+
+    def compact(value: Any, *, limit: int) -> str:
+        return " ".join(str(value).split())[:limit].rstrip()
+
+    mappings = reflector_capsule["weakness_to_action"]
+    diagnoses = [
+        (
+            f"{item['weakness_id']}: {item['dimension']}; candidate observation: "
+            f"{compact(item['candidate_observation'], limit=94)}; additive action: "
+            f"{compact(item['next_run_action'], limit=88)}"
+        )
+        for item in mappings
+    ]
+    achievements = [
+        (
+            f"{item['achievement_id']} REQUIRED: method={' '.join(item['method_signature'][:6])}; "
+            f"outputs={','.join(item['required_output_classes'])}; evidence role="
+            f"{compact(item['scientific_role'], limit=72)}"
+        )
+        for item in reflector_capsule["baseline_achievement_ledger"]["achievements"]
+    ]
+    trace_events = [
+        (
+            f"{item['trace_id']} successful: action={compact(item['action'], limit=98)}; "
+            f"evidence={','.join(item['candidate_artifact_refs'][:3])}; "
+            f"verify={compact(item['verification'], limit=58)}"
+        )
+        for item in reflector_capsule["baseline_success_trace"]["events"]
+    ]
+    return {
+        "00_reconstruct_preserve_extend_verify": (
+            "RECONSTRUCT required baseline capabilities in a fresh workspace; PRESERVE "
+            "every required achievement; EXTEND only through additive diagnosed actions; "
+            "VERIFY baseline equivalence before submission. Never replace a baseline path "
+            "or restart the research plan."
+        ),
+        "01_all_sanitized_diagnoses": diagnoses,
+        "02_baseline_achievement_ledger": achievements,
+        "03_baseline_success_trace": trace_events,
+        "04_artifact_roles": (
+            "memory=what must not be lost; skill=how to reconstruct then extend; "
+            "agent-system=what must be true before submission."
+        ),
     }
 
 

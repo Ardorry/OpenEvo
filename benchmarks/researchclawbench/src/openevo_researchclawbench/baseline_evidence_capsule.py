@@ -1,9 +1,8 @@
-"""Candidate-grounded retention input for one per-item evolution cycle.
+"""Candidate-grounded preservation input for one R3 per-item evolution cycle.
 
-The capsule is deliberately small and deterministic.  It identifies useful
-baseline work by *candidate-owned* paths and connects admitted evaluator
-dimensions to fresh-workspace reconstruction actions.  It is not a copy of a
-Candidate workspace, and it never accepts hidden GT or Judge-private content.
+This module deliberately projects a bounded success trace and achievement
+ledger.  It never transfers a baseline workspace or evaluator-private data to
+the fresh evolved Candidate.
 """
 
 from __future__ import annotations
@@ -14,51 +13,31 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .baseline_success_trace import (
+    ACHIEVEMENT_LEDGER_SCHEMA,
+    SUCCESS_TRACE_SCHEMA,
+    BaselineSuccessTraceError,
+    build_baseline_achievement_ledger,
+    build_baseline_success_trace,
+)
 from .training_state_store import canonical_sha256
 
-CAPSULE_SCHEMA = "openevo.researchclawbench.baseline_evidence_capsule.v1"
-CAPSULE_ADMISSION_SCHEMA = "openevo.researchclawbench.baseline_evidence_capsule_admission.v1"
-REFLECTOR_CAPSULE_SCHEMA = (
-    "openevo.researchclawbench.baseline_evidence_capsule_reflector_view.v1"
-)
+CAPSULE_SCHEMA = "openevo.researchclawbench.baseline_evidence_capsule.v2"
+CAPSULE_ADMISSION_SCHEMA = "openevo.researchclawbench.baseline_evidence_capsule_admission.v2"
+REFLECTOR_CAPSULE_SCHEMA = "openevo.researchclawbench.baseline_evidence_capsule_reflector_view.v2"
 
 _TOKEN = re.compile(r"[a-z0-9]+", re.IGNORECASE)
 _PRIVATE_KEY_FRAGMENTS = (
-    "checklist",
-    "criterion",
-    "keywords",
-    "weight",
-    "target_image",
-    "target_figure",
-    "judge_reason",
-    "judge_raw",
-    "raw_response",
-    "correct_answer",
-    "expected_value",
+    "checklist", "criterion", "keywords", "weight", "target_image", "target_figure",
+    "judge_reason", "judge_raw", "raw_response", "correct_answer", "expected_value",
     "ground_truth_entries",
 )
 _IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".svg"})
 _CODE_SUFFIXES = frozenset({".py", ".ipynb", ".r", ".jl"})
 _OUTPUT_SUFFIXES = frozenset({".csv", ".tsv", ".json"})
 _REPORT_HEADING = re.compile(r"^#{1,3}\s+(.+?)\s*$")
-_REPORT_IMAGE = re.compile(r"!\[([^\]]+)\]\(([^)]+)\)")
-_GENERIC_STEM_TOKENS = frozenset(
-    {
-        "agent",
-        "analysis",
-        "artifact",
-        "data",
-        "figure",
-        "image",
-        "manifest",
-        "meta",
-        "output",
-        "report",
-        "result",
-        "summary",
-        "validation",
-    }
-)
+_REPORT_IMAGE = re.compile(r"!\[[^\]]+\]\(([^)]+)\)")
+_GENERIC = frozenset({"analysis", "data", "figure", "image", "output", "report", "result", "summary", "validation"})
 
 
 class BaselineEvidenceCapsuleError(RuntimeError):
@@ -66,8 +45,6 @@ class BaselineEvidenceCapsuleError(RuntimeError):
 
 
 class BaselineEvidenceCapsuleAdmissionError(BaselineEvidenceCapsuleError):
-    """A capsule contains non-candidate or private evaluation information."""
-
     def __init__(self, reason_code: str) -> None:
         self.reason_code = reason_code
         super().__init__(reason_code)
@@ -75,117 +52,10 @@ class BaselineEvidenceCapsuleAdmissionError(BaselineEvidenceCapsuleError):
 
 @dataclass(frozen=True)
 class BaselineEvidenceCapsule:
-    """Closed data-only description of baseline work worth reconstructing."""
-
     payload: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.payload)
-
-
-def build_reflector_capsule_view(capsule: Mapping[str, Any]) -> dict[str, Any]:
-    """Build the bounded candidate-specific view rendered into native prompts.
-
-    The durable capsule remains complete for audit.  Core's native reflection
-    renderer has a bounded record budget, so this view preserves the essential
-    concept/strength/weakness/action chain without adding information.
-    """
-
-    _require_schema(capsule)
-    # Keep the view compact, but preserve enough of the candidate's actual
-    # strategy for a native reflector to name it rather than silently
-    # distilling it into generic research advice.  This is one bundle-level
-    # concrete-evolution contract; it does not prescribe separate roles for
-    # memory, skill, and agent-system artifacts.
-    concepts = capsule["candidate_concepts"][:3]
-    strengths = capsule["successful_work"][:2]
-    weaknesses = capsule["observed_weaknesses"][:2]
-    actions = capsule["improvement_actions"][:2]
-    actions_by_weakness = {
-        item["addresses"]: item
-        for item in actions
-        if isinstance(item, dict) and isinstance(item.get("addresses"), str)
-    }
-    pairs = []
-    for weakness in weaknesses:
-        if not isinstance(weakness, dict):
-            continue
-        action = actions_by_weakness.get(weakness.get("weakness_id"))
-        if not isinstance(action, dict):
-            continue
-        pairs.append(
-            {
-                "weakness_id": weakness["weakness_id"],
-                "dimension": weakness["dimension"],
-                "candidate_observation": weakness["candidate_observation"],
-                "evidence_refs": weakness["evidence_refs"][:1],
-                "next_run_action": action["action"],
-                "preserve_refs": action["preserve_refs"][:1],
-            }
-        )
-    if not concepts or not strengths or not pairs:
-        raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_REFLECTOR_VIEW_INVALID")
-    candidate_proven_strategies = []
-    strength_by_concept = {
-        item.get("concept_id"): item
-        for item in strengths
-        if isinstance(item, dict) and isinstance(item.get("concept_id"), str)
-    }
-    for concept in concepts:
-        if not isinstance(concept, dict):
-            continue
-        strength = strength_by_concept.get(concept.get("concept_id"))
-        if not isinstance(strength, dict):
-            continue
-        candidate_proven_strategies.append(
-            {
-                "concept": concept["text"],
-                "reconstruction": strength["summary"],
-                "evidence_refs": concept["evidence_refs"][:1],
-            }
-        )
-    if not candidate_proven_strategies:
-        raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_REFLECTOR_VIEW_INVALID")
-    return {
-        "schema_version": REFLECTOR_CAPSULE_SCHEMA,
-        "capsule_sha256": canonical_sha256(dict(capsule)),
-        "fresh_workspace_requirement": capsule["fresh_workspace_requirement"],
-        "candidate_concepts": [
-            {
-                "text": item["text"],
-                "kind": item["kind"],
-                "evidence_refs": item["evidence_refs"][:1],
-            }
-            for item in concepts
-        ],
-        "successful_work": [
-            {
-                "summary": item["summary"],
-                "evidence_refs": item["evidence_refs"][:1],
-            }
-            for item in strengths
-        ],
-        "weakness_to_action": pairs,
-        "concrete_evolution": {
-            "objective": (
-                "Retain candidate-proven analysis paths as concrete fresh-workspace "
-                "lessons, rather than replacing them with generic workflow advice."
-            ),
-            "candidate_proven_strategies": candidate_proven_strategies,
-            "bundle_semantics": [
-                (
-                    "Across the evolved artifact bundle, name a candidate-proven "
-                    "analysis concept in a substantive reconstruction or improvement "
-                    "statement; a bare source-file list is insufficient."
-                ),
-                (
-                    "Connect an observed candidate weakness to a concrete next-run "
-                    "action that can be performed from public inputs in a fresh workspace."
-                ),
-                "Do not reconstruct hidden evaluation targets.",
-            ],
-        },
-    }
 
 
 def _walk(value: Any, path: tuple[str, ...] = ()) -> Iterable[tuple[tuple[str, ...], Any]]:
@@ -224,129 +94,56 @@ def _verify_ref(root: Path, relative: str) -> None:
 
 
 def _target_names(ground_truth_entries: list[dict[str, Any]]) -> set[str]:
-    result: set[str] = set()
-    for path, value in _walk(ground_truth_entries):
-        if path and path[-1].casefold() == "path" and isinstance(value, str):
-            result.add(Path(value).name.casefold())
-    return result
+    return {
+        Path(value).name.casefold()
+        for path, value in _walk(ground_truth_entries)
+        if path and path[-1].casefold() == "path" and isinstance(value, str)
+    }
 
 
-def _concept_from_tokens(tokens: list[str], *, kind: str) -> str | None:
-    tokens = [token for token in tokens if not token.isdigit()]
-    specific = [token for token in tokens if token not in _GENERIC_STEM_TOKENS]
-    selected = specific or tokens
-    if not selected:
-        return None
-    stem = " ".join(selected[:6])
-    # A semantic label is safer and more useful to a fresh candidate than an
-    # instruction to preserve a vanished filename.  It remains provenance
-    # checked against the candidate-owned path below.
-    if kind == "analysis" and "analysis" not in selected:
-        return f"{stem} analysis"
-    if kind == "figure":
-        return f"{stem} visual evidence"
-    if kind == "result" and "summary" not in selected:
-        return f"{stem} data summary"
-    return stem
+def _concepts(root: Path, files: list[str], targets: set[str]) -> list[dict[str, Any]]:
+    """Keep small provenance labels for audit; the ledger is the primary input."""
 
-
-def _concept_from_path(relative: str, *, kind: str) -> str | None:
-    path = Path(relative)
-    return _concept_from_tokens(
-        [token.casefold() for token in _TOKEN.findall(path.stem)], kind=kind
-    )
-
-
-def _report_concepts(
-    root: Path,
-    report_ref: str,
-    candidate_files: set[str],
-) -> list[dict[str, Any]]:
-    """Return compact concepts from Candidate-authored headings and figure labels."""
-
-    report = root / report_ref
-    text = report.read_text(encoding="utf-8", errors="replace")[:131_072]
+    report = root / "report/report.md"
+    report_text = report.read_text(encoding="utf-8", errors="replace")[:131_072]
     concepts: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    def add(label: str, *, kind: str, refs: list[str]) -> None:
-        tokens = [token.casefold() for token in _TOKEN.findall(label)]
-        concept = _concept_from_tokens(tokens, kind=kind)
-        if concept is None or concept in seen:
+    def add(text: str, kind: str, refs: list[str]) -> None:
+        tokens = [item.casefold() for item in _TOKEN.findall(text)]
+        specific = [item for item in tokens if item not in _GENERIC and not item.isdigit()]
+        if len(specific) < 2:
             return
-        # Headings such as "Methods" and "Results" are not a useful
-        # Candidate-specific strategy.  Require two non-generic source terms
-        # before they enter the bounded capsule.
-        source_specific = [
-            token
-            for token in tokens
-            if token not in _GENERIC_STEM_TOKENS and not token.isdigit()
-        ]
-        if len(source_specific) < 2:
+        label = " ".join(specific[:6])
+        if label in seen:
             return
-        seen.add(concept)
-        concepts.append(
-            {
-                "concept_id": f"concept_{len(concepts) + 1:02d}",
-                "text": concept,
-                "kind": kind,
-                "evidence_refs": refs,
-                "provenance": "candidate_workspace",
-            }
-        )
+        seen.add(label)
+        concepts.append({
+            "concept_id": f"concept_{len(concepts)+1:02d}",
+            "text": label,
+            "kind": kind,
+            "evidence_refs": refs,
+            "provenance": "candidate_workspace",
+        })
 
-    for line in text.splitlines():
-        heading = _REPORT_HEADING.match(line)
-        if heading:
-            add(heading.group(1), kind="analysis", refs=[report_ref])
-    for match in _REPORT_IMAGE.finditer(text):
-        label, destination = match.groups()
-        image_ref = (Path(report_ref).parent / destination).as_posix()
-        if image_ref in candidate_files:
-            add(label, kind="figure", refs=[image_ref, report_ref])
-    return concepts
-
-
-def _concepts(
-    root: Path,
-    files: list[str],
-    targets: set[str],
-    *,
-    report_ref: str,
-) -> list[dict[str, Any]]:
-    concepts: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for report_concept in _report_concepts(root, report_ref, set(files)):
-        seen.add(report_concept["text"])
-        concepts.append(report_concept)
-        if len(concepts) >= 8:
-            return concepts
-    kinds = (
-        ("analysis", _CODE_SUFFIXES),
-        ("figure", _IMAGE_SUFFIXES),
-        ("result", _OUTPUT_SUFFIXES),
-    )
-    for kind, suffixes in kinds:
-        for relative in files:
-            path = Path(relative)
+    for line in report_text.splitlines():
+        match = _REPORT_HEADING.match(line)
+        if match:
+            add(match.group(1), "analysis", ["report/report.md"])
+    file_set = set(files)
+    for match in _REPORT_IMAGE.finditer(report_text):
+        ref = (Path("report") / match.group(1)).as_posix()
+        if ref in file_set:
+            add(Path(ref).stem.replace("_", " "), "figure", [ref, "report/report.md"])
+    for kind, suffixes in (("analysis", _CODE_SUFFIXES), ("figure", _IMAGE_SUFFIXES), ("result", _OUTPUT_SUFFIXES)):
+        for ref in files:
+            path = Path(ref)
             if path.suffix.casefold() not in suffixes or path.name.casefold() in targets:
                 continue
-            concept = _concept_from_path(relative, kind=kind)
-            if concept is None or concept in seen:
-                continue
-            seen.add(concept)
-            concepts.append(
-                {
-                    "concept_id": f"concept_{len(concepts) + 1:02d}",
-                    "text": concept,
-                    "kind": kind,
-                    "evidence_refs": [relative],
-                    "provenance": "candidate_workspace",
-                }
-            )
+            add(path.stem.replace("_", " "), kind, [ref])
             if len(concepts) >= 8:
                 return concepts
-    return concepts
+    return concepts[:8]
 
 
 def _source_candidate(candidate: Mapping[str, Any]) -> dict[str, Any]:
@@ -358,113 +155,46 @@ def _source_candidate(candidate: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _successes(concepts: list[dict[str, Any]], report_ref: str) -> list[dict[str, Any]]:
-    result: list[dict[str, Any]] = []
-    for concept in concepts[:3]:
-        kind = concept["kind"]
-        if kind == "analysis":
-            summary = (
-                f"Reconstruct the candidate-produced {concept['text']} analysis route "
-                "in the fresh workspace."
-            )
-        elif kind == "figure":
-            summary = (
-                f"Rebuild the candidate-produced {concept['text']} visual-evidence route "
-                "and retain its role in the report."
-            )
-        else:
-            summary = (
-                f"Reproduce the candidate-produced {concept['text']} result summary "
-                "as a checkable intermediate output."
-            )
-        result.append(
-            {
-                "kind": kind,
-                "concept_id": concept["concept_id"],
-                "summary": summary,
-                "evidence_refs": [*concept["evidence_refs"], report_ref],
-                "why_retain": (
-                    "This is candidate-produced evidence that provides a concrete "
-                    "starting analysis path for a fresh rerun."
-                ),
-            }
-        )
-    return result
-
-
 def _weaknesses_and_actions(
-    sanitized_feedback: Mapping[str, Any],
-    concepts: list[dict[str, Any]],
-    report_ref: str,
+    sanitized_feedback: Mapping[str, Any], ledger: Mapping[str, Any]
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     diagnoses = sanitized_feedback.get("diagnoses")
-    if not isinstance(diagnoses, list) or not diagnoses:
+    achievements = ledger.get("achievements")
+    if not isinstance(diagnoses, list) or not diagnoses or not isinstance(achievements, list) or not achievements:
         raise BaselineEvidenceCapsuleError("CAPSULE_SANITIZED_FEEDBACK_INVALID")
-    primary = concepts[0] if concepts else None
-    primary_text = "the candidate-produced analysis route"
-    primary_refs = [report_ref]
-    if primary is not None:
-        primary_text = f"the {primary['text']} route"
-        primary_refs = [*primary["evidence_refs"], report_ref]
     weaknesses: list[dict[str, Any]] = []
     actions: list[dict[str, Any]] = []
-    for index, diagnosis in enumerate(diagnoses[:3], start=1):
+    for index, diagnosis in enumerate(diagnoses[:6], start=1):
         if not isinstance(diagnosis, dict):
             raise BaselineEvidenceCapsuleError("CAPSULE_SANITIZED_FEEDBACK_INVALID")
-        dimension = diagnosis.get("dimension")
-        observation = diagnosis.get("candidate_observation")
-        refs = diagnosis.get("evidence_refs")
+        values = {field: diagnosis.get(field) for field in ("dimension", "severity", "candidate_observation", "improvement_direction", "evidence_refs")}
         if (
-            not isinstance(dimension, str)
-            or not isinstance(observation, str)
-            or not isinstance(refs, list)
-            or not all(isinstance(item, str) for item in refs)
+            not all(isinstance(values[field], str) and _normalize(values[field]) for field in ("dimension", "severity", "candidate_observation", "improvement_direction"))
+            or not isinstance(values["evidence_refs"], list)
+            or not values["evidence_refs"]
+            or not all(isinstance(ref, str) for ref in values["evidence_refs"])
         ):
             raise BaselineEvidenceCapsuleError("CAPSULE_SANITIZED_FEEDBACK_INVALID")
         weakness_id = f"weakness_{index:02d}"
-        weaknesses.append(
-            {
-                "weakness_id": weakness_id,
-                "dimension": dimension,
-                "candidate_observation": observation,
-                "evidence_refs": list(dict.fromkeys([*refs, *primary_refs])),
-            }
-        )
-        if dimension == "visual_evidence":
-            action = (
-                f"Reconstruct {primary_text} in the fresh workspace, then add an "
-                "independent numerical summary that checks the visual evidence with public data."
-            )
-        elif dimension == "quantitative_validation":
-            action = (
-                f"Reconstruct {primary_text} first, then add an independent aggregation "
-                "or cross-check that tests the same conclusion."
-            )
-        else:
-            action = (
-                f"Reconstruct {primary_text} before adding one documented validation "
-                f"step that addresses the observed {dimension.replace('_', ' ')} weakness."
-            )
-        actions.append(
-            {
-                "action_id": f"action_{index:02d}",
-                "addresses": weakness_id,
-                "action": action,
-                "preserve_refs": primary_refs,
-            }
-        )
+        achievement = achievements[(index - 1) % len(achievements)]
+        weaknesses.append({"weakness_id": weakness_id, **values})
+        actions.append({
+            "action_id": f"action_{index:02d}",
+            "addresses": weakness_id,
+            "achievement_id": achievement["achievement_id"],
+            "action": (
+                f"After reconstructing required {achievement['achievement_id']} ({achievement['capability']}), "
+                f"add an independent public-data improvement that addresses: {values['improvement_direction']}"
+            ),
+            "feedback_action_mode": "additive",
+            "preserve_refs": achievement["candidate_evidence_refs"],
+        })
     return weaknesses, actions
 
 
 def build_baseline_evidence_capsule(
-    *,
-    task_id: str,
-    candidate: Mapping[str, Any],
-    sanitized_feedback: Mapping[str, Any],
-    ground_truth_entries: list[dict[str, Any]],
+    *, task_id: str, candidate: Mapping[str, Any], sanitized_feedback: Mapping[str, Any], ground_truth_entries: list[dict[str, Any]]
 ) -> BaselineEvidenceCapsule:
-    """Build a bounded candidate-only capsule without new model inference."""
-
     root_value = candidate.get("candidate_output_root")
     if not isinstance(root_value, str):
         raise BaselineEvidenceCapsuleError("CAPSULE_CANDIDATE_OUTPUT_AUTHORITY_ABSENT")
@@ -472,47 +202,50 @@ def build_baseline_evidence_capsule(
     if root.is_symlink() or not root.is_dir():
         raise BaselineEvidenceCapsuleError("CAPSULE_CANDIDATE_OUTPUT_AUTHORITY_UNSAFE")
     files = _candidate_files(root)
-    report_ref = "report/report.md"
-    if report_ref not in files:
+    if "report/report.md" not in files:
         raise BaselineEvidenceCapsuleError("CAPSULE_REPORT_EVIDENCE_ABSENT")
-    concepts = _concepts(
-        root,
-        files,
-        _target_names(ground_truth_entries),
-        report_ref=report_ref,
-    )
+    try:
+        trace = build_baseline_success_trace(candidate_root=root)
+        ledger = build_baseline_achievement_ledger(trace=trace, candidate_root=root)
+    except BaselineSuccessTraceError as exc:
+        raise BaselineEvidenceCapsuleError(str(exc)) from exc
+    concepts = _concepts(root, files, _target_names(ground_truth_entries))
     if not concepts:
-        raise BaselineEvidenceCapsuleError("CAPSULE_NO_CANDIDATE_SPECIFIC_CONCEPTS")
-    successes = _successes(concepts, report_ref)
-    weaknesses, actions = _weaknesses_and_actions(sanitized_feedback, concepts, report_ref)
-    payload = {
+        # The ledger is detailed enough to construct bounded audit concepts
+        # even when the report headings themselves are generic.
+        concepts = [{
+            "concept_id": f"concept_{index+1:02d}",
+            "text": " ".join(item["method_signature"][:6]),
+            "kind": "analysis",
+            "evidence_refs": item["candidate_evidence_refs"][:1],
+            "provenance": "candidate_workspace",
+        } for index, item in enumerate(ledger["achievements"][:8])]
+    successes = [{
+        "achievement_id": item["achievement_id"],
+        "summary": item["capability"],
+        "evidence_refs": item["candidate_evidence_refs"],
+        "why_retain": "Required candidate-produced capability and evidence chain for fresh-workspace reconstruction.",
+    } for item in ledger["achievements"]]
+    weaknesses, actions = _weaknesses_and_actions(sanitized_feedback, ledger)
+    return BaselineEvidenceCapsule({
         "schema_version": CAPSULE_SCHEMA,
         "task_id": task_id,
         "source_candidate": _source_candidate(candidate),
-        "fresh_workspace_requirement": (
-            "The next Candidate starts without baseline files and must reconstruct "
-            "candidate-proven strategies before adding improvements."
-        ),
+        "fresh_workspace_requirement": "The next Candidate starts without baseline files: RECONSTRUCT required capabilities, PRESERVE them, EXTEND only additively, then VERIFY baseline equivalence.",
         "candidate_concepts": concepts,
         "successful_work": successes,
         "observed_weaknesses": weaknesses,
         "improvement_actions": actions,
+        "baseline_success_trace": trace,
+        "baseline_achievement_ledger": ledger,
+        "preservation_contract": "RECONSTRUCT_PRESERVE_EXTEND_VERIFY",
         "projector_model_calls": 0,
-    }
-    return BaselineEvidenceCapsule(payload)
+    })
 
 
 def _require_schema(capsule: Mapping[str, Any]) -> None:
     expected = {
-        "schema_version",
-        "task_id",
-        "source_candidate",
-        "fresh_workspace_requirement",
-        "candidate_concepts",
-        "successful_work",
-        "observed_weaknesses",
-        "improvement_actions",
-        "projector_model_calls",
+        "schema_version", "task_id", "source_candidate", "fresh_workspace_requirement", "candidate_concepts", "successful_work", "observed_weaknesses", "improvement_actions", "baseline_success_trace", "baseline_achievement_ledger", "preservation_contract", "projector_model_calls",
     }
     if (
         set(capsule) != expected
@@ -520,37 +253,82 @@ def _require_schema(capsule: Mapping[str, Any]) -> None:
         or not isinstance(capsule.get("task_id"), str)
         or not isinstance(capsule.get("source_candidate"), dict)
         or not isinstance(capsule.get("fresh_workspace_requirement"), str)
-        or not isinstance(capsule.get("candidate_concepts"), list)
-        or not 1 <= len(capsule["candidate_concepts"]) <= 8
-        or not isinstance(capsule.get("successful_work"), list)
-        or not capsule["successful_work"]
-        or not isinstance(capsule.get("observed_weaknesses"), list)
-        or not capsule["observed_weaknesses"]
-        or not isinstance(capsule.get("improvement_actions"), list)
-        or not capsule["improvement_actions"]
+        or not isinstance(capsule.get("candidate_concepts"), list) or not capsule["candidate_concepts"]
+        or not isinstance(capsule.get("successful_work"), list) or not capsule["successful_work"]
+        or not isinstance(capsule.get("observed_weaknesses"), list) or not capsule["observed_weaknesses"]
+        or not isinstance(capsule.get("improvement_actions"), list) or not capsule["improvement_actions"]
+        or not isinstance(capsule.get("baseline_success_trace"), dict)
+        or capsule["baseline_success_trace"].get("schema_version") != SUCCESS_TRACE_SCHEMA
+        or not isinstance(capsule.get("baseline_achievement_ledger"), dict)
+        or capsule["baseline_achievement_ledger"].get("schema_version") != ACHIEVEMENT_LEDGER_SCHEMA
+        or capsule.get("preservation_contract") != "RECONSTRUCT_PRESERVE_EXTEND_VERIFY"
         or capsule.get("projector_model_calls") != 0
     ):
         raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_SCHEMA_INVALID")
 
 
 def _hidden_literals(ground_truth_entries: list[dict[str, Any]]) -> set[str]:
-    result: set[str] = set()
-    for _path, value in _walk(ground_truth_entries):
-        if isinstance(value, str):
-            normalized = _normalize(value)
-            if len(normalized.split()) >= 3 or len(normalized) >= 12:
-                result.add(normalized)
-    return result
+    return {
+        _normalize(value)
+        for _path, value in _walk(ground_truth_entries)
+        if isinstance(value, str) and (len(_normalize(value).split()) >= 3 or len(_normalize(value)) >= 12)
+    }
 
 
-def admit_baseline_evidence_capsule(
-    capsule: Mapping[str, Any],
-    *,
-    candidate_root: str | Path,
-    ground_truth_entries: list[dict[str, Any]],
-) -> dict[str, Any]:
-    """Fail closed unless every task-specific fact has Candidate provenance."""
+def _validate_trace_and_ledger(capsule: Mapping[str, Any], root: Path) -> tuple[set[str], set[str]]:
+    trace = capsule["baseline_success_trace"]
+    events = trace.get("events")
+    if not isinstance(events, list) or not events or trace.get("event_count") != len(events) or trace.get("projector_model_calls") != 0:
+        raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_SUCCESS_TRACE_INVALID")
+    trace_ids: set[str] = set()
+    event_fields = {"trace_id", "decision_context", "action", "public_input_refs", "candidate_artifact_refs", "result_summary", "verification", "status"}
+    for event in events:
+        if (
+            not isinstance(event, dict) or set(event) != event_fields
+            or not isinstance(event.get("trace_id"), str) or event["trace_id"] in trace_ids
+            or event.get("status") != "successful"
+            or not all(isinstance(event.get(key), str) and _normalize(event[key]) for key in ("decision_context", "action", "result_summary", "verification"))
+            or not isinstance(event.get("public_input_refs"), list) or not isinstance(event.get("candidate_artifact_refs"), list) or not event["candidate_artifact_refs"]
+        ):
+            raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_SUCCESS_TRACE_INVALID")
+        trace_ids.add(event["trace_id"])
+        for ref in [*event["public_input_refs"], *event["candidate_artifact_refs"]]:
+            if not isinstance(ref, str):
+                raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_SUCCESS_TRACE_INVALID")
+            _verify_ref(root, ref)
+    ledger = capsule["baseline_achievement_ledger"]
+    achievements = ledger.get("achievements")
+    if (
+        not isinstance(achievements, list) or not achievements or ledger.get("projector_model_calls") != 0
+        or ledger.get("achievement_count") != len(achievements) or ledger.get("required_achievement_count") != len(achievements)
+    ):
+        raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_ACHIEVEMENT_LEDGER_INVALID")
+    achievement_ids: set[str] = set()
+    fields = {"achievement_id", "capability", "scientific_role", "decision_rationale", "public_inputs", "trajectory_refs", "reconstruction_steps", "method_signature", "required_output_classes", "candidate_evidence_refs", "verification_assertions", "candidate_observations", "preservation_priority"}
+    output_classes = {"script", "numeric_output", "figure", "report_section"}
+    for item in achievements:
+        required_lists = ("public_inputs", "trajectory_refs", "reconstruction_steps", "method_signature", "required_output_classes", "candidate_evidence_refs", "verification_assertions")
+        if (
+            not isinstance(item, dict) or set(item) != fields or not isinstance(item.get("achievement_id"), str)
+            or item["achievement_id"] in achievement_ids or item.get("preservation_priority") != "required"
+            or not all(isinstance(item.get(key), str) and _normalize(item[key]) for key in ("capability", "scientific_role", "decision_rationale"))
+            or not all(isinstance(item.get(key), list) and item[key] for key in required_lists)
+            or not set(item["trajectory_refs"]).issubset(trace_ids)
+            or not set(item["required_output_classes"]).issubset(output_classes)
+        ):
+            raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_ACHIEVEMENT_LEDGER_INVALID")
+        observations = item.get("candidate_observations")
+        if not isinstance(observations, list) or not observations or any(not isinstance(observation, dict) or observation.get("provenance") != "candidate_observation" or not isinstance(observation.get("summary"), str) for observation in observations):
+            raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_ACHIEVEMENT_LEDGER_INVALID")
+        achievement_ids.add(item["achievement_id"])
+        for ref in [*item["public_inputs"], *item["candidate_evidence_refs"]]:
+            if not isinstance(ref, str):
+                raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_ACHIEVEMENT_LEDGER_INVALID")
+            _verify_ref(root, ref)
+    return trace_ids, achievement_ids
 
+
+def admit_baseline_evidence_capsule(capsule: Mapping[str, Any], *, candidate_root: str | Path, ground_truth_entries: list[dict[str, Any]]) -> dict[str, Any]:
     _require_schema(capsule)
     root = Path(candidate_root).resolve(strict=True)
     if root.is_symlink() or not root.is_dir():
@@ -558,108 +336,55 @@ def admit_baseline_evidence_capsule(
     for path, _value in _walk(capsule):
         if path and any(fragment in path[-1].casefold() for fragment in _PRIVATE_KEY_FRAGMENTS):
             raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_PRIVATE_FIELD_VIOLATION")
-
+    trace_ids, achievement_ids = _validate_trace_and_ledger(capsule, root)
     concept_ids: set[str] = set()
-    concept_text: set[str] = set()
     for concept in capsule["candidate_concepts"]:
         if (
-            not isinstance(concept, dict)
-            or set(concept) != {"concept_id", "text", "kind", "evidence_refs", "provenance"}
-            or not isinstance(concept.get("concept_id"), str)
-            or not isinstance(concept.get("text"), str)
+            not isinstance(concept, dict) or set(concept) != {"concept_id", "text", "kind", "evidence_refs", "provenance"}
+            or not isinstance(concept.get("concept_id"), str) or concept["concept_id"] in concept_ids
+            or not isinstance(concept.get("text"), str) or not _normalize(concept["text"])
             or concept.get("kind") not in {"analysis", "figure", "result"}
             or concept.get("provenance") not in {"candidate_workspace", "public_task"}
-            or not isinstance(concept.get("evidence_refs"), list)
-            or not concept["evidence_refs"]
+            or not isinstance(concept.get("evidence_refs"), list) or not concept["evidence_refs"]
         ):
             raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_SCHEMA_INVALID")
-        if concept["concept_id"] in concept_ids or not _normalize(concept["text"]):
-            raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_SCHEMA_INVALID")
         concept_ids.add(concept["concept_id"])
-        concept_text.add(_normalize(concept["text"]))
-        concept_provenance_matched = False
         for ref in concept["evidence_refs"]:
             if not isinstance(ref, str):
                 raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_SCHEMA_INVALID")
             _verify_ref(root, ref)
-            path_tokens = set(_TOKEN.findall(Path(ref).stem.casefold()))
-            text_tokens = set(_TOKEN.findall(concept["text"].casefold()))
-            if text_tokens.intersection(path_tokens):
-                concept_provenance_matched = True
-                continue
-            if ref == "report/report.md":
-                report_tokens = set(
-                    _TOKEN.findall(
-                        (root / ref).read_text(encoding="utf-8", errors="replace").casefold()
-                    )
-                )
-                meaningful = {
-                    token for token in text_tokens if token not in _GENERIC_STEM_TOKENS
-                }
-                if len(meaningful.intersection(report_tokens)) >= min(2, len(meaningful)):
-                    concept_provenance_matched = True
-        if not concept_provenance_matched:
-            raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_PROVENANCE_VIOLATION")
-
-    strengths = capsule["successful_work"]
-    for item in strengths:
-        if (
-            not isinstance(item, dict)
-            or set(item) != {"kind", "concept_id", "summary", "evidence_refs", "why_retain"}
-            or item.get("concept_id") not in concept_ids
-            or not isinstance(item.get("summary"), str)
-            or not isinstance(item.get("why_retain"), str)
-            or not isinstance(item.get("evidence_refs"), list)
-        ):
+    for item in capsule["successful_work"]:
+        if not isinstance(item, dict) or set(item) != {"achievement_id", "summary", "evidence_refs", "why_retain"} or item.get("achievement_id") not in achievement_ids or not isinstance(item.get("summary"), str) or not isinstance(item.get("why_retain"), str) or not isinstance(item.get("evidence_refs"), list):
             raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_SCHEMA_INVALID")
         for ref in item["evidence_refs"]:
             if not isinstance(ref, str):
                 raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_SCHEMA_INVALID")
             _verify_ref(root, ref)
-
     weakness_ids: set[str] = set()
     for item in capsule["observed_weaknesses"]:
-        if (
-            not isinstance(item, dict)
-            or set(item) != {"weakness_id", "dimension", "candidate_observation", "evidence_refs"}
-            or not isinstance(item.get("weakness_id"), str)
-            or not isinstance(item.get("dimension"), str)
-            or not isinstance(item.get("candidate_observation"), str)
-            or not isinstance(item.get("evidence_refs"), list)
-            or item["weakness_id"] in weakness_ids
-        ):
+        expected = {"weakness_id", "dimension", "severity", "candidate_observation", "improvement_direction", "evidence_refs"}
+        if not isinstance(item, dict) or set(item) != expected or not isinstance(item.get("weakness_id"), str) or item["weakness_id"] in weakness_ids or not all(isinstance(item.get(key), str) and _normalize(item[key]) for key in ("dimension", "severity", "candidate_observation", "improvement_direction")) or not isinstance(item.get("evidence_refs"), list) or not item["evidence_refs"]:
             raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_SCHEMA_INVALID")
         weakness_ids.add(item["weakness_id"])
         for ref in item["evidence_refs"]:
             if not isinstance(ref, str):
                 raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_SCHEMA_INVALID")
             _verify_ref(root, ref)
-
-    mapped_weaknesses: set[str] = set()
+    mapped: set[str] = set()
     for item in capsule["improvement_actions"]:
-        if (
-            not isinstance(item, dict)
-            or set(item) != {"action_id", "addresses", "action", "preserve_refs"}
-            or not isinstance(item.get("action_id"), str)
-            or item.get("addresses") not in weakness_ids
-            or not isinstance(item.get("action"), str)
-            or "reconstruct" not in item["action"].casefold()
-            or not isinstance(item.get("preserve_refs"), list)
-        ):
+        expected = {"action_id", "addresses", "achievement_id", "action", "feedback_action_mode", "preserve_refs"}
+        if not isinstance(item, dict) or set(item) != expected or not isinstance(item.get("action_id"), str) or item.get("addresses") not in weakness_ids or item.get("achievement_id") not in achievement_ids or not isinstance(item.get("action"), str) or "reconstruct" not in item["action"].casefold() or item.get("feedback_action_mode") != "additive" or not isinstance(item.get("preserve_refs"), list):
             raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_FRESH_WORKSPACE_SEMANTICS_INVALID")
-        mapped_weaknesses.add(item["addresses"])
+        mapped.add(item["addresses"])
         for ref in item["preserve_refs"]:
             if not isinstance(ref, str):
                 raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_SCHEMA_INVALID")
             _verify_ref(root, ref)
-    if not mapped_weaknesses:
+    if mapped != weakness_ids:
         raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_WEAKNESS_ACTION_MISSING")
-
-    serialized = "\n".join(value for _path, value in _walk(capsule) if isinstance(value, str))
-    normalized = _normalize(serialized)
-    for hidden in _hidden_literals(ground_truth_entries):
-        if hidden and hidden in normalized:
-            raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_GT_LITERAL_VIOLATION")
+    serialized = _normalize("\n".join(value for _path, value in _walk(capsule) if isinstance(value, str)))
+    if any(hidden and hidden in serialized for hidden in _hidden_literals(ground_truth_entries)):
+        raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_GT_LITERAL_VIOLATION")
     body = {
         "schema_version": CAPSULE_ADMISSION_SCHEMA,
         "status": "ADMITTED",
@@ -669,25 +394,58 @@ def admit_baseline_evidence_capsule(
         "judge_reasoning_projected": False,
         "target_image_projected": False,
         "candidate_concept_count": len(concept_ids),
-        "successful_work_count": len(strengths),
+        "success_trace_event_count": len(trace_ids),
+        "required_achievement_count": len(achievement_ids),
+        "successful_work_count": len(capsule["successful_work"]),
         "observed_weakness_count": len(weakness_ids),
-        "weakness_to_action_mapping_count": len(mapped_weaknesses),
+        "weakness_to_action_mapping_count": len(mapped),
         "projector_model_calls": 0,
         "exact_gt_literal_scan": "PASS",
         "candidate_provenance_scan": "PASS",
         "fresh_workspace_semantics": "PASS",
+        "preservation_first_semantics": "PASS",
     }
     return {**body, "content_sha256": canonical_sha256(body)}
 
 
+def build_reflector_capsule_view(capsule: Mapping[str, Any]) -> dict[str, Any]:
+    _require_schema(capsule)
+    ledger = capsule["baseline_achievement_ledger"]
+    actions = {item["addresses"]: item for item in capsule["improvement_actions"]}
+    mappings: list[dict[str, Any]] = []
+    for weakness in capsule["observed_weaknesses"]:
+        action = actions.get(weakness["weakness_id"])
+        if not isinstance(action, dict):
+            raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_REFLECTOR_VIEW_INVALID")
+        mappings.append({
+            "weakness_id": weakness["weakness_id"],
+            "dimension": weakness["dimension"],
+            "severity": weakness["severity"],
+            "candidate_observation": weakness["candidate_observation"],
+            "improvement_direction": weakness["improvement_direction"],
+            "evidence_refs": weakness["evidence_refs"][:3],
+            "achievement_id": action["achievement_id"],
+            "next_run_action": action["action"],
+            "feedback_action_mode": "additive",
+        })
+    return {
+        "schema_version": REFLECTOR_CAPSULE_SCHEMA,
+        "capsule_sha256": canonical_sha256(dict(capsule)),
+        "fresh_workspace_requirement": capsule["fresh_workspace_requirement"],
+        "preservation_contract": "RECONSTRUCT_PRESERVE_EXTEND_VERIFY",
+        "baseline_success_trace": {**capsule["baseline_success_trace"], "events": capsule["baseline_success_trace"]["events"][:20]},
+        "baseline_achievement_ledger": {**ledger, "achievements": ledger["achievements"][:8]},
+        "weakness_to_action": mappings,
+        "artifact_role_contract": {
+            "text_memory": "WHAT MUST NOT BE LOST: cover every required achievement with capability, evidence role, and preservation instruction.",
+            "skill_bundle": "HOW TO RECONSTRUCT AND EXTEND: Phase 1 reconstruct, Phase 2 verify, Phase 3 add each additive action, Phase 4 integrate without deletion.",
+            "agent_system": "WHAT MUST BE TRUE BEFORE SUBMISSION: RECONSTRUCT, PRESERVE, EXTEND, VERIFY; baseline-equivalence is required before submission.",
+        },
+    }
+
+
 __all__ = [
-    "CAPSULE_ADMISSION_SCHEMA",
-    "CAPSULE_SCHEMA",
-    "REFLECTOR_CAPSULE_SCHEMA",
-    "BaselineEvidenceCapsule",
-    "BaselineEvidenceCapsuleAdmissionError",
-    "BaselineEvidenceCapsuleError",
-    "admit_baseline_evidence_capsule",
-    "build_baseline_evidence_capsule",
-    "build_reflector_capsule_view",
+    "CAPSULE_ADMISSION_SCHEMA", "CAPSULE_SCHEMA", "REFLECTOR_CAPSULE_SCHEMA",
+    "BaselineEvidenceCapsule", "BaselineEvidenceCapsuleAdmissionError", "BaselineEvidenceCapsuleError",
+    "admit_baseline_evidence_capsule", "build_baseline_evidence_capsule", "build_reflector_capsule_view",
 ]

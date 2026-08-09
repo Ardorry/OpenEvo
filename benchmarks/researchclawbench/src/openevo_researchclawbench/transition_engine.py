@@ -15,6 +15,9 @@ class TrainingStage(StrEnum):
     CANDIDATE_SEALED = "CANDIDATE_SEALED"
     VALIDATOR_FEEDBACK_PENDING = "VALIDATOR_FEEDBACK_PENDING"
     ARTIFACT_VALIDATED = "ARTIFACT_VALIDATED"
+    BASELINE_EQUIVALENCE_PENDING = "BASELINE_EQUIVALENCE_PENDING"
+    BASELINE_EQUIVALENCE_ADMITTED = "BASELINE_EQUIVALENCE_ADMITTED"
+    BASELINE_EQUIVALENCE_FAILED = "BASELINE_EQUIVALENCE_FAILED"
     EVALUATION_PENDING = "EVALUATION_PENDING"
     EVALUATED = "EVALUATED"
     FEEDBACK_PROJECTION_PENDING = "FEEDBACK_PROJECTION_PENDING"
@@ -85,10 +88,21 @@ _ALLOWED: dict[TrainingStage, frozenset[TrainingStage]] = {
     TrainingStage.ARTIFACT_VALIDATED: frozenset(
         {
             TrainingStage.EVALUATION_PENDING,
+            TrainingStage.BASELINE_EQUIVALENCE_PENDING,
             TrainingStage.ATTACHMENT_SEALED,
             TrainingStage.FAILED,
         }
     ),
+    TrainingStage.BASELINE_EQUIVALENCE_PENDING: frozenset(
+        {
+            TrainingStage.BASELINE_EQUIVALENCE_ADMITTED,
+            TrainingStage.BASELINE_EQUIVALENCE_FAILED,
+        }
+    ),
+    TrainingStage.BASELINE_EQUIVALENCE_ADMITTED: frozenset(
+        {TrainingStage.EVALUATION_PENDING}
+    ),
+    TrainingStage.BASELINE_EQUIVALENCE_FAILED: frozenset(),
     TrainingStage.EVALUATION_PENDING: frozenset(
         {
             TrainingStage.EVALUATED,
@@ -182,6 +196,7 @@ def evolution_allowed(stage: TrainingStage) -> bool:
         TrainingStage.BLOCKED,
         TrainingStage.FAILED,
         TrainingStage.TASK_NO_VALID_ATTEMPT,
+        TrainingStage.BASELINE_EQUIVALENCE_FAILED,
     }
 
 

@@ -268,11 +268,13 @@ class DurableFakeAuthority(ProductionOperationPort):
             }
             feedback_sha256 = canonical_sha256(feedback)
             capsule = {
-                "schema_version": "openevo.researchclawbench.baseline_evidence_capsule.v1",
+                "schema_version": "openevo.researchclawbench.baseline_evidence_capsule.v2",
                 "candidate_concepts": [{"text": "synthetic analysis"}],
+                "baseline_success_trace": {"schema_version": "openevo.researchclawbench.baseline_success_trace.v1"},
+                "baseline_achievement_ledger": {"schema_version": "openevo.researchclawbench.baseline_achievement_ledger.v2"},
             }
             reflector = {
-                "feedback_class": "candidate_specific_retention_v2",
+                "feedback_class": "preservation_first_evolution_r3",
                 "sanitized_evaluation_feedback": feedback,
                 "baseline_evidence_capsule": capsule,
             }
@@ -302,6 +304,10 @@ class DurableFakeAuthority(ProductionOperationPort):
                     "baseline_evidence_capsule_present": True,
                     "fresh_workspace_reconstruction_required": True,
                     "weakness_to_action_mapping_present": True,
+                    "all_sanitized_diagnoses_visible": True,
+                    "baseline_success_trace_present": True,
+                    "baseline_achievement_ledger_present": True,
+                    "preservation_first_contract": True,
                     "gt_leakage": False,
                 },
                 "feedback_projector_model_calls": 0,
@@ -332,13 +338,13 @@ class DurableFakeAuthority(ProductionOperationPort):
                         "judge_feedback_included": False,
                     }
                 )
-            if request.get("feedback_source") == "candidate_specific_retention_v2":
+            if request.get("feedback_source") == "preservation_first_evolution_r3":
                 gt = request["gt_supervision"]
                 projection = request["feedback_projection"]
                 result.update(
                     {
                         "feedback_class": "HARD_GT",
-                        "feedback_source": "candidate_specific_retention_v2",
+                        "feedback_source": "preservation_first_evolution_r3",
                         "judge_calls": 0,
                         "ground_truth_sha256": gt["ground_truth_sha256"],
                         "sanitized_feedback_sha256": projection["sanitized_feedback_sha256"],
@@ -383,7 +389,7 @@ class DurableFakeAuthority(ProductionOperationPort):
         if self.kind == "artifact_quality":
             report = {
                 "schema_version": (
-                    "openevo.researchclawbench.task_specific_artifact_quality.v2"
+                    "openevo.researchclawbench.preservation_artifact_quality.v3"
                 ),
                 "status": "PASS",
                 "candidate_concepts": ["synthetic analysis"],
@@ -398,6 +404,7 @@ class DurableFakeAuthority(ProductionOperationPort):
                 "gt_leakage_findings": [],
                 "provenance_violations": [],
                 "artifact_text_sha256": {},
+                "artifact_role_contract": {"duplicate_mentions_count_once": True},
             }
             report["content_sha256"] = canonical_sha256(report)
             return {
@@ -409,6 +416,24 @@ class DurableFakeAuthority(ProductionOperationPort):
                 "provider_calls": 0,
                 "artifact_text_persisted": False,
                 "raw_gt_persisted": False,
+            }
+        if self.kind == "baseline_equivalence":
+            report = {
+                "schema_version": "openevo.researchclawbench.baseline_equivalence.v1",
+                "status": "PASS",
+                "required_achievement_count": 1,
+                "reconstructed_required_achievement_count": 1,
+                "dropped_required_achievement_ids": [],
+            }
+            report["content_sha256"] = canonical_sha256(report)
+            return {
+                "equivalence_gate_status": "PASS",
+                "equivalence_report": report,
+                "equivalence_report_sha256": report["content_sha256"],
+                "provider_calls": 0,
+                "raw_gt_persisted": False,
+                "judge_reasoning_persisted": False,
+                "artifact_text_persisted": False,
             }
         if self.kind == "composite":
             jobs = request["evolution"]["jobs"]
@@ -523,6 +548,7 @@ def build_synthetic_ports(
             "attachment",
             "evolution",
             "artifact_quality",
+            "baseline_equivalence",
             "composite",
             "per_item_evolved",
             "task_local",
@@ -539,6 +565,7 @@ def build_synthetic_ports(
             attachment=authorities["attachment"],
             evolution=authorities["evolution"],
             artifact_quality=authorities["artifact_quality"],
+            baseline_equivalence=authorities["baseline_equivalence"],
             composite=authorities["composite"],
             per_item_evolved=authorities["per_item_evolved"],
             task_local=authorities["task_local"],
