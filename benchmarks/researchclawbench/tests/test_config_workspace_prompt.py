@@ -35,7 +35,7 @@ def test_protocol_parser_is_frozen_and_has_closed_budget_configuration() -> None
     assert config.require("candidate.max_tool_steps") == 300
     assert config.require("budgets.max_reflector_model_calls") == 85
     readiness = config.environment_readiness({})
-    assert readiness["ready"] is False
+    assert readiness["ready"] is True
     assert readiness["reflector_runtime_receipt_valid"] is True
     assert "REFLECTOR_CODEX_RUNTIME_NOT_REPRODUCIBLY_PINNED" not in readiness["blockers"]
     assert "NATIVE_POST_RUN_TRAINING_FEEDBACK_ATTACHMENT_UNAVAILABLE" not in readiness["blockers"]
@@ -43,7 +43,7 @@ def test_protocol_parser_is_frozen_and_has_closed_budget_configuration() -> None
     assert "FORMAL_TRAINING_ORCHESTRATOR_UNAVAILABLE" not in readiness["blockers"]
     assert readiness["formal_training_orchestrator_status"] is None
     assert readiness["framework_lock_present"] is True
-    assert "SOURCE_IDENTITY_DRIFT" in readiness["blockers"]
+    assert "SOURCE_IDENTITY_DRIFT" not in readiness["blockers"]
     assert "JUDGE_CREDENTIALS_MISSING" not in readiness["blockers"]
 
 
