@@ -524,3 +524,46 @@ def test_gate_keeps_multisentence_markdown_anchor_as_one_semantic_unit(tmp_path:
 
     assert report["status"] == "PASS"
     assert report["artifact_metrics"]["text_memory"]["required_achievement_memory_coverage"] == 1
+
+
+def test_skill_gate_accepts_one_achievement_across_bounded_markdown_blocks(
+    tmp_path: Path,
+) -> None:
+    """Regression for the first R3.12 native Astronomy skill.
+
+    Method, output roles, reconstruction, and verification are intentionally
+    separate bullets.  They belong to one explicit achievement and must not be
+    mistaken for missing reconstruction fidelity.
+    """
+
+    _root, projection = _projection(tmp_path)
+    capsule = projection["baseline_evidence_capsule"]
+    artifacts = _complete_artifacts(capsule)
+    achievement = capsule["baseline_achievement_ledger"]["achievements"][0]
+    method = " ".join(achievement["method_signature"])
+    outputs = _output_words(achievement)
+    artifacts["skill_bundle"] = (
+        "Phase 1 — Reconstruct baseline capabilities\n\n"
+        f"`{achievement['achievement_id']}`:\n"
+        f"- Candidate/public method: {method}.\n"
+        f"- Evidence role: {outputs}.\n"
+        "- Reconstruction steps: reconstruct the public-data method and regenerate evidence.\n\n"
+        "Phase 2 — Verify reconstruction\n\n"
+        f"`{achievement['achievement_id']}`:\n"
+        "- Verification steps: run the method, confirm outputs, and verify report evidence.\n\n"
+        "Phase 3 — Add evaluator-driven improvements\n"
+        + "\n".join(
+            f"- For {item['addresses']} and {item['achievement_id']}, add a public-data cross-check without replacing the baseline path."
+            for item in capsule["improvement_actions"]
+        )
+        + "\n\nPhase 4 — Integrate without deleting preserved work.\n"
+    )
+
+    report = assess_task_specific_artifact_quality(
+        capsule=capsule, artifact_texts=artifacts, ground_truth_entries=_gt()
+    )
+
+    assert report["status"] == "PASS"
+    assert report["artifact_metrics"]["skill_bundle"][
+        "required_achievement_reconstruction_coverage"
+    ] == 1

@@ -634,6 +634,90 @@ def test_failed_per_item_evolution_invalidation_requires_core_terminal_proof(
     assert verified["execution_status"] == "COMPLETED_INVALIDATED"
 
 
+def test_failed_artifact_quality_archives_committed_native_successor_without_injection(
+    tmp_path: Path,
+) -> None:
+    class QualityFailureOperations(SyntheticOperations):
+        def evolve_artifacts(self, request, idempotency_key):
+            attempt = request["attempt_index"]
+            return self._once(
+                idempotency_key,
+                {
+                    "jobs": [
+                        {
+                            "artifact_type": artifact_type,
+                            "job_id": (
+                                f"job-{request['task_id']}-{attempt}-{artifact_type}"
+                            ),
+                            "successor_registry_id": (
+                                f"artifact-{request['task_id']}-{attempt}-{artifact_type}"
+                            ),
+                        }
+                        for artifact_type in (
+                            "agent_system",
+                            "text_memory",
+                            "skill_bundle",
+                        )
+                    ]
+                },
+            )
+
+        def assess_artifact_quality(self, request, idempotency_key):
+            jobs = request["evolution"]["jobs"]
+            report = {
+                "schema_version": (
+                    "openevo.researchclawbench.preservation_artifact_quality.v3"
+                ),
+                "status": "PRESERVATION_ARTIFACT_QUALITY_FAILED",
+                "gt_leakage_findings": [],
+                "provenance_violations": [],
+                "artifact_role_contract": {"duplicate_mentions_count_once": True},
+            }
+            report["content_sha256"] = canonical_sha256(report)
+            return self._once(
+                idempotency_key,
+                {
+                    "status": "SUCCEEDED",
+                    "quality_gate_status": (
+                        "PRESERVATION_ARTIFACT_QUALITY_FAILED"
+                    ),
+                    "quality_report": report,
+                    "quality_report_sha256": report["content_sha256"],
+                    "artifact_snapshot_authority": {
+                        item["artifact_type"]: {
+                            "artifact_id": item["successor_registry_id"]
+                        }
+                        for item in jobs
+                    },
+                    "provider_calls": 0,
+                    "artifact_text_persisted": False,
+                    "raw_gt_persisted": False,
+                },
+            )
+
+    operations = QualityFailureOperations()
+    supervisor = _per_item_supervisor(tmp_path, operations, task="Astronomy_004")
+    _drive_to(supervisor, "EVOLUTION_COMPLETED")
+    with pytest.raises(ValueError, match="artifact quality gate failed"):
+        supervisor.run_next()
+
+    closed = supervisor.invalidate_failed_per_item_artifact_quality(
+        reason="MECHANISM_CHANGE_AFTER_ARTIFACT_QUALITY_FAILURE"
+    )
+    verified = supervisor.verify()
+
+    assert closed["stage"] == "ITEM_INVALIDATED_RESET"
+    invalidation = closed["item_invalidation_receipt"]
+    assert invalidation["native_successor_committed"] is True
+    assert invalidation["native_artifacts_archived_not_injected"] is True
+    assert len(invalidation["archived_artifact_ids"]) == 3
+    assert closed["active_artifact_ids"] == []
+    assert closed["registry_artifact_ids"] == []
+    assert len(closed["evolution_job_ids"]) == 3
+    assert verified["execution_status"] == "COMPLETED_INVALIDATED"
+    assert verified["pending_side_effects"] == 0
+
+
 def test_next_per_item_namespace_starts_clean_after_prior_item_reset(
     tmp_path: Path,
 ) -> None:

@@ -93,6 +93,7 @@ from .training_control import (
     print_closed_json,
 )
 from .training_supervisor import (
+    ARTIFACT_QUALITY_INVALIDATION_REASON,
     FAILED_EVOLUTION_INVALIDATION_REASON,
     supervisor_capability_audit,
 )
@@ -1482,6 +1483,16 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         choices=(FAILED_EVOLUTION_INVALIDATION_REASON,),
     )
+    per_item_quality_invalidate = sub.add_parser(
+        "per-item-invalidate-artifact-quality-failure"
+    )
+    per_item_quality_invalidate.add_argument("--protocol", required=True, type=Path)
+    per_item_quality_invalidate.add_argument("--run-id", required=True)
+    per_item_quality_invalidate.add_argument(
+        "--reason",
+        required=True,
+        choices=(ARTIFACT_QUALITY_INVALIDATION_REASON,),
+    )
     minimal = sub.add_parser("minimal-per-item")
     minimal.add_argument("--protocol", required=True, type=Path)
     minimal.add_argument("--run-id", required=True)
@@ -1607,6 +1618,18 @@ def main(argv: list[str] | None = None) -> int:
                 core_control_authority=acquire_managed_core_control(config),
             )
             result = control.invalidate_failed_per_item_evolution(reason=args.reason)
+            print_closed_json(result)
+            return 0
+        if args.command == "per-item-invalidate-artifact-quality-failure":
+            control = DurableTrainingControl(
+                config=config,
+                run_id=args.run_id,
+                require_existing=True,
+                production=False,
+            )
+            result = control.invalidate_failed_per_item_artifact_quality(
+                reason=args.reason
+            )
             print_closed_json(result)
             return 0
         if getattr(config, "formal_runs_v11", None) is not None and args.command in {

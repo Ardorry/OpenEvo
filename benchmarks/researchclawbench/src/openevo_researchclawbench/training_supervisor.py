@@ -17,6 +17,9 @@ from .training_state_store import TrainingStateStore, canonical_sha256
 from .transition_engine import TrainingStage, evolution_allowed
 
 FAILED_EVOLUTION_INVALIDATION_REASON = "CORE_SUCCESSOR_TERMINAL_FAILURE"
+ARTIFACT_QUALITY_INVALIDATION_REASON = (
+    "MECHANISM_CHANGE_AFTER_ARTIFACT_QUALITY_FAILURE"
+)
 _LEGACY_FAILED_EVOLUTION_INVALIDATION_REASON = (
     "R3_CONTENT_ADMISSION_SCOPE_CONFLICT"
 )
@@ -1452,6 +1455,11 @@ class CommunityTrainingSupervisor:
                 _LEGACY_FAILED_EVOLUTION_INVALIDATION_REASON,
             }
         )
+        artifact_quality_invalidation = (
+            isinstance(invalidation_receipt, dict)
+            and invalidation_receipt.get("reason")
+            == ARTIFACT_QUALITY_INVALIDATION_REASON
+        )
         failed_evolution_effect_valid = (
             len(evolution_effects) == 1
             and evolution_effects[0].get("status") == "failed"
@@ -1463,6 +1471,29 @@ class CommunityTrainingSupervisor:
                 else None
             )
         )
+        artifact_quality_effects = [
+            item for item in effects if item.get("kind") == "artifact-quality"
+        ]
+        artifact_quality_invalidation_valid = (
+            len(evolution_effects) == 1
+            and evolution_effects[0].get("status") == "completed"
+            and len(artifact_quality_effects) == 1
+            and artifact_quality_effects[0].get("status") == "completed"
+            and not failed_effects
+            and len(state.get("evolution_job_ids", [])) == 3
+            and len(state.get("archived_artifact_ids", [])) == 3
+            and isinstance(invalidation_receipt, dict)
+            and invalidation_receipt.get("native_successor_committed") is True
+            and invalidation_receipt.get("native_artifacts_archived_not_injected")
+            is True
+            and invalidation_receipt.get("evolution_job_ids")
+            == state.get("evolution_job_ids")
+            and invalidation_receipt.get("archived_artifact_ids")
+            == state.get("archived_artifact_ids")
+        )
+        undispatched_invalidation = (
+            not failed_evolution_invalidation and not artifact_quality_invalidation
+        )
         if state["stage"] == TrainingStage.ITEM_INVALIDATED_RESET.value and (
             not self.per_item_reset_enabled
             or len(self.task_ids) != 1
@@ -1471,10 +1502,17 @@ class CommunityTrainingSupervisor:
                 failed_evolution_invalidation
                 and not failed_evolution_effect_valid
             )
-            or (not failed_evolution_invalidation and evolution_effects)
-            or state.get("evolution_job_ids") != []
+            or (
+                artifact_quality_invalidation
+                and not artifact_quality_invalidation_valid
+            )
+            or (undispatched_invalidation and evolution_effects)
+            or (
+                not artifact_quality_invalidation
+                and state.get("evolution_job_ids") != []
+            )
             or pending
-            or (not failed_evolution_invalidation and failed_effects)
+            or (undispatched_invalidation and failed_effects)
             or resources
             or state.get("active_artifact_ids") != []
             or state.get("current_composite_id") is not None
@@ -3430,6 +3468,165 @@ class CommunityTrainingSupervisor:
                 "current_task_local_overlay_id": None,
                 "current_task_local_overlay_scope_id": None,
                 "active_artifact_ids": [],
+                "active_candidate_intent": None,
+                "active_candidate_receipt": None,
+                "active_validation_receipt": None,
+                "active_evaluation_receipt": None,
+                "active_feedback_projection_receipt": None,
+                "active_baseline_capsule": None,
+                "active_attachment_receipt": None,
+                "active_evolution_receipt": None,
+                "active_artifact_quality_receipt": None,
+                "active_baseline_equivalence_receipt": None,
+                "active_admission_receipt": None,
+                "active_evolved_workspace_receipt": None,
+                "item_reset_receipt": None,
+                "item_invalidation_receipt": receipt,
+            },
+            receipt=receipt,
+        )
+
+    def invalidate_failed_per_item_artifact_quality(
+        self,
+        *,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Archive a committed native successor that was never injected.
+
+        Core has already atomically committed the successor and its three
+        artifacts, so its immutable history must not be abandoned or edited.
+        This narrow adapter lifecycle accepts only a completed failing quality
+        receipt before composite admission or evolved Candidate dispatch, then
+        clears the isolated one-item supervisor while retaining artifact IDs
+        and all model-call evidence for audit.
+        """
+
+        if reason != ARTIFACT_QUALITY_INVALIDATION_REASON:
+            raise ValueError("artifact-quality invalidation reason is not allowlisted")
+        state = self.status()
+        if not self.per_item_reset_enabled or len(self.task_ids) != 1:
+            raise ValueError("artifact-quality invalidation requires one reset-scoped task")
+        if TrainingStage(state["stage"]) is not TrainingStage.EVOLUTION_COMPLETED:
+            raise ValueError("artifact-quality invalidation requires completed evolution")
+        if state.get("current_attempt") != 0:
+            raise ValueError("artifact-quality invalidation requires the baseline evolution")
+        evolution = state.get("active_evolution_receipt")
+        jobs = evolution.get("jobs") if isinstance(evolution, dict) else None
+        if (
+            not isinstance(jobs, list)
+            or len(jobs) != len(ARTIFACT_TYPES)
+            or {item.get("artifact_type") for item in jobs if isinstance(item, dict)}
+            != set(ARTIFACT_TYPES)
+            or any(
+                not isinstance(item.get("job_id"), str)
+                or not isinstance(item.get("successor_registry_id"), str)
+                for item in jobs
+                if isinstance(item, dict)
+            )
+        ):
+            raise ValueError("artifact-quality invalidation lacks native artifact authority")
+        artifact_ids = sorted(str(item["successor_registry_id"]) for item in jobs)
+        effects = self.store.side_effects_for_experiment(self.experiment_id)
+        quality_effects = [item for item in effects if item.get("kind") == "artifact-quality"]
+        evolution_effects = [item for item in effects if item.get("kind") == "evolution"]
+        quality = (
+            quality_effects[0].get("receipt")
+            if len(quality_effects) == 1
+            and quality_effects[0].get("status") == "completed"
+            else None
+        )
+        report = quality.get("quality_report") if isinstance(quality, dict) else None
+        snapshots = (
+            quality.get("artifact_snapshot_authority")
+            if isinstance(quality, dict)
+            else None
+        )
+        if (
+            len(evolution_effects) != 1
+            or evolution_effects[0].get("status") != "completed"
+            or evolution_effects[0].get("receipt") != evolution
+            or not isinstance(quality, dict)
+            or quality.get("quality_gate_status")
+            != "PRESERVATION_ARTIFACT_QUALITY_FAILED"
+            or quality.get("provider_calls") != 0
+            or quality.get("artifact_text_persisted") is not False
+            or quality.get("raw_gt_persisted") is not False
+            or not isinstance(report, dict)
+            or report.get("schema_version")
+            != "openevo.researchclawbench.preservation_artifact_quality.v3"
+            or report.get("status") != "PRESERVATION_ARTIFACT_QUALITY_FAILED"
+            or quality.get("quality_report_sha256") != report.get("content_sha256")
+            or not isinstance(snapshots, dict)
+            or set(snapshots) != set(ARTIFACT_TYPES)
+            or sorted(
+                str(value.get("artifact_id"))
+                for value in snapshots.values()
+                if isinstance(value, dict)
+            )
+            != artifact_ids
+            or state.get("evolution_job_ids")
+            != [str(item["job_id"]) for item in jobs]
+            or state.get("registry_artifact_ids") != []
+            or state.get("active_artifact_ids") != []
+            or self.store.active_resources(self.experiment_id)
+            or any(item.get("status") != "completed" for item in effects)
+            or any(
+                item.get("kind")
+                in {
+                    "composite-admission",
+                    "evolved-workspace",
+                    "baseline-equivalence",
+                }
+                for item in effects
+            )
+        ):
+            raise ValueError("artifact-quality invalidation authority is incomplete")
+        task = self.task_ids[0]
+        receipt = {
+            "schema_version": (
+                "openevo.researchclawbench.artifact_quality_invalidation.v1"
+            ),
+            "task_id": task,
+            "reason": reason,
+            "archive_preserved": True,
+            "native_successor_committed": True,
+            "native_artifacts_archived_not_injected": True,
+            "artifact_quality_status": report["status"],
+            "artifact_quality_report_sha256": report["content_sha256"],
+            "evolution_job_ids": list(state["evolution_job_ids"]),
+            "archived_artifact_ids": artifact_ids,
+            "pending_side_effects": 0,
+            "failed_side_effects": 0,
+            "active_owned_resources": 0,
+            "candidate_model_calls_reexecuted": 0,
+            "reflector_model_calls_reexecuted": 0,
+            "judge_calls_reexecuted": 0,
+            "budget_usage": self.store.budget_usage(self.experiment_id),
+            "reset": {
+                "active_artifacts": [],
+                "active_candidate": None,
+                "active_workspace": None,
+                "active_gt_supervision": None,
+                "active_evaluation_feedback": None,
+                "active_baseline_capsule": None,
+                "active_successor_head": None,
+                "active_project_head": None,
+                "active_reflector": None,
+            },
+        }
+        return self._transition(
+            TrainingStage.EVOLUTION_COMPLETED,
+            TrainingStage.ITEM_INVALIDATED_RESET,
+            "per-item-artifact-quality-invalidated-reset",
+            updates={
+                "current_task_index": len(self.task_ids),
+                "current_composite_id": None,
+                "core_project_id": None,
+                "preseeded_workspace_authority": None,
+                "current_task_local_overlay_id": None,
+                "current_task_local_overlay_scope_id": None,
+                "active_artifact_ids": [],
+                "archived_artifact_ids": artifact_ids,
                 "active_candidate_intent": None,
                 "active_candidate_receipt": None,
                 "active_validation_receipt": None,

@@ -22,6 +22,7 @@ from .production_operation_ports import CoreControlV2Client, build_production_po
 from .production_training_operations import ProductionTrainingOperations
 from .training_state_store import TrainingStateStore, canonical_sha256
 from .training_supervisor import (
+    ARTIFACT_QUALITY_INVALIDATION_REASON,
     FAILED_EVOLUTION_INVALIDATION_REASON,
     CommunityTrainingSupervisor,
     SupervisorIdentity,
@@ -272,6 +273,15 @@ class DurableTrainingControl:
         return self.supervisor.invalidate_failed_per_item_evolution(
             reason=reason,
             terminal_evolution_receipt=terminal_receipt,
+        )
+
+    def invalidate_failed_per_item_artifact_quality(
+        self, *, reason: str
+    ) -> dict[str, Any]:
+        if reason != ARTIFACT_QUALITY_INVALIDATION_REASON:
+            raise ValueError("artifact-quality invalidation reason is not allowlisted")
+        return self.supervisor.invalidate_failed_per_item_artifact_quality(
+            reason=reason
         )
 
     def stop_owned(self) -> dict[str, Any]:

@@ -144,7 +144,15 @@ _ALLOWED: dict[TrainingStage, frozenset[TrainingStage]] = {
         }
     ),
     TrainingStage.EVOLUTION_COMPLETED: frozenset(
-        {TrainingStage.ARTIFACT_QUALITY_ADMITTED, TrainingStage.COMPOSITE_ADMITTED}
+        {
+            TrainingStage.ARTIFACT_QUALITY_ADMITTED,
+            TrainingStage.COMPOSITE_ADMITTED,
+            # A completed native successor whose adapter quality receipt is
+            # fail-closed was never admitted for Candidate injection.  A
+            # protocol revision may archive that isolated successor and reset
+            # the one-item supervisor without mutating Core history.
+            TrainingStage.ITEM_INVALIDATED_RESET,
+        }
     ),
     TrainingStage.ARTIFACT_QUALITY_ADMITTED: frozenset(
         {TrainingStage.COMPOSITE_ADMITTED}

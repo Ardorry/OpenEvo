@@ -26,6 +26,7 @@ _GENERIC_PATTERNS = (
 )
 _LOW_SIGNAL = frozenset({"analysis", "artifact", "candidate", "data", "figure", "image", "output", "report", "result", "summary", "validation", "visual", "evidence", "the", "with"})
 _BULLET = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)")
+_ACHIEVEMENT_REFERENCE = re.compile(r"\bachievement\s+[a-z0-9]+\b")
 
 
 class TaskSpecificArtifactQualityError(RuntimeError):
@@ -192,6 +193,55 @@ def _matches_skill(unit: str, achievement: Mapping[str, Any]) -> bool:
     )
 
 
+def _matches_structured_skill(
+    units: list[str], achievement: Mapping[str, Any]
+) -> bool:
+    """Match one achievement across its explicit Markdown skill blocks.
+
+    A valid skill normally separates the reconstruction method, evidence
+    roles, and verification assertions into bullets under the same explicit
+    achievement heading.  Requiring all of them in one bullet rejects that
+    native structure.  Conversely, joining the whole skill would let details
+    from another achievement satisfy this one.  Collect only blocks opened by
+    the exact achievement reference and stop at phase or other-achievement
+    boundaries, then apply the same structured requirements to that bounded
+    text.
+    """
+
+    if any(_matches_skill(unit, achievement) for unit in units):
+        return True
+    identifier = _normalize(str(achievement["achievement_id"]))
+    selected: list[str] = []
+    collecting = False
+    for unit in units:
+        normalized = _normalize(unit)
+        if normalized.startswith("phase "):
+            collecting = False
+            continue
+        references = set(_ACHIEVEMENT_REFERENCE.findall(normalized))
+        if references:
+            collecting = references == {identifier}
+            if collecting:
+                selected.append(unit)
+            continue
+        if collecting:
+            selected.append(unit)
+    if not selected:
+        return False
+    block = " ".join(selected)
+    normalized = _normalize(block)
+    return (
+        _matches_achievement(block, achievement)
+        and _has_method_signature(block, achievement)
+        and _has_output_role(block, achievement)
+        and "reconstruct" in normalized
+        and any(
+            marker in normalized
+            for marker in ("verify", "validation", "check", "confirm")
+        )
+    )
+
+
 def _feedback_mapping(unit: str, weakness: Mapping[str, Any], achievements: list[dict[str, Any]]) -> bool:
     normalized = _normalize(unit)
     weakness_id = _normalize(str(weakness["weakness_id"]))
@@ -242,7 +292,12 @@ def assess_task_specific_artifact_quality(*, capsule: Mapping[str, Any], artifac
     weaknesses = _weaknesses(capsule)
     by_type = {artifact_type: _units(artifact_texts[artifact_type]) for artifact_type in _ARTIFACT_TYPES}
     memory_ids, memory_coverage = _coverage(by_type["text_memory"], achievements, _matches_memory)
-    skill_ids, skill_coverage = _coverage(by_type["skill_bundle"], achievements, _matches_skill)
+    skill_ids = [
+        achievement["achievement_id"]
+        for achievement in achievements
+        if _matches_structured_skill(by_type["skill_bundle"], achievement)
+    ]
+    skill_coverage = round(len(skill_ids) / len(achievements), 6)
     union_ids = sorted(set(memory_ids) | set(skill_ids))
     union_coverage = round(len(union_ids) / len(achievements), 6)
     skill_feedback_ids = [
