@@ -188,6 +188,11 @@ _MAX_DATASET_RECORDS_BYTES = 128 * 1024 * 1024
 _MAX_LEAKAGE_SCAN_RECORDS = 64
 _MAX_LEAKAGE_SCAN_CHARS = 2 * 1024 * 1024
 _MAX_TRACE_LITERAL_COUNT = 512
+_TASK_LOCAL_PRESERVATION_SCHEMA = "openevo.task_local_preservation.v1"
+_TASK_LOCAL_PRESERVATION_SCOPE = "next_session_only"
+_TASK_LOCAL_ALLOWED_PATH_KEYS = frozenset(
+    {"data_file", "data_files", "file_name", "file_names", "source_file", "source_files"}
+)
 
 # Closed keys whose values carry task-local answer/source authority.  Generic
 # workflow feedback such as ``required_sections_missing`` is intentionally not
@@ -310,6 +315,29 @@ def run_method(job: WorkerClaimedJob, *, artifact_root: Path) -> list[ArtifactRe
     return method(job, artifact_root)
 
 
+def _task_local_preservation_enabled(job: WorkerClaimedJob) -> bool:
+    """Return the verified next-session-only reflector scope.
+
+    The scope is intentionally unavailable to an ordinary reflector job.  It
+    must be coupled to the Core-owned post-evaluator gate, so task-local
+    reconstruction anchors cannot be used to bypass the normal transferable
+    artifact policy.
+    """
+
+    value = job.config.get("task_local_preservation")
+    if value is None:
+        return False
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"schema_version", "scope"}
+        or value.get("schema_version") != _TASK_LOCAL_PRESERVATION_SCHEMA
+        or value.get("scope") != _TASK_LOCAL_PRESERVATION_SCOPE
+        or job.config.get("training_feedback_required") is not True
+    ):
+        raise ValueError("task_local_preservation config is invalid")
+    return True
+
+
 def text_memory(job: WorkerClaimedJob, artifact_root: Path) -> list[ArtifactRegisterRequest]:
     dataset = _first_input_artifact(job, ArtifactType.DATASET)
     if dataset is None:
@@ -373,14 +401,22 @@ def text_memory_reflector(
         manifests=[manifest],
     )
     llm_config = _reflector_llm_config(job)
+    task_local_preservation = _task_local_preservation_enabled(job)
     memory_markdown = _generate_reflector_markdown(
         reflection_prompt,
         llm_config,
         system_message=(
-            "You are a reflector for text memory. Read prior task trajectories and "
+            "You are a reflector for one task-local successor memory. Preserve supplied "
+            "candidate/public reconstruction anchors before additive improvements. Return "
+            "only memory.md content."
+            if task_local_preservation
+            else "You are a reflector for text memory. Read prior task trajectories and "
             "produce concise reusable Markdown memory. Return only memory.md content."
         ),
-        codex_prompt=_codex_cli_text_memory_reflector_prompt(reflection_prompt),
+        codex_prompt=_codex_cli_text_memory_reflector_prompt(
+            reflection_prompt,
+            task_local_preservation=task_local_preservation,
+        ),
         error_context="text_memory_reflector",
         temp_prefix="openevo-text-memory-reflector-",
     )
@@ -504,15 +540,23 @@ def text_memory_expel_reflector(
         manifests=manifests,
     )
     llm_config = _reflector_llm_config(job)
+    task_local_preservation = _task_local_preservation_enabled(job)
     memory_markdown = _generate_reflector_markdown(
         reflection_prompt,
         llm_config,
         system_message=(
-            "You are an ExpeL/Reflexion-style reflector for text memory. Read prior "
+            "You are an ExpeL/Reflexion-style reflector for one task-local successor. "
+            "Reconstruct and preserve supplied candidate/public anchors before additive "
+            "improvements. Return only memory.md content with the required sections."
+            if task_local_preservation
+            else "You are an ExpeL/Reflexion-style reflector for text memory. Read prior "
             "task trajectories and produce structured reusable Markdown memory. "
             "Return only memory.md content with the required sections."
         ),
-        codex_prompt=_codex_cli_text_memory_reflector_prompt(reflection_prompt),
+        codex_prompt=_codex_cli_text_memory_reflector_prompt(
+            reflection_prompt,
+            task_local_preservation=task_local_preservation,
+        ),
         error_context="text_memory_expel_reflector",
         temp_prefix="openevo-text-memory-expel-reflector-",
     )
@@ -658,14 +702,22 @@ def skill_bundle_reflector(
         manifests=[manifest],
     )
     llm_config = _reflector_llm_config(job)
+    task_local_preservation = _task_local_preservation_enabled(job)
     skill_markdown = _generate_reflector_markdown(
         reflection_prompt,
         llm_config,
         system_message=(
-            "You are a reflector for a Codex skill bundle. Read prior task trajectories "
+            "You are a reflector for one task-local successor skill. Materialize every "
+            "supplied reconstruction anchor and additive improvement in SKILL.md. Return "
+            "only SKILL.md content."
+            if task_local_preservation
+            else "You are a reflector for a Codex skill bundle. Read prior task trajectories "
             "and produce the SKILL.md entrypoint. Return only SKILL.md content."
         ),
-        codex_prompt=_codex_cli_skill_bundle_reflector_prompt(reflection_prompt),
+        codex_prompt=_codex_cli_skill_bundle_reflector_prompt(
+            reflection_prompt,
+            task_local_preservation=task_local_preservation,
+        ),
         error_context="skill_bundle_reflector",
         temp_prefix="openevo-skill-bundle-reflector-",
     )
@@ -3275,6 +3327,7 @@ def _render_text_memory_reflection_prompt(
     reflected_records: list[dict[str, str]],
     prior_memory_texts: list[str],
 ) -> str:
+    task_local_preservation = _task_local_preservation_enabled(job)
     success_records = [record for record in reflected_records if record["kind"] == "success"]
     failure_records = [record for record in reflected_records if record["kind"] == "failure"]
     other_records = [record for record in reflected_records if record["kind"] == "observation"]
@@ -3292,8 +3345,14 @@ def _render_text_memory_reflection_prompt(
     lines = [
         "# Text Memory Reflection Context",
         "",
-        "Write reusable task memory as Markdown. The memory should help future rollouts "
-        "by capturing reusable task memory, recurring failure modes, and validation habits.",
+        (
+            "Write task-local Markdown memory for exactly the next fresh successor "
+            "session. Preserve supplied candidate/public reconstruction anchors; do not "
+            "turn them into generic cross-task SOP."
+            if task_local_preservation
+            else "Write reusable task memory as Markdown. The memory should help future rollouts "
+            "by capturing reusable task memory, recurring failure modes, and validation habits."
+        ),
         "",
         f"- job_id: {job.job_id}",
         *dataset_id_lines,
@@ -3310,19 +3369,38 @@ def _render_text_memory_reflection_prompt(
     _append_reflection_section(lines, "Failures To Remember", failure_records, "failure_signal")
     _append_reflection_section(lines, "Additional Observations", other_records, "observed")
     _append_shared_evolution_feedback_section(lines, feedback_records)
-    lines.extend(
-        [
-            "## Output Contract",
-            "",
-            "- Return only the Markdown for memory.md.",
-            "- Keep the memory concise and reusable across related task instances.",
-            "- Convert concrete trajectory evidence into general checks, validation habits, "
-            "and failure reminders.",
-            "- Do not copy held-out answers, article titles, exact source rows, exact expected "
-            "outputs, or verifier-private records.",
-            "",
-        ]
-    )
+    if task_local_preservation:
+        lines.extend(
+            [
+                "## Output Contract",
+                "",
+                "- Return only the Markdown for memory.md.",
+                "- For every supplied required achievement, emit one `PRESERVE <achievement_id>` "
+                "bullet that keeps its method/capability, candidate/public evidence role, and "
+                "do-not-drop instruction in the same bullet.",
+                "- Preserve candidate-derived method signatures and public/candidate paths when "
+                "they are supplied as reconstruction anchors; never invent a path or conclusion.",
+                "- Keep evaluator feedback additive: map every admitted weakness to an extension "
+                "after reconstruction, never a replacement research plan.",
+                "- Do not copy held-out answers, private source rows, exact expected outputs, "
+                "Judge reasoning, target-image information, or verifier-private records.",
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "## Output Contract",
+                "",
+                "- Return only the Markdown for memory.md.",
+                "- Keep the memory concise and reusable across related task instances.",
+                "- Convert concrete trajectory evidence into general checks, validation habits, "
+                "and failure reminders.",
+                "- Do not copy held-out answers, article titles, exact source rows, exact expected "
+                "outputs, or verifier-private records.",
+                "",
+            ]
+        )
     return "\n".join(lines)
 
 
@@ -3335,6 +3413,7 @@ def _render_text_memory_expel_reflection_prompt(
     reflected_records: list[dict[str, str]],
     prior_memory_texts: list[str],
 ) -> str:
+    task_local_preservation = _task_local_preservation_enabled(job)
     base_prompt = _render_text_memory_reflection_prompt(
         job=job,
         dataset=dataset,
@@ -3352,10 +3431,16 @@ def _render_text_memory_expel_reflection_prompt(
             "",
             "## ExpeL / Reflexion Memory Synthesis",
             "",
-            "Use an ExpeL-style process: compare successful and failed trajectories, "
-            "extract lessons that transfer across future tasks, and retire advice that "
-            "is contradicted or superseded by newer evidence. Treat prior text memory as "
-            "candidate memory, not as ground truth.",
+            (
+                "Use an ExpeL-style process within this one task: reconstruct every "
+                "successful candidate/public anchor first, then add only the admitted "
+                "extensions. Treat prior text memory as candidate memory, not as ground truth."
+                if task_local_preservation
+                else "Use an ExpeL-style process: compare successful and failed trajectories, "
+                "extract lessons that transfer across future tasks, and retire advice that "
+                "is contradicted or superseded by newer evidence. Treat prior text memory as "
+                "candidate memory, not as ground truth."
+            ),
             "",
             "## Output Contract",
             "",
@@ -3369,6 +3454,16 @@ def _render_text_memory_expel_reflection_prompt(
             "- `## Retired Or Superseded` names prior memory or habits that should no "
             "longer be followed.",
             "- Ground every item in the supplied trajectories or existing memory.",
+            *(
+                [
+                    "- Each `## Do` preservation bullet must retain one required achievement's "
+                    "ID, method, evidence role, and do-not-drop instruction as one semantic unit.",
+                    "- Keep each admitted weakness additive; it cannot discard or replace a "
+                    "required baseline path.",
+                ]
+                if task_local_preservation
+                else []
+            ),
             "- Do not copy held-out answers, article titles, exact source rows, exact "
             "expected outputs, or verifier-private records.",
             "",
@@ -3385,6 +3480,7 @@ def _render_skill_bundle_reflection_prompt(
     reflected_records: list[dict[str, str]],
     base_text: str,
 ) -> str:
+    task_local_preservation = _task_local_preservation_enabled(job)
     success_records = [record for record in reflected_records if record["kind"] == "success"]
     failure_records = [record for record in reflected_records if record["kind"] == "failure"]
     other_records = [record for record in reflected_records if record["kind"] == "observation"]
@@ -3417,6 +3513,21 @@ def _render_skill_bundle_reflection_prompt(
             "- Include YAML frontmatter with name and description when useful.",
             "- Make the skill trigger-oriented: state when to use it, what to inspect, "
             "what helper checks to run, and what final validation proves completion.",
+            *(
+                [
+                    "- Use exactly these phases: `Phase 1 — Reconstruct baseline capabilities`, "
+                    "`Phase 2 — Verify reconstruction`, `Phase 3 — Add evaluator-driven "
+                    "improvements`, and `Phase 4 — Integrate without deleting preserved work`.",
+                    "- In Phase 1 and Phase 2, name every required achievement ID with its "
+                    "candidate/public method, evidence role, and concrete reconstruction and "
+                    "verification steps.",
+                    "- In Phase 3, map every admitted weakness ID to one additive action tied "
+                    "to the preserved achievement; never replace or discard that path.",
+                    "- This skill is next-session task-local, not generic cross-task advice.",
+                ]
+                if task_local_preservation
+                else []
+            ),
             "- Tools are part of the skill bundle. If a future version needs helper scripts, "
             "describe the helper behavior in SKILL.md rather than creating a separate "
             "tool artifact type.",
@@ -3437,6 +3548,7 @@ def _render_agent_system_reflection_prompt(
     reflected_records: list[dict[str, str]],
     base_text: str,
 ) -> str:
+    task_local_preservation = _task_local_preservation_enabled(job)
     success_records = [record for record in reflected_records if record["kind"] == "success"]
     failure_records = [record for record in reflected_records if record["kind"] == "failure"]
     other_records = [record for record in reflected_records if record["kind"] == "observation"]
@@ -3479,11 +3591,35 @@ def _render_agent_system_reflection_prompt(
             "- Start from repository-local instructions and task-specific constraints.",
             "- Turn repeated failure signals into explicit checks before editing.",
             "- Prefer focused verification tied to the changed behavior before broad cleanup.",
+            *(
+                [
+                    "- This artifact is for one fresh next session: RECONSTRUCT every required "
+                    "baseline achievement, PRESERVE it, EXTEND only additively, then VERIFY "
+                    "baseline equivalence before submission.",
+                    "- Do not replace a required baseline path with a new generic plan. If a "
+                    "candidate conclusion changes after public-data reconstruction, retain the "
+                    "method and document the verification reason.",
+                ]
+                if task_local_preservation
+                else []
+            ),
             "",
             "## Agent-System Rule Quality Gate",
             "",
-            "- Do not copy exact held-out literals, source filenames, source sheet names, row numbers, article titles, answer counts, sequences, or reference records.",
-            "- Each methodology rule should be general across task instances but concrete enough to include a trigger, action, and validation check.",
+            (
+                "- Do not copy exact held-out literals, private source rows, article titles, "
+                "answer counts, sequences, target-image information, Judge reasoning, or "
+                "reference records. Candidate/public reconstruction paths already supplied "
+                "by the task-local attachment may be retained."
+                if task_local_preservation
+                else "- Do not copy exact held-out literals, source filenames, source sheet names, row numbers, article titles, answer counts, sequences, or reference records."
+            ),
+            (
+                "- Each preservation rule must be concrete enough to identify the required "
+                "achievement, reconstruction action, and baseline-equivalence check."
+                if task_local_preservation
+                else "- Each methodology rule should be general across task instances but concrete enough to include a trigger, action, and validation check."
+            ),
             "- Replace slogans such as broad coverage reminders with executable checks, for example recursive file-level source inventory, general structured evidence formats such as tables/spreadsheets/CSV/TSV/XLS/XLSX/supplementary files, and per-source final validation when the task involves package-like inputs.",
             "",
         ]
@@ -3522,6 +3658,7 @@ def _render_agent_system_history_reflection_prompt(
     rounds: list[dict[str, Any]],
     base_text: str,
 ) -> str:
+    task_local_preservation = _task_local_preservation_enabled(job)
     lines: list[str] = []
     if base_text.strip():
         lines.extend([base_text.strip(), ""])
@@ -3609,13 +3746,40 @@ def _render_agent_system_history_reflection_prompt(
             "- Preserve stable improvements from better rounds before adding new rules.",
             "- Compare each proposed rule against earlier rounds; do not keep a rule that explains a later regression unless it also has stronger counter-evidence.",
             "- Treat negative metric deltas as regression evidence and identify which methodology changed or disappeared.",
-            "- Use shared evaluator feedback only as sanitized methodology guidance; do not copy exact held-out literals, article titles, row identifiers, filenames, or tables.",
+            (
+                "- Use shared evaluator feedback only as sanitized additive guidance. "
+                "Preserve supplied candidate/public reconstruction anchors but do not copy "
+                "held-out literals, private source rows, Judge reasoning, target images, or answers."
+                if task_local_preservation
+                else "- Use shared evaluator feedback only as sanitized methodology guidance; do not copy exact held-out literals, article titles, row identifiers, filenames, or tables."
+            ),
             "- Prefer rules that improve component boundaries, canonical article/package identifiers, other task-provided source identifiers, deduplication, and final-output discipline across rounds.",
+            *(
+                [
+                    "- For this next-session task-local artifact, require RECONSTRUCT, PRESERVE, "
+                    "EXTEND, and VERIFY in that order; baseline equivalence is mandatory before "
+                    "submission and new analysis cannot replace required baseline capability.",
+                ]
+                if task_local_preservation
+                else []
+            ),
             "",
             "## Agent-System Rule Quality Gate",
             "",
-            "- Do not copy exact held-out literals, source filenames, source sheet names, row numbers, article titles, answer counts, sequences, or reference records.",
-            "- Each methodology rule should be general across task instances but concrete enough to include a trigger, action, and validation check.",
+            (
+                "- Do not copy exact held-out literals, private source rows, article titles, "
+                "answer counts, sequences, target-image information, Judge reasoning, or "
+                "reference records. Candidate/public reconstruction paths supplied by the "
+                "task-local attachment may be retained."
+                if task_local_preservation
+                else "- Do not copy exact held-out literals, source filenames, source sheet names, row numbers, article titles, answer counts, sequences, or reference records."
+            ),
+            (
+                "- Each task-local preservation rule must identify a required achievement, "
+                "a reconstruction or additive action, and a baseline-equivalence check."
+                if task_local_preservation
+                else "- Each methodology rule should be general across task instances but concrete enough to include a trigger, action, and validation check."
+            ),
             "- Replace slogans such as broad coverage reminders with executable checks, for example recursive file-level source inventory, general structured evidence formats such as tables/spreadsheets/CSV/TSV/XLS/XLSX/supplementary files, and per-source final validation when the task involves package-like inputs.",
             "",
         ]
@@ -3876,6 +4040,7 @@ def _render_agent_system_gepa_candidate_prompt(
     index: int,
     total: int,
 ) -> str:
+    task_local_preservation = _task_local_preservation_enabled(job)
     history_prompt = _render_agent_system_history_reflection_prompt(
         job=job,
         rounds=rounds,
@@ -3893,11 +4058,25 @@ def _render_agent_system_gepa_candidate_prompt(
         f"- Mutation strategy: {strategy}\n"
         "- Reflection rule: each added instruction must name a trigger, an action, "
         "and a validation check.\n"
-        "- Leakage rule: do not copy exact held-out literals, filenames, source row "
-        "numbers, task answers, or verifier-specific hidden records.\n"
-        "- Selection rule: prefer candidates that directly address observed verifier "
+        + (
+            "- Leakage rule: do not copy exact held-out literals, private source rows, "
+            "task answers, Judge reasoning, target-image information, or verifier-specific "
+            "hidden records. Candidate/public reconstruction paths supplied by the "
+            "task-local attachment may be retained.\n"
+            if task_local_preservation
+            else "- Leakage rule: do not copy exact held-out literals, filenames, source row "
+            "numbers, task answers, or verifier-specific hidden records.\n"
+        )
+        + "- Selection rule: prefer candidates that directly address observed verifier "
         "failures while preserving successful prior behavior.\n\n"
-        "Return only the candidate Markdown agent-system instruction file."
+        + (
+            "- Preservation rule: output the short R3 invariant that RECONSTRUCT comes "
+            "before PRESERVE, then EXTEND only additively and VERIFY baseline equivalence "
+            "before submission.\n\n"
+            if task_local_preservation
+            else ""
+        )
+        + "Return only the candidate Markdown agent-system instruction file."
     )
 
 
@@ -4197,16 +4376,28 @@ def _promotion_support_values(value: object) -> list[str]:
     return [str(value)]
 
 
-def _generate_agent_system_reflection(prompt: str, llm_config: dict[str, Any]) -> str:
+def _generate_agent_system_reflection(
+    prompt: str,
+    llm_config: dict[str, Any],
+    *,
+    task_local_preservation: bool = False,
+) -> str:
     return _generate_reflector_markdown(
         prompt,
         llm_config,
         system_message=(
-            "You are a reflector for an agent system. Read prior task trajectories, "
+            "You are a reflector for one task-local successor agent system. Require "
+            "RECONSTRUCT, PRESERVE, additive EXTEND, and baseline-equivalence VERIFY. "
+            "Return only the Markdown file content."
+            if task_local_preservation
+            else "You are a reflector for an agent system. Read prior task trajectories, "
             "preserve useful existing instructions, and produce a concise Markdown "
             "agent-system instruction file. Return only the Markdown file content."
         ),
-        codex_prompt=_codex_cli_reflector_prompt(prompt),
+        codex_prompt=_codex_cli_reflector_prompt(
+            prompt,
+            task_local_preservation=task_local_preservation,
+        ),
         error_context="agent_system_reflector",
         temp_prefix="openevo-agent-system-reflector-",
     )
@@ -4247,6 +4438,7 @@ def _generate_audited_agent_system_reflection(
     manifests: list[dict[str, Any]],
 ) -> tuple[str, dict[str, Any]]:
     audit_config = _agent_system_audit_config(job)
+    task_local_preservation = _task_local_preservation_enabled(job)
     raw_leakage_basis = audit_config.get("leakage_basis")
     leakage_basis = raw_leakage_basis if isinstance(raw_leakage_basis, dict) else {}
     forbidden_literals = _agent_system_forbidden_literals(job, manifests)
@@ -4261,7 +4453,11 @@ def _generate_audited_agent_system_reflection(
         "forbidden_literal_count": len(forbidden_literals),
     }
     if audit_config.get("enabled") is False:
-        return _generate_agent_system_reflection(prompt, llm_config), {
+        return _generate_agent_system_reflection(
+            prompt,
+            llm_config,
+            task_local_preservation=task_local_preservation,
+        ), {
             "enabled": False,
             "repair_count": 0,
             "finding_count": 0,
@@ -4269,7 +4465,11 @@ def _generate_audited_agent_system_reflection(
         }
 
     max_repairs = _int_config(audit_config.get("max_repair_attempts"), 2)
-    content = _generate_agent_system_reflection(prompt, llm_config)
+    content = _generate_agent_system_reflection(
+        prompt,
+        llm_config,
+        task_local_preservation=task_local_preservation,
+    )
     findings = _audit_agent_system_markdown(
         content,
         forbidden_literals=forbidden_literals,
@@ -4281,8 +4481,13 @@ def _generate_audited_agent_system_reflection(
             candidate_markdown=content,
             findings=findings,
             forbidden_literals=forbidden_literals,
+            task_local_preservation=task_local_preservation,
         )
-        content = _generate_agent_system_reflection(repair_prompt, llm_config)
+        content = _generate_agent_system_reflection(
+            repair_prompt,
+            llm_config,
+            task_local_preservation=task_local_preservation,
+        )
         repair_count += 1
         findings = _audit_agent_system_markdown(
             content,
@@ -4412,32 +4617,68 @@ def _generate_agent_system_reflection_with_codex_cli(
     return content.strip()
 
 
-def _codex_cli_reflector_prompt(prompt: str) -> str:
+def _codex_cli_reflector_prompt(
+    prompt: str,
+    *,
+    task_local_preservation: bool = False,
+) -> str:
+    scope = (
+        "This artifact is task-local and will be installed only for one fresh next "
+        "session. Preserve the concrete candidate/public reconstruction anchors "
+        "provided below; do not replace them with cross-task generic advice.\n\n"
+        if task_local_preservation
+        else (
+            "Every new methodology rule should be general enough to transfer across "
+            "tasks and concrete enough to describe a trigger, an action, and a "
+            "validation check.\n\n"
+        )
+    )
     return (
         "Return only the Markdown agent-system instruction file. "
         "Do not include explanations, code fences, or surrounding commentary.\n\n"
         "You are a reflector for an agent system. Read prior task trajectories, "
         "preserve useful existing instructions, and produce a concise Markdown "
-        "agent-system instruction file. Every new methodology rule should be general "
-        "enough to transfer across tasks and concrete enough to describe a trigger, "
-        "an action, and a validation check.\n\n"
+        "agent-system instruction file. "
+        f"{scope}"
         f"{prompt}"
     )
 
 
-def _codex_cli_text_memory_reflector_prompt(prompt: str) -> str:
+def _codex_cli_text_memory_reflector_prompt(
+    prompt: str,
+    *,
+    task_local_preservation: bool = False,
+) -> str:
+    scope = (
+        "Write next-session task-local preservation memory. Keep every required "
+        "candidate/public reconstruction anchor concrete and distinct; do not replace "
+        "it with reusable cross-task SOP.\n\n"
+        if task_local_preservation
+        else "Focus on recurring failure modes, successful task habits, and validation checks that transfer across tasks.\n\n"
+    )
     return (
         "Return only the Markdown memory.md file. "
         "Do not include explanations, code fences, or surrounding commentary.\n\n"
         "You are a reflector for text memory. Read prior task trajectories and produce "
-        "concise reusable memory for future sessions. Focus on recurring failure modes, "
-        "successful task habits, and validation checks that transfer across tasks. "
+        "concise memory for future sessions. "
+        f"{scope}"
         "Do not copy exact held-out literals or task answers.\n\n"
         f"{prompt}"
     )
 
 
-def _codex_cli_skill_bundle_reflector_prompt(prompt: str) -> str:
+def _codex_cli_skill_bundle_reflector_prompt(
+    prompt: str,
+    *,
+    task_local_preservation: bool = False,
+) -> str:
+    scope = (
+        "This is a task-local next-session skill. Materialize every supplied "
+        "reconstruction anchor and each additive feedback action, rather than a generic "
+        "transferable workflow.\n\n"
+        if task_local_preservation
+        else ""
+    )
     return (
         "Return only SKILL.md content for a Codex skill bundle. "
         "Do not include explanations, code fences, or surrounding commentary.\n\n"
@@ -4445,6 +4686,7 @@ def _codex_cli_skill_bundle_reflector_prompt(prompt: str) -> str:
         "and produce a concise skill entrypoint with a clear trigger, workflow, and "
         "verification guidance. Do not create a separate tool artifact type and do "
         "not copy exact held-out literals or task answers.\n\n"
+        f"{scope}"
         f"{prompt}"
     )
 
@@ -4665,8 +4907,13 @@ def _agent_system_forbidden_literals(
     manifests: list[dict[str, Any]],
 ) -> list[tuple[str, str]]:
     literals: list[tuple[str, str]] = []
+    allow_task_local_paths = _task_local_preservation_enabled(job)
     for source in (job.config, _agent_system_audit_config(job), *manifests):
-        _collect_forbidden_literals(source, literals)
+        _collect_forbidden_literals(
+            source,
+            literals,
+            allow_task_local_paths=allow_task_local_paths,
+        )
     return _unique_forbidden_literals(literals)
 
 
@@ -4749,6 +4996,7 @@ def _collect_forbidden_literals(
     *,
     kind: str = "literal",
     protected_context: bool = False,
+    allow_task_local_paths: bool = False,
 ) -> None:
     if isinstance(value, str):
         text = value.strip()
@@ -4766,6 +5014,7 @@ def _collect_forbidden_literals(
                 literals,
                 kind=kind,
                 protected_context=protected_context,
+                allow_task_local_paths=allow_task_local_paths,
             )
         return
     if not isinstance(value, dict):
@@ -4779,17 +5028,24 @@ def _collect_forbidden_literals(
                 literals,
                 kind=kind,
                 protected_context=True,
+                allow_task_local_paths=allow_task_local_paths,
             )
     for key, nested in value.items():
         if key in {"forbidden_literals", "leakage_basis"}:
             continue
         normalized_key = str(key).strip().lower().replace("-", "_")
+        if (
+            normalized_key in _TASK_LOCAL_ALLOWED_PATH_KEYS
+            and allow_task_local_paths
+        ):
+            continue
         if normalized_key in _FORBIDDEN_LITERAL_KEYS:
             _collect_forbidden_literals(
                 nested,
                 literals,
                 kind=normalized_key,
                 protected_context=True,
+                allow_task_local_paths=allow_task_local_paths,
             )
         elif protected_context:
             _collect_forbidden_literals(
@@ -4797,6 +5053,7 @@ def _collect_forbidden_literals(
                 literals,
                 kind=kind,
                 protected_context=True,
+                allow_task_local_paths=allow_task_local_paths,
             )
 
 
@@ -5123,6 +5380,7 @@ def _render_agent_system_audit_repair_prompt(
     candidate_markdown: str,
     findings: list[dict[str, str]],
     forbidden_literals: list[tuple[str, str]],
+    task_local_preservation: bool = False,
 ) -> str:
     redacted_candidate = _redact_forbidden_literals(candidate_markdown, forbidden_literals)
     lines = [
@@ -5132,13 +5390,34 @@ def _render_agent_system_audit_repair_prompt(
     ]
     for finding in findings:
         lines.append(f"- {finding['message']}")
+    if task_local_preservation:
+        rules = [
+            "- Retain supplied candidate/public reconstruction paths only when they are "
+            "needed to reconstruct a required achievement. Do not name held-out answers, "
+            "private source rows, target-image information, Judge reasoning, answer counts, "
+            "sequences, or reference records.",
+            "- Replace generic slogans with concise preservation rules that name the "
+            "achievement, reconstruction action, and baseline-equivalence verification.",
+            "- Keep new evaluator-driven work additive: reconstruct and preserve required "
+            "baseline capability before extending it.",
+        ]
+    else:
+        rules = [
+            "- Keep methodology general across tasks; do not name protected titles, exact "
+            "source files, sheet names, row numbers, answer counts, sequences, or reference "
+            "records.",
+            "- Replace generic slogans with rules that include a trigger, a concrete action, "
+            "and a validation check.",
+            "- For source-coverage rules, describe recursive file-level inventory under the "
+            "allowed input root, general structured evidence formats such as "
+            "tables/spreadsheets/CSV/TSV/XLS/XLSX/supplementary files, and validation "
+            "without naming task-specific files.",
+        ]
     lines.extend(
         [
             "",
             "Rules for the revision:",
-            "- Keep methodology general across tasks; do not name protected titles, exact source files, sheet names, row numbers, answer counts, sequences, or reference records.",
-            "- Replace generic slogans with rules that include a trigger, a concrete action, and a validation check.",
-            "- For source-coverage rules, describe recursive file-level inventory under the allowed input root, general structured evidence formats such as tables/spreadsheets/CSV/TSV/XLS/XLSX/supplementary files, and validation without naming task-specific files.",
+            *rules,
             "",
             "Original reflection context:",
             original_prompt,

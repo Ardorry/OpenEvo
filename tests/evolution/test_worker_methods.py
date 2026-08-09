@@ -1201,6 +1201,148 @@ def test_reflector_methods_are_registered():
     assert METHOD_REGISTRY["skill_bundle_reflector"]
 
 
+def _task_local_preservation_config() -> dict[str, Any]:
+    return {
+        "training_feedback_required": True,
+        "task_local_preservation": {
+            "schema_version": "openevo.task_local_preservation.v1",
+            "scope": "next_session_only",
+        },
+        "reflector_llm": {
+            "model": "reflector-model",
+            "base_url": "http://reflector.test/v1",
+            "api_key": "test-key",
+        },
+        "agent_system_audit": {
+            "forbidden_literals": {
+                "source_files": ["data/public.csv", "code/analyze.py"],
+                "answer_values": ["hidden answer value"],
+            }
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("method", "response", "content_path"),
+    [
+        (
+            "text_memory_reflector",
+            "# Preservation Memory\n\n"
+            "- PRESERVE achievement_01: use data/public.csv with code/analyze.py to "
+            "reconstruct the numeric table, figure, and report evidence; do not drop "
+            "this baseline capability.\n",
+            "memory.md",
+        ),
+        (
+            "skill_bundle_reflector",
+            "# Preservation Skill\n\n"
+            "## Phase 1 — Reconstruct baseline capabilities\n"
+            "- Reconstruct achievement_01 with data/public.csv and code/analyze.py, "
+            "then verify numeric, figure, and report evidence.\n",
+            "SKILL.md",
+        ),
+    ],
+)
+def test_task_local_preservation_scope_keeps_public_reconstruction_paths_in_final_artifact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+    response: str,
+    content_path: str,
+) -> None:
+    captured = _patch_reflector_llm(monkeypatch, response)
+    config = _task_local_preservation_config()
+    if method == "skill_bundle_reflector":
+        config["name"] = "preservation-skill"
+
+    [artifact] = run_method(
+        _job(
+            method,
+            tmp_path,
+            input_artifacts=[_reflector_dataset_artifact(tmp_path)],
+            config=config,
+        ),
+        artifact_root=tmp_path / "artifacts",
+    )
+
+    path = Path(artifact.uri.removeprefix("file://"))
+    if content_path == "SKILL.md":
+        path /= content_path
+    content = path.read_text(encoding="utf-8")
+    assert "data/public.csv" in content
+    assert "code/analyze.py" in content
+    assert "[REDACTED_SOURCE_FILES_" not in content
+    prompt = captured["json"]["messages"][1]["content"]
+    assert "task-local" in prompt.casefold()
+    assert "cross-task" in prompt.casefold()
+    assert "task-local successor" in captured["json"]["messages"][0]["content"].casefold()
+
+
+def test_task_local_preservation_scope_keeps_paths_but_not_answers_in_agent_system(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _patch_reflector_llm(
+        monkeypatch,
+        "# Preservation Gate\n\n"
+        "- Before finalizing, RECONSTRUCT achievement_01 from data/public.csv with "
+        "code/analyze.py, PRESERVE its evidence, EXTEND only additively, and VERIFY "
+        "baseline equivalence.\n",
+    )
+    dataset = _history_round_dataset_artifact(
+        tmp_path,
+        round_number=1,
+        precision=0.0,
+        recall=0.0,
+        f1=0.0,
+        record={
+            "event_id": "evt_task_local_preservation",
+            "task_id": "internal_task",
+            "session_id": "session_task_local",
+            "status": "COMPLETED",
+            "reward": 0.0,
+            "traces": [
+                {
+                    "prompt_messages": [{"role": "user", "content": "Run public analysis."}],
+                    "response_messages": [{"role": "assistant", "content": "Completed."}],
+                }
+            ],
+        },
+    )
+    config = _task_local_preservation_config()
+    config.update({"candidate_count": 1, "mutation_strategies": ["preservation"]})
+
+    artifacts = run_method(
+        _job(
+            "agent_system_gepa_reflector",
+            tmp_path,
+            input_artifacts=[dataset],
+            config=config,
+        ),
+        artifact_root=tmp_path / "artifacts",
+    )
+
+    [artifact] = [item for item in artifacts if item.type == ArtifactType.AGENT_SYSTEM]
+    content = Path(artifact.uri.removeprefix("file://")).read_text(encoding="utf-8")
+    assert "data/public.csv" in content
+    assert "code/analyze.py" in content
+    assert "hidden answer value" not in content
+    assert "[REDACTED_SOURCE_FILES_" not in content
+    prompt = captured["json"]["messages"][1]["content"]
+    assert "RECONSTRUCT comes before PRESERVE" in prompt
+    assert "baseline equivalence" in prompt
+    assert "task-local successor" in captured["json"]["messages"][0]["content"].casefold()
+
+
+def test_task_local_preservation_scope_fails_closed_without_feedback_gate(tmp_path: Path) -> None:
+    config = _task_local_preservation_config()
+    config["training_feedback_required"] = False
+    job = _job("text_memory_reflector", tmp_path, config=config)
+
+    with pytest.raises(ValueError, match="task_local_preservation config is invalid"):
+        methods_module._task_local_preservation_enabled(job)
+
+
 def test_agent_system_method_writes_harness_instruction_file(tmp_path):
     job = _job(
         "agent_system",

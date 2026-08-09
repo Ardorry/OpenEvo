@@ -344,6 +344,22 @@ def _reflector_schema(
             # than a daemon-wide switch: unrelated projects in the same Core
             # service retain their ordinary post-run behavior.
             "training_feedback_required": {"type": "boolean"},
+            # Opt-in scope for artifacts consumed by exactly one fresh
+            # successor session.  Without it, reflector methods retain their
+            # ordinary transferable cross-task contract.
+            "task_local_preservation": _closed_object(
+                {
+                    "schema_version": {
+                        "type": "string",
+                        "const": "openevo.task_local_preservation.v1",
+                    },
+                    "scope": {
+                        "type": "string",
+                        "enum": ["next_session_only"],
+                    },
+                },
+                required=("schema_version", "scope"),
+            ),
             "reflector_llm": _reflector_llm_schema(),
             **dict(extra or {}),
         },

@@ -347,6 +347,32 @@ def test_reflector_catalog_requires_model_and_codex_harness_provider(
                 "path_fallback_allowed": False,
             },
         }
+        scoped = snapshot.normalize_method_config(
+            method_id,
+            {
+                **normalized,
+                "training_feedback_required": True,
+                "task_local_preservation": {
+                    "schema_version": "openevo.task_local_preservation.v1",
+                    "scope": "next_session_only",
+                },
+            },
+        )
+        assert scoped["task_local_preservation"] == {
+            "schema_version": "openevo.task_local_preservation.v1",
+            "scope": "next_session_only",
+        }
+        with pytest.raises(ValueError, match="invalid config"):
+            snapshot.normalize_method_config(
+                method_id,
+                {
+                    **normalized,
+                    "task_local_preservation": {
+                        "schema_version": "openevo.task_local_preservation.v1",
+                        "scope": "unbounded",
+                    },
+                },
+            )
 
 
 def test_builtin_method_helper_does_not_infer_project_config_ownership(
