@@ -1,7 +1,7 @@
 experiment_id: sequential_task_reflector_evolution_v0
 refactor_id: PRODUCTION_TRAINING_OPERATIONS_DRIVER_V1
 protocol_name: preservation_first_evolution_r3
-protocol_version: 3.0.2
+protocol_version: 3.0.3
 status: PER_ITEM_CONFIGURED_NOT_STARTED
 per_item_reset:
   contract_version: openevo.researchclawbench.per_item_reset.v2
@@ -72,9 +72,9 @@ paths:
   researchclawbench_root: /home/lhy-h/work/researchclaw_openevo/ResearchClawBench
 source_identity:
   openevo_commit: 44c3ac780c66af641df2cf31e08b80c17afcf111
-  adapter_implementation_commit: 44c3ac780c66af641df2cf31e08b80c17afcf111
+  adapter_implementation_commit: 65b866f2ef43c55770cb760d8d5bd03a6d30dac2
   openevo_core_source_tree_sha256: d31c72a42882ff84054676e6bd6a31899c0df07bfd85ef7101435ff5fdc31eb3
-  adapter_tree_sha256: 3f7b796aa82fb1fdb8f6f2e39e3dcb4cdcef0963f14bd83b72556ddcf86b4016
+  adapter_tree_sha256: 82b8399d85319636b88e4cc7801b73aa65351cea1e6409282cf726267408097a
   researchclawbench_commit: b1175eca3deb78ff8b2c839070874474051d2261
   canonical_scorer_sha256: 9492317443acc069744330f27aac693d162f1aa6837d512e40419704197c6022
 native_openevo:
