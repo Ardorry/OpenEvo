@@ -419,8 +419,8 @@ def test_native_reflector_requests_see_candidate_specific_retention_feedback(
     # The real native renderer bounds a reflected record.  The adapter must
     # therefore place the concrete candidate strategy/action ahead of the
     # verbose capsule, rather than only proving that the full JSON exists.
-    assert prompts.count("R3 TASK-LOCAL; NOT generic SOP") >= 3
-    assert prompts.count("Memory: PRESERVE each ID with method+evidence") >= 3
+    assert prompts.count("R3 TASK-LOCAL PRESERVATION, NOT generic SOP") >= 3
+    assert prompts.count("Memory: include a distinct `PRESERVE <achievement_id>`") >= 3
     assert prompts.count("candidate_summary") >= 3
     assert "Candidate report links report/images/candidate_summary.png" in prompts
     assert "fresh workspace" in prompts

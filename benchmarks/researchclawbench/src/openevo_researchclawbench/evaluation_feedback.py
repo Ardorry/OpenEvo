@@ -771,16 +771,19 @@ def _build_reflector_prompt_contract(reflector_capsule: Mapping[str, Any]) -> di
     diagnoses = [
         (
             f"{item['weakness_id']} -> {item['achievement_id']}: {item['dimension']}; "
-            f"candidate={compact(item['candidate_observation'], limit=32)}; ADD "
-            f"{compact(item['next_run_action'], limit=48)}"
+            f"candidate={compact(item['candidate_observation'], limit=84)}; ADDITIVE ACTION="
+            f"{compact(item['next_run_action'], limit=112)}"
         )
         for item in mappings
     ]
     achievements = [
         (
-            f"{item['achievement_id']} REQUIRED: method={' '.join(item['method_signature'][:7])}; "
-            f"outputs={','.join(item['required_output_classes'])}; evidence role="
-            f"{compact(item['scientific_role'], limit=28)}"
+            f"{item['achievement_id']} REQUIRED PRESERVATION ANCHOR: public="
+            f"{','.join(item['public_inputs'][:2])}; route="
+            f"{','.join(item['candidate_evidence_refs'][:2])}; method="
+            f"{' '.join(item['method_signature'][:8])}; outputs="
+            f"{','.join(item['required_output_classes'])}; role="
+            f"{compact(item['scientific_role'], limit=48)}"
         )
         for item in reflector_capsule["baseline_achievement_ledger"]["achievements"]
     ]
@@ -794,14 +797,17 @@ def _build_reflector_prompt_contract(reflector_capsule: Mapping[str, Any]) -> di
     ]
     return {
         "00_task_local_final_artifact_contract": (
-            "R3 TASK-LOCAL; NOT generic SOP. RECONSTRUCT/PRESERVE all achievements; EXTEND "
-            "only additive weaknesses in a fresh workspace; VERIFY baseline equivalence. Final artifact must use "
-            "required achievement IDs, methods, and evidence roles."
+            "R3 TASK-LOCAL PRESERVATION, NOT generic SOP. The required anchors below are "
+            "hard final-artifact content: RECONSTRUCT and PRESERVE every anchor in a fresh "
+            "workspace, EXTEND only additively, then VERIFY baseline equivalence. Do not replace "
+            "a baseline path or restart the research plan."
         ),
         "00a_destination_role_contract": (
-            "Memory: PRESERVE each ID with method+evidence. Skill: reconstruct+verify each ID; "
-            "map every weakness additively. Agent-system: RECONSTRUCT, PRESERVE, EXTEND, VERIFY, "
-            "and baseline equivalence."
+            "Memory: include a distinct `PRESERVE <achievement_id>` semantic unit for each "
+            "anchor with its method, evidence role, and do-not-drop instruction. Skill: include "
+            "each anchor in Phase 1 RECONSTRUCT and Phase 2 VERIFY, then map every weakness "
+            "additively in Phase 3. Agent-system: state RECONSTRUCT, PRESERVE, EXTEND, VERIFY, "
+            "and baseline equivalence before submission."
         ),
         "01_required_baseline_achievements": achievements,
         "02_all_sanitized_diagnoses": diagnoses,
@@ -809,6 +815,11 @@ def _build_reflector_prompt_contract(reflector_capsule: Mapping[str, Any]) -> di
         "04_artifact_roles": (
             "memory=what must not be lost; skill=how to reconstruct then extend; "
             "agent-system=what must be true before submission."
+        ),
+        "05_non_substitution_rule": (
+            "Do not replace a required method with a generic validation checklist. Candidate-derived "
+            "method names, public-input roles, script/output/figure/report evidence roles are allowed "
+            "because they come from the sealed Candidate trajectory, not hidden evaluation authority."
         ),
     }
 

@@ -317,6 +317,32 @@ def build_baseline_success_trace(*, candidate_root: str | Path) -> dict[str, Any
     file_set = set(files)
     public_inputs = [item for item in files if item.startswith(("data/", "related_work/", "inputs/"))][:6]
     candidates = _transcript_items(root, file_set) + _file_events(root, files)
+
+    # A transcript often begins with successful but low-information inspection
+    # commands.  The candidate-created executable route is the strongest
+    # evidence of a reconstructable capability, so order it before those
+    # commands while retaining the rest of the sealed success trace.  This is
+    # deterministic and uses only candidate-owned paths, never evaluator data.
+    def evidence_rank(item: Mapping[str, Any]) -> tuple[int, int, str]:
+        refs = [
+            ref
+            for ref in item.get("candidate_artifact_refs", [])
+            if isinstance(ref, str)
+        ]
+        has_code = any(Path(ref).suffix.casefold() in _CODE_SUFFIXES for ref in refs)
+        has_report = "report/report.md" in refs
+        output_count = sum(
+            Path(ref).suffix.casefold() in (_IMAGE_SUFFIXES | _NUMERIC_SUFFIXES)
+            for ref in refs
+        )
+        action = str(item.get("action", ""))
+        is_reconstructable_route = action.startswith(
+            "Reconstruct and execute candidate-created"
+        )
+        tier = 0 if is_reconstructable_route else (1 if has_code else (2 if output_count and has_report else 3))
+        return (tier, -output_count, _normalize(action))
+
+    candidates = sorted(candidates, key=evidence_rank)
     events: list[dict[str, Any]] = []
     seen: set[str] = set()
     for item in candidates:

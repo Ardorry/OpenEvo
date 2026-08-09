@@ -428,12 +428,31 @@ def build_reflector_capsule_view(capsule: Mapping[str, Any]) -> dict[str, Any]:
             "next_run_action": action["action"],
             "feedback_action_mode": "additive",
         })
+    trace_events = capsule["baseline_success_trace"]["events"]
+
+    # Preserve a bounded *high-information* trace in the reflector view.  The
+    # first raw transcript entries can be navigation or inspection, while the
+    # candidate-created script/report/output chain is the evidence an evolved
+    # Candidate must be able to reconstruct.  Keep the original trace IDs and
+    # use only candidate-owned path classes for this stable ranking.
+    def trace_rank(event: Mapping[str, Any]) -> tuple[int, int, str]:
+        refs = [
+            ref for ref in event.get("candidate_artifact_refs", []) if isinstance(ref, str)
+        ]
+        has_script = any(ref.endswith((".py", ".ipynb", ".r", ".jl")) for ref in refs)
+        output_count = sum(ref.endswith((".csv", ".tsv", ".json", ".png", ".jpg", ".jpeg", ".svg")) for ref in refs)
+        route = str(event.get("action", "")).startswith(
+            "Reconstruct and execute candidate-created"
+        )
+        return (0 if route else (1 if has_script else 2), -output_count, str(event.get("trace_id", "")))
+
+    selected_trace = sorted(trace_events, key=trace_rank)[:12]
     return {
         "schema_version": REFLECTOR_CAPSULE_SCHEMA,
         "capsule_sha256": canonical_sha256(dict(capsule)),
         "fresh_workspace_requirement": capsule["fresh_workspace_requirement"],
         "preservation_contract": "RECONSTRUCT_PRESERVE_EXTEND_VERIFY",
-        "baseline_success_trace": {**capsule["baseline_success_trace"], "events": capsule["baseline_success_trace"]["events"][:20]},
+        "baseline_success_trace": {**capsule["baseline_success_trace"], "events": selected_trace},
         "baseline_achievement_ledger": {**ledger, "achievements": ledger["achievements"][:8]},
         "weakness_to_action": mappings,
         "artifact_role_contract": {

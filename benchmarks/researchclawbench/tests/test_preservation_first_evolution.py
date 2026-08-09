@@ -183,6 +183,9 @@ def test_success_trace_extracts_real_successes_and_filters_noise(tmp_path: Path)
     assert "ls -la" not in actions
     assert "pwd" not in actions
     assert "scratch.py" not in actions
+    assert trace["events"][0]["action"].startswith(
+        "Reconstruct and execute candidate-created `code/analyze.py`"
+    )
 
 
 def test_achievement_ledger_uses_trajectory_capability_not_report_heading(tmp_path: Path) -> None:
@@ -225,6 +228,9 @@ def test_reflector_view_keeps_all_three_admitted_diagnoses(tmp_path: Path) -> No
     assert [item["weakness_id"] for item in view["weakness_to_action"]] == [
         "weakness_01", "weakness_02", "weakness_03"
     ]
+    assert view["baseline_success_trace"]["events"][0]["action"].startswith(
+        "Reconstruct and execute candidate-created `code/analyze.py`"
+    )
 
 
 def test_memory_gate_requires_unique_required_achievement_coverage(tmp_path: Path) -> None:
@@ -300,6 +306,8 @@ def test_candidate_detail_is_allowed_but_hidden_detail_is_rejected(tmp_path: Pat
     prompt_contract = projection["reflector_feedback"]["a00_preservation_first_prompt_contract"]
     assert "analyze" in json.dumps(prompt_contract).casefold()
     assert "figure" in json.dumps(prompt_contract).casefold()
+    assert "required preservation anchor" in json.dumps(prompt_contract).casefold()
+    assert "do not replace a required method" in json.dumps(prompt_contract).casefold()
     assert any(
         "trend.png" in ref
         for item in capsule["baseline_achievement_ledger"]["achievements"]
