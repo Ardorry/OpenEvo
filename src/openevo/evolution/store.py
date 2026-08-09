@@ -72,6 +72,7 @@ from openevo.evolution.framework.contracts import (
     MAX_HANDLER_ARTIFACTS,
     canonical_digest,
     canonical_json,
+    validate_relative_path,
 )
 from openevo.evolution.framework.execution import (
     MethodExecutionEnvelope,
@@ -7125,6 +7126,65 @@ class EvolutionStore:
                         entry.relative_path,
                         max_chars=MAX_CONTRIBUTION_TEXT,
                         max_bytes=entry.size_bytes,
+                    )
+                records_fields = {
+                    key: manifest.get(key)
+                    for key in (
+                        "records_path",
+                        "records_uri",
+                        "records_byte_size",
+                        "records_sha256",
+                    )
+                }
+                if any(value is not None for value in records_fields.values()):
+                    records_path_value = records_fields["records_path"]
+                    records_uri = records_fields["records_uri"]
+                    records_byte_size = records_fields["records_byte_size"]
+                    records_sha256 = records_fields["records_sha256"]
+                    if (
+                        not isinstance(records_path_value, str)
+                        or not isinstance(records_uri, str)
+                        or type(records_byte_size) is not int
+                        or not 0 <= records_byte_size <= MAX_CONTRIBUTION_TEXT
+                        or not isinstance(records_sha256, str)
+                        or re.fullmatch(r"[0-9a-f]{64}", records_sha256) is None
+                    ):
+                        raise ValueError(
+                            "sealed source content admission requires complete dataset records authority"
+                        )
+                    try:
+                        records_path = validate_relative_path(records_path_value)
+                    except ValueError as exc:
+                        raise ValueError(
+                            "sealed source content admission has invalid dataset records path"
+                        ) from exc
+                    records_snapshot = service.issue_snapshot(
+                        artifact_id=str(row["artifact_id"]),
+                        artifact_type=str(row["type"]),
+                        name=str(row["name"]),
+                        uri=records_uri,
+                        manifest={"content_path": records_path},
+                        scores=scores,
+                        rank_index=rank_index,
+                    )
+                    if len(records_snapshot.payload_entries) != 1:
+                        raise ValueError(
+                            "sealed source content admission requires one dataset records payload"
+                        )
+                    records_entry = records_snapshot.payload_entries[0]
+                    if (
+                        records_entry.relative_path != records_path
+                        or records_entry.size_bytes != records_byte_size
+                        or records_entry.sha256 != records_sha256
+                    ):
+                        raise ValueError(
+                            "sealed source content admission dataset records authority differs"
+                        )
+                    verified_text[records_path] = service.read_utf8_prefix(
+                        records_snapshot.payload_handle,
+                        records_path,
+                        max_chars=MAX_CONTRIBUTION_TEXT,
+                        max_bytes=records_byte_size,
                     )
                 if not verified_text:
                     raise ValueError(

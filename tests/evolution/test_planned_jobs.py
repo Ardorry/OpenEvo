@@ -161,6 +161,7 @@ def _request_with_sealed_dataset(
     store: EvolutionStore,
     *,
     idempotency_key: str | None = "planned-job-sealed-dataset",
+    candidate_response: str = "Verified.",
 ) -> tuple[PlanBoundJobCreateRequest, str]:
     store.ingest_event(
         EventIngestRequest(
@@ -179,7 +180,7 @@ def _request_with_sealed_dataset(
                                     {"role": "user", "content": "Verify the sealed dataset."}
                                 ],
                                 "response_messages": [
-                                    {"role": "assistant", "content": "Verified."}
+                                    {"role": "assistant", "content": candidate_response}
                                 ],
                             }
                         ]
@@ -228,6 +229,7 @@ def _complete_transition_bound_skill_job(
     request: PlanBoundJobCreateRequest,
     *,
     payload_name: str,
+    payload_text: str | None = None,
     promoted: bool = True,
 ) -> tuple[str, str]:
     created = store.create_plan_bound_job(
@@ -253,7 +255,7 @@ def _complete_transition_bound_skill_job(
     )
     payload.mkdir(parents=True)
     (payload / "SKILL.md").write_text(
-        f"# {payload_name}\n",
+        payload_text if payload_text is not None else f"# {payload_name}\n",
         encoding="utf-8",
     )
     completed = store.complete_job(
@@ -468,6 +470,117 @@ def test_admission_binds_candidate_source_reuse_to_task_local_plan_scope(
     )
 
     assert store.apply_internal_artifact_admission(scoped).admission.passed is True
+
+
+def test_candidate_reuse_scans_manifest_bound_dataset_records_without_weakening_gt(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    base, _dataset_id = _request_with_sealed_dataset(
+        store,
+        candidate_response="The successful baseline selected threshold 0.25.",
+    )
+    scoped_request = _scoped_skill_request(base).model_copy(
+        update={"successor_transition_id": "successor-transition-record-source"}
+    )
+    job_id, proposal_id = _complete_transition_bound_skill_job(
+        store,
+        scoped_request,
+        payload_name="record-source-reuse",
+        payload_text="Preserve the Candidate-selected threshold 0.25.\n",
+        promoted=False,
+    )
+    basis = ArtifactContentAdmissionBasis(
+        values=("0.25",),
+        candidate_source_reuse_authorized=True,
+    )
+    request = _admission_request(
+        job_id=job_id,
+        selected_artifact_id=proposal_id,
+        parent_artifact_id=scoped_request.input_bindings[1].artifact_ids[0],
+    ).model_copy(update={"content_admission_basis": basis})
+
+    admitted = store.apply_internal_artifact_admission(request)
+
+    assert admitted.content_admission.passed is True
+    assert admitted.content_admission.finding_count == 0
+    assert admitted.content_admission.source_artifact_ids == (
+        scoped_request.input_bindings[0].artifact_ids[0],
+    )
+    assert admitted.content_admission.source_payload_sha256 is not None
+
+    gt_store = _store(tmp_path / "gt-only")
+    gt_only_base, _dataset_id = _request_with_sealed_dataset(
+        gt_store,
+        candidate_response="The successful baseline used only public evidence.",
+    )
+    gt_only_request = _scoped_skill_request(gt_only_base).model_copy(
+        update={"successor_transition_id": "successor-transition-gt-only-source"}
+    )
+    gt_job_id, gt_proposal_id = _complete_transition_bound_skill_job(
+        gt_store,
+        gt_only_request,
+        payload_name="gt-only-record-source",
+        payload_text="Use protected value 0.77.\n",
+        promoted=False,
+    )
+    gt_decision = _admission_request(
+        job_id=gt_job_id,
+        selected_artifact_id=gt_proposal_id,
+        parent_artifact_id=gt_only_request.input_bindings[1].artifact_ids[0],
+    ).model_copy(
+        update={
+            "content_admission_basis": ArtifactContentAdmissionBasis(
+                values=("0.77",),
+                candidate_source_reuse_authorized=True,
+            )
+        }
+    )
+
+    with pytest.raises(ValueError, match="requires reject"):
+        gt_store.apply_internal_artifact_admission(gt_decision)
+
+
+def test_candidate_reuse_rejects_dataset_records_changed_after_job_completion(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    base, dataset_id = _request_with_sealed_dataset(
+        store,
+        candidate_response="The successful baseline selected threshold 0.25.",
+    )
+    scoped_request = _scoped_skill_request(base).model_copy(
+        update={"successor_transition_id": "successor-transition-record-tamper"}
+    )
+    job_id, proposal_id = _complete_transition_bound_skill_job(
+        store,
+        scoped_request,
+        payload_name="record-tamper",
+        payload_text="Preserve threshold 0.25.\n",
+        promoted=False,
+    )
+    records_path = store.files.dataset_manifest_path(dataset_id).with_name(
+        "records.jsonl"
+    )
+    records_path.write_text(
+        '{"forged":"threshold 0.25"}\n',
+        encoding="utf-8",
+    )
+    decision = _admission_request(
+        job_id=job_id,
+        selected_artifact_id=proposal_id,
+        parent_artifact_id=scoped_request.input_bindings[1].artifact_ids[0],
+    ).model_copy(
+        update={
+            "content_admission_basis": ArtifactContentAdmissionBasis(
+                values=("0.25",),
+                candidate_source_reuse_authorized=True,
+            )
+        }
+    )
+
+    with pytest.raises(ValueError, match="dataset records"):
+        store.apply_internal_artifact_admission(decision)
 
 
 def test_succeeded_plan_bound_authority_closes_exact_request_and_result(
