@@ -56,15 +56,17 @@ from .community_evaluator import (
     build_production_community_evaluator,
 )
 from .config import ARTIFACT_TYPES, FROZEN_TASKS, ExperimentConfig
-from .evaluation_feedback import (
-    BALANCED_CONTEXT_SCHEMA,
+from .evaluation_feedback import EvaluationFeedbackProjectionPort
+from .managed_core_control import ManagedCoreControlAuthority
+from .minimal_semantic_evolution import (
+    MINIMAL_CONTEXT_SCHEMA,
+    MINIMAL_TRACE_SCHEMA,
     RETENTION_FEEDBACK_CLASS,
     RETENTION_FEEDBACK_SCHEMA,
-    EvaluationFeedbackProjectionPort,
-    build_balanced_evolution_context,
+    MinimalSemanticFeedbackProjectionPort,
+    assess_minimal_semantic_artifact_quality,
+    build_minimal_evolution_context,
 )
-from .gt_supervision import load_current_task_gt_supervision
-from .managed_core_control import ManagedCoreControlAuthority
 from .production_training_operations import (
     ProductionOperationPort,
     ProductionPorts,
@@ -73,7 +75,6 @@ from .production_training_operations import (
 from .prompt_composer import compose_native_instruction
 from .reflector_runner import NATIVE_METHODS
 from .run_manifest import atomic_write_json
-from .task_specific_artifact_quality import assess_task_specific_artifact_quality
 from .training_state_store import canonical_bytes, canonical_sha256
 from .training_supervisor import CandidateAuthorityUnavailable
 from .workspace import (
@@ -839,7 +840,7 @@ def _project_config(
             # closed configuration and prevents pre-evaluator evolution.
             "config": {
                 "training_feedback_required": True,
-                # R3 injects these artifacts only into the next fresh session
+                # R4 injects these artifacts only into the next fresh session
                 # of this same item; Core owns the closed scope semantics.
                 "task_local_preservation": {
                     "schema_version": "openevo.task_local_preservation.v1",
@@ -3207,8 +3208,8 @@ class CoreFeedbackPort(ProductionOperationPort):
             reflector_feedback = (
                 projection.get("reflector_feedback") if isinstance(projection, dict) else None
             )
-            balanced_context = (
-                reflector_feedback.get("a00_balanced_evolution_context")
+            minimal_context = (
+                reflector_feedback.get("a00_minimal_semantic_context")
                 if isinstance(reflector_feedback, dict)
                 else None
             )
@@ -3230,13 +3231,21 @@ class CoreFeedbackPort(ProductionOperationPort):
                 if isinstance(projection, dict)
                 else None
             )
-            expected_balanced: dict[str, Any] | None = None
-            if isinstance(reflector_capsule, dict) and isinstance(
-                reflector_sanitized, dict
-            ):
-                expected_balanced = build_balanced_evolution_context(
+            minimal_trace = (
+                projection.get("minimal_baseline_trace")
+                if isinstance(projection, dict)
+                else None
+            )
+            minimal_trace_admission = (
+                projection.get("minimal_baseline_trace_admission")
+                if isinstance(projection, dict)
+                else None
+            )
+            expected_context: dict[str, Any] | None = None
+            if isinstance(minimal_trace, dict) and isinstance(reflector_sanitized, dict):
+                expected_context = build_minimal_evolution_context(
+                    trace=minimal_trace,
                     sanitized_feedback=reflector_sanitized,
-                    capsule=reflector_capsule,
                 )
             admission = projection.get("admission") if isinstance(projection, dict) else None
             capsule_admission = (
@@ -3263,6 +3272,8 @@ class CoreFeedbackPort(ProductionOperationPort):
                 != canonical_sha256(reflector_sanitized)
                 or projection.get("reflector_baseline_evidence_capsule_sha256")
                 != canonical_sha256(reflector_capsule)
+                or projection.get("minimal_baseline_trace_sha256")
+                != canonical_sha256(minimal_trace)
                 or not isinstance(admission, dict)
                 or admission.get("status") != "ADMITTED"
                 or not isinstance(capsule_admission, dict)
@@ -3285,13 +3296,19 @@ class CoreFeedbackPort(ProductionOperationPort):
                 != "openevo.researchclawbench.baseline_evidence_capsule_reflector_view.v2"
                 or reflector_capsule.get("capsule_sha256")
                 != projection.get("baseline_evidence_capsule_sha256")
+                or not isinstance(minimal_trace, dict)
+                or minimal_trace.get("schema_version") != MINIMAL_TRACE_SCHEMA
+                or not isinstance(minimal_trace_admission, dict)
+                or minimal_trace_admission.get("status") != "ADMITTED"
+                or minimal_trace_admission.get("trace_sha256")
+                != projection.get("minimal_baseline_trace_sha256")
                 or not isinstance(reflector_feedback, dict)
                 or reflector_feedback.get("schema_version") != RETENTION_FEEDBACK_SCHEMA
                 or reflector_feedback.get("feedback_class") != RETENTION_FEEDBACK_CLASS
                 or reflector_feedback.get("task_id") != request.get("task_id")
-                or expected_balanced is None
-                or balanced_context != expected_balanced
-                or balanced_context.get("schema_version") != BALANCED_CONTEXT_SCHEMA
+                or expected_context is None
+                or minimal_context != expected_context
+                or minimal_context.get("schema_version") != MINIMAL_CONTEXT_SCHEMA
             ):
                 raise CoreControlError("candidate-specific retention feedback authority is invalid")
             return {
@@ -3304,8 +3321,12 @@ class CoreFeedbackPort(ProductionOperationPort):
                 "baseline_evidence_capsule_sha256": projection[
                     "baseline_evidence_capsule_sha256"
                 ],
+                "minimal_baseline_trace_sha256": projection[
+                    "minimal_baseline_trace_sha256"
+                ],
                 "sanitized_feedback_included": True,
-                "baseline_evidence_capsule_included": True,
+                "baseline_evidence_capsule_included": False,
+                "minimal_baseline_trace_included": True,
                 "judge_feedback_included": False,
                 "raw_gt_projected": False,
                 "judge_reasoning_projected": False,
@@ -3987,11 +4008,13 @@ class CoreArtifactQualityPort(ProductionOperationPort):
     def execute(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
         task_id = request.get("task_id")
         evolution = request.get("evolution")
-        capsule = request.get("baseline_evidence_capsule")
+        trace = request.get("minimal_baseline_trace")
+        sanitized_feedback = request.get("reflector_sanitized_feedback")
         if (
             task_id not in FROZEN_TASKS
             or not isinstance(evolution, dict)
-            or not isinstance(capsule, dict)
+            or not isinstance(trace, dict)
+            or not isinstance(sanitized_feedback, dict)
             or not isinstance(evolution.get("successor_transition_id"), str)
         ):
             raise CoreControlError("ARTIFACT_QUALITY_REQUEST_INVALID")
@@ -4010,6 +4033,37 @@ class CoreArtifactQualityPort(ProductionOperationPort):
         transition_id = evolution["successor_transition_id"]
         artifact_texts: dict[str, str] = {}
         snapshot_authority: dict[str, dict[str, Any]] = {}
+        content_admission_findings: list[str] = []
+        provenance_violations: list[str] = []
+        for artifact_type in ARTIFACT_TYPES:
+            job = by_type[artifact_type]
+            admission = job.get("content_admission")
+            if not isinstance(admission, dict):
+                provenance_violations.append(
+                    f"{artifact_type}:CONTENT_ADMISSION_ABSENT"
+                )
+                continue
+            findings = admission.get("finding_categories")
+            if (
+                admission.get("passed") is not True
+                or admission.get("finding_count") != 0
+                or findings != []
+            ):
+                if isinstance(findings, list):
+                    content_admission_findings.extend(str(item) for item in findings)
+                if not findings:
+                    content_admission_findings.append("CORE_CONTENT_ADMISSION_FAILED")
+            if (
+                not isinstance(admission.get("source_artifact_ids"), list)
+                or not admission["source_artifact_ids"]
+                or not isinstance(admission.get("source_payload_sha256"), str)
+                or not _SHA256.fullmatch(admission["source_payload_sha256"])
+                or job.get("content_admission_sha256")
+                != admission.get("content_sha256")
+            ):
+                provenance_violations.append(
+                    f"{artifact_type}:SOURCE_PROVENANCE_INVALID"
+                )
         client = CoreControlV2Client(self.core_authority)
         try:
             for artifact_type in ARTIFACT_TYPES:
@@ -4059,22 +4113,12 @@ class CoreArtifactQualityPort(ProductionOperationPort):
                 }
         finally:
             client.close()
-        # This private adapter read is intentionally not placed in a side
-        # effect request or receipt.  It is solely an exact-literal leakage
-        # audit of the three already-native registered texts.
-        gt = load_current_task_gt_supervision(self.config, task_id=task_id)
-        task_local = gt.get("task_local_feedback")
-        entries = (
-            task_local.get("ground_truth_entries")
-            if isinstance(task_local, dict)
-            else None
-        )
-        if not isinstance(entries, list):
-            raise CoreControlError("ARTIFACT_QUALITY_GT_AUTHORITY_INVALID")
-        report = assess_task_specific_artifact_quality(
-            capsule=capsule,
+        report = assess_minimal_semantic_artifact_quality(
+            trace=trace,
+            sanitized_feedback=sanitized_feedback,
             artifact_texts=artifact_texts,
-            ground_truth_entries=entries,
+            content_admission_findings=content_admission_findings,
+            provenance_violations=provenance_violations,
         )
         report_path = (
             self.root
@@ -5227,10 +5271,14 @@ def build_production_ports(
             authority_root=run_root / "evaluator_private" / "durable_authority",
         )
     )
-    feedback_projection = EvaluationFeedbackProjectionPort(
-        root=run_root / "evaluator_private" / "feedback_projection",
+    frozen_feedback_projection = EvaluationFeedbackProjectionPort(
+        root=run_root / "evaluator_private" / "feedback_projection" / "frozen_v1",
         researchclawbench_root=config.researchclawbench_root,
         evaluator=evaluator,
+    )
+    feedback_projection = MinimalSemanticFeedbackProjectionPort(
+        root=run_root / "evaluator_private" / "feedback_projection" / "minimal_r4",
+        frozen_projector=frozen_feedback_projection,
     )
     return ProductionPorts(
         candidate=CoreV2CandidatePort(

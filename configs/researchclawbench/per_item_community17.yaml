@@ -1,7 +1,7 @@
 experiment_id: sequential_task_reflector_evolution_v0
 refactor_id: PRODUCTION_TRAINING_OPERATIONS_DRIVER_V1
-protocol_name: preservation_first_evolution_r3
-protocol_version: 3.0.4
+protocol_name: minimal_semantic_evolution_r4
+protocol_version: 4.0.0
 status: PER_ITEM_CONFIGURED_NOT_STARTED
 per_item_reset:
   contract_version: openevo.researchclawbench.per_item_reset.v2
@@ -12,13 +12,11 @@ per_item_reset:
     - judge_baseline
     - project_sanitized_evaluator_feedback
     - admit_sanitized_evaluator_feedback
-    - build_baseline_success_trace
-    - build_baseline_achievement_ledger
-    - build_baseline_evidence_capsule
-    - evolve_once_preservation_first
-    - verify_preservation_native_artifacts
+    - build_minimal_baseline_trace
+    - evolve_once_minimal_semantic
+    - verify_minimal_semantic_native_artifacts
     - evolved
-    - baseline_equivalence
+    - baseline_equivalence_diagnostic
     - judge_evolved
     - paired_result
     - reset
@@ -195,15 +193,14 @@ teacher:
 feedback:
   native_post_run_attachment_status: ATTACHED_TO_NATIVE_COMPLETED_TASK_DATASET
   private_target_study: true
-  boundary: SANITIZED_EVALUATION_FEEDBACK_BOUNDARY_V1_PLUS_PRESERVATION_FIRST_R3
-  feedback_class: preservation_first_evolution_r3
-  baseline_success_trace: baseline_success_trace_v1
-  baseline_achievement_ledger: baseline_achievement_ledger_v2
-  baseline_evidence_capsule: baseline_evidence_capsule_v2
-  artifact_quality_gate: PRESERVATION_ARTIFACT_QUALITY_V3
-  baseline_equivalence_gate: BASELINE_EQUIVALENCE_V1
-  reflector_success_trace_selection: high_information_candidate_evidence_v1
-  reflector_preservation_anchor_contract: task_local_required_anchor_v1
+  boundary: SANITIZED_EVALUATION_FEEDBACK_BOUNDARY_V1_PLUS_MINIMAL_SEMANTIC_R4
+  feedback_class: minimal_semantic_evolution_r4
+  minimal_baseline_trace: minimal_baseline_trace_v1
+  legacy_baseline_evidence_capsule: diagnostic_only
+  artifact_quality_gate: MINIMAL_SEMANTIC_ARTIFACT_QUALITY_V1
+  baseline_equivalence_gate: DIAGNOSTIC_ONLY
+  reflector_success_trace_selection: candidate_action_method_parameter_v1
+  reflector_preservation_anchor_contract: task_local_minimal_semantic_v1
   capsule_projector_model_calls: 0
   raw_gt_visible_to_reflector: false
   judge_reasoning_visible_to_reflector: false

@@ -22,11 +22,18 @@ from openevo_researchclawbench.evaluator_dependency_lock import (
     write_evaluator_dependency_lock,
 )
 from openevo_researchclawbench.managed_core_control import ManagedCoreControlAuthority
+from openevo_researchclawbench.minimal_semantic_evolution import (
+    MINIMAL_TRACE_SCHEMA,
+    RETENTION_FEEDBACK_CLASS,
+    RETENTION_FEEDBACK_SCHEMA,
+    build_minimal_evolution_context,
+)
 from openevo_researchclawbench.official_training_supervisor import (
     OfficialTrainingIdentity,
     load_official_frozen_plan,
 )
 from openevo_researchclawbench.production_operation_ports import (
+    CoreArtifactQualityPort,
     CoreControlError,
     CoreControlV2Client,
     CoreFeedbackPort,
@@ -2308,6 +2315,287 @@ def test_sanitized_evaluation_feedback_attachment_projects_only_admitted_signal(
     assert result["judge_reasoning_projected"] is False
     assert result["target_image_projected"] is False
     assert len(calls) == 3
+
+
+def test_minimal_semantic_attachment_sends_trace_and_all_sanitized_feedback() -> None:
+    calls = []
+    sanitized = {
+        "feedback_class": "sanitized_evaluation_feedback_v1",
+        "preserve_strengths": [],
+        "diagnoses": [
+            {
+                "dimension": "visual_evidence",
+                "severity": "high",
+                "candidate_observation": "The Candidate figure needs another check.",
+                "improvement_direction": "Add an independent comparison.",
+                "evidence_refs": ["report/report.md"],
+            },
+            {
+                "dimension": "quantitative_validation",
+                "severity": "high",
+                "candidate_observation": "The Candidate analysis needs validation.",
+                "improvement_direction": "Add an independent quantitative check.",
+                "evidence_refs": ["code/analysis.py"],
+            },
+        ],
+    }
+    trace = {
+        "schema_version": MINIMAL_TRACE_SCHEMA,
+        "successful_paths": [
+            {
+                "summary": "Fit the Candidate logistic model.",
+                "why": "The baseline executed the script successfully.",
+                "inputs": ["data/input.csv"],
+                "steps": ["Call `train_logistic` from `code/analysis.py`."],
+                "parameters": ["threshold=0.90"],
+                "outputs": ["outputs/metrics.csv"],
+                "report_role": "Supports the baseline model result.",
+            }
+        ],
+        "projector_model_calls": 0,
+    }
+    context = build_minimal_evolution_context(
+        trace=trace, sanitized_feedback=sanitized
+    )
+    reflector = {
+        "a00_minimal_semantic_context": context,
+        "schema_version": RETENTION_FEEDBACK_SCHEMA,
+        "status": "available_for_evolution",
+        "feedback_class": RETENTION_FEEDBACK_CLASS,
+        "task_id": CANARY_TASK,
+        "policy": {
+            "candidate_grounded": True,
+            "public_or_candidate_provenance_required": True,
+            "answer_reconstruction_allowed": False,
+        },
+    }
+    capsule = {
+        "schema_version": "openevo.researchclawbench.baseline_evidence_capsule.v2"
+    }
+    capsule_sha256 = ports_module.canonical_sha256(capsule)
+    reflector_capsule = {
+        "schema_version": (
+            "openevo.researchclawbench.baseline_evidence_capsule_reflector_view.v2"
+        ),
+        "capsule_sha256": capsule_sha256,
+    }
+    projection = {
+        "task_id": CANARY_TASK,
+        "ground_truth_sha256": "7" * 64,
+        "sanitized_feedback": {
+            "status": "available_for_evolution",
+            "feedback_class": "sanitized_evaluation_feedback_v1",
+        },
+        "reflector_sanitized_feedback": sanitized,
+        "baseline_evidence_capsule": capsule,
+        "reflector_baseline_evidence_capsule": reflector_capsule,
+        "minimal_baseline_trace": trace,
+        "reflector_feedback": reflector,
+        "admission": {"status": "ADMITTED"},
+        "baseline_evidence_capsule_admission": {
+            "status": "ADMITTED",
+            "capsule_sha256": capsule_sha256,
+        },
+        "minimal_baseline_trace_admission": {
+            "status": "ADMITTED",
+            "trace_sha256": ports_module.canonical_sha256(trace),
+        },
+        "raw_gt_projected": False,
+        "judge_reasoning_projected": False,
+        "target_image_projected": False,
+    }
+    for name in (
+        "sanitized_feedback",
+        "reflector_sanitized_feedback",
+        "baseline_evidence_capsule",
+        "reflector_baseline_evidence_capsule",
+        "minimal_baseline_trace",
+        "reflector_feedback",
+    ):
+        projection[f"{name}_sha256"] = ports_module.canonical_sha256(projection[name])
+
+    class Client:
+        def json(self, method, path, *, payload=None, headers=None):
+            del headers
+            calls.append((method, path, payload))
+            if method == "GET":
+                return {
+                    "completed_dataset_id": "dataset-r4",
+                    "completed_dataset_revision": "artifact-r4.v1",
+                    "session_id": "session-r4",
+                    "task_id": "rollout-r4",
+                }
+            if path.endswith("/attachments"):
+                assert payload["global_feedback"] == reflector
+                assert len(
+                    payload["global_feedback"]["a00_minimal_semantic_context"][
+                        "what_needs_improvement"
+                    ]["diagnoses"]
+                ) == 2
+                assert "PRIVATE_GT_LITERAL" not in json.dumps(
+                    payload["global_feedback"]
+                )
+                return {
+                    **payload,
+                    "attachment_id": "attachment-r4",
+                    "content_sha256": "c" * 64,
+                    "status": "sealed",
+                }
+            return {
+                "resolved_view_sha256": "a" * 64,
+                "dataset_artifact": {"artifact_id": "resolved-r4"},
+                "dataset_view": {"task_local_overlay_sha256": "b" * 64},
+            }
+
+    class Port(CoreFeedbackPort):
+        @contextmanager
+        def _client(self):
+            yield Client()
+
+    result = Port(core_authority=object(), evaluator=None).execute(
+        {
+            "task_id": CANARY_TASK,
+            "core_task_id": "science-task-r4",
+            "dataset_id": "dataset-r4",
+            "dataset_revision": "artifact-r4.v1",
+            "session_id": "session-r4",
+            "feedback_source": RETENTION_FEEDBACK_CLASS,
+            "gt_supervision": {
+                "task_id": CANARY_TASK,
+                "ground_truth_sha256": "7" * 64,
+                "feedback_class": "HARD_GT",
+                "global_feedback": {},
+                "task_local_feedback": {
+                    "ground_truth_entries": [{"content": "PRIVATE_GT_LITERAL"}]
+                },
+                "judge_feedback_included": False,
+            },
+            "feedback_projection": projection,
+        },
+        "supervisor-r4-feedback-key",
+    )
+
+    assert result["feedback_source"] == RETENTION_FEEDBACK_CLASS
+    assert result["minimal_baseline_trace_included"] is True
+    assert result["baseline_evidence_capsule_included"] is False
+    assert result["judge_calls"] == 0
+    assert len(calls) == 3
+
+
+def test_minimal_artifact_quality_uses_core_admission_and_full_provenance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    trace = {
+        "schema_version": MINIMAL_TRACE_SCHEMA,
+        "successful_paths": [
+            {
+                "summary": "Fit a logistic model and inspect its confusion analysis.",
+                "why": "The baseline completed the analysis.",
+                "inputs": ["data/input.csv"],
+                "steps": [
+                    "Call `train_logistic` from `code/analysis.py`.",
+                    "Call `confusion` from `code/analysis.py`.",
+                ],
+                "parameters": ["threshold=0.90"],
+                "outputs": ["outputs/metrics.csv"],
+                "report_role": "Supports the model result.",
+            }
+        ],
+        "projector_model_calls": 0,
+    }
+    feedback = {
+        "feedback_class": "sanitized_evaluation_feedback_v1",
+        "diagnoses": [
+            {
+                "dimension": "quantitative_validation",
+                "improvement_direction": "Add an independent quantitative check.",
+            }
+        ],
+    }
+    texts = {
+        "text_memory": "Retain train_logistic with threshold 0.90 and metrics.csv.",
+        "skill_bundle": (
+            "Run train_logistic and confusion, preserve metrics.csv, and add an "
+            "independent quantitative validation comparison."
+        ),
+        "agent_system": "Keep the effective baseline analysis while improving it.",
+    }
+    manifest_sha256 = "a" * 64
+
+    class Client:
+        def __init__(self, _authority):
+            pass
+
+        def json(self, method, path):
+            assert method == "GET"
+            artifact_type = next(kind for kind in ARTIFACT_TYPES if kind in path)
+            text = texts[artifact_type]
+            return {
+                "schema_version": "openevo.internal.artifact_text_snapshot.v1",
+                "artifact_id": f"artifact-{artifact_type}",
+                "artifact_type": artifact_type,
+                "payload_manifest_sha256": manifest_sha256,
+                "documents": [
+                    {
+                        "text": text,
+                        "content_sha256": hashlib.sha256(text.encode()).hexdigest(),
+                        "utf8_byte_size": len(text.encode()),
+                    }
+                ],
+                "total_utf8_bytes": len(text.encode()),
+            }
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(ports_module, "CoreControlV2Client", Client)
+
+    def request(*, missing_provenance: bool) -> dict[str, object]:
+        jobs = []
+        for artifact_type in ARTIFACT_TYPES:
+            admission = {
+                "passed": True,
+                "finding_count": 0,
+                "finding_categories": [],
+                "source_artifact_ids": (
+                    []
+                    if missing_provenance and artifact_type == "text_memory"
+                    else ["dataset-candidate"]
+                ),
+                "source_payload_sha256": "b" * 64,
+            }
+            admission["content_sha256"] = ports_module.canonical_sha256(admission)
+            jobs.append(
+                {
+                    "artifact_type": artifact_type,
+                    "successor_registry_id": f"artifact-{artifact_type}",
+                    "successor_sha256": manifest_sha256,
+                    "content_admission": admission,
+                    "content_admission_sha256": admission["content_sha256"],
+                }
+            )
+        return {
+            "task_id": CANARY_TASK,
+            "evolution": {
+                "successor_transition_id": "transition-r4",
+                "jobs": jobs,
+            },
+            "minimal_baseline_trace": trace,
+            "reflector_sanitized_feedback": feedback,
+        }
+
+    port = CoreArtifactQualityPort(
+        object(), root=tmp_path / "quality", core_authority=object()
+    )
+    passed = port.execute(request(missing_provenance=False), "quality-pass")
+    failed = port.execute(request(missing_provenance=True), "quality-fail")
+
+    assert passed["quality_gate_status"] == "PASS"
+    assert passed["quality_report"]["provenance_violations"] == []
+    assert failed["quality_gate_status"] != "PASS"
+    assert failed["quality_report"]["provenance_violations"] == [
+        "text_memory:SOURCE_PROVENANCE_INVALID"
+    ]
 
 
 class _SuccessorCoreAuthority:

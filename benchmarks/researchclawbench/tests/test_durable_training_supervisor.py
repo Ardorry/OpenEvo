@@ -6,6 +6,12 @@ from pathlib import Path
 
 import pytest
 from openevo_researchclawbench.config import FROZEN_TASKS
+from openevo_researchclawbench.minimal_semantic_evolution import (
+    MINIMAL_CONTEXT_SCHEMA,
+    MINIMAL_QUALITY_SCHEMA,
+    MINIMAL_TRACE_SCHEMA,
+    RETENTION_FEEDBACK_CLASS,
+)
 from openevo_researchclawbench.owned_resource_registry import OwnedResourceRegistry
 from openevo_researchclawbench.training_state_store import (
     TrainingStateStore,
@@ -177,6 +183,13 @@ class SyntheticOperations:
         sanitized = {
             "status": "available_for_evolution",
             "feedback_class": "sanitized_evaluation_feedback_v1",
+            "preserve_strengths": [],
+            "diagnoses": [
+                {
+                    "dimension": "quantitative_validation",
+                    "improvement_direction": "Add one independent validation.",
+                }
+            ],
         }
         capsule = {
             "schema_version": "openevo.researchclawbench.baseline_evidence_capsule.v2",
@@ -184,10 +197,34 @@ class SyntheticOperations:
             "baseline_success_trace": {"schema_version": "openevo.researchclawbench.baseline_success_trace.v1"},
             "baseline_achievement_ledger": {"schema_version": "openevo.researchclawbench.baseline_achievement_ledger.v2"},
         }
+        trace = {
+            "schema_version": MINIMAL_TRACE_SCHEMA,
+            "successful_paths": [
+                {
+                    "summary": "Run the synthetic analysis method.",
+                    "why": "The baseline completed it successfully.",
+                    "inputs": ["data/input.csv"],
+                    "steps": ["Call `analyze_input` from `code/analysis.py`."],
+                    "parameters": ["threshold=0.9"],
+                    "outputs": ["outputs/metrics.csv"],
+                    "report_role": "Supports the submitted analysis.",
+                }
+            ],
+            "projector_model_calls": 0,
+        }
+        reflector_sanitized = {
+            "feedback_class": sanitized["feedback_class"],
+            "preserve_strengths": [],
+            "diagnoses": sanitized["diagnoses"],
+        }
+        context = {
+            "schema_version": MINIMAL_CONTEXT_SCHEMA,
+            "what_already_worked": trace,
+            "what_needs_improvement": reflector_sanitized,
+        }
         reflector = {
-            "feedback_class": "preservation_first_evolution_r3",
-            "sanitized_evaluation_feedback": sanitized,
-            "baseline_evidence_capsule": capsule,
+            "feedback_class": RETENTION_FEEDBACK_CLASS,
+            "a00_minimal_semantic_context": context,
         }
         feedback_sha256 = canonical_sha256(sanitized)
         return self._once(
@@ -202,6 +239,13 @@ class SyntheticOperations:
                     "status": "ADMITTED",
                     "projector_model_calls": 0,
                 },
+                "minimal_baseline_trace": trace,
+                "minimal_baseline_trace_sha256": canonical_sha256(trace),
+                "minimal_baseline_trace_admission": {
+                    "status": "ADMITTED",
+                    "trace_sha256": canonical_sha256(trace),
+                },
+                "reflector_sanitized_feedback": reflector_sanitized,
                 "reflector_feedback": reflector,
                 "reflector_feedback_sha256": canonical_sha256(reflector),
                 "admission": {
@@ -209,18 +253,12 @@ class SyntheticOperations:
                     "feedback_sha256": feedback_sha256,
                 },
                 "quality_contract": {
-                    "generic_only_advice": False,
-                    "candidate_specific_references_present": True,
-                    "candidate_evidence_refs_present": True,
-                    "preserve_strength_guidance_present": True,
-                    "targeted_improvement_guidance_present": True,
-                    "baseline_evidence_capsule_present": True,
-                    "fresh_workspace_reconstruction_required": True,
-                    "weakness_to_action_mapping_present": True,
+                    "baseline_scientific_paths_required": True,
+                    "sanitized_feedback_improvement_required": True,
                     "all_sanitized_diagnoses_visible": True,
-                    "baseline_success_trace_present": True,
-                    "baseline_achievement_ledger_present": True,
-                    "preservation_first_contract": True,
+                    "minimal_baseline_trace_present": True,
+                    "legacy_achievement_metrics_diagnostic_only": True,
+                    "baseline_equivalence_diagnostic_only": True,
                     "gt_leakage": False,
                 },
                 "feedback_projector_model_calls": 0,
@@ -253,20 +291,24 @@ class SyntheticOperations:
                     "judge_feedback_included": False,
                 }
             )
-        if request.get("feedback_source") == "preservation_first_evolution_r3":
+        if request.get("feedback_source") == RETENTION_FEEDBACK_CLASS:
             gt = request["gt_supervision"]
             projection = request["feedback_projection"]
             result.update(
                 {
                     "feedback_class": "HARD_GT",
-                    "feedback_source": "preservation_first_evolution_r3",
+                    "feedback_source": RETENTION_FEEDBACK_CLASS,
                     "judge_calls": 0,
                     "ground_truth_sha256": gt["ground_truth_sha256"],
                     "sanitized_feedback_sha256": projection["sanitized_feedback_sha256"],
                     "sanitized_feedback_included": True,
-                    "baseline_evidence_capsule_included": True,
+                    "baseline_evidence_capsule_included": False,
                     "baseline_evidence_capsule_sha256": projection[
                         "baseline_evidence_capsule_sha256"
+                    ],
+                    "minimal_baseline_trace_included": True,
+                    "minimal_baseline_trace_sha256": projection[
+                        "minimal_baseline_trace_sha256"
                     ],
                     "reflector_feedback_sha256": projection["reflector_feedback_sha256"],
                     "judge_feedback_included": False,
@@ -305,23 +347,16 @@ class SyntheticOperations:
 
     def assess_artifact_quality(self, request, idempotency_key):
         report = {
-            "schema_version": (
-                "openevo.researchclawbench.preservation_artifact_quality.v3"
-            ),
+            "schema_version": MINIMAL_QUALITY_SCHEMA,
             "status": "PASS",
-            "candidate_concepts": ["synthetic analysis"],
-            "artifact_metrics": {},
-            "aggregate": {
-                "candidate_specific_reference_count": 2,
-                "baseline_strength_count": 1,
-                "observed_weakness_count": 1,
-                "weakness_to_action_mapping_count": 1,
-                "overall_retention_ratio": 1.0,
+            "checks": {
+                "baseline_scientific_paths_present": True,
+                "sanitized_feedback_addressed": True,
+                "gt_and_judge_leakage_absent": True,
             },
             "gt_leakage_findings": [],
             "provenance_violations": [],
             "artifact_text_sha256": {},
-            "artifact_role_contract": {"duplicate_mentions_count_once": True},
         }
         report["content_sha256"] = canonical_sha256(report)
         return self._once(
@@ -534,7 +569,7 @@ def test_per_item_reset_closes_exact_pair_and_clears_active_state(
     assert len(operations.evaluation_requests) == 2
     assert len(operations.attachment_requests) == 1
     attachment = operations.attachment_requests[0]
-    assert attachment["feedback_source"] == "preservation_first_evolution_r3"
+    assert attachment["feedback_source"] == RETENTION_FEEDBACK_CLASS
     assert attachment["judge_feedback"] is None
     assert attachment["gt_supervision"]["ground_truth_sha256"] == "7" * 64
     assert attachment["feedback_projection"]["raw_gt_projected"] is False
@@ -718,7 +753,7 @@ def test_failed_artifact_quality_archives_committed_native_successor_without_inj
     assert verified["pending_side_effects"] == 0
 
 
-def test_failed_baseline_equivalence_archives_unjudged_evolved_candidate(
+def test_failed_baseline_equivalence_is_diagnostic_and_does_not_block_judge(
     tmp_path: Path,
 ) -> None:
     class EquivalenceFailureOperations(SyntheticOperations):
@@ -755,22 +790,24 @@ def test_failed_baseline_equivalence_archives_unjudged_evolved_candidate(
 
     operations = EquivalenceFailureOperations()
     supervisor = _per_item_supervisor(tmp_path, operations, task="Astronomy_004")
-    _drive_to(supervisor, "BASELINE_EQUIVALENCE_FAILED")
+    _drive_to(supervisor, "BASELINE_EQUIVALENCE_ADMITTED")
+    diagnostic = supervisor.status()["active_baseline_equivalence_receipt"]
+    assert diagnostic["diagnostic_only"] is True
+    assert diagnostic["production_gate"] is False
+    assert diagnostic["diagnostic_status"] == "BASELINE_EQUIVALENCE_FAILED"
 
-    closed = supervisor.invalidate_failed_per_item_baseline_equivalence(
-        reason="MECHANISM_CHANGE_AFTER_BASELINE_EQUIVALENCE_FAILURE"
-    )
+    _drive_to(supervisor, "ITEM_RESET")
+    closed = supervisor.status()
     verified = supervisor.verify()
 
-    assert closed["stage"] == "ITEM_INVALIDATED_RESET"
-    invalidation = closed["item_invalidation_receipt"]
-    assert invalidation["artifact_quality_passed"] is True
-    assert invalidation["fresh_evolved_candidate_archived_unjudged"] is True
-    assert invalidation["judge_calls_reexecuted"] == 0
-    assert len(invalidation["archived_artifact_ids"]) == 3
+    assert closed["stage"] == "ITEM_RESET"
+    assert closed["paired_result"]["baseline_equivalence"]["diagnostic_only"] is True
+    assert closed["paired_result"]["baseline_equivalence"]["diagnostic_status"] == (
+        "BASELINE_EQUIVALENCE_FAILED"
+    )
     assert closed["active_artifact_ids"] == []
-    assert closed["registry_artifact_ids"] == []
-    assert verified["execution_status"] == "COMPLETED_INVALIDATED"
+    assert len(closed["archived_artifact_ids"]) == 3
+    assert verified["execution_status"] == "COMPLETED"
     assert verified["pending_side_effects"] == 0
 
 

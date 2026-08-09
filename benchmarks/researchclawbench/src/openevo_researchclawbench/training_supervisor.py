@@ -12,7 +12,10 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from .config import ARTIFACT_TYPES, FROZEN_TASKS
-from .evaluation_feedback import RETENTION_FEEDBACK_CLASS
+from .minimal_semantic_evolution import (
+    MINIMAL_QUALITY_SCHEMA,
+    RETENTION_FEEDBACK_CLASS,
+)
 from .training_state_store import TrainingStateStore, canonical_sha256
 from .transition_engine import TrainingStage, evolution_allowed
 
@@ -2373,29 +2376,27 @@ class CommunityTrainingSupervisor:
                 or equivalence.get("equivalence_report_sha256") != report.get("content_sha256")
             ):
                 raise ValueError("baseline equivalence receipt is incomplete")
-            if equivalence.get("equivalence_gate_status") != "PASS" or report.get("status") != "PASS":
-                return self._transition(
-                    stage,
-                    TrainingStage.BASELINE_EQUIVALENCE_FAILED,
-                    "baseline-equivalence-failed",
-                    updates={"active_baseline_equivalence_receipt": equivalence},
-                    receipt=equivalence,
-                )
+            diagnostic = {
+                **equivalence,
+                "production_gate": False,
+                "diagnostic_only": True,
+                "diagnostic_status": report.get("status"),
+            }
             return self._transition(
                 stage,
                 TrainingStage.BASELINE_EQUIVALENCE_ADMITTED,
-                "baseline-equivalence-admitted",
-                updates={"active_baseline_equivalence_receipt": equivalence},
-                receipt=equivalence,
+                "baseline-equivalence-diagnostic-recorded",
+                updates={"active_baseline_equivalence_receipt": diagnostic},
+                receipt=diagnostic,
             )
         if stage is TrainingStage.BASELINE_EQUIVALENCE_ADMITTED:
             return self._transition(
                 stage,
                 TrainingStage.EVALUATION_PENDING,
-                "per-item-evolved-evaluation-after-baseline-equivalence",
+                "per-item-evolved-evaluation-after-equivalence-diagnostic",
                 receipt={
                     "attempt_index": attempt,
-                    "baseline_equivalence_pass": True,
+                    "baseline_equivalence_production_gate": False,
                     "candidate_gt_visible": False,
                     "judge_is_evolution_input": False,
                 },
@@ -2518,8 +2519,11 @@ class CommunityTrainingSupervisor:
                         != set(ARTIFACT_TYPES)
                         or not isinstance(state.get("active_baseline_equivalence_receipt"), dict)
                         or state["active_baseline_equivalence_receipt"].get(
-                            "equivalence_gate_status"
-                        ) != "PASS"
+                            "diagnostic_only"
+                        ) is not True
+                        or state["active_baseline_equivalence_receipt"].get(
+                            "production_gate"
+                        ) is not False
                     ):
                         raise ValueError("per-item Candidate artifact consumption is incomplete")
                     distinct = {
@@ -2658,17 +2662,12 @@ class CommunityTrainingSupervisor:
                 or not isinstance(admission, dict)
                 or admission.get("status") != "ADMITTED"
                 or not isinstance(quality, dict)
-                or quality.get("generic_only_advice") is not False
-                or quality.get("candidate_specific_references_present") is not True
-                or quality.get("preserve_strength_guidance_present") is not True
-                or quality.get("targeted_improvement_guidance_present") is not True
-                or quality.get("baseline_evidence_capsule_present") is not True
-                or quality.get("fresh_workspace_reconstruction_required") is not True
-                or quality.get("weakness_to_action_mapping_present") is not True
+                or quality.get("baseline_scientific_paths_required") is not True
+                or quality.get("sanitized_feedback_improvement_required") is not True
                 or quality.get("all_sanitized_diagnoses_visible") is not True
-                or quality.get("baseline_success_trace_present") is not True
-                or quality.get("baseline_achievement_ledger_present") is not True
-                or quality.get("preservation_first_contract") is not True
+                or quality.get("minimal_baseline_trace_present") is not True
+                or quality.get("legacy_achievement_metrics_diagnostic_only") is not True
+                or quality.get("baseline_equivalence_diagnostic_only") is not True
                 or quality.get("gt_leakage") is not False
                 or not isinstance(projection.get("baseline_evidence_capsule"), dict)
                 or not isinstance(projection.get("baseline_evidence_capsule_admission"), dict)
@@ -2678,6 +2677,12 @@ class CommunityTrainingSupervisor:
                     "projector_model_calls"
                 )
                 != 0
+                or not isinstance(projection.get("minimal_baseline_trace"), dict)
+                or not isinstance(
+                    projection.get("minimal_baseline_trace_admission"), dict
+                )
+                or projection["minimal_baseline_trace_admission"].get("status")
+                != "ADMITTED"
                 or not isinstance(projection.get("reflector_feedback"), dict)
                 or projection["reflector_feedback"].get("feedback_class")
                 != RETENTION_FEEDBACK_CLASS
@@ -2739,9 +2744,12 @@ class CommunityTrainingSupervisor:
                 or attachment.get("sanitized_feedback_sha256")
                 != projection.get("sanitized_feedback_sha256")
                 or attachment.get("sanitized_feedback_included") is not True
-                or attachment.get("baseline_evidence_capsule_included") is not True
+                or attachment.get("baseline_evidence_capsule_included") is not False
                 or attachment.get("baseline_evidence_capsule_sha256")
                 != projection.get("baseline_evidence_capsule_sha256")
+                or attachment.get("minimal_baseline_trace_included") is not True
+                or attachment.get("minimal_baseline_trace_sha256")
+                != projection.get("minimal_baseline_trace_sha256")
                 or attachment.get("reflector_feedback_sha256")
                 != projection.get("reflector_feedback_sha256")
                 or attachment.get("judge_feedback_included") is not False
@@ -2789,6 +2797,10 @@ class CommunityTrainingSupervisor:
                 is not True
                 or state.get("active_attachment_receipt", {}).get(
                     "baseline_evidence_capsule_included"
+                )
+                is not False
+                or state.get("active_attachment_receipt", {}).get(
+                    "minimal_baseline_trace_included"
                 )
                 is not True
                 or state.get("active_attachment_receipt", {}).get("raw_gt_projected") is not False
@@ -2907,6 +2919,7 @@ class CommunityTrainingSupervisor:
             )
         if stage is TrainingStage.EVOLUTION_COMPLETED and self.per_item_reset_enabled:
             capsule = state.get("active_baseline_capsule")
+            projection = state.get("active_feedback_projection_receipt")
             quality = self._effect(
                 kind="artifact-quality",
                 request={
@@ -2914,6 +2927,16 @@ class CommunityTrainingSupervisor:
                     "attempt_index": attempt,
                     "evolution": state["active_evolution_receipt"],
                     "baseline_evidence_capsule": capsule,
+                    "minimal_baseline_trace": (
+                        projection.get("minimal_baseline_trace")
+                        if isinstance(projection, dict)
+                        else None
+                    ),
+                    "reflector_sanitized_feedback": (
+                        projection.get("reflector_sanitized_feedback")
+                        if isinstance(projection, dict)
+                        else None
+                    ),
                     "phase": "post-native-registration-pre-evolved-injection",
                 },
                 execute=self.operations.assess_artifact_quality,
@@ -2926,13 +2949,18 @@ class CommunityTrainingSupervisor:
                 or quality.get("artifact_text_persisted") is not False
                 or quality.get("raw_gt_persisted") is not False
                 or not isinstance(report, dict)
-                or report.get("schema_version")
-                != "openevo.researchclawbench.preservation_artifact_quality.v3"
+                or report.get("schema_version") != MINIMAL_QUALITY_SCHEMA
                 or report.get("status") != "PASS"
                 or report.get("gt_leakage_findings") != []
                 or report.get("provenance_violations") != []
-                or report.get("artifact_role_contract", {}).get(
-                    "duplicate_mentions_count_once"
+                or report.get("checks", {}).get(
+                    "baseline_scientific_paths_present"
+                ) is not True
+                or report.get("checks", {}).get(
+                    "sanitized_feedback_addressed"
+                ) is not True
+                or report.get("checks", {}).get(
+                    "gt_and_judge_leakage_absent"
                 ) is not True
                 or quality.get("quality_report_sha256") != report.get("content_sha256")
             ):
@@ -3441,7 +3469,7 @@ class CommunityTrainingSupervisor:
             raise ValueError("failed per-item invalidation is only allowed for baseline evolution")
         attachment = state.get("active_attachment_receipt")
         if not isinstance(attachment, dict):
-            raise ValueError("failed per-item invalidation lacks sealed attachment")
+            raise TypeError("failed per-item invalidation lacks sealed attachment")
         transition_id = attachment.get("successor_transition_id")
         if (
             not isinstance(terminal_evolution_receipt, dict)
