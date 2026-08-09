@@ -72,9 +72,9 @@ paths:
   researchclawbench_root: /home/lhy-h/work/researchclaw_openevo/ResearchClawBench
 source_identity:
   openevo_commit: caa247268e525cab6b8d4760da2d012c10d98b36
-  adapter_implementation_commit: b445bc185043cea31295990522d046dd9d15f06c
+  adapter_implementation_commit: 2e021e1eb9521e46b931308a6979cf60231d4575
   openevo_core_source_tree_sha256: 37cb9908be06716a9b5b51e05de8d48745d136b11f27223a83b486b6e8e48bbf
-  adapter_tree_sha256: 924fa8e56fe0e7444f593c89b0e660152ef028d1c44ee98aa0a48ac99e028b39
+  adapter_tree_sha256: 36ca8dbba905d48c8e5b2df48fe71e7589c3bafedbd1598729ade61caa9d69fb
   researchclawbench_commit: b1175eca3deb78ff8b2c839070874474051d2261
   canonical_scorer_sha256: 9492317443acc069744330f27aac693d162f1aa6837d512e40419704197c6022
 native_openevo:
