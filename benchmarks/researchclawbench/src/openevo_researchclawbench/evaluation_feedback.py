@@ -806,7 +806,8 @@ def build_balanced_evolution_context(
             f"{item['achievement_id']} REQUIRED|method="
             f"{compact(' '.join(item['method_signature'][:6]), limit=42)}|public="
             f"{','.join(item['public_inputs'][:1])}|outputs="
-            f"{','.join(item['required_output_classes'])}|evidence="
+            f"{','.join(item['required_output_classes'])}|role="
+            f"{compact(' '.join(item['evidence_role_signature']), limit=36)}|evidence="
             f"{','.join(item['candidate_evidence_refs'][:1])}"
         )
         for item in ledger["achievements"]
@@ -832,12 +833,13 @@ def build_balanced_evolution_context(
             f"{','.join(item['candidate_artifact_refs'][:1])}|verify="
             f"{compact(item['verification'], limit=28)}"
         )
-        for item in trace["events"][:2]
+        for item in trace["events"]
     ]
     return {
         "schema_version": BALANCED_CONTEXT_SCHEMA,
         "baseline_successes": compact_strengths,
         "baseline_achievements": compact_achievements,
+        "baseline_output_floor": dict(ledger["required_output_class_counts"]),
         "baseline_success_trace": trace_events,
         "sanitized_feedback": compact_feedback,
         "additive_improvement_targets": compact_actions,

@@ -23,6 +23,7 @@ from .production_training_operations import ProductionTrainingOperations
 from .training_state_store import TrainingStateStore, canonical_sha256
 from .training_supervisor import (
     ARTIFACT_QUALITY_INVALIDATION_REASON,
+    BASELINE_EQUIVALENCE_INVALIDATION_REASON,
     FAILED_EVOLUTION_INVALIDATION_REASON,
     CommunityTrainingSupervisor,
     SupervisorIdentity,
@@ -281,6 +282,17 @@ class DurableTrainingControl:
         if reason != ARTIFACT_QUALITY_INVALIDATION_REASON:
             raise ValueError("artifact-quality invalidation reason is not allowlisted")
         return self.supervisor.invalidate_failed_per_item_artifact_quality(
+            reason=reason
+        )
+
+    def invalidate_failed_per_item_baseline_equivalence(
+        self, *, reason: str
+    ) -> dict[str, Any]:
+        if reason != BASELINE_EQUIVALENCE_INVALIDATION_REASON:
+            raise ValueError(
+                "baseline-equivalence invalidation reason is not allowlisted"
+            )
+        return self.supervisor.invalidate_failed_per_item_baseline_equivalence(
             reason=reason
         )
 

@@ -191,6 +191,8 @@ _MAX_DATASET_RECORDS_BYTES = 128 * 1024 * 1024
 _MAX_LEAKAGE_SCAN_RECORDS = 64
 _MAX_LEAKAGE_SCAN_CHARS = 2 * 1024 * 1024
 _MAX_TRACE_LITERAL_COUNT = 512
+_DEFAULT_EVOLUTION_FEEDBACK_SNIPPET_CHARS = 2_000
+_TASK_LOCAL_EVOLUTION_FEEDBACK_SNIPPET_CHARS = 16_000
 _TASK_LOCAL_ALLOWED_PATH_KEYS = frozenset(
     {"data_file", "data_files", "file_name", "file_names", "source_file", "source_files"}
 )
@@ -328,6 +330,14 @@ def _task_local_preservation_enabled(job: WorkerClaimedJob) -> bool:
     return task_local_preservation_allows_candidate_source_reuse(job.config)
 
 
+def _evolution_feedback_snippet_chars(job: WorkerClaimedJob) -> int:
+    return (
+        _TASK_LOCAL_EVOLUTION_FEEDBACK_SNIPPET_CHARS
+        if _task_local_preservation_enabled(job)
+        else _DEFAULT_EVOLUTION_FEEDBACK_SNIPPET_CHARS
+    )
+
+
 _TASK_LOCAL_EVALUATION_BOUNDARY_REDACTIONS = (
     (re.compile(r"\braw\s+GT\b", re.IGNORECASE), "restricted evaluation material"),
     (re.compile(r"\bground[- ]truth\b", re.IGNORECASE), "restricted evaluation material"),
@@ -404,6 +414,7 @@ def text_memory_reflector(
     reflected_records = _reflection_records(
         records,
         max_records=_int_config(job.config.get("max_records"), 20),
+        evolution_feedback_limit=_evolution_feedback_snippet_chars(job),
     )
     prior_memory_texts = _text_memory_reflector_base_texts(job)
 
@@ -543,6 +554,7 @@ def text_memory_expel_reflector(
     reflected_records = _reflection_records(
         records,
         max_records=_int_config(job.config.get("max_records"), 20),
+        evolution_feedback_limit=_evolution_feedback_snippet_chars(job),
     )
     prior_memory_texts = _text_memory_reflector_base_texts(job)
 
@@ -705,6 +717,7 @@ def skill_bundle_reflector(
     reflected_records = _reflection_records(
         records,
         max_records=_int_config(job.config.get("max_records"), 20),
+        evolution_feedback_limit=_evolution_feedback_snippet_chars(job),
     )
     base_text, base_skill_artifact = _skill_bundle_reflector_base(job)
 
@@ -867,6 +880,7 @@ def agent_system_reflector(
     reflected_records = _reflection_records(
         records,
         max_records=_int_config(job.config.get("max_records"), 20),
+        evolution_feedback_limit=_evolution_feedback_snippet_chars(job),
     )
 
     name = str(job.config.get("name") or f"{dataset.name or dataset.artifact_id} reflector")
@@ -974,6 +988,7 @@ def agent_system_history_reflector(
     rounds = _history_reflection_rounds(
         dataset_artifacts,
         max_records_per_round=max_records_per_round,
+        evolution_feedback_limit=_evolution_feedback_snippet_chars(job),
     )
 
     name = str(
@@ -1114,6 +1129,7 @@ def agent_system_pareto_reflector(
     rounds = _history_reflection_rounds(
         dataset_artifacts,
         max_records_per_round=max_records_per_round,
+        evolution_feedback_limit=_evolution_feedback_snippet_chars(job),
     )
     strategies = _pareto_candidate_strategies(job)
     llm_config = _reflector_llm_config(job)
@@ -1337,6 +1353,7 @@ def agent_system_gepa_reflector(
     rounds = _history_reflection_rounds(
         dataset_artifacts,
         max_records_per_round=max_records_per_round,
+        evolution_feedback_limit=_evolution_feedback_snippet_chars(job),
     )
     strategies = _gepa_mutation_strategies(job)
     llm_config = _reflector_llm_config(job)
@@ -3651,6 +3668,7 @@ def _history_reflection_rounds(
     dataset_artifacts: list[WorkerClaimInputArtifact],
     *,
     max_records_per_round: int,
+    evolution_feedback_limit: int = _DEFAULT_EVOLUTION_FEEDBACK_SNIPPET_CHARS,
 ) -> list[dict[str, Any]]:
     rounds: list[dict[str, Any]] = []
     for index, dataset in enumerate(dataset_artifacts, start=1):
@@ -3658,6 +3676,7 @@ def _history_reflection_rounds(
         reflected_records = _reflection_records(
             records,
             max_records=max_records_per_round,
+            evolution_feedback_limit=evolution_feedback_limit,
         )
         rounds.append(
             {
@@ -5847,18 +5866,26 @@ def _reflection_records(
     records: list[dict[str, Any]],
     *,
     max_records: int,
+    evolution_feedback_limit: int = _DEFAULT_EVOLUTION_FEEDBACK_SNIPPET_CHARS,
 ) -> list[dict[str, str]]:
     reflected: list[dict[str, str]] = []
     for record in records:
         if len(reflected) >= max_records:
             break
-        summary = _reflection_record(record)
+        summary = _reflection_record(
+            record,
+            evolution_feedback_limit=evolution_feedback_limit,
+        )
         if summary is not None:
             reflected.append(summary)
     return reflected
 
 
-def _reflection_record(record: dict[str, Any]) -> dict[str, str] | None:
+def _reflection_record(
+    record: dict[str, Any],
+    *,
+    evolution_feedback_limit: int = _DEFAULT_EVOLUTION_FEEDBACK_SNIPPET_CHARS,
+) -> dict[str, str] | None:
     traces = record.get("traces")
     evolution_feedback = _record_evolution_feedback(record)
     if (not isinstance(traces, list) or not traces) and not evolution_feedback:
@@ -5902,7 +5929,10 @@ def _reflection_record(record: dict[str, Any]) -> dict[str, str] | None:
         "prompt": _snippet(prompt),
         "observed": _snippet(observed),
         "failure_signal": _snippet(failure_signal, limit=2000),
-        "evolution_feedback": _snippet(evolution_feedback, limit=2000),
+        "evolution_feedback": _snippet(
+            evolution_feedback,
+            limit=evolution_feedback_limit,
+        ),
     }
 
 

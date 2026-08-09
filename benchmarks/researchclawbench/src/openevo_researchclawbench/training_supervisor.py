@@ -20,6 +20,9 @@ FAILED_EVOLUTION_INVALIDATION_REASON = "CORE_SUCCESSOR_TERMINAL_FAILURE"
 ARTIFACT_QUALITY_INVALIDATION_REASON = (
     "MECHANISM_CHANGE_AFTER_ARTIFACT_QUALITY_FAILURE"
 )
+BASELINE_EQUIVALENCE_INVALIDATION_REASON = (
+    "MECHANISM_CHANGE_AFTER_BASELINE_EQUIVALENCE_FAILURE"
+)
 _LEGACY_FAILED_EVOLUTION_INVALIDATION_REASON = (
     "R3_CONTENT_ADMISSION_SCOPE_CONFLICT"
 )
@@ -1460,6 +1463,11 @@ class CommunityTrainingSupervisor:
             and invalidation_receipt.get("reason")
             == ARTIFACT_QUALITY_INVALIDATION_REASON
         )
+        baseline_equivalence_invalidation = (
+            isinstance(invalidation_receipt, dict)
+            and invalidation_receipt.get("reason")
+            == BASELINE_EQUIVALENCE_INVALIDATION_REASON
+        )
         failed_evolution_effect_valid = (
             len(evolution_effects) == 1
             and evolution_effects[0].get("status") == "failed"
@@ -1491,8 +1499,32 @@ class CommunityTrainingSupervisor:
             and invalidation_receipt.get("archived_artifact_ids")
             == state.get("archived_artifact_ids")
         )
+        equivalence_effects = [
+            item for item in effects if item.get("kind") == "baseline-equivalence"
+        ]
+        baseline_equivalence_invalidation_valid = (
+            len(evolution_effects) == 1
+            and evolution_effects[0].get("status") == "completed"
+            and len(artifact_quality_effects) == 1
+            and artifact_quality_effects[0].get("status") == "completed"
+            and len(equivalence_effects) == 1
+            and equivalence_effects[0].get("status") == "completed"
+            and not failed_effects
+            and len(state.get("evolution_job_ids", [])) == 3
+            and len(state.get("archived_artifact_ids", [])) == 3
+            and isinstance(invalidation_receipt, dict)
+            and invalidation_receipt.get("native_successor_committed") is True
+            and invalidation_receipt.get("fresh_evolved_candidate_archived_unjudged")
+            is True
+            and invalidation_receipt.get("evolution_job_ids")
+            == state.get("evolution_job_ids")
+            and invalidation_receipt.get("archived_artifact_ids")
+            == state.get("archived_artifact_ids")
+        )
         undispatched_invalidation = (
-            not failed_evolution_invalidation and not artifact_quality_invalidation
+            not failed_evolution_invalidation
+            and not artifact_quality_invalidation
+            and not baseline_equivalence_invalidation
         )
         if state["stage"] == TrainingStage.ITEM_INVALIDATED_RESET.value and (
             not self.per_item_reset_enabled
@@ -1506,9 +1538,16 @@ class CommunityTrainingSupervisor:
                 artifact_quality_invalidation
                 and not artifact_quality_invalidation_valid
             )
+            or (
+                baseline_equivalence_invalidation
+                and not baseline_equivalence_invalidation_valid
+            )
             or (undispatched_invalidation and evolution_effects)
             or (
-                not artifact_quality_invalidation
+                not (
+                    artifact_quality_invalidation
+                    or baseline_equivalence_invalidation
+                )
                 and state.get("evolution_job_ids") != []
             )
             or pending
@@ -3627,6 +3666,177 @@ class CommunityTrainingSupervisor:
                 "current_task_local_overlay_scope_id": None,
                 "active_artifact_ids": [],
                 "archived_artifact_ids": artifact_ids,
+                "active_candidate_intent": None,
+                "active_candidate_receipt": None,
+                "active_validation_receipt": None,
+                "active_evaluation_receipt": None,
+                "active_feedback_projection_receipt": None,
+                "active_baseline_capsule": None,
+                "active_attachment_receipt": None,
+                "active_evolution_receipt": None,
+                "active_artifact_quality_receipt": None,
+                "active_baseline_equivalence_receipt": None,
+                "active_admission_receipt": None,
+                "active_evolved_workspace_receipt": None,
+                "item_reset_receipt": None,
+                "item_invalidation_receipt": receipt,
+            },
+            receipt=receipt,
+        )
+
+    def invalidate_failed_per_item_baseline_equivalence(
+        self,
+        *,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Archive an unjudged evolved Candidate after equivalence failure.
+
+        This terminal path is limited to a completed native successor whose
+        artifacts passed the preservation gate and were injected into one
+        fresh, sealed evolved Candidate.  The failing zero-call equivalence
+        receipt is retained, while the isolated supervisor state is reset
+        without evaluating or replaying that Candidate.
+        """
+
+        if reason != BASELINE_EQUIVALENCE_INVALIDATION_REASON:
+            raise ValueError("baseline-equivalence invalidation reason is not allowlisted")
+        state = self.status()
+        if not self.per_item_reset_enabled or len(self.task_ids) != 1:
+            raise ValueError(
+                "baseline-equivalence invalidation requires one reset-scoped task"
+            )
+        if TrainingStage(state["stage"]) is not TrainingStage.BASELINE_EQUIVALENCE_FAILED:
+            raise ValueError(
+                "baseline-equivalence invalidation requires its failed terminal stage"
+            )
+        if state.get("current_attempt") != 1:
+            raise ValueError(
+                "baseline-equivalence invalidation requires the evolved attempt"
+            )
+        evolution = state.get("active_evolution_receipt")
+        jobs = evolution.get("jobs") if isinstance(evolution, dict) else None
+        admission = state.get("active_admission_receipt")
+        admitted_artifact_ids = (
+            admission.get("registry_artifact_ids")
+            if isinstance(admission, dict)
+            else None
+        )
+        if (
+            not isinstance(jobs, list)
+            or len(jobs) != len(ARTIFACT_TYPES)
+            or {item.get("artifact_type") for item in jobs if isinstance(item, dict)}
+            != set(ARTIFACT_TYPES)
+            or any(
+                not isinstance(item.get("job_id"), str)
+                for item in jobs
+                if isinstance(item, dict)
+            )
+            or not isinstance(admitted_artifact_ids, list)
+            or len(admitted_artifact_ids) != len(ARTIFACT_TYPES)
+            or any(not isinstance(item, str) for item in admitted_artifact_ids)
+        ):
+            raise ValueError(
+                "baseline-equivalence invalidation lacks native artifact authority"
+            )
+        artifact_ids = sorted(admitted_artifact_ids)
+        equivalence = state.get("active_baseline_equivalence_receipt")
+        equivalence_report = (
+            equivalence.get("equivalence_report")
+            if isinstance(equivalence, dict)
+            else None
+        )
+        quality = state.get("active_artifact_quality_receipt")
+        effects = self.store.side_effects_for_experiment(self.experiment_id)
+        equivalence_effects = [
+            item for item in effects if item.get("kind") == "baseline-equivalence"
+        ]
+        evaluation_effects = [
+            item for item in effects if item.get("kind") == "evaluation"
+        ]
+        if (
+            not isinstance(quality, dict)
+            or quality.get("quality_gate_status") != "PASS"
+            or quality.get("provider_calls") != 0
+            or not isinstance(equivalence, dict)
+            or equivalence.get("equivalence_gate_status")
+            != "BASELINE_EQUIVALENCE_FAILED"
+            or equivalence.get("provider_calls") != 0
+            or equivalence.get("raw_gt_persisted") is not False
+            or equivalence.get("judge_reasoning_persisted") is not False
+            or equivalence.get("artifact_text_persisted") is not False
+            or not isinstance(equivalence_report, dict)
+            or equivalence_report.get("status") != "BASELINE_EQUIVALENCE_FAILED"
+            or equivalence.get("equivalence_report_sha256")
+            != equivalence_report.get("content_sha256")
+            or len(equivalence_effects) != 1
+            or equivalence_effects[0].get("status") != "completed"
+            or equivalence_effects[0].get("receipt") != equivalence
+            or len(evaluation_effects) != 1
+            or not isinstance(state.get("active_candidate_receipt"), dict)
+            or state["active_candidate_receipt"].get("completed") is not True
+            or not isinstance(state.get("active_validation_receipt"), dict)
+            or state["active_validation_receipt"].get("artifact_valid") is not True
+            or not isinstance(state.get("active_admission_receipt"), dict)
+            or not isinstance(state.get("active_evolved_workspace_receipt"), dict)
+            or sorted(state.get("active_artifact_ids", [])) != artifact_ids
+            or sorted(state.get("registry_artifact_ids", [])) != artifact_ids
+            or state.get("evolution_job_ids")
+            != [str(item["job_id"]) for item in jobs]
+            or state.get("paired_result") is not None
+            or self.store.active_resources(self.experiment_id)
+            or any(item.get("status") != "completed" for item in effects)
+        ):
+            raise ValueError(
+                "baseline-equivalence invalidation authority is incomplete"
+            )
+        task = self.task_ids[0]
+        receipt = {
+            "schema_version": (
+                "openevo.researchclawbench.baseline_equivalence_invalidation.v1"
+            ),
+            "task_id": task,
+            "reason": reason,
+            "archive_preserved": True,
+            "native_successor_committed": True,
+            "artifact_quality_passed": True,
+            "fresh_evolved_candidate_archived_unjudged": True,
+            "baseline_equivalence_status": equivalence_report["status"],
+            "baseline_equivalence_report_sha256": equivalence_report["content_sha256"],
+            "evolution_job_ids": list(state["evolution_job_ids"]),
+            "archived_artifact_ids": artifact_ids,
+            "pending_side_effects": 0,
+            "failed_side_effects": 0,
+            "active_owned_resources": 0,
+            "candidate_model_calls_reexecuted": 0,
+            "reflector_model_calls_reexecuted": 0,
+            "judge_calls_reexecuted": 0,
+            "budget_usage": self.store.budget_usage(self.experiment_id),
+            "reset": {
+                "active_artifacts": [],
+                "active_candidate": None,
+                "active_workspace": None,
+                "active_gt_supervision": None,
+                "active_evaluation_feedback": None,
+                "active_baseline_capsule": None,
+                "active_successor_head": None,
+                "active_project_head": None,
+                "active_reflector": None,
+            },
+        }
+        return self._transition(
+            TrainingStage.BASELINE_EQUIVALENCE_FAILED,
+            TrainingStage.ITEM_INVALIDATED_RESET,
+            "per-item-baseline-equivalence-invalidated-reset",
+            updates={
+                "current_task_index": len(self.task_ids),
+                "current_composite_id": None,
+                "core_project_id": None,
+                "preseeded_workspace_authority": None,
+                "current_task_local_overlay_id": None,
+                "current_task_local_overlay_scope_id": None,
+                "active_artifact_ids": [],
+                "archived_artifact_ids": artifact_ids,
+                "registry_artifact_ids": [],
                 "active_candidate_intent": None,
                 "active_candidate_receipt": None,
                 "active_validation_receipt": None,

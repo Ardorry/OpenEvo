@@ -718,6 +718,62 @@ def test_failed_artifact_quality_archives_committed_native_successor_without_inj
     assert verified["pending_side_effects"] == 0
 
 
+def test_failed_baseline_equivalence_archives_unjudged_evolved_candidate(
+    tmp_path: Path,
+) -> None:
+    class EquivalenceFailureOperations(SyntheticOperations):
+        def assess_artifact_quality(self, request, idempotency_key):
+            return {
+                **super().assess_artifact_quality(request, idempotency_key),
+                "quality_gate_status": "PASS",
+            }
+
+        def assess_baseline_equivalence(self, request, idempotency_key):
+            del request
+            report = {
+                "schema_version": (
+                    "openevo.researchclawbench.baseline_equivalence.v1"
+                ),
+                "status": "BASELINE_EQUIVALENCE_FAILED",
+                "required_achievement_count": 1,
+                "reconstructed_required_achievement_count": 0,
+                "dropped_required_achievement_ids": ["achievement_01"],
+            }
+            report["content_sha256"] = canonical_sha256(report)
+            return self._once(
+                idempotency_key,
+                {
+                    "equivalence_gate_status": "BASELINE_EQUIVALENCE_FAILED",
+                    "equivalence_report": report,
+                    "equivalence_report_sha256": report["content_sha256"],
+                    "provider_calls": 0,
+                    "raw_gt_persisted": False,
+                    "judge_reasoning_persisted": False,
+                    "artifact_text_persisted": False,
+                },
+            )
+
+    operations = EquivalenceFailureOperations()
+    supervisor = _per_item_supervisor(tmp_path, operations, task="Astronomy_004")
+    _drive_to(supervisor, "BASELINE_EQUIVALENCE_FAILED")
+
+    closed = supervisor.invalidate_failed_per_item_baseline_equivalence(
+        reason="MECHANISM_CHANGE_AFTER_BASELINE_EQUIVALENCE_FAILURE"
+    )
+    verified = supervisor.verify()
+
+    assert closed["stage"] == "ITEM_INVALIDATED_RESET"
+    invalidation = closed["item_invalidation_receipt"]
+    assert invalidation["artifact_quality_passed"] is True
+    assert invalidation["fresh_evolved_candidate_archived_unjudged"] is True
+    assert invalidation["judge_calls_reexecuted"] == 0
+    assert len(invalidation["archived_artifact_ids"]) == 3
+    assert closed["active_artifact_ids"] == []
+    assert closed["registry_artifact_ids"] == []
+    assert verified["execution_status"] == "COMPLETED_INVALIDATED"
+    assert verified["pending_side_effects"] == 0
+
+
 def test_next_per_item_namespace_starts_clean_after_prior_item_reset(
     tmp_path: Path,
 ) -> None:

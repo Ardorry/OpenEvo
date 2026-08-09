@@ -102,7 +102,9 @@ _ALLOWED: dict[TrainingStage, frozenset[TrainingStage]] = {
     TrainingStage.BASELINE_EQUIVALENCE_ADMITTED: frozenset(
         {TrainingStage.EVALUATION_PENDING}
     ),
-    TrainingStage.BASELINE_EQUIVALENCE_FAILED: frozenset(),
+    TrainingStage.BASELINE_EQUIVALENCE_FAILED: frozenset(
+        {TrainingStage.ITEM_INVALIDATED_RESET}
+    ),
     TrainingStage.EVALUATION_PENDING: frozenset(
         {
             TrainingStage.EVALUATED,

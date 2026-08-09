@@ -104,6 +104,10 @@ def _required_achievements(capsule: Mapping[str, Any]) -> list[dict[str, Any]]:
             or not isinstance(item.get("achievement_id"), str)
             or item["achievement_id"] in ids
             or not isinstance(item.get("method_signature"), list)
+            or not isinstance(item.get("evidence_role_signature"), list)
+            or not item["evidence_role_signature"]
+            or item.get("evidence_output_class")
+            not in {"script", "numeric_output", "figure", "report_section"}
             or not isinstance(item.get("required_output_classes"), list)
             or not isinstance(item.get("capability"), str)
         ):
@@ -179,16 +183,25 @@ def _has_method_signature(unit: str, achievement: Mapping[str, Any]) -> bool:
     return len(signature_terms.intersection(_terms(unit))) >= min(2, len(signature_terms))
 
 
+def _has_evidence_role(unit: str, achievement: Mapping[str, Any]) -> bool:
+    role_terms = _terms(
+        " ".join(str(value) for value in achievement.get("evidence_role_signature", []))
+    )
+    if not role_terms:
+        return False
+    return len(role_terms.intersection(_terms(unit))) >= min(2, len(role_terms))
+
+
 def _matches_memory(unit: str, achievement: Mapping[str, Any]) -> bool:
     normalized = _normalize(unit)
-    return _matches_achievement(unit, achievement) and _has_method_signature(unit, achievement) and _has_output_role(unit, achievement) and any(
+    return _matches_achievement(unit, achievement) and _has_method_signature(unit, achievement) and _has_evidence_role(unit, achievement) and _has_output_role(unit, achievement) and any(
         marker in normalized for marker in ("preserve", "retain", "must not lose", "do not drop")
     )
 
 
 def _matches_skill(unit: str, achievement: Mapping[str, Any]) -> bool:
     normalized = _normalize(unit)
-    return _matches_achievement(unit, achievement) and _has_method_signature(unit, achievement) and _has_output_role(unit, achievement) and "reconstruct" in normalized and any(
+    return _matches_achievement(unit, achievement) and _has_method_signature(unit, achievement) and _has_evidence_role(unit, achievement) and _has_output_role(unit, achievement) and "reconstruct" in normalized and any(
         marker in normalized for marker in ("verify", "validation", "check", "confirm")
     )
 
@@ -233,6 +246,7 @@ def _matches_structured_skill(
     return (
         _matches_achievement(block, achievement)
         and _has_method_signature(block, achievement)
+        and _has_evidence_role(block, achievement)
         and _has_output_role(block, achievement)
         and "reconstruct" in normalized
         and any(

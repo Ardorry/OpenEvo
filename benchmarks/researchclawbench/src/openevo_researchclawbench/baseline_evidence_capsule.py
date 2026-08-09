@@ -298,16 +298,20 @@ def _validate_trace_and_ledger(capsule: Mapping[str, Any], root: Path) -> tuple[
             _verify_ref(root, ref)
     ledger = capsule["baseline_achievement_ledger"]
     achievements = ledger.get("achievements")
+    required_output_counts = ledger.get("required_output_class_counts")
     if (
         not isinstance(achievements, list) or not achievements or ledger.get("projector_model_calls") != 0
         or ledger.get("achievement_count") != len(achievements) or ledger.get("required_achievement_count") != len(achievements)
+        or not isinstance(required_output_counts, dict)
+        or set(required_output_counts) != {"script", "numeric_output", "figure", "report_section"}
+        or any(type(value) is not int or value < 0 for value in required_output_counts.values())
     ):
         raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_ACHIEVEMENT_LEDGER_INVALID")
     achievement_ids: set[str] = set()
-    fields = {"achievement_id", "capability", "scientific_role", "decision_rationale", "public_inputs", "trajectory_refs", "reconstruction_steps", "method_signature", "required_output_classes", "candidate_evidence_refs", "verification_assertions", "candidate_observations", "preservation_priority"}
+    fields = {"achievement_id", "capability", "scientific_role", "decision_rationale", "public_inputs", "trajectory_refs", "reconstruction_steps", "method_signature", "evidence_role_signature", "evidence_output_class", "required_output_classes", "candidate_evidence_refs", "verification_assertions", "candidate_observations", "preservation_priority"}
     output_classes = {"script", "numeric_output", "figure", "report_section"}
     for item in achievements:
-        required_lists = ("public_inputs", "trajectory_refs", "reconstruction_steps", "method_signature", "required_output_classes", "candidate_evidence_refs", "verification_assertions")
+        required_lists = ("public_inputs", "trajectory_refs", "reconstruction_steps", "method_signature", "evidence_role_signature", "required_output_classes", "candidate_evidence_refs", "verification_assertions")
         if (
             not isinstance(item, dict) or set(item) != fields or not isinstance(item.get("achievement_id"), str)
             or item["achievement_id"] in achievement_ids or item.get("preservation_priority") != "required"
@@ -315,6 +319,7 @@ def _validate_trace_and_ledger(capsule: Mapping[str, Any], root: Path) -> tuple[
             or not all(isinstance(item.get(key), list) and item[key] for key in required_lists)
             or not set(item["trajectory_refs"]).issubset(trace_ids)
             or not set(item["required_output_classes"]).issubset(output_classes)
+            or item.get("evidence_output_class") not in output_classes
         ):
             raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_ACHIEVEMENT_LEDGER_INVALID")
         observations = item.get("candidate_observations")
@@ -325,6 +330,28 @@ def _validate_trace_and_ledger(capsule: Mapping[str, Any], root: Path) -> tuple[
             if not isinstance(ref, str):
                 raise BaselineEvidenceCapsuleAdmissionError("CAPSULE_ACHIEVEMENT_LEDGER_INVALID")
             _verify_ref(root, ref)
+    observed_output_counts = {
+        "script": len(
+            {
+                ref
+                for item in achievements
+                for ref in item["candidate_evidence_refs"]
+                if Path(ref).suffix.casefold() in {".py", ".ipynb", ".r", ".jl"}
+            }
+        ),
+        "numeric_output": sum(
+            item["evidence_output_class"] == "numeric_output"
+            for item in achievements
+        ),
+        "figure": sum(
+            item["evidence_output_class"] == "figure" for item in achievements
+        ),
+        "report_section": 1,
+    }
+    if required_output_counts != observed_output_counts:
+        raise BaselineEvidenceCapsuleAdmissionError(
+            "CAPSULE_ACHIEVEMENT_LEDGER_INVALID"
+        )
     return trace_ids, achievement_ids
 
 
@@ -453,7 +480,10 @@ def build_reflector_capsule_view(capsule: Mapping[str, Any]) -> dict[str, Any]:
         "fresh_workspace_requirement": capsule["fresh_workspace_requirement"],
         "preservation_contract": "RECONSTRUCT_PRESERVE_EXTEND_VERIFY",
         "baseline_success_trace": {**capsule["baseline_success_trace"], "events": selected_trace},
-        "baseline_achievement_ledger": {**ledger, "achievements": ledger["achievements"][:8]},
+        "baseline_achievement_ledger": {
+            **ledger,
+            "achievements": ledger["achievements"][:12],
+        },
         "weakness_to_action": mappings,
         "artifact_role_contract": {
             "text_memory": "WHAT MUST NOT BE LOST: cover every required achievement with capability, evidence role, and preservation instruction.",

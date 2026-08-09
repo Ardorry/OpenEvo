@@ -66,3 +66,23 @@
 
 One structure now owns each semantic; no parallel recovery semantics or task-specific answer
 logic is introduced.
+
+## Pre-live R3.14 closure
+
+- A real R3.13 replay showed that a one-script/one-achievement ledger still allowed five
+  baseline figures to collapse to two. The ledger now binds each report-linked scientific
+  evidence role and output class, excludes inventory/manifest/access-status bookkeeping, and
+  preserves a bounded maximum of twelve required evidence chains.
+- Baseline equivalence now binds an evidence role to its concrete output class and report
+  reference, plus a baseline output-count floor. A figure can no longer stand in for a missing
+  numeric table, and unrelated files cannot satisfy an achievement.
+- The native renderer's existing 2,000-character whole-feedback bound was proven to truncate a
+  real 11-achievement balanced context before strengths, diagnoses, and SuccessTrace. Adapter
+  composition cannot split one authoritative feedback attachment without parallel semantics.
+  Core therefore retains the 2,000-character default and uses a closed 16,000-character bound
+  only for already-authorized `task_local_preservation` jobs. No target ID, benchmark name, or
+  answer-specific branch was added.
+- The baseline-equivalence invalidation transition is retained as one narrow terminal lifecycle,
+  because it was required to archive the unjudged R3.13 Candidate and clear exact task-local
+  ownership without deleting immutable evidence. It does not retry a model or authorize a new
+  run.

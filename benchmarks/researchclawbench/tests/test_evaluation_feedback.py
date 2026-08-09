@@ -315,33 +315,81 @@ def test_native_reflector_requests_see_candidate_specific_retention_feedback(
     feedback["a00_balanced_evolution_context"]["additive_improvement_targets"].append(
         "weakness_03->achievement_01 ADDITIVE|add public rerun verification"
     )
+    achievement_template = feedback["a00_balanced_evolution_context"][
+        "baseline_achievements"
+    ][0]
+    while len(
+        feedback["a00_balanced_evolution_context"]["baseline_achievements"]
+    ) < 12:
+        index = len(
+            feedback["a00_balanced_evolution_context"]["baseline_achievements"]
+        ) + 1
+        feedback["a00_balanced_evolution_context"]["baseline_achievements"].append(
+            achievement_template.replace("achievement_01", f"achievement_{index:02d}")
+        )
+    trace_template = feedback["a00_balanced_evolution_context"][
+        "baseline_success_trace"
+    ][0]
+    while len(feedback["a00_balanced_evolution_context"]["baseline_success_trace"]) < 12:
+        index = len(
+            feedback["a00_balanced_evolution_context"]["baseline_success_trace"]
+        ) + 1
+        feedback["a00_balanced_evolution_context"]["baseline_success_trace"].append(
+            trace_template.replace("trace_01", f"trace_{index:02d}")
+        )
     dataset = _dataset(tmp_path, feedback)
     runtime = default_managed_reflector_runtime()
     captured: list[ReflectorInferenceRequest] = []
+    achievements = projection["baseline_evidence_capsule"][
+        "baseline_achievement_ledger"
+    ]["achievements"]
+
+    def output_roles(achievement: dict[str, Any]) -> str:
+        words = {
+            "script": "script code",
+            "numeric_output": "numeric table csv metric",
+            "figure": "figure plot image",
+            "report_section": "report discussion section",
+        }
+        return " ".join(
+            words[item] for item in achievement["required_output_classes"]
+        )
+
+    memory_text = "\n".join(
+        f"PRESERVE {item['achievement_id']}: retain candidate method "
+        f"{' '.join(item['method_signature'])} and its "
+        f"{' '.join(item['evidence_role_signature'])} {output_roles(item)} evidence role; "
+        "do not drop this baseline capability."
+        for item in achievements
+    )
+    skill_reconstruction = "\n".join(
+        f"RECONSTRUCT {item['achievement_id']} using candidate method "
+        f"{' '.join(item['method_signature'])} with "
+        f"{' '.join(item['evidence_role_signature'])} {output_roles(item)}, then verify its report evidence."
+        for item in achievements
+    )
+    skill_actions = "\n".join(
+        f"For {item['addresses']} and {item['achievement_id']}, add a public-data cross-check without replacing the baseline path."
+        for item in projection["baseline_evidence_capsule"]["improvement_actions"]
+    )
 
     class FakeService:
         def infer(self, request: ReflectorInferenceRequest) -> ReflectorInferenceResponse:
             captured.append(request)
             if "ExpeL" in request.prompt:
                 text = (
-                    "# Memory\n\n## Do\nPRESERVE achievement_01 analyze script and report evidence. "
-                    "PRESERVE achievement_02 public csv numeric table and report evidence. "
-                    "PRESERVE achievement_03 candidate summary figure and report evidence.\n\n"
+                    f"# Memory\n\n## Do\n{memory_text}\n\n"
                     "## Avoid\nDo not replace required baseline achievements.\n\n"
-                    "## Validate\nKeep achievement_01 while weakness_01 adds an independent numeric cross-check; "
-                    "keep achievement_02 while weakness_02 adds a public-input comparison.\n\n"
+                    "## Validate\nRetain known weaknesses for additive handling.\n\n"
                     "## When Applicable\nUse for public-data analysis.\n\n"
                     "## Retired Or Superseded\nNone.\n"
                 )
             elif "Skill Bundle" in request.prompt:
                 text = (
                     "# Preservation-first skill\n\n"
-                    "Phase 1 — Reconstruct baseline capabilities. RECONSTRUCT achievement_01 analyze script and verify report evidence. "
-                    "RECONSTRUCT achievement_02 public csv numeric table and verify report evidence. "
-                    "RECONSTRUCT achievement_03 candidate summary figure and verify report evidence.\n"
+                    f"Phase 1 — Reconstruct baseline capabilities.\n{skill_reconstruction}\n"
                     "Phase 2 — Verify reconstruction.\n"
-                    "Phase 3 — Add evaluator-driven improvements. For weakness_01 and achievement_01, add a numeric cross-check. "
-                    "For weakness_02 and achievement_02, add a public-input comparison validation.\n"
+                    f"Phase 3 — Add evaluator-driven improvements.\n{skill_actions}\n"
                     "Phase 4 — Integrate without deleting preserved work.\n"
                 )
             else:
@@ -378,6 +426,11 @@ def test_native_reflector_requests_see_candidate_specific_retention_feedback(
         lambda: FakeService(),
     )
     common = {
+        "training_feedback_required": True,
+        "task_local_preservation": {
+            "schema_version": "openevo.task_local_preservation.v1",
+            "scope": "next_session_only",
+        },
         "reflector_llm": {
             "provider": "codex_cli",
             "model": "gpt-5.5",
@@ -427,10 +480,16 @@ def test_native_reflector_requests_see_candidate_specific_retention_feedback(
     assert "report/images/candidate_summa" in prompts
     assert "fresh workspace" in prompts.casefold()
     assert prompts.count("Baseline Success Trace") >= 3
+    last_trace_id = projection["reflector_baseline_evidence_capsule"][
+        "baseline_success_trace"
+    ]["events"][-1]["trace_id"]
+    assert prompts.count(last_trace_id) >= 3
     assert prompts.count("weakness_01") >= 3
     assert prompts.count("weakness_02") >= 3
     assert prompts.count("weakness_03") >= 3
     assert prompts.count("achievement_01 REQUIRED") >= 3
+    assert prompts.count("achievement_12 REQUIRED") >= 3
+    assert prompts.count("trace_12") >= 3
     assert "candidate_summary.png" in prompts
     assert "quasiflux" not in prompts.casefold()
     assert "private_target_figure" not in prompts.casefold()

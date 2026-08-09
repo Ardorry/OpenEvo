@@ -27,9 +27,41 @@ _SUCCESS_WORDS = frozenset(
     {"created", "wrote", "generated", "executed", "ran", "computed", "built", "validated", "produced", "saved", "rendered"}
 )
 _LOW_SIGNAL = frozenset(
-    {"analysis", "artifact", "candidate", "data", "file", "figure", "image", "output", "report", "result", "run", "script", "summary", "the", "with"}
+    {
+        "analysis",
+        "artifact",
+        "artifacts",
+        "candidate",
+        "candidates",
+        "data",
+        "file",
+        "files",
+        "figure",
+        "figures",
+        "image",
+        "images",
+        "output",
+        "outputs",
+        "report",
+        "reports",
+        "result",
+        "results",
+        "run",
+        "runs",
+        "script",
+        "scripts",
+        "summaries",
+        "summary",
+        "the",
+        "with",
+    }
 )
 _CODE_NOISE = frozenset({"ensure_dirs", "main", "run", "run_pipeline", "save", "write"})
+_PUBLIC_INPUT_PREFIXES = ("data/", "related_work/", "inputs/")
+_MAX_REQUIRED_ACHIEVEMENTS = 12
+_ADMIN_OUTPUT_TOKENS = frozenset(
+    {"checklist", "inventory", "manifest", "metadata", "validator"}
+)
 
 
 class BaselineSuccessTraceError(RuntimeError):
@@ -49,6 +81,69 @@ def _candidate_files(root: Path) -> list[str]:
             continue
         files.append(path.relative_to(root).as_posix())
     return files
+
+
+def _is_public_input(ref: str) -> bool:
+    return ref.startswith(_PUBLIC_INPUT_PREFIXES)
+
+
+def _is_candidate_output(ref: str) -> bool:
+    suffix = Path(ref).suffix.casefold()
+    return ref.startswith(("outputs/", "report/")) and suffix in (
+        _IMAGE_SUFFIXES | _NUMERIC_SUFFIXES
+    )
+
+
+def _evidence_role_signature(ref: str) -> list[str]:
+    return [
+        token
+        for token in dict.fromkeys(_TOKEN.findall(Path(ref).stem.casefold()))
+        if token not in _LOW_SIGNAL
+        and token not in _ADMIN_OUTPUT_TOKENS
+        and not token.isdigit()
+    ][:6]
+
+
+def _is_administrative_output(ref: str) -> bool:
+    """Exclude runtime bookkeeping from scientific capability preservation.
+
+    These files remain sealed candidate evidence and may be cited as
+    limitations, but inventory, manifest, and access-status records are not
+    themselves scientific analysis capabilities.  Match only narrow filename
+    identities; validation and scientific summary outputs remain eligible.
+    """
+
+    tokens = set(_TOKEN.findall(Path(ref).stem.casefold()))
+    return bool(tokens.intersection(_ADMIN_OUTPUT_TOKENS)) or {
+        "access",
+        "status",
+    }.issubset(tokens) or {"artifact", "tree"}.issubset(tokens)
+
+
+def _prioritize_evidence_outputs(root: Path, refs: Iterable[str]) -> list[str]:
+    try:
+        report = (root / "report/report.md").read_text(
+            encoding="utf-8", errors="replace"
+        )[:262_144].casefold()
+    except OSError:
+        report = ""
+    candidates = [
+        ref
+        for ref in dict.fromkeys(refs)
+        if _is_candidate_output(ref)
+        and not _is_administrative_output(ref)
+        and _evidence_role_signature(ref)
+    ]
+    return sorted(
+        candidates,
+        key=lambda ref: (
+            0
+            if ref.casefold() in report or Path(ref).name.casefold() in report
+            else 1,
+            0 if Path(ref).suffix.casefold() in _IMAGE_SUFFIXES else 1,
+            ref,
+        ),
+    )
 
 
 def _safe_ref(root: Path, relative: str) -> bool:
@@ -183,11 +278,11 @@ def _classify_outputs(refs: Iterable[str]) -> list[str]:
     output_classes: set[str] = set()
     for ref in refs:
         path = Path(ref)
-        if path.suffix.casefold() in _CODE_SUFFIXES:
+        if path.suffix.casefold() in _CODE_SUFFIXES and not _is_public_input(ref):
             output_classes.add("script")
-        elif path.suffix.casefold() in _IMAGE_SUFFIXES:
+        elif _is_candidate_output(ref) and path.suffix.casefold() in _IMAGE_SUFFIXES:
             output_classes.add("figure")
-        elif path.suffix.casefold() in _NUMERIC_SUFFIXES:
+        elif _is_candidate_output(ref) and path.suffix.casefold() in _NUMERIC_SUFFIXES:
             output_classes.add("numeric_output")
         elif ref == "report/report.md":
             output_classes.add("report_section")
@@ -260,12 +355,17 @@ def _script_evidence(
 
 
 def _file_events(root: Path, files: list[str]) -> list[dict[str, Any]]:
-    public_inputs = [item for item in files if item.startswith(("data/", "related_work/", "inputs/"))][:6]
+    public_inputs = [item for item in files if _is_public_input(item)][:6]
     reports = [item for item in files if item == "report/report.md"]
-    outputs = [item for item in files if Path(item).suffix.casefold() in (_IMAGE_SUFFIXES | _NUMERIC_SUFFIXES)]
+    outputs = [item for item in files if _is_candidate_output(item)]
     events: list[dict[str, Any]] = []
     script_events: list[dict[str, Any]] = []
-    for script in [item for item in files if Path(item).suffix.casefold() in _CODE_SUFFIXES]:
+    for script in [
+        item
+        for item in files
+        if Path(item).suffix.casefold() in _CODE_SUFFIXES
+        and not _is_public_input(item)
+    ]:
         stem = Path(script).stem.replace("_", " ")
         linked, signature, method_summary = _script_evidence(root, script, outputs)
         refs = list(dict.fromkeys([script, *linked, *reports]))
@@ -315,7 +415,7 @@ def build_baseline_success_trace(*, candidate_root: str | Path) -> dict[str, Any
     if "report/report.md" not in files:
         raise BaselineSuccessTraceError("SUCCESS_TRACE_REPORT_EVIDENCE_ABSENT")
     file_set = set(files)
-    public_inputs = [item for item in files if item.startswith(("data/", "related_work/", "inputs/"))][:6]
+    public_inputs = [item for item in files if _is_public_input(item)][:6]
     candidates = _transcript_items(root, file_set) + _file_events(root, files)
 
     # A transcript often begins with successful but low-information inspection
@@ -332,7 +432,7 @@ def build_baseline_success_trace(*, candidate_root: str | Path) -> dict[str, Any
         has_code = any(Path(ref).suffix.casefold() in _CODE_SUFFIXES for ref in refs)
         has_report = "report/report.md" in refs
         output_count = sum(
-            Path(ref).suffix.casefold() in (_IMAGE_SUFFIXES | _NUMERIC_SUFFIXES)
+            _is_candidate_output(ref)
             for ref in refs
         )
         action = str(item.get("action", ""))
@@ -346,8 +446,20 @@ def build_baseline_success_trace(*, candidate_root: str | Path) -> dict[str, Any
     events: list[dict[str, Any]] = []
     seen: set[str] = set()
     for item in candidates:
-        refs = [ref for ref in item.get("candidate_artifact_refs", []) if ref in file_set]
-        public_refs = [ref for ref in item.get("public_input_refs", public_inputs) if ref in file_set]
+        observed_refs = [
+            ref for ref in item.get("candidate_artifact_refs", []) if ref in file_set
+        ]
+        refs = [ref for ref in observed_refs if not _is_public_input(ref)]
+        public_refs = list(
+            dict.fromkeys(
+                [
+                    ref
+                    for ref in item.get("public_input_refs", public_inputs)
+                    if ref in file_set and _is_public_input(ref)
+                ]
+                + [ref for ref in observed_refs if _is_public_input(ref)]
+            )
+        )
         if not refs:
             # A successful transcript-only item is useful only when it can be
             # tied to a concrete candidate artifact, rather than its prose.
@@ -408,13 +520,88 @@ def build_baseline_achievement_ledger(
     workspace_outputs = [
         item
         for item in files
-        if Path(item).suffix.casefold() in (_IMAGE_SUFFIXES | _NUMERIC_SUFFIXES)
+        if _is_candidate_output(item)
     ]
     code_methods_present = any(
         any(Path(ref).suffix.casefold() in _CODE_SUFFIXES for ref in event.get("candidate_artifact_refs", []))
         for event in raw_events
         if isinstance(event, dict)
     )
+
+    def append_achievement(
+        *,
+        event: Mapping[str, Any],
+        method_ref: str,
+        signature: list[str],
+        method_summary: str,
+        evidence_ref: str,
+    ) -> None:
+        evidence_signature = _evidence_role_signature(evidence_ref)
+        evidence_class = (
+            "figure"
+            if Path(evidence_ref).suffix.casefold() in _IMAGE_SUFFIXES
+            else (
+                "numeric_output"
+                if Path(evidence_ref).suffix.casefold() in _NUMERIC_SUFFIXES
+                else "script"
+            )
+        )
+        classes = list(
+            dict.fromkeys(
+                [
+                    "script",
+                    evidence_class,
+                    "report_section",
+                ]
+            )
+        )
+        achievement_id = f"achievement_{len(achievements) + 1:02d}"
+        role = " ".join(evidence_signature)
+        capability = (
+            f"Reconstruct candidate-created `{method_ref}` analysis route: "
+            f"{method_summary}. Regenerate the candidate evidence role `{role}` "
+            f"as {evidence_class} and connect it to the report."
+        )
+        achievements.append(
+            {
+                "achievement_id": achievement_id,
+                "capability": capability,
+                "scientific_role": (
+                    "Candidate-produced analysis and evidence chain used in the "
+                    "submitted scientific report."
+                ),
+                "decision_rationale": str(event.get("decision_context", "")),
+                "public_inputs": list(event.get("public_input_refs", [])),
+                "trajectory_refs": [event.get("trace_id")],
+                "reconstruction_steps": [
+                    "Start from the original public inputs in a fresh workspace.",
+                    f"Reconstruct and execute `{method_ref}` using this candidate-derived method: {method_summary}.",
+                    f"Regenerate the `{role}` {evidence_class} evidence role and connect it to the report discussion.",
+                    "Verify that the regenerated method and evidence chain are present before adding improvements.",
+                ],
+                "method_signature": signature,
+                "evidence_role_signature": evidence_signature,
+                "evidence_output_class": evidence_class,
+                "required_output_classes": classes,
+                "candidate_evidence_refs": [
+                    method_ref,
+                    evidence_ref,
+                    "report/report.md",
+                ],
+                "verification_assertions": [
+                    str(event.get("verification", "")),
+                    "Fresh output must include the reconstructed method, evidence, and report discussion.",
+                ],
+                "candidate_observations": [
+                    {
+                        "provenance": "candidate_observation",
+                        "summary": str(event.get("result_summary", "")),
+                    }
+                ],
+                "preservation_priority": "required",
+            }
+        )
+
     for event in raw_events:
         if not isinstance(event, dict):
             continue
@@ -426,10 +613,28 @@ def build_baseline_achievement_ledger(
             linked, source_signature, source_summary = _script_evidence(
                 root, method_refs[0], workspace_outputs
             )
-            # The transcript can record only the command that invoked a
-            # script.  Bind its sealed outputs here so the ledger describes a
-            # complete method/evidence chain rather than an isolated path.
-            refs = list(dict.fromkeys([*refs, *linked, "report/report.md"]))
+            evidence_outputs = _prioritize_evidence_outputs(root, linked)
+            method_key = method_refs[0].casefold()
+            if method_key in seen_methods:
+                continue
+            if evidence_outputs and len(source_signature) >= 2:
+                seen_methods.add(method_key)
+                for evidence_ref in evidence_outputs:
+                    if len(achievements) == _MAX_REQUIRED_ACHIEVEMENTS:
+                        break
+                    append_achievement(
+                        event=event,
+                        method_ref=method_refs[0],
+                        signature=source_signature,
+                        method_summary=source_summary,
+                        evidence_ref=evidence_ref,
+                    )
+                if len(achievements) == _MAX_REQUIRED_ACHIEVEMENTS:
+                    break
+                continue
+            # A script-only route is a fallback for a valid baseline that did
+            # not produce a separately typed candidate output.
+            refs = list(dict.fromkeys([*refs, "report/report.md"]))
         classes = _classify_outputs(refs)
         if not classes:
             continue
@@ -466,6 +671,19 @@ def build_baseline_achievement_ledger(
             "Regenerate the required evidence outputs and connect them to the report discussion.",
             "Verify that the regenerated method and evidence chain are present before adding improvements.",
         ]
+        evidence_ref = next(
+            (ref for ref in refs if _is_candidate_output(ref)), method_ref
+        )
+        evidence_signature = _evidence_role_signature(evidence_ref) or signature[:4]
+        evidence_class = (
+            "figure"
+            if Path(evidence_ref).suffix.casefold() in _IMAGE_SUFFIXES
+            else (
+                "numeric_output"
+                if Path(evidence_ref).suffix.casefold() in _NUMERIC_SUFFIXES
+                else "script"
+            )
+        )
         achievements.append(
             {
                 "achievement_id": achievement_id,
@@ -478,6 +696,8 @@ def build_baseline_achievement_ledger(
                 "trajectory_refs": [event.get("trace_id")],
                 "reconstruction_steps": reconstruction_steps,
                 "method_signature": signature,
+                "evidence_role_signature": evidence_signature,
+                "evidence_output_class": evidence_class,
                 "required_output_classes": classes,
                 "candidate_evidence_refs": list(dict.fromkeys([*refs, "report/report.md"])),
                 "verification_assertions": [
@@ -493,16 +713,35 @@ def build_baseline_achievement_ledger(
                 "preservation_priority": "required",
             }
         )
-        if len(achievements) == 8:
+        if len(achievements) == _MAX_REQUIRED_ACHIEVEMENTS:
             break
     if not achievements:
         raise BaselineSuccessTraceError("ACHIEVEMENT_LEDGER_NO_CONCRETE_CAPABILITY")
+    output_floor = {
+        "script": len(
+            {
+                ref
+                for item in achievements
+                for ref in item["candidate_evidence_refs"]
+                if Path(ref).suffix.casefold() in _CODE_SUFFIXES
+            }
+        ),
+        "numeric_output": sum(
+            item["evidence_output_class"] == "numeric_output"
+            for item in achievements
+        ),
+        "figure": sum(
+            item["evidence_output_class"] == "figure" for item in achievements
+        ),
+        "report_section": 1,
+    }
     return {
         "schema_version": ACHIEVEMENT_LEDGER_SCHEMA,
         "source": "baseline_success_trace",
         "projector_model_calls": 0,
         "achievement_count": len(achievements),
         "required_achievement_count": len(achievements),
+        "required_output_class_counts": output_floor,
         "achievements": achievements,
     }
 
