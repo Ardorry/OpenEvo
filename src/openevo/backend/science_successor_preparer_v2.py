@@ -941,6 +941,19 @@ class ProductionScienceSuccessorPreparerV2:
             observed_job_ids: list[str] = []
             observed_plan_authorities: set[tuple[str, str, str]] = set()
             for planned in context.plan.enabled_methods:
+                selection = project.config.evolution.targets.get(
+                    planned.target_id
+                )
+                if selection is None:
+                    raise ScienceSuccessorPreparationV2Error(
+                        "completed method target is absent from project config"
+                    )
+                method_content_basis = (
+                    self._content_admission_basis_for_method(
+                        content_basis,
+                        selection.config,
+                    )
+                )
                 job = SucceededPlanBoundJobAuthorityResponse.model_validate_json(
                     json.dumps(
                         client.get_internal_succeeded_plan_bound_job_authority(
@@ -1047,7 +1060,7 @@ class ProductionScienceSuccessorPreparerV2:
                     or artifact.content_admission is None
                     or artifact.content_admission.passed is not True
                     or artifact.content_admission.basis_sha256
-                    != content_basis.content_sha256
+                    != method_content_basis.content_sha256
                     or raw_selected.get("payload_manifest_digest")
                     != artifact.payload_manifest_sha256
                     or raw_selected.get("payload_byte_size")
@@ -1922,10 +1935,15 @@ class ProductionScienceSuccessorPreparerV2:
                     passed=True,
                     report_sha256=admission_report_sha256,
                 ),
-                content_admission_basis=self._content_admission_basis(
-                    context,
-                    dataset,
-                    client,
+                content_admission_basis=(
+                    self._content_admission_basis_for_method(
+                        self._content_admission_basis(
+                            context,
+                            dataset,
+                            client,
+                        ),
+                        spec.selection.config(),
+                    )
                 ),
             ),
         )
