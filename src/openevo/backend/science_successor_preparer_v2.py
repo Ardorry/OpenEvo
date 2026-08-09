@@ -88,6 +88,7 @@ from openevo.evolution.methods import (
     task_specific_report_titles,
 )
 from openevo.evolution.models import (
+    ArtifactContentAdmissionReceipt,
     ArtifactResponse,
     ArtifactState,
     ArtifactType,
@@ -3825,14 +3826,9 @@ class ProductionScienceSuccessorPreparerV2:
             != admission_decision.proposal_artifact_ids
             or admission_decision.content_admission.basis_sha256
             != content_admission_basis.content_sha256
-            or admission_decision.content_admission.source_artifact_ids
-            != expected_source_artifact_ids
-            or (
-                bool(expected_source_artifact_ids)
-                != (
-                    admission_decision.content_admission.source_payload_sha256
-                    is not None
-                )
+            or not _content_admission_provenance_matches(
+                admission_decision.content_admission,
+                expected_source_artifact_ids,
             )
             or (
                 selection.action is not ProposalAction.REJECT
@@ -3959,6 +3955,19 @@ def _plan_bound_request(
         ),
         core_config=core_config,
         priority=100,
+    )
+
+
+def _content_admission_provenance_matches(
+    receipt: ArtifactContentAdmissionReceipt,
+    expected_source_artifact_ids: tuple[str, ...],
+) -> bool:
+    """Compare successor source authority without changing leakage semantics."""
+
+    return (
+        receipt.source_artifact_ids == expected_source_artifact_ids
+        and bool(expected_source_artifact_ids)
+        == (receipt.source_payload_sha256 is not None)
     )
 
 

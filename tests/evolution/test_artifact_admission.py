@@ -400,8 +400,10 @@ def test_task_local_preservation_allows_candidate_overlap_not_private_literals()
     )
 
     assert preserved.passed is True
-    assert preserved.source_artifact_ids == ()
-    assert preserved.source_payload_sha256 is None
+    # Candidate-owned payloads are excluded from the GT-literal collision scan,
+    # not from the immutable provenance authority attached to the receipt.
+    assert preserved.source_artifact_ids == ("dataset-1",)
+    assert preserved.source_payload_sha256 is not None
     assert blocked.passed is False
     assert blocked.finding_categories == ("file_name",)
     assert task_id_blocked.passed is False

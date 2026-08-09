@@ -250,6 +250,15 @@ def artifact_content_admission_receipt(
     scanned_byte_count = 0
 
     source_payloads = source_payloads or {}
+    # These two authorities deliberately have different scopes:
+    #
+    # * ``source_payloads_for_literal_scan`` controls which source literals can
+    #   collide with proposal text.  A sealed candidate/public source may be
+    #   reusable in the closed task-local preservation scope.
+    # * ``source_payloads`` is the complete provenance authority.  Reuse never
+    #   changes which artifacts actually produced the proposal.
+    #
+    # Do not derive provenance from the filtered scan set.
     # The one-session scope may retain candidate/public evidence. Its exact
     # task/evaluator basis below still blocks private feedback, task IDs,
     # protected paths, Judge markers, and every classified literal.
@@ -346,10 +355,10 @@ def artifact_content_admission_receipt(
         "schema_version": "openevo.artifact_content_admission.v1",
         "basis_sha256": basis.content_sha256,
         "proposal_artifact_ids": list(proposal_ids),
-        "source_artifact_ids": sorted(source_payloads_for_literal_scan),
+        "source_artifact_ids": sorted(source_payloads),
         "source_payload_sha256": (
-            _source_payload_sha256(source_payloads_for_literal_scan)
-            if source_payloads_for_literal_scan
+            _source_payload_sha256(source_payloads)
+            if source_payloads
             else None
         ),
         "scanned_file_count": scanned_file_count,

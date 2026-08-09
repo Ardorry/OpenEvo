@@ -33,12 +33,14 @@ from openevo.backend.science_successor import (
 from openevo.backend.science_successor_preparer_v2 import (
     ProductionScienceSuccessorPreparerV2,
     ScienceSuccessorPreparationV2Error,
+    _content_admission_provenance_matches,
     _materialized_context_from_wire,
     _project_requires_training_feedback,
 )
 from openevo.backend.workspace_handoff_v2 import WorkspaceHandoffStoreV2
 from openevo.backend.workspace_store_v2 import WorkspaceStoreV2
 from openevo.evolution.admission import (
+    ArtifactContentAdmissionBasis,
     ArtifactProposalDecisionRequest,
     ProposalAction,
     artifact_content_admission_receipt,
@@ -105,6 +107,45 @@ def test_project_scoped_method_config_requires_durable_feedback() -> None:
         resource_version=project.resource_version,
     )
     assert _project_requires_training_feedback(ungated) is False
+
+
+def test_successor_provenance_uses_full_sources_when_literal_scan_reuses_candidate(
+    tmp_path,
+) -> None:
+    source_payloads = {
+        "dataset-candidate": {
+            "records.jsonl": '{"candidate_report":"candidate_plot.png"}'
+        }
+    }
+    receipt = artifact_content_admission_receipt(
+        basis=ArtifactContentAdmissionBasis(
+            file_names=("candidate_plot.png",),
+            candidate_source_reuse_authorized=True,
+        ),
+        payloads={
+            "proposal-1": {
+                "SKILL.md": "Reconstruct the path that produced candidate_plot.png."
+            }
+        },
+        source_payloads=source_payloads,
+    )
+
+    assert receipt.passed is True
+    assert _content_admission_provenance_matches(
+        receipt,
+        ("dataset-candidate",),
+    )
+
+    missing_body = receipt.model_dump(mode="json")
+    missing_body["source_artifact_ids"] = []
+    missing_body["source_payload_sha256"] = None
+    missing_body.pop("content_sha256")
+    missing_body["content_sha256"] = canonical_digest(missing_body)
+    missing = type(receipt).model_validate(missing_body)
+    assert not _content_admission_provenance_matches(
+        missing,
+        ("dataset-candidate",),
+    )
 
 
 def test_production_preparer_resolves_trusted_feedback_for_successor_jobs(
