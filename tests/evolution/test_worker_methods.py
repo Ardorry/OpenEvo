@@ -1217,6 +1217,7 @@ def _task_local_preservation_config() -> dict[str, Any]:
             "forbidden_literals": {
                 "source_files": ["data/public.csv", "code/analyze.py"],
                 "answer_values": ["hidden answer value"],
+                "task_ids": ["internal_task"],
             }
         },
     }
@@ -1329,6 +1330,7 @@ def test_task_local_preservation_scope_keeps_paths_but_not_answers_in_agent_syst
     assert "hidden answer value" not in content
     assert "[REDACTED_SOURCE_FILES_" not in content
     prompt = captured["json"]["messages"][1]["content"]
+    assert "internal_task" not in prompt
     assert "RECONSTRUCT comes before PRESERVE" in prompt
     assert "baseline equivalence" in prompt
     assert "task-local successor" in captured["json"]["messages"][0]["content"].casefold()

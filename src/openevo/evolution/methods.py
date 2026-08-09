@@ -4439,6 +4439,16 @@ def _generate_audited_agent_system_reflection(
 ) -> tuple[str, dict[str, Any]]:
     audit_config = _agent_system_audit_config(job)
     task_local_preservation = _task_local_preservation_enabled(job)
+    # The task-local scope may retain candidate-produced public reconstruction
+    # anchors, but it never authorizes task identity or evaluator-only literals.
+    # Redact those before the first inference as well as in repair prompts: a
+    # later output audit must not be the first boundary protecting a completed
+    # successor transition from an otherwise avoidable task-ID echo.
+    prompt = _redact_generic_reflector_prompt(
+        prompt,
+        job=job,
+        manifests=manifests,
+    )
     raw_leakage_basis = audit_config.get("leakage_basis")
     leakage_basis = raw_leakage_basis if isinstance(raw_leakage_basis, dict) else {}
     forbidden_literals = _agent_system_forbidden_literals(job, manifests)
