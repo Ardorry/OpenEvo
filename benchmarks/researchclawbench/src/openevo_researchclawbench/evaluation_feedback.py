@@ -32,6 +32,9 @@ FEEDBACK_SCHEMA = "openevo.researchclawbench.sanitized_evaluation_feedback.v1"
 ADMISSION_SCHEMA = "openevo.researchclawbench.feedback_admission.v1"
 RETENTION_FEEDBACK_CLASS = "preservation_first_evolution_r3"
 RETENTION_FEEDBACK_SCHEMA = "openevo.researchclawbench.preservation_first_evolution.r3"
+BALANCED_CONTEXT_SCHEMA = (
+    "openevo.researchclawbench.balanced_evolution_context.v1"
+)
 
 ALLOWED_DIMENSIONS = frozenset(
     {
@@ -658,6 +661,18 @@ def project_sanitized_evaluation_feedback(
         "feedback_class": feedback["feedback_class"],
         "evaluation_summary": feedback["evaluation_summary"],
         "preserve_before_improve": feedback["preserve_before_improve"],
+        "preserve_strengths": [
+            {
+                key: strength[key]
+                for key in (
+                    "dimension",
+                    "candidate_observation",
+                    "improvement_direction",
+                    "evidence_refs",
+                )
+            }
+            for strength in feedback["preserve_strengths"]
+        ],
         "diagnoses": [
             {
                 key: diagnosis[key]
@@ -673,47 +688,19 @@ def project_sanitized_evaluation_feedback(
         ],
     }
     reflector_capsule = build_reflector_capsule_view(capsule)
-    actionable_candidate_evolution = {
-        "preservation_contract": "RECONSTRUCT_PRESERVE_EXTEND_VERIFY",
-        "required_achievement_ids": [
-            item["achievement_id"]
-            for item in reflector_capsule["baseline_achievement_ledger"]["achievements"]
-        ],
-        "all_feedback_actions": reflector_capsule["weakness_to_action"],
-        "fresh_workspace": reflector_capsule["fresh_workspace_requirement"],
-        "requirement": (
-            "RECONSTRUCT every required baseline achievement before PRESERVE it. "
-            "EXTEND only through each additive feedback action, then VERIFY baseline "
-            "equivalence. Do not replace baseline paths, restart the research plan, "
-            "or reconstruct hidden targets."
-        ),
-    }
-    # Core's native reflector renderer correctly bounds feedback records.  Put
-    # the complete preservation contract first in a compact, data-only view so
-    # that all three native reflector prompts receive it before any verbose
-    # trajectory JSON can consume that bounded rendering budget.  The full
-    # typed capsule remains attached below for durable provenance and adapter
-    # admission; this compact view is not a second source of authority.
-    prompt_contract = _build_reflector_prompt_contract(reflector_capsule)
+    balanced_context = build_balanced_evolution_context(
+        sanitized_feedback=reflector_sanitized_feedback,
+        capsule=reflector_capsule,
+    )
+    # The full feedback and capsule remain separate durable authorities.  The
+    # native reflectors receive one compact composition, rather than several
+    # overlapping wrappers that repeat the same weakness and preservation data.
     reflector_feedback = {
-        "a00_preservation_first_prompt_contract": prompt_contract,
+        "a00_balanced_evolution_context": balanced_context,
         "schema_version": RETENTION_FEEDBACK_SCHEMA,
         "status": "available_for_evolution",
         "feedback_class": RETENTION_FEEDBACK_CLASS,
         "task_id": task_id,
-        "actionable_candidate_evolution": actionable_candidate_evolution,
-        "sanitized_evaluation_feedback": reflector_sanitized_feedback,
-        "baseline_evidence_capsule": reflector_capsule,
-        "fresh_workspace_guidance": [
-            "The next Candidate will run in a fresh workspace without baseline files.",
-            (
-                "For memory write WHAT MUST NOT BE LOST; for skill write HOW TO "
-                "RECONSTRUCT AND EXTEND; for agent-system write WHAT MUST BE TRUE "
-                "BEFORE SUBMISSION. Keep all required achievements and all admitted "
-                "diagnoses visible in the final artifacts."
-            ),
-            "Do not reconstruct hidden evaluation targets.",
-        ],
         "policy": {
             "candidate_grounded": True,
             "public_or_candidate_provenance_required": True,
@@ -755,72 +742,114 @@ def project_sanitized_evaluation_feedback(
     }
 
 
-def _build_reflector_prompt_contract(reflector_capsule: Mapping[str, Any]) -> dict[str, Any]:
-    """Return the compact, ordered R3 view consumed by native reflectors.
+def build_balanced_evolution_context(
+    *,
+    sanitized_feedback: Mapping[str, Any],
+    capsule: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Compose one bounded, balanced native-reflector input.
 
-    Values stay below Core's per-leaf feedback rendering bound.  The ordered
-    keys deliberately place the semantic rule, every admitted diagnosis, the
-    required-achievement ledger, and successful trace evidence ahead of the
-    verbose durable capsule fields.
+    This does not reinterpret evaluator feedback.  It pairs every admitted
+    weakness with Candidate-owned successful paths and additive actions, while
+    retaining the full feedback and capsule as separate durable authorities.
     """
 
     def compact(value: Any, *, limit: int) -> str:
         return " ".join(str(value).split())[:limit].rstrip()
 
-    mappings = reflector_capsule["weakness_to_action"]
-    diagnoses = [
+    strengths = sanitized_feedback.get("preserve_strengths")
+    diagnoses = sanitized_feedback.get("diagnoses")
+    ledger = capsule.get("baseline_achievement_ledger")
+    mappings = capsule.get("weakness_to_action")
+    trace = capsule.get("baseline_success_trace")
+    if (
+        not isinstance(strengths, list)
+        or not strengths
+        or not isinstance(diagnoses, list)
+        or not diagnoses
+        or not isinstance(ledger, dict)
+        or not isinstance(ledger.get("achievements"), list)
+        or not ledger["achievements"]
+        or not isinstance(mappings, list)
+        or len(mappings) != len(diagnoses)
+        or not isinstance(trace, dict)
+        or not isinstance(trace.get("events"), list)
+        or not trace["events"]
+    ):
+        raise FeedbackProjectionError("BALANCED_EVOLUTION_CONTEXT_FAILED")
+    achievement_ids = {
+        item.get("achievement_id")
+        for item in ledger["achievements"]
+        if isinstance(item, dict)
+    }
+    if (
+        None in achievement_ids
+        or any(
+            not isinstance(item, dict)
+            or item.get("feedback_action_mode") != "additive"
+            or item.get("achievement_id") not in achievement_ids
+            for item in mappings
+        )
+    ):
+        raise FeedbackProjectionError("BALANCED_EVOLUTION_CONTEXT_FAILED")
+
+    compact_strengths = [
         (
-            f"{item['weakness_id']} -> {item['achievement_id']}: {item['dimension']}; "
-            f"candidate={compact(item['candidate_observation'], limit=84)}; ADDITIVE ACTION="
-            f"{compact(item['next_run_action'], limit=112)}"
+            f"strength:{item['dimension']}|candidate="
+            f"{compact(item['candidate_observation'], limit=72)}|evidence="
+            f"{','.join(item['evidence_refs'][:2])}"
+        )
+        for item in strengths
+    ]
+    compact_achievements = [
+        (
+            f"{item['achievement_id']} REQUIRED|method="
+            f"{compact(' '.join(item['method_signature'][:6]), limit=42)}|public="
+            f"{','.join(item['public_inputs'][:1])}|outputs="
+            f"{','.join(item['required_output_classes'])}|evidence="
+            f"{','.join(item['candidate_evidence_refs'][:1])}"
+        )
+        for item in ledger["achievements"]
+    ]
+    compact_feedback = [
+        (
+            f"{mapping['weakness_id']}:{diagnosis['dimension']}|candidate="
+            f"{compact(diagnosis['candidate_observation'], limit=56)}|direction="
+            f"{compact(diagnosis['improvement_direction'], limit=56)}"
+        )
+        for diagnosis, mapping in zip(diagnoses, mappings, strict=True)
+    ]
+    compact_actions = [
+        (
+            f"{item['weakness_id']}->{item['achievement_id']} ADDITIVE|"
+            f"{compact(item['next_run_action'], limit=76)}"
         )
         for item in mappings
     ]
-    achievements = [
-        (
-            f"{item['achievement_id']} REQUIRED PRESERVATION ANCHOR: public="
-            f"{','.join(item['public_inputs'][:2])}; route="
-            f"{','.join(item['candidate_evidence_refs'][:2])}; method="
-            f"{' '.join(item['method_signature'][:8])}; outputs="
-            f"{','.join(item['required_output_classes'])}; role="
-            f"{compact(item['scientific_role'], limit=48)}"
-        )
-        for item in reflector_capsule["baseline_achievement_ledger"]["achievements"]
-    ]
     trace_events = [
         (
-            f"{item['trace_id']} successful: action={compact(item['action'], limit=48)}; "
-            f"evidence={','.join(item['candidate_artifact_refs'][:2])}; "
-            f"verify={compact(item['verification'], limit=24)}"
+            f"{item['trace_id']}|action={compact(item['action'], limit=48)}|output="
+            f"{','.join(item['candidate_artifact_refs'][:1])}|verify="
+            f"{compact(item['verification'], limit=28)}"
         )
-        for item in reflector_capsule["baseline_success_trace"]["events"][:3]
+        for item in trace["events"][:2]
     ]
     return {
-        "00_task_local_final_artifact_contract": (
-            "R3 TASK-LOCAL PRESERVATION, NOT generic SOP. The required anchors below are "
-            "hard final-artifact content: RECONSTRUCT and PRESERVE every anchor in a fresh "
-            "workspace, EXTEND only additively, then VERIFY baseline equivalence. Do not replace "
-            "a baseline path or restart the research plan."
+        "schema_version": BALANCED_CONTEXT_SCHEMA,
+        "baseline_successes": compact_strengths,
+        "baseline_achievements": compact_achievements,
+        "baseline_success_trace": trace_events,
+        "sanitized_feedback": compact_feedback,
+        "additive_improvement_targets": compact_actions,
+        "preservation_contract": (
+            "RECONSTRUCT every required baseline achievement; PRESERVE its evidence chain; "
+            "EXTEND only additively; VERIFY baseline equivalence. Never replace the baseline plan."
         ),
-        "00a_destination_role_contract": (
-            "Memory: include a distinct `PRESERVE <achievement_id>` semantic unit for each "
-            "anchor with its method, evidence role, and do-not-drop instruction. Skill: include "
-            "each anchor in Phase 1 RECONSTRUCT and Phase 2 VERIFY, then map every weakness "
-            "additively in Phase 3. Agent-system: state RECONSTRUCT, PRESERVE, EXTEND, VERIFY, "
-            "and baseline equivalence before submission."
-        ),
-        "01_required_baseline_achievements": achievements,
-        "02_all_sanitized_diagnoses": diagnoses,
-        "03_baseline_success_trace": trace_events,
-        "04_artifact_roles": (
+        "artifact_roles": (
             "memory=what must not be lost; skill=how to reconstruct then extend; "
             "agent-system=what must be true before submission."
         ),
-        "05_non_substitution_rule": (
-            "Do not replace a required method with a generic validation checklist. Candidate-derived "
-            "method names, public-input roles, script/output/figure/report evidence roles are allowed "
-            "because they come from the sealed Candidate trajectory, not hidden evaluation authority."
-        ),
+        "fresh_workspace_requirement": capsule["fresh_workspace_requirement"],
     }
 
 

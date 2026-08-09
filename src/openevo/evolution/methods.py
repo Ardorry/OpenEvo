@@ -3679,6 +3679,38 @@ def _render_agent_system_history_reflection_prompt(
     base_text: str,
 ) -> str:
     task_local_preservation = _task_local_preservation_enabled(job)
+    if task_local_preservation:
+        lines = [
+            "# Task-Local Agent-System Constraint Context",
+            "",
+            "Write only the short constraints that must hold before submission. The "
+            "memory preserves learned content and the skill owns reconstruction steps; "
+            "do not repeat either artifact as a handbook or workflow.",
+            "",
+        ]
+        feedback_records = [
+            record
+            for history_round in rounds
+            for record in history_round["reflected_records"]
+            if record.get("evolution_feedback")
+        ]
+        _append_shared_evolution_feedback_section(lines, feedback_records)
+        lines.extend(
+            [
+                "## Output Contract",
+                "",
+                "- Return only a concise Markdown agent-system file of at most 250 words.",
+                "- State RECONSTRUCT, PRESERVE, additive EXTEND, and VERIFY in that order.",
+                "- Require baseline equivalence before submission and prohibit tunnel vision "
+                "on one weakness.",
+                "- Do not restate the reconstruction workflow, inventory procedure, or generic "
+                "research SOP.",
+                "- Do not copy held-out literals, private source rows, restricted evaluation "
+                "material, Judge reasoning, target-image information, or answers.",
+                "",
+            ]
+        )
+        return "\n".join(lines)
     lines: list[str] = []
     if base_text.strip():
         lines.extend([base_text.strip(), ""])
@@ -4067,6 +4099,18 @@ def _render_agent_system_gepa_candidate_prompt(
         rounds=rounds,
         base_text=base_text,
     )
+    if task_local_preservation:
+        return (
+            f"{history_prompt}\n"
+            "## Constraint Candidate\n\n"
+            f"- Candidate index: {index} of {total}\n"
+            f"- Mutation strategy: {strategy}\n"
+            "- Produce only short submission constraints; memory owns retained knowledge "
+            "and skill owns executable reconstruction.\n"
+            "- Keep RECONSTRUCT, PRESERVE, additive EXTEND, VERIFY, broad coverage, and "
+            "baseline equivalence explicit.\n\n"
+            "Return only the candidate Markdown agent-system file, at most 250 words."
+        )
     return (
         f"{history_prompt}\n"
         "## GEPA Candidate Mutation\n\n"
@@ -4659,8 +4703,10 @@ def _codex_cli_reflector_prompt(
 ) -> str:
     scope = (
         "This artifact is task-local and will be installed only for one fresh next "
-        "session. Preserve the concrete candidate/public reconstruction anchors "
-        "provided below; do not replace them with cross-task generic advice.\n\n"
+        "session. Write at most 250 words of submission constraints only. Memory owns "
+        "retained knowledge and skill owns reconstruction steps; do not repeat them as "
+        "a generic handbook. Require RECONSTRUCT, PRESERVE, additive EXTEND, VERIFY, "
+        "broad coverage, and baseline equivalence.\n\n"
         if task_local_preservation
         else (
             "Every new methodology rule should be general enough to transfer across "

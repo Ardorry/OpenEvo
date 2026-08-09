@@ -73,7 +73,9 @@ _PRODUCTION_V2_LIFECYCLE_COMPATIBILITY = 10
 # Lifecycle 104 additionally redacts evaluator-boundary labels from task-local
 # reflection prompts and emitted artifacts before native content admission.
 # Lifecycle 105 persists only closed successor failure classes for recovery.
-V2_DAEMON_LIFECYCLE_COMPATIBILITY = 105
+# Lifecycle 106 separates source-literal scanning from full provenance and
+# narrows task-local agent-system reflection to submission constraints.
+V2_DAEMON_LIFECYCLE_COMPATIBILITY = 106
 _MAX_CORE_SERVICE_ENSURE_DEADLINE_SECONDS = 1800.0
 _ONEFILE_LAUNCHER_CLEANUP_SECONDS = 10.0
 _ORPHANED_SERVICE_CHILDREN_GUARD = threading.Lock()

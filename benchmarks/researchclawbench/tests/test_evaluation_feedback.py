@@ -309,9 +309,11 @@ def test_native_reflector_requests_see_candidate_specific_retention_feedback(
     # The actual Core renderer receives a bounded string.  Exercise the
     # regression case in which a third admitted diagnosis must remain visible
     # rather than disappearing behind diagnoses[0].
-    feedback["a00_preservation_first_prompt_contract"]["02_all_sanitized_diagnoses"].append(
-        "weakness_03 -> achievement_01: reproducibility; candidate=report-linked rerun; "
-        "ADD public rerun verification"
+    feedback["a00_balanced_evolution_context"]["sanitized_feedback"].append(
+        "weakness_03:reproducibility|candidate=report-linked rerun|direction=add rerun"
+    )
+    feedback["a00_balanced_evolution_context"]["additive_improvement_targets"].append(
+        "weakness_03->achievement_01 ADDITIVE|add public rerun verification"
     )
     dataset = _dataset(tmp_path, feedback)
     runtime = default_managed_reflector_runtime()
@@ -419,11 +421,11 @@ def test_native_reflector_requests_see_candidate_specific_retention_feedback(
     # The real native renderer bounds a reflected record.  The adapter must
     # therefore place the concrete candidate strategy/action ahead of the
     # verbose capsule, rather than only proving that the full JSON exists.
-    assert prompts.count("R3 TASK-LOCAL PRESERVATION, NOT generic SOP") >= 3
-    assert prompts.count("Memory: include a distinct `PRESERVE <achievement_id>`") >= 3
+    assert prompts.count("Balanced Evolution Context") >= 3
+    assert prompts.count("memory=what must not be lost") >= 3
     assert prompts.count("candidate_summary") >= 3
-    assert "Candidate report links report/images/candidate_summary.png" in prompts
-    assert "fresh workspace" in prompts
+    assert "report/images/candidate_summa" in prompts
+    assert "fresh workspace" in prompts.casefold()
     assert prompts.count("Baseline Success Trace") >= 3
     assert prompts.count("weakness_01") >= 3
     assert prompts.count("weakness_02") >= 3

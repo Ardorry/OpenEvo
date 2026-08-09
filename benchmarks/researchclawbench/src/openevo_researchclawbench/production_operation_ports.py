@@ -57,9 +57,11 @@ from .community_evaluator import (
 )
 from .config import ARTIFACT_TYPES, FROZEN_TASKS, ExperimentConfig
 from .evaluation_feedback import (
+    BALANCED_CONTEXT_SCHEMA,
     RETENTION_FEEDBACK_CLASS,
     RETENTION_FEEDBACK_SCHEMA,
     EvaluationFeedbackProjectionPort,
+    build_balanced_evolution_context,
 )
 from .gt_supervision import load_current_task_gt_supervision
 from .managed_core_control import ManagedCoreControlAuthority
@@ -3205,8 +3207,8 @@ class CoreFeedbackPort(ProductionOperationPort):
             reflector_feedback = (
                 projection.get("reflector_feedback") if isinstance(projection, dict) else None
             )
-            actionable = (
-                reflector_feedback.get("actionable_candidate_evolution")
+            balanced_context = (
+                reflector_feedback.get("a00_balanced_evolution_context")
                 if isinstance(reflector_feedback, dict)
                 else None
             )
@@ -3228,49 +3230,14 @@ class CoreFeedbackPort(ProductionOperationPort):
                 if isinstance(projection, dict)
                 else None
             )
-            expected_actionable: dict[str, Any] | None = None
-            if isinstance(reflector_capsule, dict):
-                ledger = reflector_capsule.get("baseline_achievement_ledger")
-                mappings = reflector_capsule.get("weakness_to_action")
-                if (
-                    reflector_capsule.get("preservation_contract")
-                    == "RECONSTRUCT_PRESERVE_EXTEND_VERIFY"
-                    and isinstance(ledger, dict)
-                    and isinstance(ledger.get("achievements"), list)
-                    and ledger["achievements"]
-                    and all(
-                        isinstance(item, dict)
-                        and isinstance(item.get("achievement_id"), str)
-                        for item in ledger["achievements"]
-                    )
-                    and isinstance(mappings, list)
-                    and mappings
-                    and all(
-                        isinstance(item, dict)
-                        and item.get("feedback_action_mode") == "additive"
-                        and isinstance(item.get("weakness_id"), str)
-                        and isinstance(item.get("achievement_id"), str)
-                        and isinstance(item.get("next_run_action"), str)
-                        for item in mappings
-                    )
-                    and isinstance(reflector_capsule.get("fresh_workspace_requirement"), str)
-                ):
-                    expected_actionable = {
-                        "preservation_contract": "RECONSTRUCT_PRESERVE_EXTEND_VERIFY",
-                        "required_achievement_ids": [
-                            item["achievement_id"] for item in ledger["achievements"]
-                        ],
-                        "all_feedback_actions": mappings,
-                        "fresh_workspace": reflector_capsule[
-                            "fresh_workspace_requirement"
-                        ],
-                        "requirement": (
-                            "RECONSTRUCT every required baseline achievement before PRESERVE it. "
-                            "EXTEND only through each additive feedback action, then VERIFY baseline "
-                            "equivalence. Do not replace baseline paths, restart the research plan, "
-                            "or reconstruct hidden targets."
-                        ),
-                    }
+            expected_balanced: dict[str, Any] | None = None
+            if isinstance(reflector_capsule, dict) and isinstance(
+                reflector_sanitized, dict
+            ):
+                expected_balanced = build_balanced_evolution_context(
+                    sanitized_feedback=reflector_sanitized,
+                    capsule=reflector_capsule,
+                )
             admission = projection.get("admission") if isinstance(projection, dict) else None
             capsule_admission = (
                 projection.get("baseline_evidence_capsule_admission")
@@ -3322,11 +3289,9 @@ class CoreFeedbackPort(ProductionOperationPort):
                 or reflector_feedback.get("schema_version") != RETENTION_FEEDBACK_SCHEMA
                 or reflector_feedback.get("feedback_class") != RETENTION_FEEDBACK_CLASS
                 or reflector_feedback.get("task_id") != request.get("task_id")
-                or expected_actionable is None
-                or actionable != expected_actionable
-                or reflector_feedback.get("sanitized_evaluation_feedback")
-                != reflector_sanitized
-                or reflector_feedback.get("baseline_evidence_capsule") != reflector_capsule
+                or expected_balanced is None
+                or balanced_context != expected_balanced
+                or balanced_context.get("schema_version") != BALANCED_CONTEXT_SCHEMA
             ):
                 raise CoreControlError("candidate-specific retention feedback authority is invalid")
             return {

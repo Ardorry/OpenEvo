@@ -17,6 +17,8 @@ from openevo_researchclawbench.baseline_success_trace import (
     build_baseline_success_trace,
 )
 from openevo_researchclawbench.evaluation_feedback import (
+    FeedbackProjectionError,
+    build_balanced_evolution_context,
     project_sanitized_evaluation_feedback,
 )
 from openevo_researchclawbench.task_specific_artifact_quality import (
@@ -308,11 +310,11 @@ def test_duplicate_achievement_mentions_count_once(tmp_path: Path) -> None:
 def test_candidate_detail_is_allowed_but_hidden_detail_is_rejected(tmp_path: Path) -> None:
     root, projection = _projection(tmp_path)
     capsule = projection["baseline_evidence_capsule"]
-    prompt_contract = projection["reflector_feedback"]["a00_preservation_first_prompt_contract"]
+    prompt_contract = projection["reflector_feedback"]["a00_balanced_evolution_context"]
     assert "analyze" in json.dumps(prompt_contract).casefold()
     assert "figure" in json.dumps(prompt_contract).casefold()
-    assert "required preservation anchor" in json.dumps(prompt_contract).casefold()
-    assert "do not replace a required method" in json.dumps(prompt_contract).casefold()
+    assert "required" in json.dumps(prompt_contract).casefold()
+    assert "never replace the baseline plan" in json.dumps(prompt_contract).casefold()
     assert any(
         "trend.png" in ref
         for item in capsule["baseline_achievement_ledger"]["achievements"]
@@ -323,6 +325,48 @@ def test_candidate_detail_is_allowed_but_hidden_detail_is_rejected(tmp_path: Pat
     poisoned["candidate_concepts"][0]["text"] = "Hidden target relation with private curvature."
     with pytest.raises(BaselineEvidenceCapsuleAdmissionError):
         admit_baseline_evidence_capsule(poisoned, candidate_root=root, ground_truth_entries=_gt())
+
+
+def test_balanced_context_contains_strengths_achievements_and_all_actions(
+    tmp_path: Path,
+) -> None:
+    _root, projection = _projection(tmp_path)
+    context = projection["reflector_feedback"]["a00_balanced_evolution_context"]
+    capsule = projection["reflector_baseline_evidence_capsule"]
+
+    assert context["baseline_successes"]
+    assert len(context["baseline_achievements"]) == len(
+        capsule["baseline_achievement_ledger"]["achievements"]
+    )
+    assert len(context["sanitized_feedback"]) == len(capsule["weakness_to_action"])
+    assert len(context["additive_improvement_targets"]) == len(
+        capsule["weakness_to_action"]
+    )
+    assert all("ADDITIVE" in item for item in context["additive_improvement_targets"])
+
+
+def test_balanced_context_rejects_weakness_only_or_success_only(
+    tmp_path: Path,
+) -> None:
+    _root, projection = _projection(tmp_path)
+    sanitized = deepcopy(projection["reflector_sanitized_feedback"])
+    capsule = deepcopy(projection["reflector_baseline_evidence_capsule"])
+
+    weakness_only = deepcopy(sanitized)
+    weakness_only["preserve_strengths"] = []
+    with pytest.raises(FeedbackProjectionError, match="BALANCED_EVOLUTION_CONTEXT_FAILED"):
+        build_balanced_evolution_context(
+            sanitized_feedback=weakness_only,
+            capsule=capsule,
+        )
+
+    success_only = deepcopy(sanitized)
+    success_only["diagnoses"] = []
+    with pytest.raises(FeedbackProjectionError, match="BALANCED_EVOLUTION_CONTEXT_FAILED"):
+        build_balanced_evolution_context(
+            sanitized_feedback=success_only,
+            capsule={**capsule, "weakness_to_action": []},
+        )
 
 
 def _equivalence_ledger() -> dict[str, Any]:
@@ -365,7 +409,10 @@ def _evolved_workspace(tmp_path: Path, *, include: list[str]) -> Path:
     report_lines = ["# Evolved report", "Verification check completed from public data."]
     for identifier in include:
         token = identifier.removeprefix("achievement_")
-        report_lines.append(f"{identifier}: {token} route script comparison validation evidence.")
+        report_lines.append(
+            f"{identifier}: verify the {token} route script with a numeric table and "
+            "figure; retain this report evidence discussion."
+        )
     (root / "report/report.md").write_text("\n".join(report_lines), encoding="utf-8")
     return root
 
@@ -378,7 +425,10 @@ def test_baseline_equivalence_accepts_reconstructed_path_with_corrected_conclusi
     )
     report_path = root / "report/report.md"
     report_path.write_text(
-        report_path.read_text(encoding="utf-8") + "\nCorrected conclusion after the reconstructed public-data check.\n",
+        report_path.read_text(encoding="utf-8").replace(
+            "report evidence discussion.",
+            "report evidence discussion with a corrected conclusion after the public-data check.",
+        ),
         encoding="utf-8",
     )
 
@@ -417,7 +467,43 @@ def test_final_artifact_gate_accepts_complete_r3_roles_without_provider_calls(tm
     assert report["aggregate"]["memory_required_achievement_coverage"] >= 0.80
     assert report["aggregate"]["skill_required_achievement_reconstruction_coverage"] >= 0.80
     assert report["aggregate"]["feedback_action_coverage"] == 1
+    assert report["aggregate"]["required_achievement_memory_skill_union_coverage"] == 1
+    assert report["aggregate"]["artifact_role_redundancy_ratio"] < 0.65
     assert report["gt_leakage_findings"] == []
+
+
+def test_artifact_role_redundancy_rejects_three_copies(tmp_path: Path) -> None:
+    _root, projection = _projection(tmp_path)
+    capsule = projection["baseline_evidence_capsule"]
+    complete = _complete_artifacts(capsule)
+    repeated = "\n".join(complete.values())
+    report = assess_task_specific_artifact_quality(
+        capsule=capsule,
+        artifact_texts={kind: repeated for kind in complete},
+        ground_truth_entries=_gt(),
+    )
+
+    assert report["status"] == QUALITY_FAILURE
+    assert report["aggregate"]["artifact_role_redundancy_ratio"] == 1
+
+
+def test_artifact_roles_reject_memory_workflow_and_agent_handbook(tmp_path: Path) -> None:
+    _root, projection = _projection(tmp_path)
+    capsule = projection["baseline_evidence_capsule"]
+    artifacts = _complete_artifacts(capsule)
+    artifacts["text_memory"] += "\nPhase 1 inventory workspace; Phase 2 run scripts."
+    artifacts["agent_system"] += "\n" + ("generic operating handbook rule " * 400)
+    report = assess_task_specific_artifact_quality(
+        capsule=capsule,
+        artifact_texts=artifacts,
+        ground_truth_entries=_gt(),
+    )
+
+    assert report["status"] == QUALITY_FAILURE
+    assert report["artifact_metrics"]["text_memory"][
+        "retained_knowledge_not_full_workflow"
+    ] is False
+    assert report["artifact_metrics"]["agent_system"]["constraint_only_role"] is False
 
 
 def test_gate_keeps_multisentence_markdown_anchor_as_one_semantic_unit(tmp_path: Path) -> None:

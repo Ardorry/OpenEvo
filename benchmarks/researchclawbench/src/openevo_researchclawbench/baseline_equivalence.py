@@ -92,6 +92,38 @@ def _report_discusses(achievement: Mapping[str, Any], report_text: str) -> bool:
     return len(signature.intersection(_terms(report_text))) >= min(2, len(signature))
 
 
+def _report_evidence_unit(
+    achievement: Mapping[str, Any], report_text: str
+) -> str:
+    units = [item.strip() for item in re.split(r"\n\s*\n|(?<=[.!?])\s+", report_text) if item.strip()]
+    identifier = _normalize(str(achievement["achievement_id"]))
+    for unit in units:
+        if identifier in _normalize(unit):
+            return unit
+    signature = _terms(" ".join(str(item) for item in achievement.get("method_signature", [])))
+    ranked = sorted(
+        units,
+        key=lambda unit: len(signature.intersection(_terms(unit))),
+        reverse=True,
+    )
+    return ranked[0] if ranked and len(signature.intersection(_terms(ranked[0]))) >= min(2, len(signature)) else ""
+
+
+def _report_output_roles_present(unit: str, required: list[str]) -> bool:
+    normalized = _normalize(unit)
+    vocabulary = {
+        "script": ("script", "code", "program"),
+        "numeric_output": ("numeric", "table", "csv", "metric", "value"),
+        "figure": ("figure", "plot", "chart", "image"),
+        "report_section": ("report", "discussion", "section", "evidence"),
+    }
+    return all(
+        any(marker in normalized for marker in vocabulary[item])
+        for item in required
+        if item in vocabulary
+    )
+
+
 def assess_baseline_equivalence(*, ledger: Mapping[str, Any], evolved_candidate_root: str | Path, validation: Mapping[str, Any]) -> dict[str, Any]:
     if ledger.get("schema_version") != "openevo.researchclawbench.baseline_achievement_ledger.v2":
         raise BaselineEquivalenceError("BASELINE_EQUIVALENCE_LEDGER_INVALID")
@@ -108,9 +140,6 @@ def assess_baseline_equivalence(*, ledger: Mapping[str, Any], evolved_candidate_
         raise BaselineEquivalenceError("BASELINE_EQUIVALENCE_REPORT_ABSENT")
     report_text = (root / "report/report.md").read_text(encoding="utf-8", errors="replace")[:262_144]
     corpus = _text_corpus(root, files)
-    verification_present = validation.get("artifact_valid") is True and any(
-        marker in _normalize(report_text) for marker in ("verify", "validation", "check", "compare", "reproduc")
-    )
     findings: list[dict[str, Any]] = []
     for achievement in achievements:
         if not isinstance(achievement, dict) or achievement.get("preservation_priority") != "required":
@@ -121,13 +150,31 @@ def assess_baseline_equivalence(*, ledger: Mapping[str, Any], evolved_candidate_
         output_presence = _outputs_present(files, required)
         method = _method_reconstructed(achievement, corpus, files)
         report_discussion = _report_discusses(achievement, report_text)
-        conclusion_revised = any(marker in _normalize(report_text) for marker in ("revised", "corrected", "updated conclusion", "different conclusion"))
-        passed = method and all(output_presence.values()) and report_discussion and verification_present
+        evidence_unit = _report_evidence_unit(achievement, report_text)
+        evidence_roles = bool(evidence_unit) and _report_output_roles_present(
+            evidence_unit, required
+        )
+        verification_present = validation.get("artifact_valid") is True and any(
+            marker in _normalize(evidence_unit)
+            for marker in ("verify", "validation", "check", "compare", "reproduc")
+        )
+        conclusion_revised = any(
+            marker in _normalize(evidence_unit)
+            for marker in ("revised", "corrected", "updated conclusion", "different conclusion")
+        )
+        corresponding_evidence = (
+            method
+            and all(output_presence.values())
+            and report_discussion
+            and evidence_roles
+        )
+        passed = corresponding_evidence and verification_present
         findings.append({
             "achievement_id": achievement.get("achievement_id"),
             "method_reconstructed": method,
             "required_output_classes_present": output_presence,
-            "corresponding_evidence_present": all(output_presence.values()),
+            "corresponding_evidence_present": corresponding_evidence,
+            "report_output_roles_present": evidence_roles,
             "report_discussion_present": report_discussion,
             "verification_assertion_present": verification_present,
             "candidate_conclusion_revised": conclusion_revised,
