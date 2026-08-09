@@ -69,16 +69,16 @@ paths:
   experiment_root: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0
   researchclawbench_root: /home/lhy-h/work/researchclaw_openevo/ResearchClawBench
 source_identity:
-  openevo_commit: 7d62155fa5e92bd3ec1c9a5d6a236b539c26fc83
+  openevo_commit: ccfcd1917b772693b9299cd4e6fa78e30854ac0a
   adapter_implementation_commit: bd8a575111e0c2f7bb0ae97a794b59c788663be6
-  openevo_core_source_tree_sha256: 4b5368c74494475e66afcef80b776d0ddf67ee7260d0428538b3177ba1d944ba
+  openevo_core_source_tree_sha256: f4c68eb90d6e01914a40e460760f06f5b976014a4347421281fe284aea58e82c
   adapter_tree_sha256: 3f5872da90c2fa0a9b8b85a95ef72073fa1621c7c954d2f91d8e01815e892c28
   researchclawbench_commit: b1175eca3deb78ff8b2c839070874474051d2261
   canonical_scorer_sha256: 9492317443acc069744330f27aac693d162f1aa6837d512e40419704197c6022
 native_openevo:
   core_control_mode: managed_remote_daemon
   core_control_url: managed_dynamic_loopback
-  framework_lock: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/runtime/native_release_7d62155fa_minimal_semantic_r4_4_lifecycle111/core/framework-lock.json
+  framework_lock: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/runtime/native_release_ccfcd1917_minimal_semantic_r4_5_lifecycle112_retry1/core/framework-lock.json
   core_host_codex_probe_bin: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/runtime/host-codex-probe-bin-0.144.1
   remote_core:
     profile_id: rcb-oe-native-gpt55-v6
@@ -97,8 +97,8 @@ native_openevo:
     supported_docker_server_versions:
       - 29.3.0
       - 29.5.2
-    daemon_bundle: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/runtime/native_release_7d62155fa_minimal_semantic_r4_4_lifecycle111/daemon/openevo-daemon-linux-x86_64
-    daemon_manifest: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/runtime/native_release_7d62155fa_minimal_semantic_r4_4_lifecycle111/daemon/openevo-daemon-bundle.json
+    daemon_bundle: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/runtime/native_release_ccfcd1917_minimal_semantic_r4_5_lifecycle112_retry1/daemon/openevo-daemon-linux-x86_64
+    daemon_manifest: /home/lhy-h/work/researchclaw_openevo/experiments/sequential_task_reflector_evolution_v0/runtime/native_release_ccfcd1917_minimal_semantic_r4_5_lifecycle112_retry1/daemon/openevo-daemon-bundle.json
   rollout_url: http://127.0.0.1:8080
   evolution_url: http://127.0.0.1:8200
   rollout_step: 0
