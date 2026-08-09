@@ -328,6 +328,36 @@ def _task_local_preservation_enabled(job: WorkerClaimedJob) -> bool:
     return task_local_preservation_allows_candidate_source_reuse(job.config)
 
 
+_TASK_LOCAL_EVALUATION_BOUNDARY_REDACTIONS = (
+    (re.compile(r"\braw\s+GT\b", re.IGNORECASE), "restricted evaluation material"),
+    (re.compile(r"\bground[- ]truth\b", re.IGNORECASE), "restricted evaluation material"),
+    (re.compile(r"\bchecklist(?:\s+keyword)?\b", re.IGNORECASE), "restricted evaluator specification"),
+    (re.compile(r"\bjudge\s+reasoning\b", re.IGNORECASE), "restricted evaluator rationale"),
+    (re.compile(r"\braw\s+judge\s+response\b", re.IGNORECASE), "restricted evaluator response"),
+    (re.compile(r"\brubric\s+mode\b", re.IGNORECASE), "restricted evaluator configuration"),
+    (re.compile(r"\btarget[_ -]?study\b", re.IGNORECASE), "restricted evaluation material"),
+    (re.compile(r"\btarget[- ]?image(?:\s+information)?\b", re.IGNORECASE), "restricted evaluation material"),
+    (re.compile(r"\b_score\.json\b", re.IGNORECASE), "restricted evaluation result file"),
+)
+
+
+def _redact_task_local_evaluation_boundary(text: str) -> str:
+    """Remove evaluator-side labels from task-local Reflector I/O.
+
+    The preservation scope deliberately carries candidate-produced anchors.  It
+    must not, however, teach a reflector the names of the evaluator-private
+    boundary.  Those names were appearing in a negative instruction and then
+    being copied into otherwise valid task-local artifacts, which Core correctly
+    rejected at content admission.  This deterministic rewrite only removes
+    boundary labels; it does not remove candidate methods, observations, or
+    public evidence paths.
+    """
+
+    for pattern, replacement in _TASK_LOCAL_EVALUATION_BOUNDARY_REDACTIONS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
 def text_memory(job: WorkerClaimedJob, artifact_root: Path) -> list[ArtifactRegisterRequest]:
     dataset = _first_input_artifact(job, ArtifactType.DATASET)
     if dataset is None:
@@ -3598,9 +3628,9 @@ def _render_agent_system_reflection_prompt(
             "",
             (
                 "- Do not copy exact held-out literals, private source rows, article titles, "
-                "answer counts, sequences, target-image information, Judge reasoning, or "
-                "reference records. Candidate/public reconstruction paths already supplied "
-                "by the task-local attachment may be retained."
+                "answer counts, sequences, restricted evaluation-side material, or reference "
+                "records. Candidate/public reconstruction paths already supplied by the "
+                "task-local attachment may be retained."
                 if task_local_preservation
                 else "- Do not copy exact held-out literals, source filenames, source sheet names, row numbers, article titles, answer counts, sequences, or reference records."
             ),
@@ -3739,7 +3769,8 @@ def _render_agent_system_history_reflection_prompt(
             (
                 "- Use shared evaluator feedback only as sanitized additive guidance. "
                 "Preserve supplied candidate/public reconstruction anchors but do not copy "
-                "held-out literals, private source rows, Judge reasoning, target images, or answers."
+                "held-out literals, private source rows, restricted evaluation-side material, "
+                "or answers."
                 if task_local_preservation
                 else "- Use shared evaluator feedback only as sanitized methodology guidance; do not copy exact held-out literals, article titles, row identifiers, filenames, or tables."
             ),
@@ -3758,9 +3789,9 @@ def _render_agent_system_history_reflection_prompt(
             "",
             (
                 "- Do not copy exact held-out literals, private source rows, article titles, "
-                "answer counts, sequences, target-image information, Judge reasoning, or "
-                "reference records. Candidate/public reconstruction paths supplied by the "
-                "task-local attachment may be retained."
+                "answer counts, sequences, restricted evaluation-side material, or reference "
+                "records. Candidate/public reconstruction paths supplied by the task-local "
+                "attachment may be retained."
                 if task_local_preservation
                 else "- Do not copy exact held-out literals, source filenames, source sheet names, row numbers, article titles, answer counts, sequences, or reference records."
             ),
@@ -4050,8 +4081,8 @@ def _render_agent_system_gepa_candidate_prompt(
         "and a validation check.\n"
         + (
             "- Leakage rule: do not copy exact held-out literals, private source rows, "
-            "task answers, Judge reasoning, target-image information, or verifier-specific "
-            "hidden records. Candidate/public reconstruction paths supplied by the "
+            "task answers, restricted evaluation-side material, or verifier-specific hidden "
+            "records. Candidate/public reconstruction paths supplied by the "
             "task-local attachment may be retained.\n"
             if task_local_preservation
             else "- Leakage rule: do not copy exact held-out literals, filenames, source row "
@@ -4470,6 +4501,8 @@ def _generate_audited_agent_system_reflection(
         llm_config,
         task_local_preservation=task_local_preservation,
     )
+    if task_local_preservation:
+        content = _redact_task_local_evaluation_boundary(content)
     findings = _audit_agent_system_markdown(
         content,
         forbidden_literals=forbidden_literals,
@@ -4488,6 +4521,8 @@ def _generate_audited_agent_system_reflection(
             llm_config,
             task_local_preservation=task_local_preservation,
         )
+        if task_local_preservation:
+            content = _redact_task_local_evaluation_boundary(content)
         repair_count += 1
         findings = _audit_agent_system_markdown(
             content,
@@ -4924,9 +4959,11 @@ def _redact_generic_reflector_prompt(
     manifests: list[dict[str, Any]],
 ) -> str:
     forbidden_literals = _agent_system_forbidden_literals(job, manifests)
-    if not forbidden_literals:
-        return prompt
-    return _redact_forbidden_literals(prompt, forbidden_literals)
+    if forbidden_literals:
+        prompt = _redact_forbidden_literals(prompt, forbidden_literals)
+    if _task_local_preservation_enabled(job):
+        prompt = _redact_task_local_evaluation_boundary(prompt)
+    return prompt
 
 
 def _guard_generic_reflector_output(
@@ -4935,6 +4972,8 @@ def _guard_generic_reflector_output(
     job: WorkerClaimedJob,
     manifests: list[dict[str, Any]],
 ) -> tuple[str, dict[str, Any]]:
+    if _task_local_preservation_enabled(job):
+        markdown = _redact_task_local_evaluation_boundary(markdown)
     forbidden_literals = _agent_system_forbidden_literals(job, manifests)
     findings = _forbidden_literal_findings(markdown, forbidden_literals)
     if not findings:
@@ -5394,8 +5433,8 @@ def _render_agent_system_audit_repair_prompt(
         rules = [
             "- Retain supplied candidate/public reconstruction paths only when they are "
             "needed to reconstruct a required achievement. Do not name held-out answers, "
-            "private source rows, target-image information, Judge reasoning, answer counts, "
-            "sequences, or reference records.",
+            "private source rows, restricted evaluation-side material, answer counts, sequences, "
+            "or reference records.",
             "- Replace generic slogans with concise preservation rules that name the "
             "achievement, reconstruction action, and baseline-equivalence verification.",
             "- Keep new evaluator-driven work additive: reconstruct and preserve required "
