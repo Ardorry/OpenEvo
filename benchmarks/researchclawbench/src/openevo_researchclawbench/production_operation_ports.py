@@ -835,7 +835,15 @@ def _project_config(
             # sealed until the trusted evaluator attachment exists.  This
             # project-scoped gate is part of each reflector method's verified
             # closed configuration and prevents pre-evaluator evolution.
-            "config": {"training_feedback_required": True},
+            "config": {
+                "training_feedback_required": True,
+                # R3 injects these artifacts only into the next fresh session
+                # of this same item; Core owns the closed scope semantics.
+                "task_local_preservation": {
+                    "schema_version": "openevo.task_local_preservation.v1",
+                    "scope": "next_session_only",
+                },
+            },
         }
         for artifact_type in ARTIFACT_TYPES
     }

@@ -1359,7 +1359,14 @@ def test_candidate_project_config_matches_native_closed_capabilities() -> None:
     config = ExperimentConfig.load(PROTOCOL)
     project = _project_config(config, CANARY_TASK, "Capability preflight.")
     assert all(
-        selection.config == {"training_feedback_required": True}
+        selection.config
+        == {
+            "training_feedback_required": True,
+            "task_local_preservation": {
+                "schema_version": "openevo.task_local_preservation.v1",
+                "scope": "next_session_only",
+            },
+        }
         for target_id, selection in project.evolution.targets.items()
         if target_id != "parametric_memory"
     )

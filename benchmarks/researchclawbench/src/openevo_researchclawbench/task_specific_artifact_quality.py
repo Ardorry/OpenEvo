@@ -25,7 +25,7 @@ _GENERIC_PATTERNS = (
     "verify paths", "review files", "check files",
 )
 _LOW_SIGNAL = frozenset({"analysis", "artifact", "candidate", "data", "figure", "image", "output", "report", "result", "summary", "validation", "visual", "evidence", "the", "with"})
-_SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+(?=[#*\-\d]|\S)")
+_BULLET = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)")
 
 
 class TaskSpecificArtifactQualityError(RuntimeError):
@@ -51,7 +51,33 @@ def _string_leaves(value: Any) -> Iterable[str]:
 
 
 def _units(text: str) -> list[str]:
-    return [unit.strip() for unit in _SENTENCE.split(text) if unit.strip()]
+    """Keep a Markdown bullet intact as one structured semantic unit.
+
+    R3 anchors naturally place a method, evidence role, and do-not-drop rule
+    in separate clauses of one bullet.  Sentence splitting made that valid
+    unit impossible to match; joining different bullets would allow unrelated
+    generic advice to satisfy an anchor.
+    """
+
+    units: list[str] = []
+    current: list[str] = []
+
+    def flush() -> None:
+        value = " ".join(part.strip() for part in current if part.strip()).strip()
+        if value:
+            units.append(value)
+        current.clear()
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            flush()
+            continue
+        if stripped.startswith("#") or _BULLET.match(stripped):
+            flush()
+        current.append(stripped)
+    flush()
+    return units
 
 
 def _terms(value: str) -> set[str]:
@@ -138,19 +164,30 @@ def _has_output_role(unit: str, achievement: Mapping[str, Any]) -> bool:
         "figure": ("figure", "plot", "chart", "image"),
         "report_section": ("report", "discussion", "section"),
     }
-    return any(any(word in _normalize(unit) for word in vocabulary[item]) for item in classes if item in vocabulary)
+    return bool(classes) and all(
+        any(word in _normalize(unit) for word in vocabulary[item])
+        for item in classes
+        if item in vocabulary
+    )
+
+
+def _has_method_signature(unit: str, achievement: Mapping[str, Any]) -> bool:
+    signature_terms = _terms(" ".join(str(value) for value in achievement.get("method_signature", [])))
+    if len(signature_terms) < 2:
+        return False
+    return len(signature_terms.intersection(_terms(unit))) >= min(2, len(signature_terms))
 
 
 def _matches_memory(unit: str, achievement: Mapping[str, Any]) -> bool:
     normalized = _normalize(unit)
-    return _matches_achievement(unit, achievement) and _has_output_role(unit, achievement) and any(
+    return _matches_achievement(unit, achievement) and _has_method_signature(unit, achievement) and _has_output_role(unit, achievement) and any(
         marker in normalized for marker in ("preserve", "retain", "must not lose", "do not drop")
     )
 
 
 def _matches_skill(unit: str, achievement: Mapping[str, Any]) -> bool:
     normalized = _normalize(unit)
-    return _matches_achievement(unit, achievement) and _has_output_role(unit, achievement) and "reconstruct" in normalized and any(
+    return _matches_achievement(unit, achievement) and _has_method_signature(unit, achievement) and _has_output_role(unit, achievement) and "reconstruct" in normalized and any(
         marker in normalized for marker in ("verify", "validation", "check", "confirm")
     )
 

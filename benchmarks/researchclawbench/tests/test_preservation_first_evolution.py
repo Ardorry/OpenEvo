@@ -120,12 +120,15 @@ def _complete_artifacts(capsule: dict[str, Any]) -> dict[str, str]:
     achievements = capsule["baseline_achievement_ledger"]["achievements"]
     actions = capsule["improvement_actions"]
     memory = "\n".join(
-        f"PRESERVE {item['achievement_id']}: retain the { _output_words(item) } evidence role."
+        f"PRESERVE {item['achievement_id']}: retain candidate method "
+        f"{' '.join(item['method_signature'])} and its {_output_words(item)} evidence role; "
+        "do not drop this baseline capability."
         for item in achievements
     )
     skill = ["Phase 1 — Reconstruct baseline capabilities."]
     skill.extend(
-        f"RECONSTRUCT {item['achievement_id']} with { _output_words(item) }, then verify its report evidence."
+        f"RECONSTRUCT {item['achievement_id']} using candidate method "
+        f"{' '.join(item['method_signature'])} with {_output_words(item)}, then verify its report evidence."
         for item in achievements
     )
     skill.append("Phase 2 — Verify reconstruction.")
@@ -288,7 +291,9 @@ def test_duplicate_achievement_mentions_count_once(tmp_path: Path) -> None:
     artifacts = _complete_artifacts(capsule)
     first = capsule["baseline_achievement_ledger"]["achievements"][0]
     artifacts["text_memory"] = " ".join(
-        f"PRESERVE {first['achievement_id']}: retain the {_output_words(first)} evidence role."
+        f"PRESERVE {first['achievement_id']}: retain candidate method "
+        f"{' '.join(first['method_signature'])} and its {_output_words(first)} evidence role; "
+        "do not drop this baseline capability."
         for _ in range(20)
     )
 
@@ -413,3 +418,23 @@ def test_final_artifact_gate_accepts_complete_r3_roles_without_provider_calls(tm
     assert report["aggregate"]["skill_required_achievement_reconstruction_coverage"] >= 0.80
     assert report["aggregate"]["feedback_action_coverage"] == 1
     assert report["gt_leakage_findings"] == []
+
+
+def test_gate_keeps_multisentence_markdown_anchor_as_one_semantic_unit(tmp_path: Path) -> None:
+    _root, projection = _projection(tmp_path)
+    capsule = projection["baseline_evidence_capsule"]
+    artifacts = _complete_artifacts(capsule)
+    achievement = capsule["baseline_achievement_ledger"]["achievements"][0]
+    anchor = (
+        f"- PRESERVE {achievement['achievement_id']}: retain candidate method "
+        f"{' '.join(achievement['method_signature'])}. It produces the "
+        f"{_output_words(achievement)} evidence chain. Do not drop this baseline capability."
+    )
+    artifacts["text_memory"] = "# Preservation\n\n" + anchor
+
+    report = assess_task_specific_artifact_quality(
+        capsule=capsule, artifact_texts=artifacts, ground_truth_entries=_gt()
+    )
+
+    assert report["status"] == "PASS"
+    assert report["artifact_metrics"]["text_memory"]["required_achievement_memory_coverage"] == 1
