@@ -371,14 +371,28 @@ def test_production_quality_port_reads_only_bounded_core_snapshots_and_archives_
     receipt policy.
     """
 
-    _root, projection = _projection(tmp_path)
-    texts = _artifact_texts()
+    texts = {
+        "text_memory": (
+            "Retain the baseline `custom_analysis` path over data/public.csv and "
+            "its outputs/summary.csv evidence."
+        ),
+        "skill_bundle": (
+            "Reconstruct `custom_analysis` from data/public.csv and verify "
+            "outputs/summary.csv, then add an independent quantitative validation."
+        ),
+        "agent_system": (
+            "Keep the successful baseline scientific path and improve what the "
+            "sanitized feedback identified."
+        ),
+    }
     identifiers = {
         "text_memory": "art-memory",
         "skill_bundle": "art-skill",
         "agent_system": "art-agent-system",
     }
-    manifests = {artifact_type: sha256(artifact_type.encode()).hexdigest() for artifact_type in texts}
+    manifests = {
+        artifact_type: sha256(artifact_type.encode()).hexdigest() for artifact_type in texts
+    }
     observed_paths: list[str] = []
 
     class _CoreSnapshotClient:
@@ -406,7 +420,9 @@ def test_production_quality_port_reads_only_bounded_core_snapshots_and_archives_
                 "payload_manifest_sha256": manifests[artifact_type],
                 "documents": [
                     {
-                        "relative_path": "SKILL.md" if artifact_type == "skill_bundle" else "memory.md",
+                        "relative_path": "SKILL.md"
+                        if artifact_type == "skill_bundle"
+                        else "memory.md",
                         "content_sha256": sha256(text.encode("utf-8")).hexdigest(),
                         "utf8_byte_size": len(text.encode("utf-8")),
                         "text": text,
@@ -416,14 +432,6 @@ def test_production_quality_port_reads_only_bounded_core_snapshots_and_archives_
             }
 
     monkeypatch.setattr(operation_ports, "CoreControlV2Client", _CoreSnapshotClient)
-    monkeypatch.setattr(
-        operation_ports,
-        "load_current_task_gt_supervision",
-        lambda _config, *, task_id: {
-            "task_id": task_id,
-            "task_local_feedback": {"ground_truth_entries": _gt()},
-        },
-    )
     port = operation_ports.CoreArtifactQualityPort(
         object(),  # type: ignore[arg-type]
         root=tmp_path / "quality",
@@ -439,11 +447,46 @@ def test_production_quality_port_reads_only_bounded_core_snapshots_and_archives_
                         "artifact_type": artifact_type,
                         "successor_registry_id": artifact_id,
                         "successor_sha256": manifests[artifact_type],
+                        "content_admission_sha256": manifests[artifact_type],
+                        "content_admission": {
+                            "passed": True,
+                            "finding_count": 0,
+                            "finding_categories": [],
+                            "source_artifact_ids": ["dataset-1"],
+                            "source_payload_sha256": "a" * 64,
+                            "content_sha256": manifests[artifact_type],
+                        },
                     }
                     for artifact_type, artifact_id in identifiers.items()
                 ],
             },
-            "baseline_evidence_capsule": projection["baseline_evidence_capsule"],
+            "minimal_baseline_trace": {
+                "schema_version": "openevo.researchclawbench.minimal_baseline_trace.v1",
+                "successful_paths": [
+                    {
+                        "summary": (
+                            "Run the custom public-data analysis and retain its "
+                            "numeric evidence."
+                        ),
+                        "why": "The baseline used this executed path in the report.",
+                        "inputs": ["data/public.csv"],
+                        "steps": ["Call `custom_analysis` over the public table."],
+                        "parameters": [],
+                        "outputs": ["outputs/summary.csv"],
+                        "report_role": "Supports the baseline scientific result.",
+                    }
+                ],
+                "projector_model_calls": 0,
+            },
+            "reflector_sanitized_feedback": {
+                "feedback_class": "sanitized_evaluation_feedback_v1",
+                "diagnoses": [
+                    {
+                        "dimension": "quantitative_validation",
+                        "improvement_direction": ("Add an independent quantitative validation."),
+                    }
+                ],
+            },
         },
         "artifact-quality-key",
     )
@@ -452,8 +495,11 @@ def test_production_quality_port_reads_only_bounded_core_snapshots_and_archives_
     archived = report_path.read_text(encoding="utf-8")
     assert result["quality_gate_status"] == "PASS"
     assert len(observed_paths) == 3
-    assert all(path.startswith("/v2/internal/training-successors/successor-v2/") for path in observed_paths)
+    assert all(
+        path.startswith("/v2/internal/training-successors/successor-v2/")
+        for path in observed_paths
+    )
     assert result["artifact_text_persisted"] is False
     assert result["raw_gt_persisted"] is False
-    assert "Reconstruct the baseline custom analysis route" not in archived
+    assert "Retain the baseline `custom_analysis` path" not in archived
     assert "Hidden target relationship" not in archived
