@@ -669,8 +669,23 @@ def test_failed_per_item_evolution_invalidation_requires_core_terminal_proof(
     assert verified["execution_status"] == "COMPLETED_INVALIDATED"
 
 
+@pytest.mark.parametrize(
+    ("quality_schema", "failure_status"),
+    [
+        (
+            "openevo.researchclawbench.preservation_artifact_quality.v3",
+            "PRESERVATION_ARTIFACT_QUALITY_FAILED",
+        ),
+        (
+            "openevo.researchclawbench.minimal_semantic_artifact_quality.v1",
+            "MINIMAL_SEMANTIC_ARTIFACT_QUALITY_FAILED",
+        ),
+    ],
+)
 def test_failed_artifact_quality_archives_committed_native_successor_without_injection(
     tmp_path: Path,
+    quality_schema: str,
+    failure_status: str,
 ) -> None:
     class QualityFailureOperations(SyntheticOperations):
         def evolve_artifacts(self, request, idempotency_key):
@@ -700,10 +715,8 @@ def test_failed_artifact_quality_archives_committed_native_successor_without_inj
         def assess_artifact_quality(self, request, idempotency_key):
             jobs = request["evolution"]["jobs"]
             report = {
-                "schema_version": (
-                    "openevo.researchclawbench.preservation_artifact_quality.v3"
-                ),
-                "status": "PRESERVATION_ARTIFACT_QUALITY_FAILED",
+                "schema_version": quality_schema,
+                "status": failure_status,
                 "gt_leakage_findings": [],
                 "provenance_violations": [],
                 "artifact_role_contract": {"duplicate_mentions_count_once": True},
@@ -713,9 +726,7 @@ def test_failed_artifact_quality_archives_committed_native_successor_without_inj
                 idempotency_key,
                 {
                     "status": "SUCCEEDED",
-                    "quality_gate_status": (
-                        "PRESERVATION_ARTIFACT_QUALITY_FAILED"
-                    ),
+                    "quality_gate_status": failure_status,
                     "quality_report": report,
                     "quality_report_sha256": report["content_sha256"],
                     "artifact_snapshot_authority": {

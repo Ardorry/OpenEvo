@@ -3608,20 +3608,28 @@ class CommunityTrainingSupervisor:
             if isinstance(quality, dict)
             else None
         )
+        failure_pair = (
+            report.get("schema_version") if isinstance(report, dict) else None,
+            report.get("status") if isinstance(report, dict) else None,
+        )
+        allowed_failure_pairs = {
+            (
+                "openevo.researchclawbench.preservation_artifact_quality.v3",
+                "PRESERVATION_ARTIFACT_QUALITY_FAILED",
+            ),
+            (MINIMAL_QUALITY_SCHEMA, "MINIMAL_SEMANTIC_ARTIFACT_QUALITY_FAILED"),
+        }
         if (
             len(evolution_effects) != 1
             or evolution_effects[0].get("status") != "completed"
             or evolution_effects[0].get("receipt") != evolution
             or not isinstance(quality, dict)
-            or quality.get("quality_gate_status")
-            != "PRESERVATION_ARTIFACT_QUALITY_FAILED"
+            or quality.get("quality_gate_status") != failure_pair[1]
             or quality.get("provider_calls") != 0
             or quality.get("artifact_text_persisted") is not False
             or quality.get("raw_gt_persisted") is not False
             or not isinstance(report, dict)
-            or report.get("schema_version")
-            != "openevo.researchclawbench.preservation_artifact_quality.v3"
-            or report.get("status") != "PRESERVATION_ARTIFACT_QUALITY_FAILED"
+            or failure_pair not in allowed_failure_pairs
             or quality.get("quality_report_sha256") != report.get("content_sha256")
             or not isinstance(snapshots, dict)
             or set(snapshots) != set(ARTIFACT_TYPES)

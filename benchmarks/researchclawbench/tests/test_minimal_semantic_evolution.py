@@ -322,6 +322,33 @@ def test_astronomy_semantic_regression_requires_methods_and_thresholds() -> None
     assert concrete["status"] == "PASS"
 
 
+def test_score_percentile_grid_resolution_is_not_a_hard_scientific_parameter() -> None:
+    trace = _trace(
+        summary="Select score thresholds from candidate percentiles.",
+        steps=["Call `select_threshold` from `code/quasar_pipeline.py`."],
+        parameters=[
+            "candidates = sorted(set(q(scores, [i / 100 for i in range(1, 100)])))"
+        ],
+        outputs=["outputs/threshold_selection.csv"],
+    )
+    report = assess_minimal_semantic_artifact_quality(
+        trace=trace,
+        sanitized_feedback=_feedback("quantitative_validation"),
+        artifact_texts=_artifact_texts(
+            "Retain score-percentile threshold selection and threshold_selection.csv.",
+            (
+                "Run select_threshold over score percentiles, then add an independent "
+                "quantitative validation comparison."
+            ),
+        ),
+        content_admission_findings=[],
+        provenance_violations=[],
+    )
+
+    assert report["status"] == "PASS"
+    assert report["path_findings"][0]["parameter_anchor_count"] == 0
+
+
 def test_scientific_formula_parameters_are_not_erased_by_underscores() -> None:
     trace = _trace(
         summary="Descriptor scoring with explicit propensity and score formulas.",

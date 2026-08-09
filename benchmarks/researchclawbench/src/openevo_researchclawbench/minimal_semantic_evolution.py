@@ -606,6 +606,13 @@ def _important_parameter_values(parameters: Iterable[str]) -> list[str]:
     values: list[str] = []
     for parameter in parameters:
         rendered = str(parameter)
+        # Loop/grid resolution is an implementation detail, not a scientific
+        # decision that an artifact must repeat verbatim.  The surrounding
+        # method anchor still has to be retained (for example score-percentile
+        # threshold selection), while named thresholds and comparisons remain
+        # exact fidelity anchors below.
+        if re.search(r"\bfor\b", rendered) and re.search(r"\brange\s*\(", rendered):
+            continue
         numbers = [_canonical_number(value) for value in _NUMBER.findall(rendered)]
         if re.search(r"\[['\"][^'\"]+['\"]\]", rendered):
             values.extend(value for value in numbers if value not in {"0", "1", "-1"})
