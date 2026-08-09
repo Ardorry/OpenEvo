@@ -70,7 +70,9 @@ _PRODUCTION_V2_LIFECYCLE_COMPATIBILITY = 10
 # candidate/public source evidence may be retained only in that closed scope,
 # while evaluator literals and ordinary transferable artifacts remain denied.
 # It also retains lifecycle 101's pre-inference protected-literal redaction.
-V2_DAEMON_LIFECYCLE_COMPATIBILITY = 103
+# Lifecycle 104 additionally redacts evaluator-boundary labels from task-local
+# reflection prompts and emitted artifacts before native content admission.
+V2_DAEMON_LIFECYCLE_COMPATIBILITY = 104
 _MAX_CORE_SERVICE_ENSURE_DEADLINE_SECONDS = 1800.0
 _ONEFILE_LAUNCHER_CLEANUP_SECONDS = 10.0
 _ORPHANED_SERVICE_CHILDREN_GUARD = threading.Lock()
