@@ -2937,7 +2937,7 @@ def test_daemon_floor_allows_legacy_upgrade_and_rejects_same_abi_downgrade(
 def test_current_daemon_lifecycle_advances_past_reflector_boundary_floor() -> None:
     """A changed preservation reflector boundary cannot reuse lifecycle 103."""
 
-    assert service.V2_DAEMON_LIFECYCLE_COMPATIBILITY > 103
+    assert service.V2_DAEMON_LIFECYCLE_COMPATIBILITY == 107
 
 
 def test_pending_process_is_recovered_before_restart(

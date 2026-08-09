@@ -75,7 +75,8 @@ _PRODUCTION_V2_LIFECYCLE_COMPATIBILITY = 10
 # Lifecycle 105 persists only closed successor failure classes for recovery.
 # Lifecycle 106 separates source-literal scanning from full provenance and
 # narrows task-local agent-system reflection to submission constraints.
-V2_DAEMON_LIFECYCLE_COMPATIBILITY = 106
+# Lifecycle 107 preserves the complete bounded task-local preservation context.
+V2_DAEMON_LIFECYCLE_COMPATIBILITY = 107
 _MAX_CORE_SERVICE_ENSURE_DEADLINE_SECONDS = 1800.0
 _ONEFILE_LAUNCHER_CLEANUP_SECONDS = 10.0
 _ORPHANED_SERVICE_CHILDREN_GUARD = threading.Lock()
