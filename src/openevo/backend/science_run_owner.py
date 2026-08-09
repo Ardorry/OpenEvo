@@ -1505,10 +1505,11 @@ class CoreScienceTaskOwnerV2:
             )
         except Exception as exc:
             http_diagnostic = _successor_transition_http_diagnostic(exc)
+            closed_failure_code = _successor_transition_closed_failure_code(exc)
             logger.error(
                 "v2 science successor transition %s failed during preparation [%s]%s",
                 transition_id,
-                _successor_transition_closed_failure_code(exc),
+                closed_failure_code,
                 (
                     ""
                     if http_diagnostic is None
@@ -1529,6 +1530,7 @@ class CoreScienceTaskOwnerV2:
                 code="successor_transition_failed",
                 message=(
                     "Core could not prepare and atomically commit the successor state."
+                    f" Closed failure class: {closed_failure_code}."
                     f"{diagnostic_suffix}"
                 ),
                 retryable=retryable,
