@@ -347,7 +347,7 @@ def test_content_admission_passes_generic_transferable_artifact() -> None:
     assert receipt.finding_count == 0
 
 
-def test_task_local_preservation_keeps_candidate_sources_but_not_basis_literals() -> None:
+def test_task_local_preservation_allows_candidate_overlap_not_private_literals() -> None:
     source = json.dumps(
         {
             "task_id": "Astronomy_004",
@@ -357,7 +357,8 @@ def test_task_local_preservation_keeps_candidate_sources_but_not_basis_literals(
     )
     scoped = ArtifactContentAdmissionBasis(
         task_ids=("Astronomy_004",),
-        file_names=("evaluator_private.csv",),
+        file_names=("candidate_plot.png", "evaluator_private.csv"),
+        evaluator_terms=("judge reasoning",),
         candidate_source_reuse_authorized=True,
     )
 
@@ -379,12 +380,34 @@ def test_task_local_preservation_keeps_candidate_sources_but_not_basis_literals(
         },
         source_payloads={"dataset-1": {"records.jsonl": source}},
     )
+    task_id_blocked = artifact_content_admission_receipt(
+        basis=scoped,
+        payloads={
+            "proposal-3": {
+                "SKILL.md": "Use Astronomy_004 as an embedded target identity."
+            }
+        },
+        source_payloads={"dataset-1": {"records.jsonl": source}},
+    )
+    evaluator_blocked = artifact_content_admission_receipt(
+        basis=scoped,
+        payloads={
+            "proposal-4": {
+                "SKILL.md": "Do not expose judge reasoning to the candidate."
+            }
+        },
+        source_payloads={"dataset-1": {"records.jsonl": source}},
+    )
 
     assert preserved.passed is True
     assert preserved.source_artifact_ids == ()
     assert preserved.source_payload_sha256 is None
     assert blocked.passed is False
     assert blocked.finding_categories == ("file_name",)
+    assert task_id_blocked.passed is False
+    assert task_id_blocked.finding_categories == ("task_id",)
+    assert evaluator_blocked.passed is False
+    assert evaluator_blocked.finding_categories == ("evaluator_term",)
 
 
 def test_content_admission_allows_only_the_exact_managed_workspace_root() -> None:

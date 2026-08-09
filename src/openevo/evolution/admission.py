@@ -253,18 +253,56 @@ def artifact_content_admission_receipt(
     # The one-session scope may retain candidate/public evidence. Its exact
     # task/evaluator basis below still blocks private feedback, task IDs,
     # protected paths, Judge markers, and every classified literal.
+    candidate_source_literals = _sealed_source_literals(source_payloads)
     source_payloads_for_literal_scan = (
         {} if basis.candidate_source_reuse_authorized else source_payloads
     )
     source_literals = _sealed_source_literals(source_payloads_for_literal_scan)
+
+    def direct_literals(category: str, literals: tuple[str, ...]) -> tuple[str, ...]:
+        """Keep evaluator-only literals unless baseline evidence already used them.
+
+        In the bounded preservation scope, a candidate can legitimately name a
+        public input, file, quantitative observation, DOI, or report sentence
+        that happens also to occur in evaluator-private GT.  That overlap is
+        candidate provenance, not a route by which the Reflector learned GT:
+        the source artifact already sealed it before evaluator attachment.
+        Task IDs, evaluator markers, and absolute paths remain non-transferable
+        even when the baseline transcript contains them.
+        """
+
+        if (
+            not basis.candidate_source_reuse_authorized
+            or category
+            not in {"file_name", "entity", "value", "doi", "report_sentence"}
+        ):
+            return literals
+        reusable = {
+            item.casefold()
+            for item in candidate_source_literals[category]
+        }
+        return tuple(item for item in literals if item.casefold() not in reusable)
+
     exact_by_category = {
         "task_id": _merged_literals(basis.task_ids, source_literals["task_id"]),
-        "file_name": _merged_literals(basis.file_names, source_literals["file_name"]),
-        "entity": _merged_literals(basis.entities, source_literals["entity"]),
-        "value": _merged_literals(basis.values, source_literals["value"]),
-        "doi": _merged_literals(basis.dois, source_literals["doi"]),
+        "file_name": _merged_literals(
+            direct_literals("file_name", basis.file_names),
+            source_literals["file_name"],
+        ),
+        "entity": _merged_literals(
+            direct_literals("entity", basis.entities),
+            source_literals["entity"],
+        ),
+        "value": _merged_literals(
+            direct_literals("value", basis.values),
+            source_literals["value"],
+        ),
+        "doi": _merged_literals(
+            direct_literals("doi", basis.dois),
+            source_literals["doi"],
+        ),
         "report_sentence": _merged_literals(
-            basis.report_sentences,
+            direct_literals("report_sentence", basis.report_sentences),
             source_literals["report_sentence"],
         ),
         "evaluator_term": tuple(
@@ -432,7 +470,8 @@ def _sealed_source_literals(
                 set(
                     re.findall(
                         r"(?<![A-Za-z0-9_.-])([A-Za-z0-9][A-Za-z0-9_.-]{1,127}\."
-                        r"(?:csv|tsv|xlsx?|jsonl?|npy|npz|nc|hdf5?|parquet|txt))\b",
+                        r"(?:csv|tsv|xlsx?|jsonl?|npy|npz|nc|hdf5?|parquet|txt|"
+                        r"png|svg|pdf|md|py|r))\b",
                         joined,
                         flags=re.IGNORECASE,
                     )
