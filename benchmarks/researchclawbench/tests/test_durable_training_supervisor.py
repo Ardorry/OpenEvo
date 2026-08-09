@@ -622,7 +622,7 @@ def test_failed_per_item_evolution_invalidation_requires_core_terminal_proof(
     )
 
     closed = supervisor.invalidate_failed_per_item_evolution(
-        reason="R3_CONTENT_ADMISSION_SCOPE_CONFLICT",
+        reason="CORE_SUCCESSOR_TERMINAL_FAILURE",
         terminal_evolution_receipt=receipt,
     )
     verified = supervisor.verify()

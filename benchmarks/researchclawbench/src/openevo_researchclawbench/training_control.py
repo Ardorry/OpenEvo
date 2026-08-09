@@ -22,6 +22,7 @@ from .production_operation_ports import CoreControlV2Client, build_production_po
 from .production_training_operations import ProductionTrainingOperations
 from .training_state_store import TrainingStateStore, canonical_sha256
 from .training_supervisor import (
+    FAILED_EVOLUTION_INVALIDATION_REASON,
     CommunityTrainingSupervisor,
     SupervisorIdentity,
     TrainingBudgetPolicy,
@@ -174,7 +175,7 @@ class DurableTrainingControl:
     def invalidate_failed_per_item_evolution(self, *, reason: str) -> dict[str, Any]:
         """Use the owned Core transition lifecycle to close a failed R3 item."""
 
-        if reason != "R3_CONTENT_ADMISSION_SCOPE_CONFLICT":
+        if reason != FAILED_EVOLUTION_INVALIDATION_REASON:
             raise ValueError("failed per-item invalidation reason is not allowlisted")
         if self.core_control_authority is None:
             raise TrainingOperationsUnavailable(

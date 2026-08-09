@@ -92,7 +92,10 @@ from .training_control import (
     TrainingOperationsUnavailable,
     print_closed_json,
 )
-from .training_supervisor import supervisor_capability_audit
+from .training_supervisor import (
+    FAILED_EVOLUTION_INVALIDATION_REASON,
+    supervisor_capability_audit,
+)
 from .transition_engine import TrainingStage
 from .validator_failure_learning import (
     ValidatorFailureLearningSpec,
@@ -1477,7 +1480,7 @@ def main(argv: list[str] | None = None) -> int:
     per_item_failed_invalidate.add_argument(
         "--reason",
         required=True,
-        choices=("R3_CONTENT_ADMISSION_SCOPE_CONFLICT",),
+        choices=(FAILED_EVOLUTION_INVALIDATION_REASON,),
     )
     minimal = sub.add_parser("minimal-per-item")
     minimal.add_argument("--protocol", required=True, type=Path)

@@ -16,6 +16,11 @@ from .evaluation_feedback import RETENTION_FEEDBACK_CLASS
 from .training_state_store import TrainingStateStore, canonical_sha256
 from .transition_engine import TrainingStage, evolution_allowed
 
+FAILED_EVOLUTION_INVALIDATION_REASON = "CORE_SUCCESSOR_TERMINAL_FAILURE"
+_LEGACY_FAILED_EVOLUTION_INVALIDATION_REASON = (
+    "R3_CONTENT_ADMISSION_SCOPE_CONFLICT"
+)
+
 
 class TrainingPaused(RuntimeError):
     """External gate is absent; durable state remains resumable in place."""
@@ -1442,7 +1447,10 @@ class CommunityTrainingSupervisor:
         failed_evolution_invalidation = (
             isinstance(invalidation_receipt, dict)
             and invalidation_receipt.get("reason")
-            == "R3_CONTENT_ADMISSION_SCOPE_CONFLICT"
+            in {
+                FAILED_EVOLUTION_INVALIDATION_REASON,
+                _LEGACY_FAILED_EVOLUTION_INVALIDATION_REASON,
+            }
         )
         failed_evolution_effect_valid = (
             len(evolution_effects) == 1
@@ -3345,7 +3353,7 @@ class CommunityTrainingSupervisor:
         only clears task-local ownership after validating that durable proof.
         """
 
-        if reason != "R3_CONTENT_ADMISSION_SCOPE_CONFLICT":
+        if reason != FAILED_EVOLUTION_INVALIDATION_REASON:
             raise ValueError("failed per-item invalidation reason is not allowlisted")
         state = self.status()
         if not self.per_item_reset_enabled or len(self.task_ids) != 1:
