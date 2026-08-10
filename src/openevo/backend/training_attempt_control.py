@@ -77,7 +77,7 @@ class TrainingAttemptCancellationRequestV1(BaseModel):
     reason_code: str
 
     @model_validator(mode="after")
-    def _closed_identity(self) -> "TrainingAttemptCancellationRequestV1":
+    def _closed_identity(self) -> TrainingAttemptCancellationRequestV1:
         if not self.operation_id.strip() or not self.reason_code.strip():
             raise ValueError("training Attempt cancellation identity is empty")
         return self
@@ -157,38 +157,37 @@ class TrainingSuccessorArtifactAuthorityV2(BaseModel):
     promoted: bool
 
     @model_validator(mode="after")
-    def _closed_admission_authority(self) -> "TrainingSuccessorArtifactAuthorityV2":
+    def _closed_admission_authority(self) -> TrainingSuccessorArtifactAuthorityV2:
         fields = (
             self.admission_action,
             self.admission_decision_id,
             self.admission_decision_sha256,
             self.content_admission,
         )
-        if any(value is not None for value in fields):
-            if (
-                any(value is None for value in fields)
-                or self.job_id is None
-                or self.admission_action not in {"update", "keep", "reject"}
-                or not self.proposal_artifact_ids
-                or self.content_admission is None
-                or self.content_admission.proposal_artifact_ids
-                != self.proposal_artifact_ids
-                or (
-                    self.admission_action == "update"
-                    and (
-                        self.origin != "produced"
-                        or self.artifact_id not in self.proposal_artifact_ids
-                    )
+        if any(value is not None for value in fields) and (
+            any(value is None for value in fields)
+            or self.job_id is None
+            or self.admission_action not in {"update", "keep", "reject"}
+            or not self.proposal_artifact_ids
+            or self.content_admission is None
+            or self.content_admission.proposal_artifact_ids
+            != self.proposal_artifact_ids
+            or (
+                self.admission_action == "update"
+                and (
+                    self.origin != "produced"
+                    or self.artifact_id not in self.proposal_artifact_ids
                 )
-                or (
-                    self.admission_action in {"keep", "reject"}
-                    and (
-                        self.origin != "inherited"
-                        or self.artifact_id in self.proposal_artifact_ids
-                    )
+            )
+            or (
+                self.admission_action in {"keep", "reject"}
+                and (
+                    self.origin != "inherited"
+                    or self.artifact_id in self.proposal_artifact_ids
                 )
-            ):
-                raise ValueError("training successor admission authority is invalid")
+            )
+        ):
+            raise ValueError("training successor admission authority is invalid")
         return self
 
 
@@ -232,7 +231,7 @@ class HistoricalProjectHeadRestoreRequestV2(BaseModel):
     source_project_id: str | None = None
 
     @model_validator(mode="after")
-    def _closed_restore_mode(self) -> "HistoricalProjectHeadRestoreRequestV2":
+    def _closed_restore_mode(self) -> HistoricalProjectHeadRestoreRequestV2:
         if self.mode == "historical_restore" and self.source_project_id is not None:
             raise ValueError("historical restore cannot name another source project")
         if self.mode == "cross_project_fork" and not self.source_project_id:
