@@ -2934,10 +2934,10 @@ def test_daemon_floor_allows_legacy_upgrade_and_rejects_same_abi_downgrade(
     }
 
 
-def test_current_daemon_lifecycle_advances_for_bounded_readiness_cancellation() -> None:
-    """Bounded readiness cancellation has a distinct Daemon lifecycle."""
+def test_current_daemon_lifecycle_advances_for_bounded_transcript_admission() -> None:
+    """Bounded transcript admission has a distinct Daemon lifecycle."""
 
-    assert service.V2_DAEMON_LIFECYCLE_COMPATIBILITY == 112
+    assert service.V2_DAEMON_LIFECYCLE_COMPATIBILITY == 113
 
 
 def test_pending_process_is_recovered_before_restart(
