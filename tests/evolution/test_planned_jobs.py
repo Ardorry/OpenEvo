@@ -541,6 +541,58 @@ def test_candidate_reuse_scans_manifest_bound_dataset_records_without_weakening_
         gt_store.apply_internal_artifact_admission(gt_decision)
 
 
+def test_candidate_reuse_accepts_bounded_transcript_dataset_above_contribution_limit(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    base, dataset_id = _request_with_sealed_dataset(
+        store,
+        candidate_response=(
+            "The successful baseline selected threshold 0.25.\n"
+            + ("bounded candidate tool output\n" * 40_000)
+        ),
+    )
+    records_path = store.files.dataset_manifest_path(dataset_id).with_name(
+        "records.jsonl"
+    )
+    assert records_path.stat().st_size > store_module.MAX_CONTRIBUTION_TEXT
+    assert (
+        records_path.stat().st_size
+        <= store_module._MAX_CONTENT_ADMISSION_DATASET_RECORD_BYTES
+    )
+    scoped_request = _scoped_skill_request(base).model_copy(
+        update={"successor_transition_id": "successor-transition-large-record-source"}
+    )
+    job_id, proposal_id = _complete_transition_bound_skill_job(
+        store,
+        scoped_request,
+        payload_name="large-record-source-reuse",
+        payload_text="Preserve the Candidate-selected threshold 0.25.\n",
+        promoted=False,
+    )
+    request = _admission_request(
+        job_id=job_id,
+        selected_artifact_id=proposal_id,
+        parent_artifact_id=scoped_request.input_bindings[1].artifact_ids[0],
+    ).model_copy(
+        update={
+            "content_admission_basis": ArtifactContentAdmissionBasis(
+                values=("0.25",),
+                candidate_source_reuse_authorized=True,
+            )
+        }
+    )
+
+    admitted = store.apply_internal_artifact_admission(request)
+
+    assert admitted.content_admission.passed is True
+    assert admitted.content_admission.finding_count == 0
+    assert admitted.content_admission.source_artifact_ids == (
+        scoped_request.input_bindings[0].artifact_ids[0],
+    )
+    assert admitted.content_admission.source_payload_sha256 is not None
+
+
 def test_candidate_reuse_rejects_dataset_records_changed_after_job_completion(
     tmp_path: Path,
 ) -> None:

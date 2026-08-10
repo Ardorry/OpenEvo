@@ -164,6 +164,14 @@ from openevo.evolution.revisions import (
 from openevo.evolution.store_schema_identity import classify_store_schema
 from openevo.evolution.time import utc_now_iso
 
+# Transcript dataset records can contain one bounded harness output twice: once
+# in the event payload and once in the normalized trace projection.  They are
+# source evidence, not a rendered context contribution.  Keep the source scan
+# bounded while retaining the framework's 1 MiB text prefix for literal
+# comparison; ArtifactPayloadService still streams and verifies the complete
+# file digest before returning that prefix.
+_MAX_CONTENT_ADMISSION_DATASET_RECORD_BYTES = 4 * MAX_CONTRIBUTION_TEXT
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
     event_id TEXT PRIMARY KEY,
@@ -7145,7 +7153,9 @@ class EvolutionStore:
                         not isinstance(records_path_value, str)
                         or not isinstance(records_uri, str)
                         or type(records_byte_size) is not int
-                        or not 0 <= records_byte_size <= MAX_CONTRIBUTION_TEXT
+                        or not 0
+                        <= records_byte_size
+                        <= _MAX_CONTENT_ADMISSION_DATASET_RECORD_BYTES
                         or not isinstance(records_sha256, str)
                         or re.fullmatch(r"[0-9a-f]{64}", records_sha256) is None
                     ):
@@ -7184,7 +7194,7 @@ class EvolutionStore:
                         records_snapshot.payload_handle,
                         records_path,
                         max_chars=MAX_CONTRIBUTION_TEXT,
-                        max_bytes=records_byte_size,
+                        max_bytes=min(records_byte_size, MAX_CONTRIBUTION_TEXT),
                     )
                 if not verified_text:
                     raise ValueError(
