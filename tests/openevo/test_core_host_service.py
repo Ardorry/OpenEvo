@@ -2934,10 +2934,10 @@ def test_daemon_floor_allows_legacy_upgrade_and_rejects_same_abi_downgrade(
     }
 
 
-def test_current_daemon_lifecycle_advances_for_sealed_context_selection() -> None:
-    """Sealed context selection handling has a distinct Daemon lifecycle."""
+def test_current_daemon_lifecycle_advances_for_successor_cleanup_reconciliation() -> None:
+    """Cross-release abandoned-output cleanup has a distinct lifecycle."""
 
-    assert service.V2_DAEMON_LIFECYCLE_COMPATIBILITY == 115
+    assert service.V2_DAEMON_LIFECYCLE_COMPATIBILITY == 116
 
 
 def test_pending_process_is_recovered_before_restart(

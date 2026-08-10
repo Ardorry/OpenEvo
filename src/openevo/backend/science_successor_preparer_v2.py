@@ -3129,8 +3129,11 @@ class ProductionScienceSuccessorPreparerV2:
         )
         binding = getattr(lease, "binding", None)
         reconciliation_only = (
-            type(context) is ScienceSuccessorPreparationContextV2
-            and context.transition_attempt.reconciliation_only is True
+            type(context) is ScienceSuccessorCleanupContextV2
+            or (
+                type(context) is ScienceSuccessorPreparationContextV2
+                and context.transition_attempt.reconciliation_only is True
+            )
         )
         if (
             lease is None

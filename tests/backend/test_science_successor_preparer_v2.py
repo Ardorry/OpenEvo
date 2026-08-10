@@ -27,6 +27,7 @@ from openevo.backend.science_run_owner import (
 )
 from openevo.backend.science_run_store import ScienceProjectAdmissionAuthorityV2
 from openevo.backend.science_successor import (
+    ScienceSuccessorCleanupContextV2,
     ScienceSuccessorPreparationContextV2,
     SealedTranscriptDatasetV2,
 )
@@ -933,6 +934,48 @@ def test_production_preparer_discards_only_the_exact_transition_outputs(
         match="discard receipt differs from the requested transition",
     ):
         preparer.discard_transition_outputs(context)
+
+
+def test_abandoned_output_cleanup_uses_current_service_release(tmp_path) -> None:
+    registry = verified_builtin_registry(tmp_path / "registry")
+    binding = _service_binding("9" * 64)
+    services = _Services(binding)
+    evolution = object()
+    preparer = ProductionScienceSuccessorPreparerV2(
+        catalog=object(),
+        ledger=object(),
+        workspaces=object(),
+        workspace_handoffs=object(),
+        services=services,
+        executable_registry=registry,
+        evolution_factory=lambda _binding: evolution,
+    )
+    context = ScienceSuccessorCleanupContextV2.model_construct(
+        task=SimpleNamespace(
+            admission=SimpleNamespace(registry_sha256="1" * 64)
+        )
+    )
+    record = SimpleNamespace(
+        receipt=SimpleNamespace(
+            registry_sha256="1" * 64,
+            runtime_identity_sha256=binding.runtime_identity_digest,
+            framework_lock_sha256="2" * 64,
+        )
+    )
+    project = SimpleNamespace(
+        config=SimpleNamespace(
+            execution=SimpleNamespace(codex_model="gpt-5.5")
+        )
+    )
+
+    with preparer._evolution(context, record, project) as (
+        observed_binding,
+        observed_evolution,
+    ):
+        assert observed_binding == binding
+        assert observed_evolution is evolution
+
+    assert services.released is True
 
 
 def test_production_preparer_fails_closed_after_shutdown_is_requested(
