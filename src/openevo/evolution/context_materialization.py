@@ -1276,7 +1276,12 @@ class ContextMaterializer:
                     "selected artifact is no longer promoted and active"
                 )
             result[artifact_id] = row
-        if observed_sealed != sealed_authority:
+        selected_sealed_authority = {
+            artifact_id: transition_id
+            for artifact_id, transition_id in sealed_authority.items()
+            if artifact_id in selected
+        }
+        if observed_sealed != selected_sealed_authority:
             raise ValueError(
                 "selected artifact has no exact sealed transition authority"
             )

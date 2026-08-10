@@ -88,7 +88,7 @@ _PRODUCTION_V2_LIFECYCLE_COMPATIBILITY = 10
 # drain wait, keeping managed service rollback within its bounded deadline.
 # Lifecycle 114 makes numeric content admission robust to decimal-like binary
 # transcript noise while preserving exact valid numeric matching.
-V2_DAEMON_LIFECYCLE_COMPATIBILITY = 114
+V2_DAEMON_LIFECYCLE_COMPATIBILITY = 115
 _MAX_CORE_SERVICE_ENSURE_DEADLINE_SECONDS = 1800.0
 _ONEFILE_LAUNCHER_CLEANUP_SECONDS = 10.0
 _ORPHANED_SERVICE_CHILDREN_GUARD = threading.Lock()

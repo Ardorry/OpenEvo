@@ -429,6 +429,34 @@ def test_selected_sealed_artifact_requires_exact_transition_authority(
         )
 
 
+def test_selected_sealed_artifact_ignores_unselected_candidate_authority(
+    tmp_path: Path,
+) -> None:
+    request = _request()
+    response = _response(request, _inline_projection())
+    selected_payload = tmp_path / "artifact-a.txt"
+    selected_payload.write_text("selected", encoding="utf-8")
+    selected_row = _row("artifact-a", selected_payload)
+    selected_row["state"] = "sealed"
+    selected_row["sealed_owner_transition_id"] = "successor-transition-a"
+    skipped_payload = tmp_path / "artifact-b.txt"
+    skipped_payload.write_text("skipped", encoding="utf-8")
+    skipped_row = _row("artifact-b", skipped_payload)
+    skipped_row["state"] = "sealed"
+    skipped_row["sealed_owner_transition_id"] = "successor-transition-b"
+
+    selected = ContextMaterializer._selected_rows(
+        response,
+        [selected_row, skipped_row],
+        sealed_artifact_authority={
+            "artifact-a": "successor-transition-a",
+            "artifact-b": "successor-transition-b",
+        },
+    )
+
+    assert selected == {"artifact-a": selected_row}
+
+
 def test_materializer_requires_verified_registry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
