@@ -2591,8 +2591,18 @@ def test_minimal_artifact_quality_uses_core_admission_and_full_provenance(
     failed = port.execute(request(missing_provenance=True), "quality-fail")
 
     assert passed["quality_gate_status"] == "PASS"
+    assert passed["quality_report"]["hard_safety"] == {
+        "pass": True,
+        "findings": [],
+    }
     assert passed["quality_report"]["provenance_violations"] == []
-    assert failed["quality_gate_status"] != "PASS"
+    assert failed["quality_gate_status"] == "HARD_SAFETY_FAILED"
+    assert failed["quality_report"]["hard_safety"] == {
+        "pass": False,
+        "findings": [
+            "provenance:text_memory:SOURCE_PROVENANCE_INVALID"
+        ],
+    }
     assert failed["quality_report"]["provenance_violations"] == [
         "text_memory:SOURCE_PROVENANCE_INVALID"
     ]

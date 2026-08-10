@@ -430,11 +430,20 @@ class DurableFakeAuthority(ProductionOperationPort):
             report = {
                 "schema_version": MINIMAL_QUALITY_SCHEMA,
                 "status": "PASS",
-                "checks": {
-                    "baseline_scientific_paths_present": True,
-                    "sanitized_feedback_addressed": True,
-                    "gt_and_judge_leakage_absent": True,
+                "hard_safety": {"pass": True, "findings": []},
+                "dispatch_authority": {
+                    "pass": True,
+                    "basis": "registered_readable_native_artifact_triple",
+                    "semantic_heuristics_hard_blocking": False,
                 },
+                "minimal_usability": {
+                    "authority": "diagnostic_only",
+                    "pass": True,
+                    "baseline_method_present": True,
+                    "feedback_action_present": True,
+                    "generic_only": False,
+                },
+                "diagnostics": {"authority": "diagnostic_only"},
                 "gt_leakage_findings": [],
                 "provenance_violations": [],
                 "artifact_text_sha256": {},

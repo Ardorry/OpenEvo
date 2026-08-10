@@ -2953,15 +2953,16 @@ class CommunityTrainingSupervisor:
                 or report.get("status") != "PASS"
                 or report.get("gt_leakage_findings") != []
                 or report.get("provenance_violations") != []
-                or report.get("checks", {}).get(
-                    "baseline_scientific_paths_present"
-                ) is not True
-                or report.get("checks", {}).get(
-                    "sanitized_feedback_addressed"
-                ) is not True
-                or report.get("checks", {}).get(
-                    "gt_and_judge_leakage_absent"
-                ) is not True
+                or report.get("hard_safety")
+                != {"pass": True, "findings": []}
+                or report.get("dispatch_authority", {}).get("pass") is not True
+                or report.get("dispatch_authority", {}).get(
+                    "semantic_heuristics_hard_blocking"
+                ) is not False
+                or report.get("minimal_usability", {}).get("authority")
+                != "diagnostic_only"
+                or report.get("diagnostics", {}).get("authority")
+                != "diagnostic_only"
                 or quality.get("quality_report_sha256") != report.get("content_sha256")
             ):
                 raise ValueError("task-specific native artifact quality gate failed")
@@ -3617,7 +3618,11 @@ class CommunityTrainingSupervisor:
                 "openevo.researchclawbench.preservation_artifact_quality.v3",
                 "PRESERVATION_ARTIFACT_QUALITY_FAILED",
             ),
-            (MINIMAL_QUALITY_SCHEMA, "MINIMAL_SEMANTIC_ARTIFACT_QUALITY_FAILED"),
+            (
+                "openevo.researchclawbench.minimal_semantic_artifact_quality.v1",
+                "MINIMAL_SEMANTIC_ARTIFACT_QUALITY_FAILED",
+            ),
+            (MINIMAL_QUALITY_SCHEMA, "HARD_SAFETY_FAILED"),
         }
         if (
             len(evolution_effects) != 1

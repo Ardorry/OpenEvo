@@ -32,6 +32,15 @@ The package-local `recover-native-evolution` command remains a debug-only tool
 for immutable historical evidence. The production per-item command does not
 call or depend on it.
 
+The R4.5 demo artifact boundary keeps only operational integrity as dispatch
+authority: the native triple must be registered, readable, type-correct,
+task-owned, and backed by valid lineage/content-admission receipts. Baseline
+method, parameter, filename, output-name, generic-advice, token/stem, and
+per-path retention measurements remain in the artifact-quality report as
+diagnostics. Their result cannot terminate the lifecycle or block the fresh
+evolved Candidate. Baseline equivalence is likewise diagnostic only. These
+metrics observe evolution behavior; they do not predict Judge score.
+
 No-model checks:
 
 See `docs/runner-cli-demo.md` for the exact repository-managed protocol and

@@ -282,7 +282,7 @@ def analyze_candidate():
     assert "Rectangle((0, 0), 12, 8)" not in parameter_text
 
 
-def test_astronomy_semantic_regression_requires_methods_and_thresholds() -> None:
+def test_astronomy_semantic_diagnostics_do_not_block_dispatch() -> None:
     trace = _trace(
         summary="Select the quasar catalog, fit logistic predictions, and inspect confusion.",
         steps=[
@@ -318,8 +318,19 @@ def test_astronomy_semantic_regression_requires_methods_and_thresholds() -> None
         provenance_violations=[],
     )
 
-    assert generic["status"] != "PASS"
+    assert generic["status"] == "PASS"
+    assert generic["hard_safety"]["pass"] is True
+    assert generic["dispatch_authority"]["pass"] is True
+    assert generic["dispatch_authority"]["semantic_heuristics_hard_blocking"] is False
+    assert generic["minimal_usability"] == {
+        "authority": "diagnostic_only",
+        "pass": False,
+        "baseline_method_present": False,
+        "feedback_action_present": True,
+        "generic_only": False,
+    }
     assert concrete["status"] == "PASS"
+    assert concrete["minimal_usability"]["pass"] is True
 
 
 def test_score_percentile_grid_resolution_is_not_a_hard_scientific_parameter() -> None:
@@ -346,7 +357,9 @@ def test_score_percentile_grid_resolution_is_not_a_hard_scientific_parameter() -
     )
 
     assert report["status"] == "PASS"
-    assert report["path_findings"][0]["parameter_anchor_count"] == 0
+    assert report["dispatch_authority"]["pass"] is True
+    assert report["diagnostics"]["parameter_literal_retention"]["ratio"] < 1.0
+    assert "PARAMETER_LITERAL_RETENTION_INCOMPLETE" in report["diagnostics"]["warnings"]
 
 
 def test_scientific_formula_parameters_are_not_erased_by_underscores() -> None:
@@ -384,11 +397,14 @@ def test_scientific_formula_parameters_are_not_erased_by_underscores() -> None:
         provenance_violations=[],
     )
 
-    assert generic["status"] != "PASS"
+    # Literal fidelity is diagnostic in R4.5.  The concrete method remains
+    # present, so omission alone cannot terminate the native lifecycle.
+    assert generic["status"] == "PASS"
+    assert generic["diagnostics"]["parameter_literal_retention"]["ratio"] < 1.0
     assert concrete["status"] == "PASS"
 
 
-def test_chemistry_semantic_regression_preserves_real_pdf_extraction() -> None:
+def test_chemistry_pdf_extraction_diagnostic_does_not_block_dispatch() -> None:
     trace = _trace(
         summary="Extract text from four supplied PDFs before literature screening.",
         steps=[
@@ -422,7 +438,8 @@ def test_chemistry_semantic_regression_preserves_real_pdf_extraction() -> None:
         provenance_violations=[],
     )
 
-    assert generic["status"] != "PASS"
+    assert generic["status"] == "PASS"
+    assert generic["minimal_usability"]["pass"] is False
     assert concrete["status"] == "PASS"
 
 
@@ -751,5 +768,9 @@ def test_artifact_quality_requires_core_leakage_admission() -> None:
         provenance_violations=[],
     )
 
-    assert report["status"] != "PASS"
+    assert report["status"] == "HARD_SAFETY_FAILED"
+    assert report["hard_safety"] == {
+        "pass": False,
+        "findings": ["content_admission:GT_LITERAL"],
+    }
     assert report["gt_leakage_findings"] == ["GT_LITERAL"]

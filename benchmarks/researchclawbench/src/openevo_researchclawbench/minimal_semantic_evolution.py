@@ -22,7 +22,7 @@ from .training_state_store import canonical_sha256
 
 MINIMAL_TRACE_SCHEMA = "openevo.researchclawbench.minimal_baseline_trace.v1"
 MINIMAL_CONTEXT_SCHEMA = "openevo.researchclawbench.minimal_semantic_evolution.r4"
-MINIMAL_QUALITY_SCHEMA = "openevo.researchclawbench.minimal_semantic_artifact_quality.v1"
+MINIMAL_QUALITY_SCHEMA = "openevo.researchclawbench.minimal_semantic_artifact_quality.v2"
 RETENTION_FEEDBACK_CLASS = "minimal_semantic_evolution_r4"
 RETENTION_FEEDBACK_SCHEMA = MINIMAL_CONTEXT_SCHEMA
 
@@ -86,6 +86,34 @@ _TERM_NOISE = frozenset(
 _PRESENTATION_PARAMETER_TARGET = re.compile(
     r"(?i)^(?:x|y|x0|x1|y0|y1|cx|cy|r|row|col|left|right|top|bottom|"
     r"width|height|margin|padding|color|rgb|font|pixel|canvas|bar_width|tick)$"
+)
+_GENERIC_ADVICE_PATTERNS = tuple(
+    re.compile(pattern)
+    for pattern in (
+        r"\bread (?:the )?workspace\b",
+        r"\binspect (?:the )?(?:workspace|files)\b",
+        r"\banaly[sz]e (?:the )?problem\b",
+        r"\bensure reproducibility\b",
+        r"\bvalidate (?:the )?(?:output|outputs|result|results)\b",
+        r"\bcheck (?:the )?(?:output|outputs|result|results|evidence|paths)\b",
+        r"\bfollow (?:the )?instructions\b",
+    )
+)
+_GENERIC_ADVICE_TERMS = frozenset(
+    {
+        "analyze",
+        "check",
+        "ensure",
+        "files",
+        "follow",
+        "instructions",
+        "inspect",
+        "problem",
+        "read",
+        "reproducibility",
+        "validate",
+        "workspace",
+    }
 )
 
 
@@ -601,18 +629,11 @@ def _canonical_number(value: str) -> str:
 
 
 def _important_parameter_values(parameters: Iterable[str]) -> list[str]:
-    """Select values that define a Candidate method, not parser/loop mechanics."""
+    """Extract numeric literals for diagnostics, never lifecycle authority."""
 
     values: list[str] = []
     for parameter in parameters:
         rendered = str(parameter)
-        # Loop/grid resolution is an implementation detail, not a scientific
-        # decision that an artifact must repeat verbatim.  The surrounding
-        # method anchor still has to be retained (for example score-percentile
-        # threshold selection), while named thresholds and comparisons remain
-        # exact fidelity anchors below.
-        if re.search(r"\bfor\b", rendered) and re.search(r"\brange\s*\(", rendered):
-            continue
         numbers = [_canonical_number(value) for value in _NUMBER.findall(rendered)]
         if re.search(r"\[['\"][^'\"]+['\"]\]", rendered):
             values.extend(value for value in numbers if value not in {"0", "1", "-1"})
@@ -658,7 +679,9 @@ def _path_fidelity(path: Mapping[str, Any], artifact_text: str) -> dict[str, Any
     matched_outputs = [
         name for name in output_names if name.casefold() in artifact_text.casefold()
     ]
-    summary_overlap = len(_terms(str(path.get("summary", ""))).intersection(_terms(artifact_text)))
+    summary_overlap = len(
+        _terms(str(path.get("summary", ""))).intersection(_terms(artifact_text))
+    )
     method_required = min(2, len(methods))
     method_present = (
         len(matched_methods) >= method_required if method_required else summary_overlap >= 2
@@ -666,9 +689,11 @@ def _path_fidelity(path: Mapping[str, Any], artifact_text: str) -> dict[str, Any
     method_present = method_present or (
         bool(method_terms) and len(matched_method_terms) >= min(2, len(method_terms))
     )
-    parameter_present = len(matched_parameters) == len(parameter_values)
     output_present = bool(matched_outputs) or not output_names
-    passed = method_present and parameter_present and (output_present or summary_overlap >= 3)
+    parameter_present = len(matched_parameters) == len(parameter_values)
+    retained = method_present and parameter_present and (
+        output_present or summary_overlap >= 3
+    )
     return {
         "summary_sha256": canonical_sha256(str(path.get("summary", ""))),
         "method_anchor_count": len(methods),
@@ -678,8 +703,19 @@ def _path_fidelity(path: Mapping[str, Any], artifact_text: str) -> dict[str, Any
         "matched_parameter_anchor_count": len(matched_parameters),
         "output_anchor_count": len(output_names),
         "matched_output_anchor_count": len(matched_outputs),
-        "status": "PASS" if passed else "FAIL",
+        "summary_term_overlap_count": summary_overlap,
+        "retained_path": retained,
+        "status": "PASS" if retained else "WARNING",
     }
+
+
+def _generic_advice_diagnostic(artifact_text: str) -> tuple[float, int]:
+    normalized = _normalize(artifact_text)
+    tokens = normalized.split()
+    generic_token_count = sum(token in _GENERIC_ADVICE_TERMS for token in tokens)
+    ratio = generic_token_count / max(1, len(tokens))
+    marker_count = sum(bool(pattern.search(normalized)) for pattern in _GENERIC_ADVICE_PATTERNS)
+    return round(ratio, 6), marker_count
 
 
 def assess_minimal_semantic_artifact_quality(
@@ -735,21 +771,79 @@ def assess_minimal_semantic_artifact_quality(
             }
         )
     leakage = sorted(set(content_admission_findings))
-    paths_present = all(item["status"] == "PASS" for item in path_findings)
+    provenance = sorted(set(provenance_violations))
+    retained_path_count = sum(bool(item["retained_path"]) for item in path_findings)
+    baseline_method_present = retained_path_count > 0
     feedback_addressed = any(item["status"] == "PASS" for item in feedback_findings)
-    passed = paths_present and feedback_addressed and not leakage and not provenance_violations
+    generic_ratio, generic_marker_count = _generic_advice_diagnostic(combined)
+    generic_only = (
+        not baseline_method_present
+        and (generic_marker_count >= 2 or generic_ratio >= 0.30)
+    )
+    hard_safety_pass = not leakage and not provenance
+    parameter_total = sum(item["parameter_anchor_count"] for item in path_findings)
+    parameter_matched = sum(
+        item["matched_parameter_anchor_count"] for item in path_findings
+    )
+    output_total = sum(item["output_anchor_count"] for item in path_findings)
+    output_matched = sum(item["matched_output_anchor_count"] for item in path_findings)
+    warnings: list[str] = []
+    if retained_path_count != len(path_findings):
+        warnings.append("PATH_SEMANTIC_COVERAGE_INCOMPLETE")
+    if parameter_matched != parameter_total:
+        warnings.append("PARAMETER_LITERAL_RETENTION_INCOMPLETE")
+    if output_matched != output_total:
+        warnings.append("OUTPUT_NAME_RETENTION_INCOMPLETE")
+    warnings = list(dict.fromkeys(warnings))
+    status = (
+        "HARD_SAFETY_FAILED"
+        if not hard_safety_pass
+        else "PASS"
+    )
     body = {
         "schema_version": MINIMAL_QUALITY_SCHEMA,
-        "status": "PASS" if passed else "MINIMAL_SEMANTIC_ARTIFACT_QUALITY_FAILED",
-        "checks": {
-            "baseline_scientific_paths_present": paths_present,
-            "sanitized_feedback_addressed": feedback_addressed,
-            "gt_and_judge_leakage_absent": not leakage,
+        "status": status,
+        "hard_safety": {
+            "pass": hard_safety_pass,
+            "findings": [
+                *[f"content_admission:{item}" for item in leakage],
+                *[f"provenance:{item}" for item in provenance],
+            ],
         },
-        "path_findings": path_findings,
+        "dispatch_authority": {
+            "pass": hard_safety_pass,
+            "basis": "registered_readable_native_artifact_triple",
+            "semantic_heuristics_hard_blocking": False,
+        },
+        "minimal_usability": {
+            "authority": "diagnostic_only",
+            "pass": baseline_method_present and feedback_addressed and not generic_only,
+            "baseline_method_present": baseline_method_present,
+            "feedback_action_present": feedback_addressed,
+            "generic_only": generic_only,
+        },
+        "diagnostics": {
+            "authority": "diagnostic_only",
+            "path_retention": path_findings,
+            "path_count": len(path_findings),
+            "retained_path_count": retained_path_count,
+            "parameter_literal_retention": {
+                "matched": parameter_matched,
+                "total": parameter_total,
+                "ratio": round(parameter_matched / max(1, parameter_total), 6),
+            },
+            "output_name_retention": {
+                "matched": output_matched,
+                "total": output_total,
+                "ratio": round(output_matched / max(1, output_total), 6),
+            },
+            "generic_advice_ratio": generic_ratio,
+            "generic_advice_marker_count": generic_marker_count,
+            "warnings": warnings,
+        },
         "feedback_findings": feedback_findings,
         "gt_leakage_findings": leakage,
-        "provenance_violations": sorted(set(provenance_violations)),
+        "provenance_violations": provenance,
         "artifact_text_sha256": {
             kind: canonical_sha256(text) for kind, text in artifact_texts.items()
         },
