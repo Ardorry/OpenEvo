@@ -199,20 +199,41 @@ class DurableTrainingControl:
             attempts = authority.get("attempts")
             artifacts = authority.get("artifacts")
             commit = authority.get("commit")
-            if (
-                not isinstance(transition, dict)
-                or transition.get("state") != "failed"
-                or not isinstance(transition.get("error"), dict)
-                or transition["error"].get("retryable") is not False
-                or not isinstance(attempts, list)
-                or not attempts
-                or not isinstance(attempts[-1], dict)
-                or attempts[-1].get("state") != "failed"
-                or not isinstance(attempts[-1].get("error"), dict)
-                or attempts[-1]["error"].get("retryable") is not False
-                or artifacts != []
-                or commit is not None
-            ):
+            failed_authority = (
+                isinstance(transition, dict)
+                and transition.get("state") == "failed"
+                and isinstance(transition.get("error"), dict)
+                and transition["error"].get("retryable") is False
+                and isinstance(attempts, list)
+                and bool(attempts)
+                and isinstance(attempts[-1], dict)
+                and attempts[-1].get("state") == "failed"
+                and isinstance(attempts[-1].get("error"), dict)
+                and attempts[-1]["error"].get("retryable") is False
+                and artifacts == []
+                and commit is None
+            )
+            abandon_manifest = (
+                commit.get("manifest") if isinstance(commit, dict) else None
+            )
+            cancelled_authority = (
+                isinstance(transition, dict)
+                and transition.get("state") == "cancelled"
+                and transition.get("error") is None
+                and isinstance(attempts, list)
+                and bool(attempts)
+                and isinstance(attempts[-1], dict)
+                and attempts[-1].get("state") == "failed"
+                and isinstance(attempts[-1].get("error"), dict)
+                and attempts[-1]["error"].get("retryable") is False
+                and artifacts == []
+                and isinstance(abandon_manifest, dict)
+                and abandon_manifest.get("atomic_evolution_abandon_contract_version")
+                == "2"
+                and abandon_manifest.get("successor_transition_id") == transition_id
+                and abandon_manifest.get("method_artifact_ids") == []
+            )
+            if not failed_authority and not cancelled_authority:
                 raise ValueError("failed successor terminal authority is incomplete")
             transition_ref = transition.get("transition")
             predecessor = (
@@ -224,23 +245,26 @@ class DurableTrainingControl:
                 predecessor.get("project_head_id"), str
             ):
                 raise ValueError("failed successor predecessor authority is incomplete")
-            key = f"{self.supervisor.experiment_id}:failed-evolution-abandon"
-            abandoned = client.json(
-                "POST",
-                f"/v2/transitions/{transition_id}/abandon",
-                payload={"expected_project_head_id": predecessor["project_head_id"]},
-                headers={"Idempotency-Key": key},
-            )
-            if (
-                abandoned.get("kind") != "transition_abandon"
-                or abandoned.get("status") != "succeeded"
-            ):
-                raise ValueError("failed successor abandonment is not authoritative")
+            abandoned_operation_id = None
+            if failed_authority:
+                key = f"{self.supervisor.experiment_id}:failed-evolution-abandon"
+                abandoned = client.json(
+                    "POST",
+                    f"/v2/transitions/{transition_id}/abandon",
+                    payload={"expected_project_head_id": predecessor["project_head_id"]},
+                    headers={"Idempotency-Key": key},
+                )
+                if (
+                    abandoned.get("kind") != "transition_abandon"
+                    or abandoned.get("status") != "succeeded"
+                ):
+                    raise ValueError("failed successor abandonment is not authoritative")
+                abandoned_operation_id = abandoned.get("operation_id")
             terminal_receipt = {
                 "schema_version": "openevo.researchclawbench.failed_evolution_closure.v1",
                 "terminal_proven": True,
                 "kind": "evolution",
-                "reason_code": "r3_content_admission_scope_conflict",
+                "reason_code": "core_successor_terminal_failure",
                 "successor_transition_id": transition_id,
                 "latest_transition_attempt_id": attempts[-1].get(
                     "transition_attempt_id"
@@ -248,7 +272,7 @@ class DurableTrainingControl:
                 "terminal_error_code": attempts[-1]["error"].get("code"),
                 "successor_artifact_count": 0,
                 "core_abandonment": "succeeded",
-                "core_abandon_operation_id": abandoned.get("operation_id"),
+                "core_abandon_operation_id": abandoned_operation_id,
                 "terminal_authority_sha256": canonical_sha256(
                     {
                         "transition": transition,
