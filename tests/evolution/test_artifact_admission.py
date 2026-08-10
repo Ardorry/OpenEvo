@@ -467,6 +467,32 @@ def test_task_local_candidate_numeric_parameter_reuses_equivalent_spelling() -> 
     assert receipt.source_payload_sha256 is not None
 
 
+def test_task_local_candidate_numeric_scan_ignores_decimal_like_binary_noise() -> None:
+    receipt = artifact_content_admission_receipt(
+        basis=ArtifactContentAdmissionBasis(
+            values=("0.1",),
+            candidate_source_reuse_authorized=True,
+        ),
+        payloads={
+            "proposal-1": {
+                "SKILL.md": "Preserve the baseline numeric analysis at 0.1."
+            }
+        },
+        source_payloads={
+            "dataset-1": {
+                "records.jsonl": (
+                    "Candidate output included 0000e905000000000000081200000000 "
+                    "and used 0.1 in the reported analysis."
+                )
+            }
+        },
+    )
+
+    assert receipt.passed is True
+    assert receipt.finding_count == 0
+    assert receipt.source_artifact_ids == ("dataset-1",)
+
+
 @pytest.mark.parametrize("equivalent_literal", ("0.1", "0.10", ".1", "1e-1"))
 def test_task_local_candidate_reuse_still_rejects_gt_only_numeric_literal(
     equivalent_literal: str,

@@ -542,10 +542,18 @@ def _protected_literal_present(folded_text: str, literal: str) -> bool:
             protected_value = Decimal(normalized)
         except InvalidOperation:
             return False
-        return any(
-            Decimal(match.group(0)) == protected_value
-            for match in _NUMERIC_TOKEN_PATTERN.finditer(folded_text)
-        )
+        for match in _NUMERIC_TOKEN_PATTERN.finditer(folded_text):
+            try:
+                if Decimal(match.group(0)) == protected_value:
+                    return True
+            except InvalidOperation:
+                # Candidate transcripts can contain long hexadecimal or
+                # binary-looking strings whose embedded ``e`` makes the
+                # bounded token regex resemble scientific notation.  They are
+                # not valid Decimal values and must not turn a content scan
+                # into an internal server error.
+                continue
+        return False
     return normalized in folded_text
 
 
