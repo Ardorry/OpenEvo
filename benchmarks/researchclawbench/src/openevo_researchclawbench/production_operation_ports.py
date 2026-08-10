@@ -58,14 +58,14 @@ from .community_evaluator import (
 from .config import ARTIFACT_TYPES, FROZEN_TASKS, ExperimentConfig
 from .evaluation_feedback import EvaluationFeedbackProjectionPort
 from .managed_core_control import ManagedCoreControlAuthority
-from .minimal_semantic_evolution import (
+from .minimal_interference_evolution import (
     MINIMAL_CONTEXT_SCHEMA,
     MINIMAL_TRACE_SCHEMA,
     RETENTION_FEEDBACK_CLASS,
     RETENTION_FEEDBACK_SCHEMA,
-    MinimalSemanticFeedbackProjectionPort,
-    assess_minimal_semantic_artifact_quality,
-    build_minimal_evolution_context,
+    MinimalInterferenceFeedbackProjectionPort,
+    assess_minimal_interference_artifacts,
+    build_minimal_interference_context,
 )
 from .production_training_operations import (
     ProductionOperationPort,
@@ -3209,7 +3209,7 @@ class CoreFeedbackPort(ProductionOperationPort):
                 projection.get("reflector_feedback") if isinstance(projection, dict) else None
             )
             minimal_context = (
-                reflector_feedback.get("a00_minimal_semantic_context")
+                reflector_feedback.get("a00_minimal_interference_context")
                 if isinstance(reflector_feedback, dict)
                 else None
             )
@@ -3232,18 +3232,18 @@ class CoreFeedbackPort(ProductionOperationPort):
                 else None
             )
             minimal_trace = (
-                projection.get("minimal_baseline_trace")
+                projection.get("selected_baseline_trajectory")
                 if isinstance(projection, dict)
                 else None
             )
             minimal_trace_admission = (
-                projection.get("minimal_baseline_trace_admission")
+                projection.get("selected_baseline_trajectory_admission")
                 if isinstance(projection, dict)
                 else None
             )
             expected_context: dict[str, Any] | None = None
             if isinstance(minimal_trace, dict) and isinstance(reflector_sanitized, dict):
-                expected_context = build_minimal_evolution_context(
+                expected_context = build_minimal_interference_context(
                     trace=minimal_trace,
                     sanitized_feedback=reflector_sanitized,
                 )
@@ -3272,7 +3272,7 @@ class CoreFeedbackPort(ProductionOperationPort):
                 != canonical_sha256(reflector_sanitized)
                 or projection.get("reflector_baseline_evidence_capsule_sha256")
                 != canonical_sha256(reflector_capsule)
-                or projection.get("minimal_baseline_trace_sha256")
+                or projection.get("selected_baseline_trajectory_sha256")
                 != canonical_sha256(minimal_trace)
                 or not isinstance(admission, dict)
                 or admission.get("status") != "ADMITTED"
@@ -3301,7 +3301,7 @@ class CoreFeedbackPort(ProductionOperationPort):
                 or not isinstance(minimal_trace_admission, dict)
                 or minimal_trace_admission.get("status") != "ADMITTED"
                 or minimal_trace_admission.get("trace_sha256")
-                != projection.get("minimal_baseline_trace_sha256")
+                != projection.get("selected_baseline_trajectory_sha256")
                 or not isinstance(reflector_feedback, dict)
                 or reflector_feedback.get("schema_version") != RETENTION_FEEDBACK_SCHEMA
                 or reflector_feedback.get("feedback_class") != RETENTION_FEEDBACK_CLASS
@@ -3321,12 +3321,12 @@ class CoreFeedbackPort(ProductionOperationPort):
                 "baseline_evidence_capsule_sha256": projection[
                     "baseline_evidence_capsule_sha256"
                 ],
-                "minimal_baseline_trace_sha256": projection[
-                    "minimal_baseline_trace_sha256"
+                "selected_baseline_trajectory_sha256": projection[
+                    "selected_baseline_trajectory_sha256"
                 ],
                 "sanitized_feedback_included": True,
                 "baseline_evidence_capsule_included": False,
-                "minimal_baseline_trace_included": True,
+                "selected_baseline_trajectory_included": True,
                 "judge_feedback_included": False,
                 "raw_gt_projected": False,
                 "judge_reasoning_projected": False,
@@ -4008,7 +4008,7 @@ class CoreArtifactQualityPort(ProductionOperationPort):
     def execute(self, request: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
         task_id = request.get("task_id")
         evolution = request.get("evolution")
-        trace = request.get("minimal_baseline_trace")
+        trace = request.get("selected_baseline_trajectory")
         sanitized_feedback = request.get("reflector_sanitized_feedback")
         if (
             task_id not in FROZEN_TASKS
@@ -4113,7 +4113,7 @@ class CoreArtifactQualityPort(ProductionOperationPort):
                 }
         finally:
             client.close()
-        report = assess_minimal_semantic_artifact_quality(
+        report = assess_minimal_interference_artifacts(
             trace=trace,
             sanitized_feedback=sanitized_feedback,
             artifact_texts=artifact_texts,
@@ -5276,8 +5276,8 @@ def build_production_ports(
         researchclawbench_root=config.researchclawbench_root,
         evaluator=evaluator,
     )
-    feedback_projection = MinimalSemanticFeedbackProjectionPort(
-        root=run_root / "evaluator_private" / "feedback_projection" / "minimal_r4",
+    feedback_projection = MinimalInterferenceFeedbackProjectionPort(
+        root=run_root / "evaluator_private" / "feedback_projection" / "minimal_r5",
         frozen_projector=frozen_feedback_projection,
     )
     return ProductionPorts(

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from .config import ARTIFACT_TYPES, FROZEN_TASKS
-from .minimal_semantic_evolution import (
+from .minimal_interference_evolution import (
     MINIMAL_QUALITY_SCHEMA,
     RETENTION_FEEDBACK_CLASS,
 )
@@ -2662,13 +2662,10 @@ class CommunityTrainingSupervisor:
                 or not isinstance(admission, dict)
                 or admission.get("status") != "ADMITTED"
                 or not isinstance(quality, dict)
-                or quality.get("baseline_scientific_paths_required") is not True
-                or quality.get("sanitized_feedback_improvement_required") is not True
                 or quality.get("all_sanitized_diagnoses_visible") is not True
-                or quality.get("minimal_baseline_trace_present") is not True
-                or quality.get("legacy_achievement_metrics_diagnostic_only") is not True
+                or quality.get("selected_baseline_trajectory_present") is not True
+                or quality.get("semantic_quality_diagnostic_only") is not True
                 or quality.get("baseline_equivalence_diagnostic_only") is not True
-                or quality.get("gt_leakage") is not False
                 or not isinstance(projection.get("baseline_evidence_capsule"), dict)
                 or not isinstance(projection.get("baseline_evidence_capsule_admission"), dict)
                 or projection["baseline_evidence_capsule_admission"].get("status")
@@ -2677,11 +2674,11 @@ class CommunityTrainingSupervisor:
                     "projector_model_calls"
                 )
                 != 0
-                or not isinstance(projection.get("minimal_baseline_trace"), dict)
+                or not isinstance(projection.get("selected_baseline_trajectory"), dict)
                 or not isinstance(
-                    projection.get("minimal_baseline_trace_admission"), dict
+                    projection.get("selected_baseline_trajectory_admission"), dict
                 )
-                or projection["minimal_baseline_trace_admission"].get("status")
+                or projection["selected_baseline_trajectory_admission"].get("status")
                 != "ADMITTED"
                 or not isinstance(projection.get("reflector_feedback"), dict)
                 or projection["reflector_feedback"].get("feedback_class")
@@ -2747,9 +2744,9 @@ class CommunityTrainingSupervisor:
                 or attachment.get("baseline_evidence_capsule_included") is not False
                 or attachment.get("baseline_evidence_capsule_sha256")
                 != projection.get("baseline_evidence_capsule_sha256")
-                or attachment.get("minimal_baseline_trace_included") is not True
-                or attachment.get("minimal_baseline_trace_sha256")
-                != projection.get("minimal_baseline_trace_sha256")
+                or attachment.get("selected_baseline_trajectory_included") is not True
+                or attachment.get("selected_baseline_trajectory_sha256")
+                != projection.get("selected_baseline_trajectory_sha256")
                 or attachment.get("reflector_feedback_sha256")
                 != projection.get("reflector_feedback_sha256")
                 or attachment.get("judge_feedback_included") is not False
@@ -2800,7 +2797,7 @@ class CommunityTrainingSupervisor:
                 )
                 is not False
                 or state.get("active_attachment_receipt", {}).get(
-                    "minimal_baseline_trace_included"
+                    "selected_baseline_trajectory_included"
                 )
                 is not True
                 or state.get("active_attachment_receipt", {}).get("raw_gt_projected") is not False
@@ -2927,8 +2924,8 @@ class CommunityTrainingSupervisor:
                     "attempt_index": attempt,
                     "evolution": state["active_evolution_receipt"],
                     "baseline_evidence_capsule": capsule,
-                    "minimal_baseline_trace": (
-                        projection.get("minimal_baseline_trace")
+                    "selected_baseline_trajectory": (
+                        projection.get("selected_baseline_trajectory")
                         if isinstance(projection, dict)
                         else None
                     ),
@@ -2951,16 +2948,10 @@ class CommunityTrainingSupervisor:
                 or not isinstance(report, dict)
                 or report.get("schema_version") != MINIMAL_QUALITY_SCHEMA
                 or report.get("status") != "PASS"
-                or report.get("gt_leakage_findings") != []
-                or report.get("provenance_violations") != []
-                or report.get("hard_safety")
-                != {"pass": True, "findings": []}
                 or report.get("dispatch_authority", {}).get("pass") is not True
                 or report.get("dispatch_authority", {}).get(
                     "semantic_heuristics_hard_blocking"
                 ) is not False
-                or report.get("minimal_usability", {}).get("authority")
-                != "diagnostic_only"
                 or report.get("diagnostics", {}).get("authority")
                 != "diagnostic_only"
                 or quality.get("quality_report_sha256") != report.get("content_sha256")

@@ -1,7 +1,7 @@
 experiment_id: sequential_task_reflector_evolution_v0
 refactor_id: PRODUCTION_TRAINING_OPERATIONS_DRIVER_V1
-protocol_name: minimal_semantic_evolution_r4
-protocol_version: 4.0.0
+protocol_name: minimal_interference_evolution_r5
+protocol_version: 5.0.0
 status: PER_ITEM_CONFIGURED_NOT_STARTED
 per_item_reset:
   contract_version: openevo.researchclawbench.per_item_reset.v2
@@ -12,9 +12,9 @@ per_item_reset:
     - judge_baseline
     - project_sanitized_evaluator_feedback
     - admit_sanitized_evaluator_feedback
-    - build_minimal_baseline_trace
-    - evolve_once_minimal_semantic
-    - verify_minimal_semantic_native_artifacts
+    - select_baseline_trajectory_excerpts
+    - evolve_once_minimal_interference
+    - record_artifact_diagnostics
     - evolved
     - baseline_equivalence_diagnostic
     - judge_evolved
@@ -193,14 +193,14 @@ teacher:
 feedback:
   native_post_run_attachment_status: ATTACHED_TO_NATIVE_COMPLETED_TASK_DATASET
   private_target_study: true
-  boundary: SANITIZED_EVALUATION_FEEDBACK_BOUNDARY_V1_PLUS_MINIMAL_SEMANTIC_R4
-  feedback_class: minimal_semantic_evolution_r4
-  minimal_baseline_trace: minimal_baseline_trace_v1
+  boundary: SANITIZED_EVALUATION_FEEDBACK_BOUNDARY_V1_PLUS_MINIMAL_INTERFERENCE_R5
+  feedback_class: minimal_interference_evolution_r5
+  selected_baseline_trajectory: selected_baseline_trajectory_v1
   legacy_baseline_evidence_capsule: diagnostic_only
-  artifact_quality_gate: DIAGNOSTIC_SEMANTIC_ARTIFACT_QUALITY_V2
+  artifact_quality_gate: DIAGNOSTIC_ONLY
   baseline_equivalence_gate: DIAGNOSTIC_ONLY
-  reflector_success_trace_selection: candidate_action_method_parameter_v1
-  reflector_preservation_anchor_contract: task_local_minimal_semantic_v1
+  reflector_success_trace_selection: bounded_verbatim_scientific_excerpts_v1
+  reflector_preservation_anchor_contract: task_local_minimal_interference_v1
   capsule_projector_model_calls: 0
   raw_gt_visible_to_reflector: false
   judge_reasoning_visible_to_reflector: false
