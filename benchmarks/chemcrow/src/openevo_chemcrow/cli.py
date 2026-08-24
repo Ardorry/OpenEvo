@@ -128,6 +128,10 @@ def command_tool_smoke(args: argparse.Namespace) -> int:
         "MolSimilarity": registry.execute("MolSimilarity", {"query": "CCO.CCOC"}, call_id="smoke-similarity"),
         "FunctionalGroups": registry.execute("FunctionalGroups", {"query": "CCO"}, call_id="smoke-groups"),
         "ControlChemCheck": registry.execute("ControlChemCheck", {"query": "CCO"}, call_id="smoke-control"),
+        "SimilarityToControlChem": registry.execute(
+            "SimilarityToControlChem", {"query": "CCO"}, call_id="smoke-control-similarity"
+        ),
+        "PatentCheck": registry.execute("PatentCheck", {"query": "CCO"}, call_id="smoke-patent"),
     }
     payload = {
         "schema_version": "chemcrow_local_tool_smoke_v1",

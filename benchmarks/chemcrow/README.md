@@ -20,9 +20,9 @@ uv sync --python 3.11 --extra dev
 uv run pytest -q
 uv run openevo-chemcrow extract-tasks \
   --runs-root ../../../vendor/chemcrow-runs \
-  --output benchmarks/chemcrow/tasks.jsonl \
-  --safety-output benchmarks/chemcrow/safety_tasks.jsonl \
-  --audit-output benchmarks/chemcrow/leakage_audit.json
+  --output tasks.jsonl \
+  --safety-output safety_tasks.jsonl \
+  --audit-output reports/LEAKAGE_AUDIT.json
 uv run openevo-chemcrow preflight \
   --config configs/preflight.yaml \
   --no-model-calls
