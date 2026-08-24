@@ -1,0 +1,372 @@
+{
+  "chemcrow_public_commit": "e7ebd5193334ac1d8dea137b635721c7cb470d33",
+  "schema_version": "chemcrow_tool_inventory_v1",
+  "tools": [
+    {
+      "class": "F",
+      "dependencies": [
+        "legacy langchain"
+      ],
+      "determinism": "non-deterministic",
+      "environment_variables": [],
+      "failure_reason": "arbitrary code execution is excluded from the benchmark tool surface",
+      "human_setup": true,
+      "import_path": "langchain.agents.load_tools:python_repl",
+      "local_network": "local",
+      "name": "python_repl",
+      "paper_only_absent": false,
+      "purpose": "arbitrary Python execution",
+      "safe": false,
+      "service": null,
+      "status": "excluded"
+    },
+    {
+      "class": "B",
+      "dependencies": [
+        "httpx"
+      ],
+      "determinism": "non-deterministic",
+      "environment_variables": [],
+      "failure_reason": null,
+      "human_setup": false,
+      "import_path": "langchain.agents.load_tools:wikipedia",
+      "local_network": "public network",
+      "name": "wikipedia",
+      "paper_only_absent": false,
+      "purpose": "general encyclopedia lookup",
+      "safe": true,
+      "service": "MediaWiki API",
+      "status": "available when network is enabled"
+    },
+    {
+      "class": "B",
+      "dependencies": [
+        "rdkit",
+        "httpx"
+      ],
+      "determinism": "non-deterministic",
+      "environment_variables": [
+        "CHEMSPACE_API_KEY"
+      ],
+      "failure_reason": null,
+      "human_setup": false,
+      "import_path": "chemcrow.tools.converters.Query2SMILES",
+      "local_network": "public network",
+      "name": "Name2SMILES",
+      "paper_only_absent": false,
+      "purpose": "convert a compound name to canonical SMILES",
+      "safe": true,
+      "service": "PubChem PUG REST; optional ChemSpace fallback",
+      "status": "available when PubChem is reachable"
+    },
+    {
+      "class": "B",
+      "dependencies": [
+        "rdkit",
+        "httpx"
+      ],
+      "determinism": "non-deterministic",
+      "environment_variables": [],
+      "failure_reason": null,
+      "human_setup": false,
+      "import_path": "chemcrow.tools.converters.Query2CAS",
+      "local_network": "public network",
+      "name": "Mol2CAS",
+      "paper_only_absent": false,
+      "purpose": "convert molecule name or SMILES to CAS registry number",
+      "safe": true,
+      "service": "PubChem PUG REST/PUG View",
+      "status": "available when PubChem is reachable"
+    },
+    {
+      "class": "B",
+      "dependencies": [
+        "rdkit",
+        "httpx"
+      ],
+      "determinism": "non-deterministic",
+      "environment_variables": [],
+      "failure_reason": null,
+      "human_setup": false,
+      "import_path": "chemcrow.tools.converters.SMILES2Name",
+      "local_network": "public network",
+      "name": "SMILES2Name",
+      "paper_only_absent": false,
+      "purpose": "convert SMILES to a compound name",
+      "safe": true,
+      "service": "PubChem PUG REST",
+      "status": "available when PubChem is reachable"
+    },
+    {
+      "class": "A",
+      "dependencies": [
+        "molbloom"
+      ],
+      "determinism": "deterministic for pinned Bloom data",
+      "environment_variables": [],
+      "failure_reason": null,
+      "human_setup": false,
+      "import_path": "chemcrow.tools.search.PatentCheck",
+      "local_network": "local",
+      "name": "PatentCheck",
+      "paper_only_absent": false,
+      "purpose": "SureChEMBL membership lookup",
+      "safe": true,
+      "service": null,
+      "status": "available after locked environment install"
+    },
+    {
+      "class": "A",
+      "dependencies": [
+        "rdkit"
+      ],
+      "determinism": "deterministic",
+      "environment_variables": [],
+      "failure_reason": null,
+      "human_setup": false,
+      "import_path": "chemcrow.tools.rdkit.MolSimilarity",
+      "local_network": "local",
+      "name": "MolSimilarity",
+      "paper_only_absent": false,
+      "purpose": "Morgan-fingerprint Tanimoto similarity",
+      "safe": true,
+      "service": null,
+      "status": "available after locked environment install"
+    },
+    {
+      "class": "A",
+      "dependencies": [
+        "rdkit"
+      ],
+      "determinism": "deterministic",
+      "environment_variables": [],
+      "failure_reason": null,
+      "human_setup": false,
+      "import_path": "chemcrow.tools.rdkit.SMILES2Weight",
+      "local_network": "local",
+      "name": "SMILES2Weight",
+      "paper_only_absent": false,
+      "purpose": "exact molecular weight",
+      "safe": true,
+      "service": null,
+      "status": "available after locked environment install"
+    },
+    {
+      "class": "A",
+      "dependencies": [
+        "rdkit"
+      ],
+      "determinism": "deterministic",
+      "environment_variables": [],
+      "failure_reason": null,
+      "human_setup": false,
+      "import_path": "chemcrow.tools.rdkit.FuncGroups",
+      "local_network": "local",
+      "name": "FunctionalGroups",
+      "paper_only_absent": false,
+      "purpose": "SMARTS functional-group detection",
+      "safe": true,
+      "service": null,
+      "status": "available after locked environment install"
+    },
+    {
+      "class": "B",
+      "dependencies": [
+        "httpx"
+      ],
+      "determinism": "non-deterministic",
+      "environment_variables": [],
+      "failure_reason": null,
+      "human_setup": false,
+      "import_path": "chemcrow.tools.safety.ExplosiveCheck",
+      "local_network": "public network",
+      "name": "ExplosiveCheck",
+      "paper_only_absent": false,
+      "purpose": "check PubChem GHS explosive classification",
+      "safe": true,
+      "service": "PubChem PUG View",
+      "status": "available through lazy adapter; vendor constructor's ClinTox download avoided"
+    },
+    {
+      "class": "A",
+      "dependencies": [
+        "rdkit",
+        "chem_wep_smi.csv"
+      ],
+      "determinism": "deterministic locally",
+      "environment_variables": [],
+      "failure_reason": null,
+      "human_setup": false,
+      "import_path": "chemcrow.tools.safety.ControlChemCheck",
+      "local_network": "local for SMILES; PubChem for CAS/name",
+      "name": "ControlChemCheck",
+      "paper_only_absent": false,
+      "purpose": "controlled-chemical membership and similarity safety gate",
+      "safe": true,
+      "service": "optional PubChem conversion",
+      "status": "available after locked environment install and vendor data binding"
+    },
+    {
+      "class": "A",
+      "dependencies": [
+        "rdkit",
+        "chem_wep_smi.csv"
+      ],
+      "determinism": "deterministic",
+      "environment_variables": [],
+      "failure_reason": null,
+      "human_setup": false,
+      "import_path": "chemcrow.tools.safety.SimilarControlChemCheck",
+      "local_network": "local",
+      "name": "SimilarityToControlChem",
+      "paper_only_absent": false,
+      "purpose": "similarity to the controlled-chemical list",
+      "safe": true,
+      "service": null,
+      "status": "available after locked environment install and vendor data binding"
+    },
+    {
+      "class": "B",
+      "dependencies": [
+        "httpx"
+      ],
+      "determinism": "non-deterministic",
+      "environment_variables": [],
+      "failure_reason": null,
+      "human_setup": false,
+      "import_path": "chemcrow.tools.safety.SafetySummary",
+      "local_network": "public network",
+      "name": "SafetySummary",
+      "paper_only_absent": false,
+      "purpose": "summarize hazard and safety records",
+      "safe": true,
+      "service": "PubChem PUG View",
+      "status": "available as deterministic evidence extract without legacy hidden LLM"
+    },
+    {
+      "class": "F",
+      "dependencies": [
+        "paper-qa==1.1.1",
+        "paperscraper",
+        "legacy langchain"
+      ],
+      "determinism": "non-deterministic",
+      "environment_variables": [
+        "OPENAI_API_KEY",
+        "SEMANTIC_SCHOLAR_API_KEY"
+      ],
+      "failure_reason": "would add hidden legacy model calls and break paired provider fairness",
+      "human_setup": true,
+      "import_path": "chemcrow.tools.search.Scholar2ResultLLM",
+      "local_network": "public network plus model",
+      "name": "LiteratureSearch",
+      "paper_only_absent": false,
+      "purpose": "search papers and synthesize an answer",
+      "safe": true,
+      "service": "Semantic Scholar and legacy OpenAI embeddings/LLM",
+      "status": "excluded from initial real profile"
+    },
+    {
+      "class": "C",
+      "dependencies": [
+        "httpx"
+      ],
+      "determinism": "non-deterministic",
+      "environment_variables": [
+        "SERP_API_KEY"
+      ],
+      "failure_reason": "SERP_API_KEY is not configured",
+      "human_setup": true,
+      "import_path": "chemcrow.tools.search.WebSearch",
+      "local_network": "credentialed network",
+      "name": "WebSearch",
+      "paper_only_absent": false,
+      "purpose": "general web search",
+      "safe": true,
+      "service": "SerpAPI",
+      "status": "blocked without key"
+    },
+    {
+      "class": "F",
+      "dependencies": [
+        "httpx"
+      ],
+      "determinism": "non-deterministic",
+      "environment_variables": [
+        "CHEMSPACE_API_KEY"
+      ],
+      "failure_reason": "procurement/price tool is unnecessary and excluded by benchmark-only boundary",
+      "human_setup": true,
+      "import_path": "chemcrow.tools.chemspace.GetMoleculePrice",
+      "local_network": "credentialed commercial network",
+      "name": "GetMoleculePrice",
+      "paper_only_absent": false,
+      "purpose": "query compound availability and price",
+      "safe": false,
+      "service": "ChemSpace API",
+      "status": "excluded from benchmark execution profile"
+    },
+    {
+      "class": "C/D",
+      "dependencies": [
+        "rxn4chemistry for hosted path",
+        "HTTP for local path"
+      ],
+      "determinism": "model-dependent",
+      "environment_variables": [
+        "RXN4CHEM_API_KEY",
+        "RXN4CHEM_PROJECT_ID",
+        "CHEMCROW_RXN_PREDICT_URL"
+      ],
+      "failure_reason": "legacy Docker image is unavailable locally and registry manifest lookup failed",
+      "human_setup": true,
+      "import_path": "chemcrow.tools.rxn4chem.RXNPredict or chemcrow.tools.reactions.RXNPredictLocal",
+      "local_network": "hosted API or local service",
+      "name": "ReactionPredict",
+      "paper_only_absent": false,
+      "purpose": "forward reaction prediction",
+      "safe": true,
+      "service": "IBM RXN or RXN-Sandbox/local endpoint",
+      "status": "blocked until hosted credentials or a verified local service exist"
+    },
+    {
+      "class": "C/D",
+      "dependencies": [
+        "rxn4chemistry for hosted path",
+        "HTTP for local path"
+      ],
+      "determinism": "model-dependent",
+      "environment_variables": [
+        "RXN4CHEM_API_KEY",
+        "RXN4CHEM_PROJECT_ID",
+        "CHEMCROW_RXN_RETRO_URL"
+      ],
+      "failure_reason": "legacy local route embeds an obsolete hidden GPT summarizer and old images are unavailable",
+      "human_setup": true,
+      "import_path": "chemcrow.tools.rxn4chem.RXNRetrosynthesis or chemcrow.tools.reactions.RXNRetrosynthesisLocal",
+      "local_network": "hosted API or local service",
+      "name": "ReactionRetrosynthesis",
+      "paper_only_absent": false,
+      "purpose": "retrosynthetic route prediction",
+      "safe": true,
+      "service": "IBM RXN or RXN-Sandbox/local endpoint",
+      "status": "blocked until hosted credentials or a verified local service exist"
+    },
+    {
+      "class": "E",
+      "dependencies": [],
+      "determinism": "unknown",
+      "environment_variables": [],
+      "failure_reason": "the official README states that API-restricted paper tools are not public",
+      "human_setup": true,
+      "import_path": "absent from chemcrow-public",
+      "local_network": "unknown/restricted",
+      "name": "paper-only restricted tools",
+      "paper_only_absent": true,
+      "purpose": "tools described in the ChemCrow paper but omitted from public source",
+      "safe": false,
+      "service": "restricted APIs",
+      "status": "unavailable"
+    }
+  ]
+}

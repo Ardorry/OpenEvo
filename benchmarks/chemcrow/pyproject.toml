@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openevo-chemcrow"
+version = "0.1.0"
+description = "Leakage-closed ChemCrow task and tool environment for task-local OpenEvo evolution."
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "httpx[socks]>=0.27,<0.29",
+    "mcp>=1.13,<2",
+    "molbloom>=2.2,<3",
+    "openevo==0.1.10",
+    "pydantic>=2.9,<3",
+    "rdkit>=2024.9,<2026",
+]
+
+[project.optional-dependencies]
+hosted-rxn = ["rxn4chemistry>=1.5,<2"]
+dev = ["pytest>=8,<9", "pytest-cov>=5,<8", "ruff>=0.8,<1"]
+
+[project.scripts]
+openevo-chemcrow = "openevo_chemcrow.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["openevo_chemcrow*"]
+
+[tool.pytest.ini_options]
+addopts = ["--import-mode=importlib"]
+pythonpath = ["src", "../.."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 99
+target-version = "py311"
+
+[tool.uv.sources]
+openevo = { path = "../..", editable = true }

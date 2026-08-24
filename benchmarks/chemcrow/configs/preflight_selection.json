@@ -1,0 +1,13 @@
+{
+  "schema_version": "chemcrow_preflight_selection_v1",
+  "recorded_before_execution": true,
+  "recorded_at_utc": "2026-08-24T16:30:30Z",
+  "selection_method": "fixed before outcomes; low-infrastructure chemical logic and molecular reasoning",
+  "task_ids": [
+    "chemcrow-03",
+    "chemcrow-06",
+    "chemcrow-12"
+  ],
+  "maximum_paid_pairs": 3,
+  "authorization_status": "NOT_AUTHORIZED"
+}

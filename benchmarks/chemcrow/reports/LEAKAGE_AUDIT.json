@@ -1,0 +1,256 @@
+{
+  "closed_output_fields": [
+    "allowed_tool_metadata",
+    "broad_category",
+    "prompt",
+    "provenance",
+    "safety_metadata",
+    "sanitized_item_sha256",
+    "task_id"
+  ],
+  "excluded_non_scored_notebooks": [
+    "chromaphore-rf-369.ipynb",
+    "paper_figs/nitroglycerin_safety.ipynb",
+    "paper_figs/reproducibility1.ipynb",
+    "robotic_platform/insect_repellent.ipynb",
+    "robotic_platform/riccis_orgcat.ipynb",
+    "robotic_platform/schreiners_thiourea.ipynb",
+    "robotic_platform/takemoto.ipynb"
+  ],
+  "extraction_scope": "tasks/*.ipynb only",
+  "forbidden_answer_like_fields": [
+    "answer",
+    "answers",
+    "evaluator",
+    "evaluator_feedback",
+    "expert_grade",
+    "expert_grades",
+    "gpt4_output",
+    "historical_output",
+    "paper_conclusion",
+    "reference_answer",
+    "result_notools",
+    "result_tools",
+    "trajectories",
+    "trajectory"
+  ],
+  "historical_notebook_outputs_included": 0,
+  "items": [
+    {
+      "historical_output_cells_excluded": 4,
+      "historical_output_objects_excluded": 4,
+      "notebook_cells_included": [
+        1
+      ],
+      "notebook_outputs_included": 0,
+      "prompt_cell_index": 1,
+      "prompt_variable": "task",
+      "sanitized_item_sha256": "56565597daca415e9df5cd353c6c1b172833105592bdcf8d3a5c57dad2dd5075",
+      "source_notebook": "tasks/01_safinamide.ipynb",
+      "source_sha256": "1fadda01b0b848a8aaf0333ceafc4a4352f416d7ea5b1874e8840c5bc01fd2f9",
+      "task_id": "chemcrow-01"
+    },
+    {
+      "historical_output_cells_excluded": 4,
+      "historical_output_objects_excluded": 4,
+      "notebook_cells_included": [
+        1
+      ],
+      "notebook_outputs_included": 0,
+      "prompt_cell_index": 1,
+      "prompt_variable": "task",
+      "sanitized_item_sha256": "e7c6ef789b4b71d1017364d8d0383fd2fcc0f936fac335a18907c8a999886a9f",
+      "source_notebook": "tasks/02_discover_cat.ipynb",
+      "source_sha256": "8b95bb2e68ff36198d7813da4fb74e8b547d4f40c4759d258ce15044d56c9fe3",
+      "task_id": "chemcrow-02"
+    },
+    {
+      "historical_output_cells_excluded": 4,
+      "historical_output_objects_excluded": 4,
+      "notebook_cells_included": [
+        1
+      ],
+      "notebook_outputs_included": 0,
+      "prompt_cell_index": 1,
+      "prompt_variable": "task",
+      "sanitized_item_sha256": "15aa7e805a840d99822367107faeeeeb7294990ee6747d099d293b50339f7b3e",
+      "source_notebook": "tasks/03_explain_mechanism.ipynb",
+      "source_sha256": "fb2a1192d23d3885f0cd211b09377f8bc88d4843bdef20e6197bfa7c43a87aaa",
+      "task_id": "chemcrow-03"
+    },
+    {
+      "historical_output_cells_excluded": 4,
+      "historical_output_objects_excluded": 4,
+      "notebook_cells_included": [
+        1
+      ],
+      "notebook_outputs_included": 0,
+      "prompt_cell_index": 1,
+      "prompt_variable": "task",
+      "sanitized_item_sha256": "578000c89c3d759ba693e571c9d4e5845a70797575f521c0386abe27d19fd2d9",
+      "source_notebook": "tasks/04_insect_repellent.ipynb",
+      "source_sha256": "4c2f2e234231fc2d0019517be46f88d6b04e205e64400124b1cce742fc8cb101",
+      "task_id": "chemcrow-04"
+    },
+    {
+      "historical_output_cells_excluded": 4,
+      "historical_output_objects_excluded": 4,
+      "notebook_cells_included": [
+        1
+      ],
+      "notebook_outputs_included": 0,
+      "prompt_cell_index": 1,
+      "prompt_variable": "task",
+      "sanitized_item_sha256": "c3c776f6692bbc27cf9bd8bdddd8b4b377eb7e66e2b0646072ab63c214f2e8f7",
+      "source_notebook": "tasks/05_how_to_make.ipynb",
+      "source_sha256": "68e919972314d887173b30c04c68561a4882fee42851c044e45836b507302aef",
+      "task_id": "chemcrow-05"
+    },
+    {
+      "historical_output_cells_excluded": 4,
+      "historical_output_objects_excluded": 4,
+      "notebook_cells_included": [
+        1
+      ],
+      "notebook_outputs_included": 0,
+      "prompt_cell_index": 1,
+      "prompt_variable": "task",
+      "sanitized_item_sha256": "da062bb455801ab261ae2e93a3ca1af119ee977ce3b6af74836569b34873d431",
+      "source_notebook": "tasks/06_mechanism_lindlars.ipynb",
+      "source_sha256": "c87c6dad49b96f21f87574d22611c37f0853043861589130d4f113653f5f1b2b",
+      "task_id": "chemcrow-06"
+    },
+    {
+      "historical_output_cells_excluded": 4,
+      "historical_output_objects_excluded": 8,
+      "notebook_cells_included": [
+        1
+      ],
+      "notebook_outputs_included": 0,
+      "prompt_cell_index": 1,
+      "prompt_variable": "task",
+      "sanitized_item_sha256": "4351a76476a0ca872f5674fba32ce64ca05e5c5805ef667fd2e53e7c6c0ce489",
+      "source_notebook": "tasks/07_modify_and_synth.ipynb",
+      "source_sha256": "1f764583f4e9ef842c051bc693a86c4a9309d6348884a8974d4c63ca887befdd",
+      "task_id": "chemcrow-07"
+    },
+    {
+      "historical_output_cells_excluded": 4,
+      "historical_output_objects_excluded": 4,
+      "notebook_cells_included": [
+        1
+      ],
+      "notebook_outputs_included": 0,
+      "prompt_cell_index": 1,
+      "prompt_variable": "task",
+      "sanitized_item_sha256": "ef68b748ef7cc5811ba042e635da52069398f7b1771aac1a97ea85dcc50c9ca8",
+      "source_notebook": "tasks/08_riccis_orgcat.ipynb",
+      "source_sha256": "a379646239d41bc46a009a50cff8185ca64fcad0092fc10cd9d4d1d9e115a357",
+      "task_id": "chemcrow-08"
+    },
+    {
+      "historical_output_cells_excluded": 4,
+      "historical_output_objects_excluded": 4,
+      "notebook_cells_included": [
+        1
+      ],
+      "notebook_outputs_included": 0,
+      "prompt_cell_index": 1,
+      "prompt_variable": "task",
+      "sanitized_item_sha256": "ff628698ece6f5a9328a9664e91f0a6f81d5fc770d2b2420305b28daa3fadd5f",
+      "source_notebook": "tasks/09_predict_rxn_incompat.ipynb",
+      "source_sha256": "0ca3bce448b57977c1408199ea2cd3bff74cf4d14bee5976b9321e28bb7dcbc3",
+      "task_id": "chemcrow-09"
+    },
+    {
+      "historical_output_cells_excluded": 4,
+      "historical_output_objects_excluded": 4,
+      "notebook_cells_included": [
+        1
+      ],
+      "notebook_outputs_included": 0,
+      "prompt_cell_index": 1,
+      "prompt_variable": "task",
+      "sanitized_item_sha256": "b72ea29f4eeae39a5babc9d5aee0f0c1e9670668b0628f4dda5c82b5f4b823a2",
+      "source_notebook": "tasks/10_property_of_product.ipynb",
+      "source_sha256": "4f502c4b8bc6b92ebc9fc11df04f1a5f6f8fbae69681b4260181558be65f5032",
+      "task_id": "chemcrow-10"
+    },
+    {
+      "historical_output_cells_excluded": 4,
+      "historical_output_objects_excluded": 4,
+      "notebook_cells_included": [
+        1
+      ],
+      "notebook_outputs_included": 0,
+      "prompt_cell_index": 1,
+      "prompt_variable": "task",
+      "sanitized_item_sha256": "bd57924d016ae11889b3f1710f88e3aff27b88e944e4c3b1c6793f3b8e27adbf",
+      "source_notebook": "tasks/12_similar_moa.ipynb",
+      "source_sha256": "45a4f8e71181c57b3dd2e4ad77fe2f31a1ddd3186beb5a56ea24ca0ccf6d368e",
+      "task_id": "chemcrow-12"
+    },
+    {
+      "historical_output_cells_excluded": 4,
+      "historical_output_objects_excluded": 6,
+      "notebook_cells_included": [
+        1
+      ],
+      "notebook_outputs_included": 0,
+      "prompt_cell_index": 1,
+      "prompt_variable": "prompt",
+      "sanitized_item_sha256": "f5f75e46420e08c48b4c3e0c325304dfee2861b80f73905942cada44d836d3ee",
+      "source_notebook": "tasks/13_atorvastatin_synth.ipynb",
+      "source_sha256": "9ace8d011be293f1c3c14976f92b30bf3350cb8a9d4d99234b5907883f0546e0",
+      "task_id": "chemcrow-13"
+    },
+    {
+      "historical_output_cells_excluded": 4,
+      "historical_output_objects_excluded": 7,
+      "notebook_cells_included": [
+        1
+      ],
+      "notebook_outputs_included": 0,
+      "prompt_cell_index": 1,
+      "prompt_variable": "task",
+      "sanitized_item_sha256": "825fd50fdc9fee9fee320c3c8f39dc750eef1929e2e9b2005c8ec1dffe2f93ec",
+      "source_notebook": "tasks/14_aspirin_synthesis.ipynb",
+      "source_sha256": "8943a3de06e8d9bf90e040140c09afb14288cf8acd81d67b8b7029f49ba26f8b",
+      "task_id": "chemcrow-14"
+    },
+    {
+      "historical_output_cells_excluded": 4,
+      "historical_output_objects_excluded": 4,
+      "notebook_cells_included": [
+        1
+      ],
+      "notebook_outputs_included": 0,
+      "prompt_cell_index": 1,
+      "prompt_variable": "task",
+      "sanitized_item_sha256": "62ea5211190aa60be83fcca110cd6ae81cda6a1c44a0f493771b4165e7a210ca",
+      "source_notebook": "tasks/15_takemoto.ipynb",
+      "source_sha256": "255c29748aca13d090e9c5045ab9393c0f61895ba9589d040cf65e5a139e1293",
+      "task_id": "chemcrow-15"
+    }
+  ],
+  "manifest_sha256": "1261517a34e22b769df144e2c60930f9f8e4b89644a1d3914d95e9e532774df3",
+  "schema_version": "chemcrow_leakage_audit_v1",
+  "scored_task_count": 14,
+  "status": "PASS",
+  "task_ids": [
+    "chemcrow-01",
+    "chemcrow-02",
+    "chemcrow-03",
+    "chemcrow-04",
+    "chemcrow-05",
+    "chemcrow-06",
+    "chemcrow-07",
+    "chemcrow-08",
+    "chemcrow-09",
+    "chemcrow-10",
+    "chemcrow-12",
+    "chemcrow-13",
+    "chemcrow-14",
+    "chemcrow-15"
+  ]
+}
