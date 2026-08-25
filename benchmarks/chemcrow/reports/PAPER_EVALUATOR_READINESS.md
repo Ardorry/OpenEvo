@@ -109,6 +109,12 @@ MOCK/fixture observations. They do not need to be rerun. A frozen two-task repai
 zero-model preflight passes Core, Evolution Backend, Docker image, local RXN, and role parity; it is
 blocked only because no duplicate-task authorization receipt has been created.
 
+The repair is additionally bound to an execution-parity receipt: all nine scientific execution
+modules are byte-identical to full-v3's reference commit, all four role configs are identical, S0
+is identical, and the only lock additions are paper-evaluator/test dependencies outside the
+Candidate/tool/evolution runtime. Any later module, role-config, repair-config, or lock drift blocks
+preflight and execution.
+
 The prepared composite path is:
 
 `12 sealed full-v3 pairs + fresh task-14/task-15 repair -> composite audit -> 14-task paper plan`
