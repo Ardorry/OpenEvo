@@ -16,7 +16,12 @@ import yaml
 
 from .aggregate import aggregate_results
 from .audit import audit_completed_run
-from .credentials import credential_report
+from .composite import (
+    audit_paper_composite_repair,
+    load_composite_pairs,
+    validate_duplicate_authorization_receipt,
+)
+from .credentials import credential_report, probe_openrouter_key
 from .evaluation import OpenEvoEvolutionEvaluator, OpenEvoFinalEvaluator
 from .hashing import file_sha256
 from .ledger import AmbiguousPhaseClaimError, PhaseLedger
@@ -172,6 +177,18 @@ def command_preflight(args: argparse.Namespace) -> int:
     runtime_config_resolved = all(required_environment_presence.values())
     if runtime_config_resolved:
         config = _resolve_env(config)
+    duplicate_authorization_error: str | None = None
+    if config.get("duplicate_authorization_receipt"):
+        try:
+            validate_duplicate_authorization_receipt(
+                path=_path(
+                    config_path, str(config["duplicate_authorization_receipt"])
+                ),
+                primary_run_root=_path(config_path, str(config["prior_run_root"])),
+                primary_experiment_id=str(config["prior_experiment_id"]),
+            )
+        except (FileNotFoundError, TypeError, ValueError) as exc:
+            duplicate_authorization_error = str(exc)
     manifest = _path(config_path, str(config["task_manifest"]))
     items = _read_tasks(manifest)
     ids = [item.task_id for item in items]
@@ -328,6 +345,8 @@ def command_preflight(args: argparse.Namespace) -> int:
         "local_rxn_health": rxn_health,
         "model_authentication": codex_auth_metadata,
         "runtime_config_resolved": runtime_config_resolved,
+        "duplicate_authorization_valid": duplicate_authorization_error is None,
+        "duplicate_authorization_error": duplicate_authorization_error,
         "required_environment_presence": required_environment_presence,
     }
     ready_for_model_calls = (
@@ -341,6 +360,7 @@ def command_preflight(args: argparse.Namespace) -> int:
         and checks["candidate_runtime_image_bound"]
         and checks["all_codex_roles_core_managed"]
         and checks["runtime_config_resolved"]
+        and checks["duplicate_authorization_valid"]
         and core_health["reachable"]
         and core_health["healthy_nodes"] > 0
         and evolution_health["reachable"]
@@ -378,6 +398,12 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
     config = _resolve_env(_load_yaml(config_path))
     if "HUMAN_ACTION_REQUIRED" in json.dumps(config):
         raise ValueError("experiment config still contains HUMAN_ACTION_REQUIRED placeholders")
+    if config.get("duplicate_authorization_receipt"):
+        validate_duplicate_authorization_receipt(
+            path=_path(config_path, str(config["duplicate_authorization_receipt"])),
+            primary_run_root=_path(config_path, str(config["prior_run_root"])),
+            primary_experiment_id=str(config["prior_experiment_id"]),
+        )
     manifest_path = _path(config_path, str(config["task_manifest"]))
     items = _read_tasks(manifest_path)
     requested = [item.task_id for item in items] if config.get("task_ids") == "all" else list(config["task_ids"])
@@ -519,12 +545,20 @@ def command_paper_evaluator_preflight(args: argparse.Namespace) -> int:
         "historical_answers_extracted": False,
     }
     try:
-        pairs = assert_sealed_run_ready(
-            run_root=_path(config_path, str(config["run_root"])),
-            experiment_id=str(config["experiment_id"]),
-            task_ids=task_ids,
-            completed_run_audit=_path(config_path, str(config["completed_run_audit"])),
-        )
+        if config.get("composite_manifest"):
+            pairs = load_composite_pairs(
+                manifest_path=_path(config_path, str(config["composite_manifest"])),
+                task_ids=task_ids,
+            )
+        else:
+            pairs = assert_sealed_run_ready(
+                run_root=_path(config_path, str(config["run_root"])),
+                experiment_id=str(config["experiment_id"]),
+                task_ids=task_ids,
+                completed_run_audit=_path(
+                    config_path, str(config["completed_run_audit"])
+                ),
+            )
         historical = extract_historical_answers(
             runs_root=_path(config_path, str(config["historical_runs_root"]))
         )
@@ -571,6 +605,79 @@ def command_paper_evaluator_preflight(args: argparse.Namespace) -> int:
         )
     )
     return 0 if report["status"] == "READY_FOR_EXPLICIT_PAID_AUTHORIZATION" else 2
+
+
+def command_paper_credential_probe(args: argparse.Namespace) -> int:
+    payload = probe_openrouter_key(
+        api_key=os.environ.get("OPENROUTER_API_KEY", ""),
+        base_url=os.environ.get(
+            "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
+        ),
+    )
+    output = args.output.resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    print(
+        json.dumps(
+            {
+                "status": payload["status"],
+                "model_calls": 0,
+                "paid_operations": 0,
+                "secret_values_included": False,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0 if payload["status"] == "VALID" else 2
+
+
+def command_paper_composite_audit(args: argparse.Namespace) -> int:
+    config_path = args.config.resolve()
+    config = _load_yaml(config_path)
+    output = args.output.resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        payload = audit_paper_composite_repair(
+            primary_run_root=_path(config_path, str(config["primary_run_root"])),
+            primary_experiment_id=str(config["primary_experiment_id"]),
+            repair_run_root=_path(config_path, str(config["repair_run_root"])),
+            repair_experiment_id=str(config["repair_experiment_id"]),
+            core_completion_root=_path(
+                config_path, str(config["core_completion_root"])
+            ),
+            expected_s0_hash=str(config["expected_s0_hash"]),
+            duplicate_authorization_receipt=_path(
+                config_path, str(config["duplicate_authorization_receipt"])
+            ),
+            composite_manifest_path=_path(
+                config_path, str(config["composite_manifest_path"])
+            ),
+        )
+    except (FileNotFoundError, TypeError, ValueError) as exc:
+        payload = {
+            "schema_version": "chemcrow_paper_composite_audit_v1",
+            "status": "BLOCKED",
+            "blocking_reason": str(exc),
+            "model_calls": 0,
+            "paid_operations": 0,
+            "answers_included": False,
+        }
+    output.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    print(
+        json.dumps(
+            {
+                "status": payload["status"],
+                "model_calls": 0,
+                "paid_operations": 0,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0 if payload["status"] == "PASS" else 2
 
 
 def command_paper_evaluator_run(args: argparse.Namespace) -> int:
@@ -623,6 +730,15 @@ def build_parser() -> argparse.ArgumentParser:
     paper_preflight.add_argument("--output", type=Path, required=True)
     paper_preflight.add_argument("--no-model-calls", action="store_true", required=True)
     paper_preflight.set_defaults(function=command_paper_evaluator_preflight)
+    paper_probe = commands.add_parser("paper-credential-probe")
+    paper_probe.add_argument("--output", type=Path, required=True)
+    paper_probe.add_argument("--no-model-calls", action="store_true", required=True)
+    paper_probe.set_defaults(function=command_paper_credential_probe)
+    paper_composite = commands.add_parser("paper-composite-audit")
+    paper_composite.add_argument("--config", type=Path, required=True)
+    paper_composite.add_argument("--output", type=Path, required=True)
+    paper_composite.add_argument("--no-model-calls", action="store_true", required=True)
+    paper_composite.set_defaults(function=command_paper_composite_audit)
     paper_run = commands.add_parser("paper-evaluator-run")
     paper_run.add_argument("--config", type=Path, required=True)
     paper_run.add_argument("--allow-paid", action="store_true")

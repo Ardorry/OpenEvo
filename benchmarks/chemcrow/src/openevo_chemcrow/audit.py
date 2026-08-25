@@ -24,6 +24,7 @@ def audit_completed_run(
     experiment_id: str,
     task_ids: list[str],
     expected_s0_hash: str,
+    require_aggregate: bool = True,
 ) -> dict[str, Any]:
     if not task_ids or len(task_ids) != len(set(task_ids)):
         raise ValueError("audit task inventory must be non-empty and unique")
@@ -119,15 +120,23 @@ def audit_completed_run(
                     raise ValueError(f"non-real observation entered metrics: {pair_id}/{role}")
                 source_counts[source] = source_counts.get(source, 0) + 1
                 tool_errors += int(observation.error is not None)
-    aggregate_path = run_root / "aggregate.json"
-    aggregate = json.loads(aggregate_path.read_text(encoding="utf-8"))
-    if aggregate.get("task_count") != len(task_ids):
-        raise ValueError("aggregate task count differs from frozen task inventory")
-    if aggregate.get("status") != "PROVISIONAL_LLM_JUDGED_RESULT":
-        raise ValueError("aggregate result is not labeled provisional")
+    aggregate_sha256: str | None = None
+    if require_aggregate:
+        aggregate_path = run_root / "aggregate.json"
+        aggregate = json.loads(aggregate_path.read_text(encoding="utf-8"))
+        if aggregate.get("task_count") != len(task_ids):
+            raise ValueError("aggregate task count differs from frozen task inventory")
+        if aggregate.get("status") != "PROVISIONAL_LLM_JUDGED_RESULT":
+            raise ValueError("aggregate result is not labeled provisional")
+        aggregate_sha256 = file_sha256(aggregate_path)
     return {
-        "schema_version": "chemcrow_completed_run_audit_v1",
+        "schema_version": (
+            "chemcrow_completed_run_audit_v1"
+            if require_aggregate
+            else "chemcrow_sealed_subset_audit_v1"
+        ),
         "status": "PASS",
+        "scope": "completed_run" if require_aggregate else "sealed_subset",
         "experiment_id": experiment_id,
         "task_ids": task_ids,
         "task_count": len(task_ids),
@@ -138,7 +147,7 @@ def audit_completed_run(
         "tool_calls": tool_calls,
         "tool_errors": tool_errors,
         "observation_source_counts": dict(sorted(source_counts.items())),
-        "aggregate_sha256": file_sha256(aggregate_path),
+        "aggregate_sha256": aggregate_sha256,
         "answers_included": False,
         "mock_or_fixture_observations": 0,
     }

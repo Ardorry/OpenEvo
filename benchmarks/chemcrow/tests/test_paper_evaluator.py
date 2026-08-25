@@ -5,8 +5,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 from openevo.harness.models import AgentSpec
 
+from openevo_chemcrow.composite import validate_duplicate_authorization_receipt
+from openevo_chemcrow.hashing import file_sha256
 from openevo_chemcrow.models import TaskItem
 from openevo_chemcrow.paper_core import PAPER_CORE_ROUTE, build_paper_task_request
 from openevo_chemcrow.paper_evaluator import (
@@ -170,3 +173,59 @@ def test_paper_core_request_has_no_reflector_or_evolution_context():
     assert request["runtime_context_binding"] is None
     assert request["evaluator"] is None
     assert request["agent"]["import_path"].endswith(":PaperEvaluatorHarness")
+
+
+def test_two_task_repair_freezes_same_s0_and_all_model_roles():
+    config_root = Path(__file__).resolve().parents[1] / "configs"
+    full = yaml.safe_load((config_root / "full.v3.yaml").read_text())
+    repair = yaml.safe_load((config_root / "paper_repair.v1.yaml").read_text())
+
+    assert repair["task_ids"] == ["chemcrow-14", "chemcrow-15"]
+    for role in ("candidate", "reflector", "evolution_evaluator", "final_evaluator"):
+        assert repair[role] == full[role]
+    assert repair["duplicate_authorization_receipt"].endswith(
+        "CHEMCROW_14_DUPLICATE_AUTHORIZATION.json"
+    )
+
+
+def test_duplicate_authorization_is_bound_to_interrupted_claim(tmp_path):
+    experiment_id = "chemcrow-task-local-full-v3"
+    claim = (
+        tmp_path
+        / "claims"
+        / f"{experiment_id}--chemcrow-14"
+        / "evolved_candidate.json"
+    )
+    claim.parent.mkdir(parents=True)
+    claim.write_text('{"status":"claimed"}\n', encoding="utf-8")
+    receipt = tmp_path / "authorization.json"
+    receipt.write_text(
+        json.dumps(
+            {
+                "schema_version": "chemcrow_duplicate_task_authorization_v1",
+                "status": "AUTHORIZED",
+                "task_id": "chemcrow-14",
+                "prior_experiment_id": experiment_id,
+                "prior_phase": "evolved_candidate",
+                "prior_claim_sha256": file_sha256(claim),
+                "authorization_literal": (
+                    "I_AUTHORIZE_FRESH_CHEMCROW_14_PAIR_AFTER_USER_STOP"
+                ),
+                "reason": (
+                    "prior pair interrupted before sealing; no prior pair result is eligible"
+                ),
+                "authorized_at": "2026-08-25T00:00:00Z",
+                "authorized_by": "user",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    safe = validate_duplicate_authorization_receipt(
+        path=receipt,
+        primary_run_root=tmp_path,
+        primary_experiment_id=experiment_id,
+    )
+
+    assert safe["task_id"] == "chemcrow-14"
+    assert "authorization_literal" not in safe

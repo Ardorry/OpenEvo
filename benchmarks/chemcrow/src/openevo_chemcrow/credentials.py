@@ -5,6 +5,11 @@ import os
 from pathlib import Path
 from typing import Any
 
+import httpx
+
+from .hashing import canonical_sha256
+from .paper_evaluator import paper_cost_ceiling
+
 CONTROL_ENVIRONMENT_NAMES = (
     "OPENEVO_ROLLOUT_BASE_URL",
     "OPENEVO_CANDIDATE_MODEL",
@@ -120,4 +125,85 @@ def credential_report(*, codex_auth_file: Path | None = None) -> dict[str, Any]:
             os.environ.get("CHEMCROW_FULL_RUN_AUTHORIZATION")
         ),
         "ready_for_reduced_profile_setting_checks": reduced_profile_ready,
+    }
+
+
+def probe_openrouter_key(
+    *,
+    api_key: str,
+    base_url: str,
+    transport: httpx.BaseTransport | None = None,
+) -> dict[str, Any]:
+    """Validate one OpenRouter key without making a model or paid request.
+
+    OpenRouter's documented ``GET /api/v1/key`` endpoint returns key metadata.
+    This receipt deliberately reduces that response to booleans and a canonical
+    hash; labels, identifiers, limits, usage values, and the credential itself
+    are never written.
+    """
+    if not api_key:
+        return _openrouter_probe_report(status="BLOCKED_KEY_ABSENT")
+    if not base_url.startswith("https://") and transport is None:
+        raise ValueError("OPENROUTER_BASE_URL must use https")
+    try:
+        with httpx.Client(
+            base_url=base_url.rstrip("/"),
+            timeout=httpx.Timeout(30.0),
+            transport=transport,
+            trust_env=False,
+        ) as client:
+            response = client.get(
+                "/key",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+    except httpx.RequestError:
+        return _openrouter_probe_report(status="AMBIGUOUS_TRANSPORT_ERROR")
+    if response.status_code == 401:
+        return _openrouter_probe_report(status="INVALID_OR_UNAUTHORIZED")
+    if not response.is_success:
+        return _openrouter_probe_report(
+            status="UPSTREAM_ERROR",
+            upstream_http_status=response.status_code,
+        )
+    try:
+        payload = response.json()
+    except ValueError:
+        return _openrouter_probe_report(status="INVALID_UPSTREAM_RESPONSE")
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict):
+        return _openrouter_probe_report(status="INVALID_UPSTREAM_RESPONSE")
+    remaining = data.get("limit_remaining")
+    sufficient: bool | None
+    if remaining is None:
+        sufficient = None
+    else:
+        try:
+            sufficient = float(remaining) >= float(
+                paper_cost_ceiling()["list_price_ceiling_usd_total"]
+            )
+        except (TypeError, ValueError):
+            return _openrouter_probe_report(status="INVALID_UPSTREAM_RESPONSE")
+    return _openrouter_probe_report(
+        status="VALID",
+        upstream_http_status=response.status_code,
+        upstream_response_sha256=canonical_sha256(payload),
+        spending_limit_present=data.get("limit") is not None,
+        limit_remaining_present=remaining is not None,
+        sufficient_remaining_for_frozen_ceiling=sufficient,
+        expiration_present=data.get("expires_at") is not None,
+        free_tier=bool(data.get("is_free_tier")),
+        management_key=bool(data.get("is_management_key")),
+    )
+
+
+def _openrouter_probe_report(status: str, **details: Any) -> dict[str, Any]:
+    return {
+        "schema_version": "chemcrow_openrouter_credential_probe_v1",
+        "status": status,
+        "endpoint": "GET /api/v1/key",
+        "model_calls": 0,
+        "paid_operations": 0,
+        "secret_values_included": False,
+        "key_metadata_values_included": False,
+        **details,
     }

@@ -1,0 +1,12 @@
+{
+  "schema_version": "chemcrow_duplicate_task_authorization_v1",
+  "status": "PENDING_USER_AUTHORIZATION",
+  "task_id": "chemcrow-14",
+  "prior_experiment_id": "chemcrow-task-local-full-v3",
+  "prior_phase": "evolved_candidate",
+  "prior_claim_sha256": "bfa5d6f880bb0f8b1f0149ceef364c51e2a0fe2e290734e0ca3827078fcae40b",
+  "authorization_literal": "I_AUTHORIZE_FRESH_CHEMCROW_14_PAIR_AFTER_USER_STOP",
+  "reason": "prior pair interrupted before sealing; no prior pair result is eligible",
+  "authorized_at": null,
+  "authorized_by": null
+}

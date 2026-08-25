@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 
+import httpx
+
 from openevo_chemcrow.credentials import (
     CONTROL_ENVIRONMENT_NAMES,
     PAPER_EVALUATOR_ENVIRONMENT_NAMES,
     credential_report,
+    probe_openrouter_key,
 )
 
 
@@ -69,3 +72,49 @@ def test_paper_evaluator_presence_never_reports_values(monkeypatch, tmp_path):
     )
     assert report["missing_paper_evaluator_names"] == []
     assert "secret-OPENROUTER_API_KEY" not in json.dumps(report)
+
+
+def test_openrouter_key_probe_is_zero_model_and_value_free():
+    sentinel = "DO_NOT_LEAK_KEY_OR_LABEL"
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        assert request.headers["authorization"] == f"Bearer {sentinel}"
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "label": sentinel,
+                    "limit": 20,
+                    "limit_remaining": 15,
+                    "usage": 5,
+                    "expires_at": None,
+                    "is_free_tier": False,
+                    "is_management_key": False,
+                }
+            },
+        )
+
+    report = probe_openrouter_key(
+        api_key=sentinel,
+        base_url="http://mock.invalid/v1",
+        transport=httpx.MockTransport(upstream),
+    )
+
+    assert report["status"] == "VALID"
+    assert report["model_calls"] == report["paid_operations"] == 0
+    assert report["sufficient_remaining_for_frozen_ceiling"] is True
+    assert sentinel not in json.dumps(report)
+
+
+def test_openrouter_key_probe_rejects_unauthorized_key_without_body_leak():
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(401, json={"error": "DO_NOT_LEAK_BODY"})
+    )
+    report = probe_openrouter_key(
+        api_key="invalid",
+        base_url="http://mock.invalid/v1",
+        transport=transport,
+    )
+
+    assert report["status"] == "INVALID_OR_UNAUTHORIZED"
+    assert "DO_NOT_LEAK_BODY" not in json.dumps(report)
