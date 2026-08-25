@@ -15,12 +15,14 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from .hashing import canonical_sha256
+from .openrouter_request_audit import sanitized_request_descriptor
 from .paper_evaluator import (
     PAPER_EVALUATOR_AUTHORIZATION,
     PAPER_EVALUATOR_CALL_COUNT,
@@ -44,6 +46,7 @@ def create_openrouter_shim_app(
     transport: httpx.AsyncBaseTransport | None = None,
     allowed_call_prompt_hashes: dict[str, str] | None = None,
     mock_mode: bool = False,
+    use_environment_proxy: bool = False,
 ) -> FastAPI:
     if not api_key:
         raise ValueError("OPENROUTER_API_KEY is required")
@@ -53,11 +56,12 @@ def create_openrouter_shim_app(
         raise ValueError("a frozen paper evaluator plan allowlist is required")
     allowed_call_prompt_hashes = dict(allowed_call_prompt_hashes or {})
     receipt_root.mkdir(parents=True, exist_ok=True)
+    proxy_descriptor = _environment_proxy_descriptor(use_environment_proxy)
     client = httpx.AsyncClient(
         base_url=base_url.rstrip("/"),
         timeout=httpx.Timeout(330.0, connect=30.0),
         transport=transport,
-        trust_env=False,
+        trust_env=use_environment_proxy,
     )
 
     @asynccontextmanager
@@ -81,6 +85,7 @@ def create_openrouter_shim_app(
             "data_collection": PAPER_EVALUATOR_DATA_COLLECTION,
             "credential_present": True,
             "credential_value_included": False,
+            "environment_proxy": proxy_descriptor,
         }
 
     @app.get("/v1/models")
@@ -147,22 +152,30 @@ def create_openrouter_shim_app(
             "require_parameters": True,
             "data_collection": PAPER_EVALUATOR_DATA_COLLECTION,
         }
+        outgoing = client.build_request(
+            "POST",
+            "/chat/completions",
+            json=upstream_payload,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "X-OpenRouter-Metadata": "enabled",
+            },
+        )
+        request_descriptor = sanitized_request_descriptor(outgoing)
+        transport_metadata = {
+            "upstream_request_descriptor": request_descriptor,
+            "environment_proxy": proxy_descriptor,
+        }
         try:
-            response = await client.post(
-                "/chat/completions",
-                json=upstream_payload,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                    "X-OpenRouter-Metadata": "enabled",
-                },
-            )
+            response = await client.send(outgoing)
         except httpx.RequestError as exc:
             _write_failure_receipt(
                 receipt_path,
                 call_id=call_id,
                 request_hash=request_hash,
                 failure="ambiguous_upstream_transport_error",
+                upstream_metadata=transport_metadata,
             )
             raise HTTPException(
                 status_code=502,
@@ -174,7 +187,10 @@ def create_openrouter_shim_app(
                 call_id=call_id,
                 request_hash=request_hash,
                 failure=f"upstream_http_{response.status_code}",
-                upstream_metadata=_safe_upstream_failure_metadata(response),
+                upstream_metadata={
+                    **transport_metadata,
+                    **_safe_upstream_failure_metadata(response),
+                },
             )
             raise HTTPException(
                 status_code=502,
@@ -188,6 +204,7 @@ def create_openrouter_shim_app(
                 call_id=call_id,
                 request_hash=request_hash,
                 failure="invalid_upstream_json",
+                upstream_metadata=transport_metadata,
             )
             raise HTTPException(
                 status_code=502, detail="OpenRouter returned invalid JSON"
@@ -198,6 +215,8 @@ def create_openrouter_shim_app(
                 request_hash,
                 payload,
                 upstream_http_status=response.status_code,
+                upstream_request_descriptor=request_descriptor,
+                environment_proxy=proxy_descriptor,
             )
         except HTTPException:
             _write_failure_receipt(
@@ -205,6 +224,7 @@ def create_openrouter_shim_app(
                 call_id=call_id,
                 request_hash=request_hash,
                 failure="invalid_or_unpinned_upstream_receipt",
+                upstream_metadata=transport_metadata,
             )
             raise
         _exclusive_json_write(receipt_path, receipt)
@@ -271,6 +291,8 @@ def _success_receipt(
     payload: dict[str, Any],
     *,
     upstream_http_status: int,
+    upstream_request_descriptor: dict[str, Any],
+    environment_proxy: dict[str, Any],
 ) -> dict[str, Any]:
     usage = payload.get("usage")
     if not isinstance(usage, dict):
@@ -318,6 +340,34 @@ def _success_receipt(
         "upstream_response_format_omitted": True,
         "internal_call_identity_validated": True,
         "upstream_user_omitted": True,
+        "upstream_request_descriptor": upstream_request_descriptor,
+        "environment_proxy": environment_proxy,
+    }
+
+
+def _environment_proxy_descriptor(enabled: bool) -> dict[str, Any]:
+    if not enabled:
+        return {"mode": "disabled"}
+    value = (
+        os.environ.get("https_proxy")
+        or os.environ.get("HTTPS_PROXY")
+        or os.environ.get("all_proxy")
+        or os.environ.get("ALL_PROXY")
+    )
+    if not value:
+        raise ValueError("environment proxy mode requires https_proxy/HTTPS_PROXY")
+    parsed = urlsplit(value)
+    if parsed.scheme not in {"http", "https", "socks5"} or not parsed.hostname:
+        raise ValueError("environment proxy URL is invalid")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("credential-bearing environment proxy URLs are forbidden")
+    return {
+        "mode": "environment_proxy",
+        "scheme": parsed.scheme,
+        "hostname": parsed.hostname,
+        "port": parsed.port,
+        "url_sha256": hashlib.sha256(value.encode("utf-8")).hexdigest(),
+        "credentials_present": False,
     }
 
 
@@ -548,6 +598,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=8400)
     parser.add_argument("--receipt-root", type=Path, required=True)
     parser.add_argument("--plan", type=Path, required=True)
+    parser.add_argument("--use-environment-proxy", action="store_true")
     return parser
 
 
@@ -580,6 +631,7 @@ def main(argv: list[str] | None = None) -> None:
         base_url=base_url,
         receipt_root=args.receipt_root.resolve(),
         allowed_call_prompt_hashes=allowed,
+        use_environment_proxy=args.use_environment_proxy,
     )
     import uvicorn
 

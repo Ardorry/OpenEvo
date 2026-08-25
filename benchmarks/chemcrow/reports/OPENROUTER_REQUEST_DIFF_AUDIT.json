@@ -1,0 +1,416 @@
+{
+  "actual_upstream_forbidden_fields_absent": {
+    "logprobs": true,
+    "plugins": true,
+    "response_format": true,
+    "return_token_ids": true,
+    "tool_choice": true,
+    "tools": true,
+    "top_logprobs": true,
+    "user": true
+  },
+  "additional_paid_debug": {
+    "attempts": 4,
+    "authorized_attempt_limit": 12,
+    "authorized_spend_limit_usd": 3.0,
+    "production_42_call_ledger_touched": false,
+    "proven_cost_usd": 0.03252,
+    "successful_completions": 3,
+    "unreceipted_failures": 1
+  },
+  "comparisons": {
+    "evaluator_direct_vs_core_structural_delta": {
+      "request_body_sha256": {
+        "a": "4ce05c778b0b3993d44fe7446aa13452b041ccacd33fbcb8440bfbf70d53a93e",
+        "b": "ed14dc99fbe11b05fabd6ed1936cc8e3e4c0be1bf64165e84de96b1fe2498152"
+      }
+    },
+    "same_body_direct_vs_proxy_descriptor_delta": {},
+    "same_body_sha256": true,
+    "same_header_names": true,
+    "same_method": "POST",
+    "same_url": "https://openrouter.ai/api/v1/chat/completions"
+  },
+  "credential_or_authorization_value_included": false,
+  "credential_sha256_prefix": "27bac185b695",
+  "evidence_hashes": {
+    "core_receipt_sha256": "56dce5d048cff0c5889465ab5f2f62c1b18370d8a102d4b87e0ab96b4f3ca2a8",
+    "core_report_sha256": "508b5578b64766f14232e30e862877373ba1c542ffad8a23bb7166dce29d9b4f",
+    "evaluator_direct_receipt_sha256": "8baa68b12121f646149fdd95e8241b44615bf13bdfbff0cbad88c1bc6e2e43a0",
+    "known_good_claim_sha256": "98dc65214abc44cd1ccf5f656f003fff82459e174030c59a04b5e0b5c55a6aa1",
+    "known_good_receipt_sha256": "d333c88907a997b24d24b5485b5706664f0f09971f7d6aa2da283af8221a9a39"
+  },
+  "generated_at": "2026-08-26 Asia/Shanghai",
+  "manual_authoritative_evidence": {
+    "attempt": 1,
+    "http": 200,
+    "model": "openai/gpt-4",
+    "note": "manual request body bytes were not supplied; fields and prompt are recorded in the user authority without prompt persistence here",
+    "provider": "OpenAI",
+    "region": "SJC",
+    "reported_cost_usd": 0.00048,
+    "request_body_sha256": null,
+    "selected_provider": "OpenAI"
+  },
+  "openrouter_account_route_available": true,
+  "prompt_or_response_included": false,
+  "request_specific_failure_under_investigation": false,
+  "requests": {
+    "core_shim_upstream_v10": {
+      "descriptor": {
+        "body_byte_length": 1459,
+        "http_header_names_sorted": [
+          "accept",
+          "accept-encoding",
+          "authorization",
+          "connection",
+          "content-length",
+          "content-type",
+          "host",
+          "user-agent",
+          "x-openrouter-metadata"
+        ],
+        "max_tokens": 1200,
+        "message_count": 2,
+        "message_roles": [
+          "system",
+          "user"
+        ],
+        "model": "openai/gpt-4",
+        "prompt_byte_length": 1150,
+        "prompt_sha256": "138e869560d0ad317af64f287a45746af0e562fc5c0510dbeec666816bb76cdf",
+        "provider": {
+          "allow_fallbacks": false,
+          "data_collection": "allow",
+          "only": [
+            "openai"
+          ],
+          "require_parameters": true
+        },
+        "request_body_sha256": "ed14dc99fbe11b05fabd6ed1936cc8e3e4c0be1bf64165e84de96b1fe2498152",
+        "response_format_present": false,
+        "stream": false,
+        "temperature": 0.1,
+        "top_level_field_names_sorted": [
+          "max_tokens",
+          "messages",
+          "model",
+          "provider",
+          "stream",
+          "temperature"
+        ],
+        "user_present": false
+      },
+      "result": {
+        "json_parse_valid": true,
+        "list_price_cost_usd": 0.01587,
+        "model": "openai/gpt-4",
+        "openrouter_reported_cost_usd": 0.01587,
+        "provider": "OpenAI",
+        "pydantic_assessment_valid": true,
+        "status": "terminal_success",
+        "upstream_http_status": 200
+      },
+      "transport": {
+        "credentials_present": false,
+        "hostname": "172.22.208.1",
+        "mode": "environment_proxy",
+        "port": 10809,
+        "scheme": "http",
+        "url_sha256": "20f1b8e027e4df494266b36a6f5e8562cd258c766c5d021bc1fe9898e7ee1175"
+      }
+    },
+    "evaluator_shaped_direct": {
+      "descriptor": {
+        "body_byte_length": 1459,
+        "http_header_names_sorted": [
+          "accept",
+          "accept-encoding",
+          "authorization",
+          "connection",
+          "content-length",
+          "content-type",
+          "host",
+          "user-agent",
+          "x-openrouter-metadata"
+        ],
+        "max_tokens": 1200,
+        "message_count": 2,
+        "message_roles": [
+          "system",
+          "user"
+        ],
+        "model": "openai/gpt-4",
+        "prompt_byte_length": 1150,
+        "prompt_sha256": "138e869560d0ad317af64f287a45746af0e562fc5c0510dbeec666816bb76cdf",
+        "provider": {
+          "allow_fallbacks": false,
+          "data_collection": "allow",
+          "only": [
+            "openai"
+          ],
+          "require_parameters": true
+        },
+        "request_body_sha256": "4ce05c778b0b3993d44fe7446aa13452b041ccacd33fbcb8440bfbf70d53a93e",
+        "response_format_present": false,
+        "stream": false,
+        "temperature": 0.1,
+        "top_level_field_names_sorted": [
+          "max_tokens",
+          "messages",
+          "model",
+          "provider",
+          "stream",
+          "temperature"
+        ],
+        "user_present": false
+      },
+      "result": {
+        "json_parse_valid": true,
+        "list_price_cost_usd": 0.01623,
+        "model": "openai/gpt-4",
+        "openrouter_attempt": 1,
+        "openrouter_endpoint_total": 2,
+        "openrouter_endpoints": [
+          {
+            "model": "openai/gpt-4",
+            "provider": "OpenAI",
+            "selected": true
+          }
+        ],
+        "openrouter_region": "SJC",
+        "openrouter_reported_cost_usd": 0.01623,
+        "provider": "OpenAI",
+        "pydantic_assessment_valid": true,
+        "status": "PASS",
+        "upstream_http_status": 200,
+        "usage": {
+          "completion_tokens": 142,
+          "prompt_tokens": 257,
+          "total_tokens": 399
+        }
+      },
+      "transport": {
+        "environment_proxy_inherited": true,
+        "region": "SJC"
+      }
+    },
+    "known_good_a": {
+      "descriptor": {
+        "body_byte_length": 243,
+        "http_header_names_sorted": [
+          "accept",
+          "accept-encoding",
+          "authorization",
+          "connection",
+          "content-length",
+          "content-type",
+          "host",
+          "user-agent",
+          "x-openrouter-metadata"
+        ],
+        "max_tokens": 4,
+        "message_count": 1,
+        "message_roles": [
+          "user"
+        ],
+        "model": "openai/gpt-4",
+        "prompt_byte_length": 22,
+        "prompt_sha256": "b4d50a67a784a449e0c763c401bb9f95fb37804dff5765d8b4f95fd202eb7d77",
+        "provider": {
+          "allow_fallbacks": false,
+          "data_collection": "allow",
+          "only": [
+            "openai"
+          ],
+          "require_parameters": true
+        },
+        "request_body_sha256": "a7e6cacba8fe3bb4d6015fb93204b30aa3101a1684c5963d287e3e3231bc0cde",
+        "response_format_present": false,
+        "stream": false,
+        "temperature": 0.1,
+        "top_level_field_names_sorted": [
+          "max_tokens",
+          "messages",
+          "model",
+          "provider",
+          "stream",
+          "temperature"
+        ],
+        "user_present": false
+      },
+      "result": {
+        "list_price_cost_usd": 0.00042,
+        "model": "openai/gpt-4",
+        "openrouter_attempt": 1,
+        "openrouter_endpoint_total": 2,
+        "openrouter_endpoints": [
+          {
+            "model": "openai/gpt-4",
+            "provider": "OpenAI",
+            "selected": true
+          }
+        ],
+        "openrouter_region": "SJC",
+        "openrouter_reported_cost_usd": 0.00042,
+        "provider": "OpenAI",
+        "status": "PASS",
+        "upstream_http_status": 200,
+        "usage": {
+          "completion_tokens": 1,
+          "prompt_tokens": 12,
+          "total_tokens": 13
+        }
+      },
+      "transport": {
+        "environment_proxy_inherited": true,
+        "region": "SJC"
+      }
+    },
+    "known_good_a_same_body_direct_egress": {
+      "descriptor": {
+        "body_byte_length": 243,
+        "http_header_names_sorted": [
+          "accept",
+          "accept-encoding",
+          "authorization",
+          "connection",
+          "content-length",
+          "content-type",
+          "host",
+          "user-agent",
+          "x-openrouter-metadata"
+        ],
+        "max_tokens": 4,
+        "message_count": 1,
+        "message_roles": [
+          "user"
+        ],
+        "model": "openai/gpt-4",
+        "prompt_byte_length": 22,
+        "prompt_sha256": "b4d50a67a784a449e0c763c401bb9f95fb37804dff5765d8b4f95fd202eb7d77",
+        "provider": {
+          "allow_fallbacks": false,
+          "data_collection": "allow",
+          "only": [
+            "openai"
+          ],
+          "require_parameters": true
+        },
+        "request_body_sha256": "a7e6cacba8fe3bb4d6015fb93204b30aa3101a1684c5963d287e3e3231bc0cde",
+        "response_format_present": false,
+        "stream": false,
+        "temperature": 0.1,
+        "top_level_field_names_sorted": [
+          "max_tokens",
+          "messages",
+          "model",
+          "provider",
+          "stream",
+          "temperature"
+        ],
+        "user_present": false
+      },
+      "result": {
+        "openrouter_attempt": 0,
+        "openrouter_endpoint_total": 2,
+        "openrouter_endpoints": [
+          {
+            "model": "openai/gpt-4",
+            "provider": "OpenAI",
+            "selected": false
+          },
+          {
+            "model": "openai/gpt-4",
+            "provider": "Azure",
+            "selected": false
+          }
+        ],
+        "openrouter_region": "HKG",
+        "openrouter_reported_cost_usd": null,
+        "status": "FAIL_CLOSED",
+        "upstream_http_status": 403
+      },
+      "transport": {
+        "environment_proxy_inherited": false,
+        "region": "HKG"
+      }
+    },
+    "previous_minimal_direct_debug_v1": {
+      "canonical_request_hash_matches_retained_report": true,
+      "capture_status": "reconstructed from frozen source; canonical payload hash exactly matches immutable V1 report",
+      "descriptor": {
+        "body_byte_length": 392,
+        "http_header_names_sorted": [
+          "accept",
+          "accept-encoding",
+          "authorization",
+          "connection",
+          "content-length",
+          "content-type",
+          "host",
+          "user-agent",
+          "x-openrouter-metadata"
+        ],
+        "max_tokens": 1200,
+        "message_count": 2,
+        "message_roles": [
+          "system",
+          "user"
+        ],
+        "model": "openai/gpt-4",
+        "prompt_byte_length": 136,
+        "prompt_sha256": "2cec8ce845167fca19798f4be2bf224d5f8d2ed4469417740ffc4826639f62f7",
+        "provider": {
+          "allow_fallbacks": false,
+          "data_collection": "allow",
+          "only": [
+            "openai"
+          ],
+          "require_parameters": true
+        },
+        "request_body_sha256": "30251b49b050943c2eb42c40ce7950a0a416a24e1a8e03247f02e74045df81bf",
+        "response_format_present": false,
+        "stream": false,
+        "temperature": 0.1,
+        "top_level_field_names_sorted": [
+          "max_tokens",
+          "messages",
+          "model",
+          "provider",
+          "stream",
+          "temperature"
+        ],
+        "user_present": false
+      },
+      "result": {
+        "openrouter_attempt": 0,
+        "openrouter_endpoint_total": 2,
+        "openrouter_endpoints": [
+          {
+            "model": "openai/gpt-4",
+            "provider": "OpenAI",
+            "selected": false
+          },
+          {
+            "model": "openai/gpt-4",
+            "provider": "Azure",
+            "selected": false
+          }
+        ],
+        "openrouter_region": "HKG",
+        "status": "FAIL_CLOSED",
+        "upstream_http_status": 403
+      }
+    }
+  },
+  "root_cause": {
+    "causal_delta": "environment proxy inheritance / network egress; request body SHA256 was identical",
+    "historical_failing_transport": "httpx trust_env=false disabled the configured lowercase https_proxy and used direct HKG egress",
+    "known_good_transport": "explicit environment-proxy inheritance used the configured credential-free HTTPS proxy and SJC egress",
+    "repair": "paper OpenRouter shim now requires explicit --use-environment-proxy for this frozen route and records a sanitized proxy identity plus actual outgoing request descriptor",
+    "under_project_control": true
+  },
+  "schema_version": "chemcrow_openrouter_request_diff_audit_v1",
+  "status": "ROOT_CAUSE_IDENTIFIED_AND_CORE_ROUTE_PASS"
+}

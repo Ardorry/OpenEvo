@@ -53,15 +53,15 @@ def test_smoke_call_is_separate_from_formal_42_call_inventory():
 
 
 @pytest.mark.parametrize(
-    "version", ("v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8")
+    "version", ("v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9")
 )
-def test_historical_smoke_config_cannot_launch_v9_call(tmp_path, version):
+def test_historical_smoke_config_cannot_launch_v10_call(tmp_path, version):
     config = tmp_path / f"{version}.json"
     config.write_text(
         json.dumps({"schema_version": f"chemcrow_paper_evaluator_smoke_config_{version}"}),
         encoding="utf-8",
     )
-    with pytest.raises(SystemExit, match="not the frozen v9 schema"):
+    with pytest.raises(SystemExit, match="not the frozen v10 schema"):
         main(
             [
                 "run",

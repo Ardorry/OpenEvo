@@ -34,10 +34,10 @@ from .paper_evaluator import (
     render_compatible_prompt,
 )
 
-PAPER_SMOKE_AUTHORIZATION = "I_AUTHORIZE_ONE_CORE_PAPER_GPT4_SMOKE_V9_20260826"
-PAPER_SMOKE_CALL_ID = "paper-chemcrow-smoke-core-v9"
-PAPER_SMOKE_SCHEMA = "chemcrow_paper_evaluator_paid_smoke_v9"
-PAPER_SMOKE_CONFIG_SCHEMA = "chemcrow_paper_evaluator_smoke_config_v9"
+PAPER_SMOKE_AUTHORIZATION = "I_AUTHORIZE_ONE_CORE_PAPER_GPT4_SMOKE_V10_20260826"
+PAPER_SMOKE_CALL_ID = "paper-chemcrow-smoke-core-v10"
+PAPER_SMOKE_SCHEMA = "chemcrow_paper_evaluator_paid_smoke_v10"
+PAPER_SMOKE_CONFIG_SCHEMA = "chemcrow_paper_evaluator_smoke_config_v10"
 
 
 def build_smoke_call() -> PaperEvaluationCall:
@@ -56,7 +56,7 @@ def build_smoke_call() -> PaperEvaluationCall:
         student_a_system="historical_chemcrow",
         prompt=prompt,
         prompt_sha256=canonical_sha256(prompt),
-        source_pair_id="test-only:paper-smoke-v9",
+        source_pair_id="test-only:paper-smoke-v10",
         source_pair_result_sha256="0" * 64,
         source_output_id="test-only:student-a",
         source_output_sha256=canonical_sha256("Water has molecular formula H2O."),
@@ -74,6 +74,7 @@ def create_smoke_shim_app(
     api_key: str,
     base_url: str,
     receipt_root: Path,
+    use_environment_proxy: bool = False,
 ):
     call = build_smoke_call()
     return create_openrouter_shim_app(
@@ -81,6 +82,7 @@ def create_smoke_shim_app(
         base_url=base_url,
         receipt_root=receipt_root,
         allowed_call_prompt_hashes={call.call_id: call.prompt_sha256},
+        use_environment_proxy=use_environment_proxy,
     )
 
 
@@ -397,6 +399,7 @@ def build_parser() -> argparse.ArgumentParser:
     shim.add_argument("--host", default="127.0.0.1")
     shim.add_argument("--port", type=int, default=8400)
     shim.add_argument("--receipt-root", type=Path, required=True)
+    shim.add_argument("--use-environment-proxy", action="store_true")
     run = commands.add_parser("run")
     run.add_argument("--config", type=Path, required=True)
     run.add_argument("--credential-probe", type=Path, required=True)
@@ -424,6 +427,7 @@ def main(argv: list[str] | None = None) -> None:
             api_key=os.environ.get("OPENROUTER_API_KEY", ""),
             base_url=os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
             receipt_root=args.receipt_root.resolve(),
+            use_environment_proxy=args.use_environment_proxy,
         )
         import uvicorn
 
@@ -437,7 +441,7 @@ def main(argv: list[str] | None = None) -> None:
         return
     config = json.loads(args.config.resolve().read_text(encoding="utf-8"))
     if config.get("schema_version") != PAPER_SMOKE_CONFIG_SCHEMA:
-        raise SystemExit("paper smoke config is not the frozen v9 schema")
+        raise SystemExit("paper smoke config is not the frozen v10 schema")
     if args.command == "seal-infrastructure-failure":
         result = seal_unreached_smoke_infrastructure_failure(
             receipt_root=Path(str(config["receipt_root"])).resolve(),

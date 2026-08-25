@@ -5,7 +5,10 @@
 > The separately proven legacy GPT-4 `response_format=json_object` HTTP 400 incompatibility does
 > not explain V2's 403. Current v6-v8 plus minimal-direct evidence now proves a separate present-day
 > pre-provider routing exclusion (`attempt=0`, all endpoints unselected). See
-> `NEXT_STAGE_READINESS_AUDIT.md`; do not modify or retry the historical V2 claim/receipt.
+> Fresh v10 later proved the current route healthy after enabling validated environment-proxy
+> inheritance; the v6-v8/minimal-direct failures were direct-HKG-egress specific, not an active
+> account guardrail. See `NEXT_STAGE_READINESS_AUDIT.md`; do not modify or retry the historical V2
+> claim/receipt.
 
 Date: 2026-08-25 Asia/Shanghai
 
