@@ -1,13 +1,18 @@
 {
   "generated_on": "2026-08-25",
   "model_calls": 0,
+  "model_call_attempts": 1,
   "paid_operations": 0,
+  "billing_status": "NO_USAGE_RECEIPT_UPSTREAM_403",
   "paper_evaluator_gate": {
-    "credential_status": "VALID_INSUFFICIENT_CREDITS",
+    "credential_status": "VALID",
     "credential_values_included": false,
     "explicit_paid_authorization_present": false,
     "frozen_list_price_ceiling_usd": 11.83266,
-    "sufficient_remaining_for_frozen_ceiling": false
+    "sufficient_remaining_for_frozen_ceiling": true,
+    "one_call_core_smoke_status": "FAIL_CLOSED_UPSTREAM_HTTP_403",
+    "one_call_usage_receipt_present": false,
+    "formal_42_call_authorization_consumed": false
   },
   "protocol_layers": {
     "openevo_internal_diagnostic": {
@@ -77,5 +82,5 @@
     }
   },
   "schema_version": "chemcrow_paper_official_scoring_protocol_v1",
-  "status": "IMPLEMENTED_BLOCKED_ON_SEALED_14_TASK_AUTHORITY_AND_HUMAN_ACTION"
+  "status": "IMPLEMENTED_BLOCKED_ON_PROTOCOL_COMPATIBLE_14_TASK_AUTHORITY_OPENROUTER_403_AND_HUMAN_ACTION"
 }

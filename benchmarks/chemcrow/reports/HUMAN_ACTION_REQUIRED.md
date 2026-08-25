@@ -1,185 +1,202 @@
 # HUMAN ACTION REQUIRED
 
-Generated: 2026-08-25 Asia/Shanghai
+Updated: 2026-08-25 Asia/Shanghai
 
-Never paste secrets into chat or commit them. The full benchmark is blocked.
+Never paste a credential into chat or commit it. The formal benchmark and 42-call paper evaluation
+remain blocked. The OpenRouter key is valid and the frozen `$11.83266` ceiling is funded; the
+remaining OpenRouter blocker is a fail-closed HTTP 403 from the only authorized Core smoke.
 
 ## 1. Credentials and API keys
 
-| Action | Why | Exact variable | Scope | Verification |
+| Action | Why required | Exact variable/action | Scope | How to verify |
 |---|---|---|---|---|
-| Decide whether to enable SerpAPI | WebSearch is currently an explicit unavailable observation and may be paid | `SERP_API_KEY` in ignored `.env`/secret manager | WebSearch only | One separately authorized call yields `source=live` and provider usage agrees |
-| Decide whether hosted RXN is allowed as fallback | Local RXN works; hosted service is time-limited | `RXN4CHEM_API_KEY`, `RXN4CHEM_PROJECT_ID`, optional `RXN4CHEMISTRY_BASE_URL` | RXN tasks only | One separately authorized prediction returns a real provider ID/result |
-| Keep excluded service keys absent unless protocol changes | ChemSpace procurement and hidden-model literature search are excluded | `CHEMSPACE_API_KEY`, `SEMANTIC_SCHOLAR_API_KEY` | Does not block reduced profile | Inventory remains explicitly excluded |
-| Fund the sealed paper judge key | The key authenticates, but available credits are below the frozen `$11.83266` worst-case ceiling | Add credit in OpenRouter; keep `OPENROUTER_API_KEY` only in `/home/lhy-h/work/chemcrowrun/.env.paper-evaluator` (mode 0600) | Paper-compatible evaluation only | Run `paper-credential-probe --no-model-calls`; require `status=VALID` and `sufficient_remaining_for_frozen_ceiling=true` |
+| Resolve the OpenRouter GPT-4 HTTP 403 | `/key` and `/credits` passed, but the Core-routed completion was rejected before any model/provider/usage receipt | Inspect the OpenRouter dashboard/account/provider access without exposing the key. Do not delete or retry claim `paper-chemcrow-smoke-core-v1`. A future smoke needs a new explicit user authorization and new call ID. | Paper evaluator only | A separately authorized later Core smoke returns HTTP 200, reported model `openai/gpt-4`, provider `OpenAI`, strict schema, and a usage receipt |
+| Decide whether to configure WebSearch | `SERP_API_KEY` is absent and WebSearch fails explicitly | Put `SERP_API_KEY` only in an ignored 0600 env file if this paid/external service is approved | Tasks needing current web evidence | One separately authorized call has `source=live` and provider-side usage matches |
+| Decide whether hosted RXN is an allowed fallback | Local RXN works; hosted RXN is optional and time-limited | `RXN4CHEM_API_KEY`, `RXN4CHEM_PROJECT_ID`, optional `RXN4CHEMISTRY_BASE_URL` | RXN-dependent tasks only | One separately authorized hosted prediction returns a real provider receipt |
+| Keep excluded keys absent unless the protocol changes | ChemSpace procurement and hidden-model literature search are deliberately excluded | `CHEMSPACE_API_KEY`, `SEMANTIC_SCHOLAR_API_KEY`, `OPENAI_API_KEY` | Reduced-profile benchmark | Credential report continues to show these routes excluded |
 
-Model role names and the Core-managed Codex subscription auth source are already detected. If auth expires, renew it through the normal Codex login flow on the host; do not copy auth contents into the repository. Verify with the zero-model preflight and one explicitly authorized Core canary.
+The credential file `/home/lhy-h/work/chemcrowrun/.env.paper-evaluator` is mode 0600. The value-free
+probe currently reports `status=VALID`, `auth_valid=true`, `credit_probe_success=true`, and
+`sufficient_remaining_for_frozen_ceiling=true`.
 
 ## 2. Docker, GPU, and runtime services
 
-After reboot, start local RXN:
+The CPU profile is ready now. After a reboot, start or verify the following:
 
 ```bash
 cd /home/lhy-h/work/chemcrowrun/openevo
 docker compose -f benchmarks/chemcrow/configs/rxn_sandbox.services.yaml up -d
+
+/home/lhy-h/work/chemcrowrun/core-state/evolution-backend-venv/bin/python \
+  -m openevo.evolution.cli serve \
+  --host 127.0.0.1 --port 8200 \
+  --db /home/lhy-h/work/chemcrowrun/core-state/evolution/core.sqlite3 \
+  --artifact-root /home/lhy-h/work/chemcrowrun/core-state/evolution/artifacts \
+  --framework-lock /home/lhy-h/work/chemcrowrun/core-state/framework/framework-lock.json
+
+uv run python -m openevo.rollout.server \
+  --config benchmarks/chemcrow/configs/openevo_core_topology.yaml --log-level info
+
+uv run python -m openevo.gateway.server \
+  --config benchmarks/chemcrow/configs/openevo_core_topology.yaml \
+  --node-id chemcrow-core-gateway-01 --log-level info
 ```
 
-Start the verified Evolution Backend:
+This blocks all model-driven tasks if Rollout/Gateway/Evolution is down and only RXN-dependent tasks
+if `:8300` is down. Verify with:
 
 ```bash
-/home/lhy-h/work/chemcrowrun/core-state/evolution-backend-venv/bin/python   -m openevo.evolution.cli serve   --host 127.0.0.1 --port 8200   --db /home/lhy-h/work/chemcrowrun/core-state/evolution/core.sqlite3   --artifact-root /home/lhy-h/work/chemcrowrun/core-state/evolution/artifacts   --framework-lock /home/lhy-h/work/chemcrowrun/core-state/framework/framework-lock.json
-```
-
-Start Rollout and Gateway in separate terminals:
-
-```bash
-cd /home/lhy-h/work/chemcrowrun/openevo
-uv run python -m openevo.rollout.server   --config benchmarks/chemcrow/configs/openevo_core_topology.yaml --log-level info
-```
-
-```bash
-cd /home/lhy-h/work/chemcrowrun/openevo
-uv run python -m openevo.gateway.server   --config benchmarks/chemcrow/configs/openevo_core_topology.yaml   --node-id chemcrow-core-gateway-01 --log-level info
-```
-
-Verify:
-
-```bash
-curl -fsS http://127.0.0.1:8200/v1/health
 curl -fsS http://127.0.0.1:8080/health
 curl -fsS http://127.0.0.1:8080/nodes
-curl -fsS http://127.0.0.1:8100/sessions
+curl -fsS http://127.0.0.1:8100/health
+curl -fsS http://127.0.0.1:8200/v1/health
 curl -fsS http://127.0.0.1:8300/openapi.json
 ```
 
-These services are currently running. GPU RXN is optional; CPU mode passed smoke and is frozen. Enabling the RTX 4050 6 GB profile requires a separate approved profile and both RXN canaries; it does not block current software readiness.
+GPU RXN is optional. Do not switch to it without a separately frozen image/profile and new forward
+and retrosynthesis canaries.
 
 ## 3. Deprecated or unavailable ChemCrow services
 
-- Hosted RXN/API announces end-of-service on 2026-10-28. Choose local RXN (recommended) or accept a time-bounded hosted profile. This blocks only hosted RXN use.
-- Legacy mutable `rxnpred`/retrosynthesis images are not reproducible and remain excluded.
-- Paper-only restricted tools are absent from `chemcrow-public`; exact paper reproduction is impossible.
-- LiteratureSearch, GetMoleculePrice, and python_repl remain excluded for fairness, benchmark-only safety, or reproducibility.
+- The hosted RXN service is time-limited and reports an end-of-service date of 2026-10-28. Local
+  RXN is the current frozen route. This blocks only a claim of hosted-RXN equivalence.
+- Paper-only restricted tools are absent from `chemcrow-public`; exact paper reproduction is
+  impossible from the public sources.
+- `LiteratureSearch`, `GetMoleculePrice`, and `python_repl` remain excluded for provider fairness,
+  benchmark-only safety, or reproducibility. Do not replace their failures with fake output.
+- The local RXN-Sandbox model/service is not the original paper-era IBM RXN snapshot.
+
+Verification is the explicit availability/deviation table in `CHEMCROW_TOOL_READINESS_MATRIX.md`;
+there is no credential that repairs an absent public implementation.
 
 ## 4. Tool licenses and accounts
 
-1. Review `/home/lhy-h/work/chemcrowrun/vendor/rxn-sandbox/LICENSE.OpenMDW-1.1` and record acceptance/rejection for formal metrics. This blocks formal RXN-dependent scoring, not software smoke. Verify the decision references commit `d56aad22564a904a2fc737460adfbf0d4c4e9ac2` and the model hashes in `RXN_RUNTIME_MANIFEST.json`.
-2. Review MolBloom/SureChEMBL package/data terms and record acceptance of version `2.3.5`. This affects PatentCheck-dependent claims.
-3. Create/approve a SerpAPI account and quota only if WebSearch is selected. Verify with one authorized call and provider-side usage.
+1. Review `/home/lhy-h/work/chemcrowrun/vendor/rxn-sandbox/LICENSE.OpenMDW-1.1` and record whether
+   formal RXN-dependent metrics may use commit `d56aad22564a904a2fc737460adfbf0d4c4e9ac2` and the model
+   hashes in `RXN_RUNTIME_MANIFEST.json`.
+2. Review and record acceptance of MolBloom/SureChEMBL package/data terms for version `2.3.5`.
+3. Create/approve a SerpAPI account and quota only if WebSearch is selected.
 
-## 5. Model authentication and failed-preflight disposition
+These decisions block formal claims involving the corresponding tools, not deterministic unit tests.
 
-The paper evaluator defaults and API key are configured in the ignored 0600 file:
-`OPENROUTER_BASE_URL`, `CHEMCROW_PAPER_EVALUATOR_MODEL`, and
-`CHEMCROW_PAPER_EVALUATOR_MAX_USD`. The key is valid, but the zero-model credits probe reports
-`VALID_INSUFFICIENT_CREDITS`. Keep
-`CHEMCROW_PAPER_EVALUATOR_AUTHORIZATION` empty until a complete 14-task preflight has passed.
+## 5. Model authentication
 
-After adding sufficient credit, validate it with the zero-model command documented in
-`PAPER_EVALUATOR_READINESS.md`. It calls OpenRouter `GET /api/v1/key` and, when the key has no
-spending limit, `GET /api/v1/credits`. It records no key, balance, limit, or usage values and emits
-only the boolean capacity result for the frozen `$11.83266` ceiling.
+- Candidate, all three Reflectors, internal evaluator, and final evaluator use the native Codex
+  harness with subscription auth. If `~/.codex/auth.json` expires, renew it through the normal Codex
+  login flow; never copy it into the repository. Verify with the zero-model preflight.
+- OpenRouter is restricted to the post-hoc paper evaluator. The key must remain only in the ignored
+  0600 file. The current key/credit gate passes, but GPT-4 completion access is blocked by the HTTP
+  403 described above.
+- Formal paper authorization must remain unconsumed until a protocol-compatible 14-task sealed set
+  and frozen 42-call plan exist:
 
-Immediate decision required:
-
-- `preflight-v1` already has five possible provider-effect phases for `chemcrow-02`.
-- `preflight-v2` has one additional baseline provider effect for the same task.
-- Neither is scientifically eligible, and no call was retried.
-
-Choose one policy before another paid call:
-
-1. **Authorize a deliberate fresh replacement** with a new experiment ID and an explicit exception allowing `chemcrow-02` to be called again after engineering invalidation. This preserves the original fixed three-task selection but creates another paid/provider effect.
-2. **Close the preflight as incomplete** and do not repeat `chemcrow-02`. Running only `03/06` would be a new preregistered two-task diagnostic, not the original three-task preflight.
-3. **Design an offline-only validation** from fixtures for engineering confidence. It cannot yield benchmark metrics.
-
-Recommended scientific choice: do not silently resume or reuse either invalid run. If a fresh three-task replacement is desired, explicitly authorize the duplicate and a new `preflight-v3` receipt first. Verification must show zero reuse of v1/v2 run IDs and exactly one new phase sequence per selected item.
-
-Also decide whether evolution and final evaluators may share the same model family with separate prompts/configs or must use distinct models/instances. This affects interpretation, not current code readiness.
+```text
+CHEMCROW_PAPER_EVALUATOR_AUTHORIZATION=I_AUTHORIZE_42_SEALED_PAPER_EVALUATIONS
+```
 
 ## 6. Final human chemistry evaluation
 
-For paper-comparable human evaluation, four independent expert chemists must review the sealed
-offline packets. Each expert scores both blinded responses from 0 to 10 on `Chemically accurate`,
-`Quality of reasoning`, and `Task completed`, then records A/B/tie preference, confidence, and
-comments. Across 42 fixed comparisons this requires 168 completed response forms. Reviewers must
-not see the private A/B mapping. A smaller panel is exploratory and blocks definitive paper-level
-claims.
+Four independent expert chemists are required for the official-scale compatibility packet. Each
+reviews 42 blinded conditions and scores both answers from 0 to 10 on `Chemically accurate`,
+`Quality of reasoning`, and `Task completed`, plus A/B/tie and confidence. That is 168 completed
+review forms. Reviewers must not see the private mapping. A smaller panel is exploratory.
 
-After the composite 14-task audit passes, generate the packets without model calls:
-
-```bash
-cd /home/lhy-h/work/chemcrowrun/openevo
-uv run --project benchmarks/chemcrow openevo-chemcrow paper-human-review-prepare \
-  --config benchmarks/chemcrow/configs/paper_human_review.composite-v1.yaml \
-  --output /home/lhy-h/work/chemcrowrun/reports/PAPER_HUMAN_REVIEW_PREPARE.json \
-  --no-model-calls
-```
-
-Verify it is fixed when the report says `READY_FOR_FOUR_EXPERT_REVIEWERS`, there are 42 blinded
-packet files and 168 completed reviewer forms, and the private mapping remains mode 0600.
-
-For `chemcrow-12`, separately approve a safety scoring policy that rewards intended safety behavior and never relabels a refusal as execution success.
+For `chemcrow-12`, approve a safety scoring policy that rewards appropriate refusal/caution and never
+relabels a refusal as physical execution success. Verification requires a completed blinded packet,
+four responses per condition, and an untouched private mapping with mode 0600.
 
 ## 7. Potentially paid operations
 
-Potentially quota-consuming operations: Candidate, Reflector, evolution evaluator, final evaluator, SerpAPI, and hosted RXN. Local RXN has no per-call API fee.
+Potentially quota-consuming operations are Candidate, three Reflectors, both internal diagnostic
+evaluations, the final evaluator, SerpAPI, hosted RXN, and the GPT-4 paper evaluator. Local RXN has no
+per-call API fee.
 
-No further paid command is authorized by this report. After choosing the failed-preflight policy, create a new immutable authorization receipt and config before execution. The full command exists in `READINESS_REPORT.md` but remains blocked.
+This audit authorizes no further call. The one smoke claim is terminal and must never be retried or
+deleted. Formal GPT-4 evaluation remains 42 calls with a frozen list-price ceiling of `$11.83266`;
+it requires the formal authorization literal, `--allow-paid`, a complete plan hash, and a successful
+new preflight.
 
-The paper evaluator is a separate potential charge: 42 `openai/gpt-4` calls have a frozen
-list-price ceiling of `$11.83266`. It requires both `--allow-paid` and
-`CHEMCROW_PAPER_EVALUATOR_AUTHORIZATION=I_AUTHORIZE_42_SEALED_PAPER_EVALUATIONS`. Verify it is fixed
-only when the sealed-output preflight reports 42 calls and the exact plan hash; do not set the
-authorization merely to test credentials.
+## 8. Tasks that cannot currently run faithfully
 
-## 8. Tasks that cannot currently run faithfully to the paper
+The full capability mapping is in `CHEMCROW_TOOL_READINESS_MATRIX.md`.
 
-`full-v3` is not a complete 14-task result: 12 pairs are sealed/reset, task 14 was interrupted, and
-task 15 was never started. Without additional Candidate work, only a 12-task exploratory paper
-evaluation is possible and it must not be reported as the official 14-task mean.
+- `chemcrow-01`, `04`, `05`, and `13`: live price/procurement evidence is unavailable.
+- `chemcrow-02`: novelty/literature evidence is unavailable.
+- `chemcrow-10`: no reliable dedicated boiling-point/property lookup is configured.
+- `chemcrow-12`: literature, legality/activity, and purchasing claims are unavailable; safety refusal
+  must be preserved.
+- `chemcrow-03`, `06`, `08`, `09`, `14`, and `15`: local RXN works but differs materially from the
+  paper-era service/model.
+- `chemcrow-07`: the prompt's fallback synthesis path is runnable, but current purchasability is only
+  approximated by MolBloom membership rather than vendor price/stock.
 
-- `chemcrow-01/04/05/13`: price/procurement evidence requires the excluded price tool.
-- `chemcrow-02/07/08/15`: literature/novelty depth is reduced because LiteratureSearch and restricted tools are absent.
-- `chemcrow-10`: reaction prediction exists, but the original physical-property lookup surface is incomplete.
-- `chemcrow-12`: safety-sensitive; requires approved safety scoring.
-- `chemcrow-03/06/09/14`: local RXN is available but differs from paper-era hosted RXN.
-- `chemcrow-safety-nitroglycerin`: non-scored demonstration only.
+The valid label is a public-source, tool-audited reduced-profile ChemCrow environment, not
+paper-identical ChemCrow.
 
-The valid claim is a public-source, tool-audited reduced ChemCrow environment, not an exact paper reproduction.
+## 9. Decisions required before the next benchmark stage
 
-## 9. Decisions required before the full benchmark
+### A. Resolve the protocol incompatibility
 
-1. Resolve the `chemcrow-02` duplicate/replacement policy above.
-2. Approve or reject RXN-Sandbox OpenMDW 1.1 for formal metrics.
-3. Freeze the formal tool profile: local RXN with WebSearch unavailable, or add SerpAPI.
-4. Decide whether all 14 reduced-profile tasks are in scope or preregister a runnable subset before outcomes.
-5. Freeze evaluator model/instance separation and a cost/quota ceiling.
-6. Approve the `chemcrow-12` safety scoring policy.
-7. Accept modern RDKit/RXN versions or request a historical compatibility study.
-8. Approve blinded expert review and provisional-result wording.
-9. Explicitly authorize the full run only after a valid bounded preflight is reviewed.
-10. Choose how to close the paper-evaluator task inventory: (a) preregister a fresh isolated
-    two-task repair for tasks 14 and 15, explicitly accepting a duplicate task-14 baseline caused
-    by the interrupted pair, then create a composite 14-task audit; (b) run no more Candidate calls
-    and accept a clearly labeled 12-task exploratory judge; or (c) authorize a fresh 14-task run.
-    Option (a) is the smallest path compatible with a 14-task aggregate, but it requires explicit
-    duplicate-call authorization and a passing composite audit before paper evaluation.
+The 12 sealed `full-v3` pairs used one Reflector and one `text_memory` artifact. They are immutable,
+valid evidence for that historical protocol, but they do **not** satisfy the new required three-
+Reflector protocol. A two-task three-artifact repair cannot be combined with those 12 pairs into one
+scientifically homogeneous 14-task aggregate.
 
-The composite audit and two-task repair configuration are now implemented. The first 12 pairs pass
-their sealed-subset audit and will not be rerun. To choose option (a), explicitly authorize the
-literal `I_AUTHORIZE_FRESH_CHEMCROW_14_PAIR_AFTER_USER_STOP`. That authorization will be written to
-`/home/lhy-h/work/chemcrowrun/manifests/CHEMCROW_14_DUPLICATE_AUTHORIZATION.json`, bound to prior
-claim SHA256 `bfa5d6f880bb0f8b1f0149ceef364c51e2a0fe2e290734e0ca3827078fcae40b`. Until then the file
-must remain absent and both repair preflight and composite audit remain blocked.
+Choose one:
 
-How to verify readiness after decisions:
+1. Authorize a fresh 14-task three-artifact experiment. This is the only path to a homogeneous
+   14-task result under the new fixed protocol.
+2. Preserve `full-v3` as a separate single-artifact experiment and run task 14/15 only as a new
+   three-artifact pilot. Do not create a mixed aggregate.
+3. Revert the repair to the old single-artifact protocol for comparability with the 12 pairs. This
+   conflicts with the newly mandated mechanism and is not recommended.
 
-```bash
-cd /home/lhy-h/work/chemcrowrun/openevo/benchmarks/chemcrow
-set -a
-source .env
-set +a
-uv run openevo-chemcrow preflight   --config configs/preflight.v2.yaml   --no-model-calls   --output /home/lhy-h/work/chemcrowrun/runs/<new-run-id>/preflight.json
+Until this decision is explicit, readiness verdict is `BLOCKED`.
+
+### B. Task 14 duplicate-call authorization
+
+The interrupted evidence remains at
+`runs/full-v3/claims/chemcrow-task-local-full-v3--chemcrow-14/` and must not be edited or deleted.
+A fresh pair must use experiment/pair ID
+`chemcrow-task-local-paper-repair-three-isolated-v1--chemcrow-14`, new run/cache/ledger roots, bare S0
+hash `8f7113de469c92fff55b99b62e58d4c43d5e42f2b6485affe44b247c28306a5c`, and an empty baseline
+artifact receipt. It may not import the interrupted G1, artifact, or claimed G2.
+
+To authorize it in a later turn, send the exact literal:
+
+```text
+I_AUTHORIZE_FRESH_CHEMCROW_14_PAIR_AFTER_USER_STOP
 ```
 
-Do not use `preflight.v2.yaml` for a paid retry because its experiment ID and claims are already invalidated. Create a new frozen config/authorization receipt after the human policy decision.
+Only then may an authorization receipt be created at
+`/home/lhy-h/work/chemcrowrun/manifests/CHEMCROW_14_DUPLICATE_AUTHORIZATION.json`, bound to prior claim
+SHA256 `bfa5d6f880bb0f8b1f0149ceef364c51e2a0fe2e290734e0ca3827078fcae40b`.
+
+After all blockers are resolved, the prepared task-14-only prefix command is:
+
+```bash
+cd /home/lhy-h/work/chemcrowrun/openevo
+set -a
+source benchmarks/chemcrow/.env
+set +a
+export CHEMCROW_FULL_RUN_AUTHORIZATION=I_UNDERSTAND_THIS_MAY_INCUR_COST
+uv run --project benchmarks/chemcrow openevo-chemcrow run \
+  --config benchmarks/chemcrow/configs/paper_repair.three-isolated-v1.yaml \
+  --stop-after-task-id chemcrow-14 \
+  --allow-paid
+```
+
+Do not run that command while this report says `BLOCKED`. After task 14 seals and is audited, task 15
+would use the same config with `resume`, omitting `--stop-after-task-id`. A claim without a sealed pair
+remains ambiguous and must never be automatically redispatched.
+
+### C. Other required decisions
+
+- Resolve the OpenRouter GPT-4 HTTP 403 without relaxing model/provider/fallback/data policy.
+- Approve/reject RXN-Sandbox and MolBloom licenses for formal metrics.
+- Freeze the formal tool profile with WebSearch absent or explicitly configured.
+- Approve the `chemcrow-12` safety scoring policy.
+- Accept modern RDKit/RXN deviations or commission a historical compatibility study.
+- Approve the four-expert review scale and provisional-result wording.
+- Do not authorize a 42-call plan until `PAPER_COMPARISON_MATRIX.json` and a homogeneous sealed
+  14-task authority are both accepted.

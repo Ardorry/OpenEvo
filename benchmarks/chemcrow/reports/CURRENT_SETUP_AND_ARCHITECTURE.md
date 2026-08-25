@@ -1,5 +1,11 @@
 # ChemCrow / OpenEvo current setup and architecture
 
+> Historical snapshot notice (2026-08-25): this report describes the sealed `full-v3` single-
+> `text_memory` protocol at commit `d55f7f4b5`. It is superseded for current readiness by
+> `NEXT_STAGE_READINESS_AUDIT.md`. OpenRouter credits are now sufficient, the one-call Core smoke
+> failed closed with upstream HTTP 403, and the new three-Reflector protocol is a separate versioned
+> path. The 12 sealed pairs below remain unchanged historical evidence.
+
 Generated: 2026-08-25 Asia/Shanghai
 
 ## 1. Executive status and execution boundary

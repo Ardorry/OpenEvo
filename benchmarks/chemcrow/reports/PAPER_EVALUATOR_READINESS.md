@@ -1,5 +1,11 @@
 # ChemCrow paper evaluator readiness
 
+> Superseded-state notice (2026-08-25): the credential balance blocker documented below has been
+> cleared, but the only authorized Core-managed GPT-4 smoke failed closed at OpenRouter HTTP 403 and
+> was not retried. Current authority is `NEXT_STAGE_READINESS_AUDIT.md` plus the value-free root
+> receipts `OPENROUTER_CREDENTIAL_PROBE.json` and `OPENROUTER_GPT4_CORE_PAID_SMOKE.json`. Formal
+> 42-call evaluation remains unauthorized and unstarted.
+
 Generated: 2026-08-25 Asia/Shanghai
 
 ## Outcome
