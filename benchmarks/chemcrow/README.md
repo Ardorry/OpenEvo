@@ -10,11 +10,6 @@ immutable managed Docker runtime. Host `codex exec`, custom shells, custom runti
 MCP injection fail closed. ChemCrow tools are exposed through a pair-scoped receipt-producing
 REST bridge because the Core subscription contract forbids caller MCP servers.
 
-All four Codex roles are admitted only through OpenEvo Core Rollout/Gateway and execute in the
-immutable managed Docker runtime. Host `codex exec`, custom shells, custom runtimes, and caller
-MCP injection fail closed. ChemCrow tools are exposed through a pair-scoped receipt-producing
-REST bridge because the Core subscription contract forbids caller MCP servers.
-
 The mandatory item protocol is:
 
 `bare S0 -> baseline -> feedback -> one native Reflector job -> same-item evolved -> seal -> reset`
@@ -38,12 +33,31 @@ uv run openevo-chemcrow preflight \
   --no-model-calls
 ```
 
-Local RXN services use exact image IDs:
+## Sealed paper-compatible evaluator
+
+The optional paper evaluator is a final-evaluation-only protocol. It reconstructs the publicly
+recoverable ChemCrow EvaluatorGPT semantics (two students, one 0--10 grade per student, task
+completion plus overall chemistry thought-process correctness, strengths, weaknesses,
+justification, and feedback). The original evaluator prompt was not published, so the protocol
+is labeled `CHEMCROW_EVALUATORGPT_PROMPT_COMPATIBLE_V1`, never a verbatim reproduction.
+
+Its route is independent from Candidate evolution:
+
+`PaperEvaluatorHarness container -> dedicated OpenEvo Rollout/Gateway -> OpenRouter auth shim -> openai/gpt-4`
+
+The historical notebook answers can be extracted only after a 14-task completed-run audit passes.
+They are never placed in `tasks.jsonl`, Candidate input, Reflector input, evolution feedback, or
+the regular final evaluator. Preflight performs zero model calls:
 
 ```bash
-docker compose -f configs/rxn_sandbox.services.yaml up -d
-curl -fsS http://127.0.0.1:8300/openapi.json
+uv run --project benchmarks/chemcrow openevo-chemcrow paper-evaluator-preflight \
+  --config benchmarks/chemcrow/configs/paper_evaluator.full-v3.yaml \
+  --output /home/lhy-h/work/chemcrowrun/reports/PAPER_EVALUATOR_PREFLIGHT.json \
+  --no-model-calls
 ```
+
+The current `full-v3` is stopped and contains only 12 fully sealed pairs, so this command correctly
+returns `BLOCKED`. Do not run the paid command until a complete 14-task authority exists.
 
 Local RXN services use exact image IDs:
 

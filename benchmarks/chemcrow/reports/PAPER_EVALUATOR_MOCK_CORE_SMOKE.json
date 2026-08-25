@@ -1,0 +1,17 @@
+{
+  "schema_version": "chemcrow_paper_evaluator_mock_core_smoke_v1",
+  "status": "PASS",
+  "executed_at": "2026-08-25T13:23:29+08:00",
+  "execution_route": "PaperEvaluatorHarness container -> dedicated OpenEvo Rollout -> dedicated OpenEvo Gateway -> OpenRouter auth shim -> MOCK upstream",
+  "core_task_id": "paper-chemcrow-mock-core-smoke-4",
+  "core_task_status": "completed",
+  "core_session_status": "COMPLETED",
+  "core_completion_sha256": "7ad64dade11475c86f04e33b0ac2746b11a8b5d8a053ef9c4ca69c5734f8b0c7",
+  "shim_receipt_sha256": "e05ccd14a9a5cd07a3f8cd6c707edf703061d4c81066e1ebd11dd53b0163147e",
+  "observation_source": "MOCK",
+  "real_model_calls": 0,
+  "paid_operations": 0,
+  "included_in_benchmark_metrics": false,
+  "temporary_services_stopped": true,
+  "temporary_ports_released": [8180, 8110, 8400]
+}

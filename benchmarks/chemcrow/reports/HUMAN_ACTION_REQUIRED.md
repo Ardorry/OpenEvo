@@ -11,6 +11,7 @@ Never paste secrets into chat or commit them. The full benchmark is blocked.
 | Decide whether to enable SerpAPI | WebSearch is currently an explicit unavailable observation and may be paid | `SERP_API_KEY` in ignored `.env`/secret manager | WebSearch only | One separately authorized call yields `source=live` and provider usage agrees |
 | Decide whether hosted RXN is allowed as fallback | Local RXN works; hosted service is time-limited | `RXN4CHEM_API_KEY`, `RXN4CHEM_PROJECT_ID`, optional `RXN4CHEMISTRY_BASE_URL` | RXN tasks only | One separately authorized prediction returns a real provider ID/result |
 | Keep excluded service keys absent unless protocol changes | ChemSpace procurement and hidden-model literature search are excluded | `CHEMSPACE_API_KEY`, `SEMANTIC_SCHOLAR_API_KEY` | Does not block reduced profile | Inventory remains explicitly excluded |
+| Configure the sealed paper judge | The dedicated shim alone may authenticate to OpenRouter | `OPENROUTER_API_KEY` in `/home/lhy-h/work/chemcrowrun/.env.paper-evaluator` (mode 0600) | Paper-compatible evaluation only | Source the file, run `credential-check`, and confirm the key name is present without printing its value |
 
 Model role names and the Core-managed Codex subscription auth source are already detected. If auth expires, renew it through the normal Codex login flow on the host; do not copy auth contents into the repository. Verify with the zero-model preflight and one explicitly authorized Core canary.
 
@@ -68,6 +69,11 @@ These services are currently running. GPU RXN is optional; CPU mode passed smoke
 
 ## 5. Model authentication and failed-preflight disposition
 
+The paper evaluator defaults are already frozen in the ignored 0600 file:
+`OPENROUTER_BASE_URL`, `CHEMCROW_PAPER_EVALUATOR_MODEL`, and
+`CHEMCROW_PAPER_EVALUATOR_MAX_USD`. Only `OPENROUTER_API_KEY` is missing. Keep
+`CHEMCROW_PAPER_EVALUATOR_AUTHORIZATION` empty until a complete 14-task preflight has passed.
+
 Immediate decision required:
 
 - `preflight-v1` already has five possible provider-effect phases for `chemcrow-02`.
@@ -96,7 +102,17 @@ Potentially quota-consuming operations: Candidate, Reflector, evolution evaluato
 
 No further paid command is authorized by this report. After choosing the failed-preflight policy, create a new immutable authorization receipt and config before execution. The full command exists in `READINESS_REPORT.md` but remains blocked.
 
+The paper evaluator is a separate potential charge: 42 `openai/gpt-4` calls have a frozen
+list-price ceiling of `$11.83266`. It requires both `--allow-paid` and
+`CHEMCROW_PAPER_EVALUATOR_AUTHORIZATION=I_AUTHORIZE_42_SEALED_PAPER_EVALUATIONS`. Verify it is fixed
+only when the sealed-output preflight reports 42 calls and the exact plan hash; do not set the
+authorization merely to test credentials.
+
 ## 8. Tasks that cannot currently run faithfully to the paper
+
+`full-v3` is not a complete 14-task result: 12 pairs are sealed/reset, task 14 was interrupted, and
+task 15 was never started. Without additional Candidate work, only a 12-task exploratory paper
+evaluation is possible and it must not be reported as the official 14-task mean.
 
 - `chemcrow-01/04/05/13`: price/procurement evidence requires the excluded price tool.
 - `chemcrow-02/07/08/15`: literature/novelty depth is reduced because LiteratureSearch and restricted tools are absent.
@@ -118,6 +134,12 @@ The valid claim is a public-source, tool-audited reduced ChemCrow environment, n
 7. Accept modern RDKit/RXN versions or request a historical compatibility study.
 8. Approve blinded expert review and provisional-result wording.
 9. Explicitly authorize the full run only after a valid bounded preflight is reviewed.
+10. Choose how to close the paper-evaluator task inventory: (a) preregister a fresh isolated
+    two-task repair for tasks 14 and 15, explicitly accepting a duplicate task-14 baseline caused
+    by the interrupted pair, then create a composite 14-task audit; (b) run no more Candidate calls
+    and accept a clearly labeled 12-task exploratory judge; or (c) authorize a fresh 14-task run.
+    Option (a) is the smallest path compatible with a 14-task aggregate, but it requires explicit
+    duplicate-call authorization and a composite-audit implementation before execution.
 
 How to verify readiness after decisions:
 
