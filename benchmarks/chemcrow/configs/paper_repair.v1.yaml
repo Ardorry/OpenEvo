@@ -12,6 +12,7 @@ ledger_root: ../../../../runs/paper-repair-v1/claims
 prior_run_root: ../../../../runs/full-v3
 prior_experiment_id: chemcrow-task-local-full-v3
 duplicate_authorization_receipt: ../../../../manifests/CHEMCROW_14_DUPLICATE_AUTHORIZATION.json
+execution_parity_report: ../reports/PAPER_REPAIR_EXECUTION_PARITY.json
 evolution_store:
   backend_url: http://127.0.0.1:8200
   db_path: ../../../../core-state/evolution/core.sqlite3

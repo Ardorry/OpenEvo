@@ -8,7 +8,10 @@ import pytest
 import yaml
 from openevo.harness.models import AgentSpec
 
-from openevo_chemcrow.composite import validate_duplicate_authorization_receipt
+from openevo_chemcrow.composite import (
+    validate_duplicate_authorization_receipt,
+    validate_repair_execution_parity,
+)
 from openevo_chemcrow.hashing import file_sha256
 from openevo_chemcrow.models import TaskItem
 from openevo_chemcrow.paper_core import PAPER_CORE_ROUTE, build_paper_task_request
@@ -186,6 +189,10 @@ def test_two_task_repair_freezes_same_s0_and_all_model_roles():
     assert repair["duplicate_authorization_receipt"].endswith(
         "CHEMCROW_14_DUPLICATE_AUTHORIZATION.json"
     )
+    parity = validate_repair_execution_parity(
+        config_root.parent / "reports" / "PAPER_REPAIR_EXECUTION_PARITY.json"
+    )
+    assert parity["scientific_execution_module_count"] == 9
 
 
 def test_duplicate_authorization_is_bound_to_interrupted_claim(tmp_path):

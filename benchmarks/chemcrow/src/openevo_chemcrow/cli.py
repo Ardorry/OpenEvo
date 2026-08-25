@@ -20,6 +20,7 @@ from .composite import (
     audit_paper_composite_repair,
     load_composite_pairs,
     validate_duplicate_authorization_receipt,
+    validate_repair_execution_parity,
 )
 from .credentials import credential_report, probe_openrouter_key
 from .evaluation import OpenEvoEvolutionEvaluator, OpenEvoFinalEvaluator
@@ -189,6 +190,14 @@ def command_preflight(args: argparse.Namespace) -> int:
             )
         except (FileNotFoundError, TypeError, ValueError) as exc:
             duplicate_authorization_error = str(exc)
+    execution_parity_error: str | None = None
+    if config.get("execution_parity_report"):
+        try:
+            validate_repair_execution_parity(
+                _path(config_path, str(config["execution_parity_report"]))
+            )
+        except (FileNotFoundError, TypeError, ValueError) as exc:
+            execution_parity_error = str(exc)
     manifest = _path(config_path, str(config["task_manifest"]))
     items = _read_tasks(manifest)
     ids = [item.task_id for item in items]
@@ -347,6 +356,8 @@ def command_preflight(args: argparse.Namespace) -> int:
         "runtime_config_resolved": runtime_config_resolved,
         "duplicate_authorization_valid": duplicate_authorization_error is None,
         "duplicate_authorization_error": duplicate_authorization_error,
+        "execution_parity_valid": execution_parity_error is None,
+        "execution_parity_error": execution_parity_error,
         "required_environment_presence": required_environment_presence,
     }
     ready_for_model_calls = (
@@ -361,6 +372,7 @@ def command_preflight(args: argparse.Namespace) -> int:
         and checks["all_codex_roles_core_managed"]
         and checks["runtime_config_resolved"]
         and checks["duplicate_authorization_valid"]
+        and checks["execution_parity_valid"]
         and core_health["reachable"]
         and core_health["healthy_nodes"] > 0
         and evolution_health["reachable"]
@@ -403,6 +415,10 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
             path=_path(config_path, str(config["duplicate_authorization_receipt"])),
             primary_run_root=_path(config_path, str(config["prior_run_root"])),
             primary_experiment_id=str(config["prior_experiment_id"]),
+        )
+    if config.get("execution_parity_report"):
+        validate_repair_execution_parity(
+            _path(config_path, str(config["execution_parity_report"]))
         )
     manifest_path = _path(config_path, str(config["task_manifest"]))
     items = _read_tasks(manifest_path)

@@ -1,0 +1,40 @@
+{
+  "schema_version": "chemcrow_paper_repair_execution_parity_v1",
+  "status": "PASS",
+  "reference_full_v3_code_commit": "6e1337834203086e2dca74e7fb61fc4964fce11d",
+  "candidate_s0_sha256": "8f7113de469c92fff55b99b62e58d4c43d5e42f2b6485affe44b247c28306a5c",
+  "candidate_config_equal": true,
+  "reflector_config_equal": true,
+  "evolution_evaluator_config_equal": true,
+  "final_evaluator_config_equal": true,
+  "scientific_execution_module_hashes_equal_to_reference": true,
+  "scientific_execution_modules": {
+    "aggregate.py": "dbab5e5194476cf94d46233383b46c4225b475284070d63abbdd7cf3566f3346",
+    "evaluation.py": "560da2c51f4967e16f8fc5471efb47d661e9f28c8a697b063e443a12873911c5",
+    "ledger.py": "993c256d201b7aa901002d570eb6a236fd3db2ba21d67d6f9f407b2fb7e8f8a9",
+    "models.py": "71176a846a2222f4aeb05690e88aead4e83366e2463cbf5f06df9d87f8b503a2",
+    "native_evolution.py": "83aaeab152e9643c82f0012aa813c25089a985399f349773a66ca80d19beaf6c",
+    "protocol.py": "5df7fd30329d5b1fd7e0555b103bca5a0b9fe5dbb545e0d2b8c67c36d3d389ab",
+    "runtime.py": "391c9ccd3d46e540c96ac8f9c756ac1b7072bca725398eda4e53b922b3edc56d",
+    "tool_service.py": "0352c29961c2e3e37c8228361deb88b5c15c129ceeae17d99d947ca9779420eb",
+    "tools.py": "decd00034c9e8b5da31ab5ef570235f0ae726cca4e8ef063ae71ced72a8a17b8"
+  },
+  "full_v3_config_sha256": "fbcb5d2e577d3d9e0ac472f3fa40428df1f42df44cac378b4e7e58a810893948",
+  "paper_repair_config_sha256": "909df9c78955294c37a9061c70f001d80de573862f810764895ef0769e2609c6",
+  "reference_environment_lock_sha256": "011c365473621b11bdf0b20cc1a12343a9c80fd1744264a02dab917c2e4bbfdd",
+  "current_environment_lock_sha256": "05ed78b4ef903a51cc3158ce445d7e2f5bf5696d0c2020ad37f3fba40188582f",
+  "scientific_runtime_dependency_versions_unchanged": true,
+  "lock_additions_outside_scientific_runtime": [
+    "pytest-asyncio 0.26.0",
+    "regex 2026.7.19",
+    "tiktoken 0.14.0"
+  ],
+  "changed_since_reference_outside_scientific_execution": [
+    "paper evaluator modules",
+    "composite audit module",
+    "credential reporting",
+    "CLI authorization and audit gates"
+  ],
+  "model_calls": 0,
+  "paid_operations": 0
+}

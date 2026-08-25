@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from .audit import audit_completed_run
 from .hashing import canonical_sha256, file_sha256
 from .models import PairResult
@@ -143,6 +145,51 @@ def load_composite_pairs(
             raise ValueError(f"paper composite pair task mismatch: {expected_task_id}")
         pairs[expected_task_id] = pair
     return pairs
+
+
+def validate_repair_execution_parity(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if (
+        payload.get("schema_version") != "chemcrow_paper_repair_execution_parity_v1"
+        or payload.get("status") != "PASS"
+        or payload.get("scientific_execution_module_hashes_equal_to_reference")
+        is not True
+        or payload.get("scientific_runtime_dependency_versions_unchanged") is not True
+    ):
+        raise ValueError("paper repair execution parity receipt is invalid")
+    repo_root = path.resolve().parents[3]
+    module_root = repo_root / "benchmarks" / "chemcrow" / "src" / "openevo_chemcrow"
+    modules = payload.get("scientific_execution_modules")
+    if not isinstance(modules, dict) or not modules:
+        raise ValueError("paper repair execution module inventory is absent")
+    for name, expected_hash in modules.items():
+        module_path = module_root / str(name)
+        if not module_path.is_file() or file_sha256(module_path) != expected_hash:
+            raise ValueError(f"paper repair execution module drift: {name}")
+    lock_path = repo_root / "benchmarks" / "chemcrow" / "uv.lock"
+    if file_sha256(lock_path) != payload.get("current_environment_lock_sha256"):
+        raise ValueError("paper repair environment lock drift")
+    config_root = repo_root / "benchmarks" / "chemcrow" / "configs"
+    full_path = config_root / "full.v3.yaml"
+    repair_path = config_root / "paper_repair.v1.yaml"
+    if (
+        file_sha256(full_path) != payload.get("full_v3_config_sha256")
+        or file_sha256(repair_path) != payload.get("paper_repair_config_sha256")
+    ):
+        raise ValueError("paper repair experiment config drift")
+    full = yaml.safe_load(full_path.read_text(encoding="utf-8"))
+    repair = yaml.safe_load(repair_path.read_text(encoding="utf-8"))
+    if not isinstance(full, dict) or not isinstance(repair, dict):
+        raise TypeError("paper repair configs must be objects")
+    for role in ("candidate", "reflector", "evolution_evaluator", "final_evaluator"):
+        if full.get(role) != repair.get(role):
+            raise ValueError(f"paper repair role config drift: {role}")
+    return {
+        "status": "PASS",
+        "reference_full_v3_code_commit": payload["reference_full_v3_code_commit"],
+        "receipt_sha256": file_sha256(path),
+        "scientific_execution_module_count": len(modules),
+    }
 
 
 def validate_duplicate_authorization_receipt(
