@@ -463,7 +463,14 @@ def _audit_declared_tool_surface(traces: list[Any], *, receipt_count: int) -> No
                 bridge_execution_ids.add(item_id)
     if builtin_web_search_ids:
         raise OpenEvoRolloutError("undeclared built-in web search was observed in Candidate runtime")
-    if len(bridge_execution_ids) != receipt_count:
+    # One Codex shell item may intentionally batch multiple curl calls (for
+    # example, several reaction candidates in a single script). Receipt
+    # cardinality therefore tracks HTTP tool invocations, not transcript shell
+    # item cardinality. Keep a fail-closed bidirectional existence check while
+    # allowing that legitimate 1:N relationship.
+    if (bridge_execution_ids and receipt_count == 0) or (
+        receipt_count > 0 and not bridge_execution_ids
+    ):
         raise OpenEvoRolloutError(
             "Candidate ChemCrow bridge executions do not match the pair-scoped receipt stream"
         )

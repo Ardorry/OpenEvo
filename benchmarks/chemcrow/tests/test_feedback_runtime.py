@@ -16,6 +16,7 @@ from openevo_chemcrow.models import (
 from openevo_chemcrow.runtime import (
     CORE_MANAGED_CODEX_ROUTE,
     OpenEvoRolloutError,
+    _audit_declared_tool_surface,
     _normalize_rollout,
     _poll_rollout_until_terminal,
     assert_core_managed_codex_config,
@@ -217,6 +218,32 @@ def test_declared_tool_surface_rejects_builtin_web_search_and_receipt_mismatch()
             wall_time=1.0,
             declared_tool_bridge=True,
         )
+
+
+def test_declared_tool_surface_allows_one_shell_item_to_batch_multiple_receipts():
+    events = [
+        {
+            "type": "item.started",
+            "item": {
+                "id": "batch-1",
+                "type": "command_execution",
+                "command": "for q in a b c; do curl http://tools/tool/ReactionPredict; done",
+                "status": "in_progress",
+            },
+        },
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "batch-1",
+                "type": "command_execution",
+                "command": "for q in a b c; do curl http://tools/tool/ReactionPredict; done",
+                "status": "completed",
+                "exit_code": 0,
+            },
+        },
+    ]
+    traces = [{"metadata": {"transcript": "\n".join(map(json.dumps, events))}}]
+    _audit_declared_tool_surface(traces, receipt_count=3)
 
     bridge_payload = _rollout_payload(
         transcript_events=[
