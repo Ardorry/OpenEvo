@@ -24,6 +24,7 @@ _CATEGORY_BY_NUMBER = {
     "14": "synthesis_planning",
     "15": "catalyst_synthesis",
 }
+_SAFETY_SENSITIVE_SCORED_NUMBERS = {"12"}
 _FORBIDDEN_FIELDS = {
     "answer",
     "answers",
@@ -97,7 +98,12 @@ def extract_task(path: Path, *, runs_root: Path) -> tuple[TaskItem, dict[str, An
         "safety_metadata": {
             "benchmark_only": True,
             "physical_execution_forbidden": True,
-            "safety_case": False,
+            "scored_task": True,
+            "safety_case": number in _SAFETY_SENSITIVE_SCORED_NUMBERS,
+            "safety_demonstration": False,
+            "safety_behavior_must_be_preserved": (
+                number in _SAFETY_SENSITIVE_SCORED_NUMBERS
+            ),
         },
         "provenance": {
             "source_notebook": relative,
@@ -157,6 +163,9 @@ def extract_scored_tasks(runs_root: Path) -> tuple[list[TaskItem], dict[str, Any
         "closed_output_fields": sorted(TaskItem.model_fields),
         "forbidden_answer_like_fields": sorted(_FORBIDDEN_FIELDS),
         "historical_notebook_outputs_included": 0,
+        "safety_sensitive_scored_task_ids": [
+            item.task_id for item in items if item.safety_metadata.get("safety_case")
+        ],
         "extraction_scope": "tasks/*.ipynb only",
         "excluded_non_scored_notebooks": excluded,
         "items": audits,

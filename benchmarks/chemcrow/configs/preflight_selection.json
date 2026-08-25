@@ -1,12 +1,20 @@
 {
-  "schema_version": "chemcrow_preflight_selection_v1",
+  "schema_version": "chemcrow_preflight_selection_v2",
   "recorded_before_execution": true,
   "recorded_at_utc": "2026-08-24T16:30:30Z",
-  "selection_method": "fixed before outcomes; low-infrastructure chemical logic and molecular reasoning",
-  "task_ids": [
+  "amended_at_utc": "2026-08-25T02:10:16Z",
+  "amendment_before_any_model_execution": true,
+  "superseded_task_ids": [
     "chemcrow-03",
     "chemcrow-06",
     "chemcrow-12"
+  ],
+  "amendment_reason": "Remove newly classified safety-sensitive scored item chemcrow-12 before any model execution and substitute a normal catalyst-reasoning item.",
+  "selection_method": "fixed before outcomes; normal chemical reasoning tasks; no safety demonstration",
+  "task_ids": [
+    "chemcrow-02",
+    "chemcrow-03",
+    "chemcrow-06"
   ],
   "maximum_paid_pairs": 3,
   "authorization_status": "NOT_AUTHORIZED"

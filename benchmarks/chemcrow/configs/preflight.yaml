@@ -2,9 +2,9 @@ schema_version: chemcrow_experiment_v1
 experiment_id: chemcrow-task-local-preflight-v1
 task_manifest: ../tasks.jsonl
 task_ids:
+  - chemcrow-02
   - chemcrow-03
   - chemcrow-06
-  - chemcrow-12
 feedback_mode: F2
 artifact_type: text_memory
 run_root: ../../../../runs/preflight-v1

@@ -28,6 +28,10 @@ def test_extracts_only_static_prompt_literals(runs_root, tmp_path):
         "result_tools",
     }
     assert all(not forbidden.intersection(row) for row in rows)
+    safety_sensitive = [item for item in items if item.safety_metadata["safety_case"]]
+    assert [item.task_id for item in safety_sensitive] == ["chemcrow-12"]
+    assert safety_sensitive[0].safety_metadata["scored_task"] is True
+    assert safety_sensitive[0].safety_metadata["safety_demonstration"] is False
 
 
 def test_non_scored_and_safety_notebooks_are_separate(runs_root):
