@@ -46,13 +46,14 @@ def test_smoke_call_is_separate_from_formal_42_call_inventory():
     }
 
 
-def test_historical_v1_smoke_config_cannot_launch_v2_call(tmp_path):
-    config = tmp_path / "v1.json"
+@pytest.mark.parametrize("version", ("v1", "v2"))
+def test_historical_smoke_config_cannot_launch_v3_call(tmp_path, version):
+    config = tmp_path / f"{version}.json"
     config.write_text(
-        json.dumps({"schema_version": "chemcrow_paper_evaluator_smoke_config_v1"}),
+        json.dumps({"schema_version": f"chemcrow_paper_evaluator_smoke_config_{version}"}),
         encoding="utf-8",
     )
-    with pytest.raises(SystemExit, match="not the frozen v2 schema"):
+    with pytest.raises(SystemExit, match="not the frozen v3 schema"):
         main(
             [
                 "run",
@@ -149,6 +150,93 @@ def test_paid_smoke_seals_hash_only_report_and_removes_raw_completion(monkeypatc
             output_path=output,
             allow_paid=True,
         )
+
+
+def test_paid_smoke_seals_terminal_upstream_failure_without_assessment(monkeypatch, tmp_path):
+    receipt_root = tmp_path / "receipts"
+    receipt_root.mkdir()
+    completion_root = tmp_path / "completions"
+    completion = completion_root / f"task_{PAPER_SMOKE_CALL_ID}" / "result.json"
+    completion.parent.mkdir(parents=True)
+    completion.write_text(
+        json.dumps(
+            {
+                "status": "ERROR",
+                "error": "post-run failed: subscription transcript could not be read safely",
+                "trajectory": "PRIVATE CORE FAILURE BODY",
+            }
+        ),
+        encoding="utf-8",
+    )
+    probe = tmp_path / "probe.json"
+    probe.write_text(
+        json.dumps(
+            {
+                "status": "VALID",
+                "auth_valid": True,
+                "credit_probe_success": True,
+                "sufficient_remaining_for_frozen_ceiling": True,
+                "model_calls": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CHEMCROW_PAPER_SMOKE_AUTHORIZATION", PAPER_SMOKE_AUTHORIZATION)
+    monkeypatch.setenv("CHEMCROW_PAPER_SMOKE_MAX_USD", "1")
+    monkeypatch.setenv("CHEMCROW_PAPER_EVALUATOR_MODEL", "openai/gpt-4")
+    monkeypatch.setattr("openevo_chemcrow.paper_smoke._assert_dedicated_core_node", lambda _: None)
+
+    def submit_once(*args, **kwargs):
+        (receipt_root / f"{PAPER_SMOKE_CALL_ID}.claim.json").write_text(
+            json.dumps(
+                {
+                    "call_id": PAPER_SMOKE_CALL_ID,
+                    "request_sha256": "a" * 64,
+                }
+            ),
+            encoding="utf-8",
+        )
+        (receipt_root / f"{PAPER_SMOKE_CALL_ID}.receipt.json").write_text(
+            json.dumps(
+                {
+                    "status": "terminal_failure_or_ambiguous",
+                    "call_id": PAPER_SMOKE_CALL_ID,
+                    "request_sha256": "a" * 64,
+                    "upstream_http_status": 403,
+                    "upstream_error_code": 403,
+                    "upstream_error_category": "other_upstream_error",
+                    "upstream_error_message_sha256": "b" * 64,
+                    "upstream_response_sha256": "c" * 64,
+                }
+            ),
+            encoding="utf-8",
+        )
+        return {"terminal": True}
+
+    monkeypatch.setattr("openevo_chemcrow.paper_smoke._submit_once_and_poll", submit_once)
+    monkeypatch.setattr(
+        "openevo_chemcrow.paper_smoke._assessment_from_core_status",
+        lambda _: pytest.fail("assessment must not run after terminal upstream failure"),
+    )
+    output = tmp_path / "failed-smoke.json"
+    result = run_paid_smoke(
+        rollout_base_url="http://127.0.0.1:8180",
+        runtime={"backend": "docker"},
+        receipt_root=receipt_root,
+        core_completion_root=completion_root,
+        credential_probe_path=probe,
+        output_path=output,
+        allow_paid=True,
+    )
+
+    assert result["status"] == "FAIL_CLOSED"
+    assert result["paid_model_calls_during_sealing"] == 0
+    assert result["provider_request_attempts"] == 1
+    assert result["successful_model_completions"] == 0
+    assert result["raw_core_completion_retained"] is False
+    assert not completion.exists()
+    report_text = output.read_text(encoding="utf-8")
+    assert "PRIVATE CORE FAILURE BODY" not in report_text
 
 
 def test_paid_smoke_requires_separate_test_authorization(monkeypatch, tmp_path):

@@ -7,9 +7,9 @@ credit probes, and exactly one authorized Core-routed GPT-4 smoke attempt. No ta
 was performed.
 
 > Data-policy amendment, 2026-08-25: after this audit's v1 HTTP 403, the user explicitly approved
-> OpenAI-only routing with `data_collection=allow`. Code, plan, tests, and a distinct v2 smoke route
-> have been updated. The historical v1 claim remains immutable; no v2 paid call has been authorized
-> or performed, so the overall verdict remains blocked.
+> OpenAI-only routing with `data_collection=allow`. A subsequently authorized v2 Core smoke still
+> received upstream HTTP 403. Code now seals terminal failures without retrying, and a distinct v3
+> route is prepared but unauthorized. The v1/v2 claims remain immutable and the verdict is blocked.
 
 ## Executive verdict
 
@@ -26,8 +26,9 @@ pass, but the next paid stage is blocked for four independent reasons:
    the two experiments separate.
 2. The only completed OpenRouter GPT-4 smoke attempt reached OpenRouter through the required Core
    route but was rejected with HTTP 403. Its OpenAI-only plus `data_collection=deny` combination has
-   now been replaced by the user-approved `data_collection=allow` route, but that route has no paid
-   live receipt yet. Formal paper evaluation therefore remains blocked.
+   now been replaced by the user-approved `data_collection=allow` route. The v2 live attempt also
+   received 403, narrowing the remaining cause to an account/workspace/member/key guardrail that
+   requires dashboard access. Formal paper evaluation therefore remains blocked.
 3. A fresh task-14 pair would intentionally duplicate an interrupted provider claim. The required
    explicit authorization receipt is absent and was not created or consumed in this audit.
 4. Seven of the 14 tasks have a paper-faithful capability blocker involving search, literature,
@@ -79,9 +80,10 @@ environment is Python 3.12.14. The host default Python 3.10.12 is not the benchm
 | Final evaluator: GPT-5.5 → OpenEvo Core | **PASS** | separate evaluator identity/prompt and blinded pair order; invoked after G2 and excluded from Reflector input |
 | Paper EvaluatorGPT: harness → dedicated Rollout → dedicated Gateway → auth shim → OpenRouter GPT-4 | **FAIL CLOSED** | full route reached OpenRouter, but upstream HTTP 403 prevented model/provider/usage/schema receipt |
 
-The approved next route remains OpenAI-only, disables fallback, requires all parameters and strict
-JSON, and changes only `data_collection` from `deny` to `allow`. OpenRouter prompt logging is neither
-required nor enabled by this protocol. The new route has deterministic tests but no paid live proof.
+The approved route remains OpenAI-only, disables fallback, requires all parameters and strict JSON,
+and changes only `data_collection` from `deny` to `allow`. OpenRouter prompt logging is neither
+required nor enabled. The v2 live request reached OpenRouter but was blocked by HTTP 403 before a
+model/provider/usage receipt.
 
 OpenRouter references are confined to paper-evaluator credential/probe/shim/smoke modules and
 paper-evaluator configuration. Candidate, all three Reflectors, internal evaluation, and final
@@ -167,7 +169,7 @@ post-hoc after sealed outputs and has no write path into the evolution evidence 
 The probe report contains only booleans, HTTP statuses, hashes, and metadata. It contains neither
 credential values nor raw balance values. The ignored credential file is mode 0600.
 
-### Only authorized paid smoke attempt
+### First authorized provider attempt (v1)
 
 | Field | Result |
 |---|---|
@@ -199,10 +201,15 @@ the immutable shim claim and failure receipt remain. The failure also exposed a 
 post-run diagnostic (`step.00.stdout.log` absent), but the authoritative upstream result is still
 HTTP 403. No formal paper-evaluator authorization was consumed.
 
-The v2 route uses call ID `paper-chemcrow-smoke-core-v2`, a separate receipt root, and authorization
-literal `I_AUTHORIZE_ONE_CORE_PAPER_GPT4_SMOKE_V2_20260825`. It records only an upstream response
-hash, error-code/category, message hash, and OpenRouter-metadata hash on failure; it never persists
-the upstream error body. No v2 claim currently exists.
+The v2 route used call ID `paper-chemcrow-smoke-core-v2` and a separate receipt root. It records only
+an upstream response hash, error-code/category, message hash, and OpenRouter-metadata hash on
+failure; it never persists the upstream error body. Its terminal claim and receipt are sealed and
+must not be retried. Prepared v3 call ID is `paper-chemcrow-smoke-core-v3` and requires the distinct
+literal `I_AUTHORIZE_ONE_CORE_PAPER_GPT4_SMOKE_V3_20260825` after dashboard repair.
+
+The v2 attempt was the only provider request made under the user's later one-call authorization.
+Across project history there are therefore two terminal provider attempts (v1 and v2), zero
+successful completions, and no usage receipt proving billing for either attempt.
 
 Evidence:
 
@@ -344,7 +351,7 @@ and a homogeneous 14-task sealed authority exists.
 | Check | Result |
 |---|---|
 | Ruff, ChemCrow source + tests | PASS |
-| ChemCrow adapter/protocol suite | **62 passed**, 0 failed |
+| ChemCrow adapter/protocol suite | **66 passed**, 0 failed |
 | OpenEvo Core evolution/gateway/runtime/managed-assets regression suite | **1619 passed, 8 skipped**, 0 failed |
 | `git diff --check` | PASS |
 | all tracked benchmark and audit JSON parsing | PASS |
@@ -353,7 +360,7 @@ and a homogeneous 14-task sealed authority exists.
 | local tool smoke | PASS, 6/6, no network/model calls |
 | public live tool smoke | PASS for the eight configured public/RXN capabilities listed above |
 | OpenRouter `/key` + `/credits` | PASS, zero model calls |
-| one-call GPT-4 Core smoke | FAIL CLOSED, upstream HTTP 403; no retry |
+| GPT-4 Core smoke v1 and v2 | both FAIL CLOSED at upstream HTTP 403; neither claim retried; v3 unstarted |
 
 Warnings/skips:
 
@@ -375,9 +382,10 @@ Before any task repair or formal evaluation, a human must:
 
 1. Choose whether to run a fresh homogeneous 14-task three-artifact experiment or preserve the new
    protocol as a separate two-task pilot. A mixed old/new 14-task aggregate is forbidden.
-2. Optionally authorize one v2 Core smoke for the approved OpenAI-only `data_collection=allow`
-   revision. Model, provider, fallback, required parameters, strict JSON, and Core routing remain
-   unchanged. The existing v1 claim must never be retried.
+2. Repair the OpenRouter account/workspace/member/key guardrail, especially OpenAI-group ZDR,
+   provider/model allowlists, ignored lists, and guardrail budget. Then optionally authorize one v3
+   Core smoke. Model, provider, fallback, required parameters, strict JSON, and Core routing remain
+   unchanged. Existing v1/v2 claims must never be retried.
 3. Explicitly authorize the fresh task-14 duplicate pair using the literal above and allow creation
    of the hash-bound receipt.
 4. Approve RXN-Sandbox and MolBloom licenses and the public-tool reduced-profile deviation, or

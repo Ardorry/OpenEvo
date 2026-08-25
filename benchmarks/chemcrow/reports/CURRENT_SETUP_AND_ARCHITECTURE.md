@@ -4,9 +4,9 @@
 > `text_memory` protocol at commit `d55f7f4b5`. It is superseded for current readiness by
 > `NEXT_STAGE_READINESS_AUDIT.md`. OpenRouter credits are now sufficient, the one-call Core smoke
 > failed closed with upstream HTTP 403, and the new three-Reflector protocol is a separate versioned
-> path. The user subsequently approved OpenAI-only `data_collection=allow`; the prepared v2 route
-> has deterministic coverage but has not made a paid call. The 12 sealed pairs below remain
-> unchanged historical evidence.
+> path. The user subsequently approved OpenAI-only `data_collection=allow`; the v2 Core smoke still
+> received upstream HTTP 403, narrowing the remaining blocker to account/workspace guardrails. The
+> 12 sealed pairs below remain unchanged historical evidence.
 
 Generated: 2026-08-25 Asia/Shanghai
 
@@ -17,11 +17,11 @@ is fully sealed and audit-valid. The later `full-v3` was explicitly stopped by t
 of 14 task-local pairs were sealed. It has no 14-task aggregate and must not be presented as a
 complete ChemCrow result.
 
-This settings-check phase performed no Candidate, Reflector, evaluator, or OpenRouter model call.
-The OpenRouter key authenticates, but the zero-model credit probe reports
-`VALID_INSUFFICIENT_CREDITS` for the frozen `$11.83266` paper-evaluator ceiling. The explicit paper
-paid-authorization variable is empty. The duplicate task-14 replacement authorization receipt is
-also absent. No experiment or paper-evaluator service was started after the user's stop request.
+The original settings-check phase performed no Candidate, Reflector, evaluator, or OpenRouter model
+call. A later authorized paper-evaluator audit proved sufficient credit, then issued one v1 and one
+separately authorized v2 Core-routed provider attempt. Both failed closed at upstream HTTP 403 and
+neither produced a usage receipt. The formal paper authorization remains absent. The duplicate
+task-14 replacement authorization receipt is also absent; no benchmark task was resumed.
 
 Current service state:
 
@@ -267,7 +267,7 @@ separation, missing keys/services, Core-only routing, transcript/receipt parity,
 registration/injection, reset/isolation, evaluator separation, claims/resume, paper plan, shim
 credential isolation, 42-call plan, credit capacity, and official human packet blinding/scale.
 
-Current adapter result: **49 passed**, Ruff PASS, `git diff --check` PASS. The two warnings are
+Current adapter result: **66 passed**, Ruff PASS, `git diff --check` PASS. The two warnings are
 existing Starlette/httpx and Pydantic-settings deprecation/forward-reference warnings. The frozen
 repair execution-parity gate also passes: nine scientific execution modules remain byte-identical
 to full-v3 reference commit `6e1337834203086e2dca74e7fb61fc4964fce11d`.
@@ -322,16 +322,17 @@ stored.
 - `/api/v1/key`: HTTP 200.
 - `/api/v1/credits`: HTTP 200 with required fields.
 - Frozen evaluator list-price ceiling: `$11.83266` for 42 calls.
-- Capacity result: `sufficient_remaining_for_frozen_ceiling=false`.
-- Probe status: `VALID_INSUFFICIENT_CREDITS`.
+- Capacity result: `sufficient_remaining_for_frozen_ceiling=true`.
+- Latest probe status: `VALID`.
 - `CHEMCROW_PAPER_EVALUATOR_AUTHORIZATION`: absent.
-- Model calls during probe/setup checks: 0.
-- Paid operations during probe/setup checks: 0.
+- Model calls during the zero-paid probe: 0.
+- Separate provider request attempts: 2 (v1 and v2); successful completions: 0; billing is unknown
+  because neither 403 response included a usage receipt.
 
 ## 10. Remaining human actions and blockers
 
-1. Add sufficient OpenRouter credit to cover at least the frozen `$11.83266` worst-case ceiling,
-   then rerun the zero-model credential probe and require `status=VALID`.
+1. Repair the OpenRouter account/workspace/member/key guardrail that still rejects OpenAI GPT-4
+   with HTTP 403. Credit already covers the frozen `$11.83266` ceiling.
 2. Decide whether to authorize a fresh isolated task-14 pair after the stopped, never-sealed claim.
    If approved, the exact literal is
    `I_AUTHORIZE_FRESH_CHEMCROW_14_PAIR_AFTER_USER_STOP`; it will create a user-bound receipt tied to

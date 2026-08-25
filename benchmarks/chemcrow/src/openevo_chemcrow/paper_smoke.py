@@ -34,10 +34,10 @@ from .paper_evaluator import (
     render_compatible_prompt,
 )
 
-PAPER_SMOKE_AUTHORIZATION = "I_AUTHORIZE_ONE_CORE_PAPER_GPT4_SMOKE_V2_20260825"
-PAPER_SMOKE_CALL_ID = "paper-chemcrow-smoke-core-v2"
-PAPER_SMOKE_SCHEMA = "chemcrow_paper_evaluator_paid_smoke_v2"
-PAPER_SMOKE_CONFIG_SCHEMA = "chemcrow_paper_evaluator_smoke_config_v2"
+PAPER_SMOKE_AUTHORIZATION = "I_AUTHORIZE_ONE_CORE_PAPER_GPT4_SMOKE_V3_20260825"
+PAPER_SMOKE_CALL_ID = "paper-chemcrow-smoke-core-v3"
+PAPER_SMOKE_SCHEMA = "chemcrow_paper_evaluator_paid_smoke_v3"
+PAPER_SMOKE_CONFIG_SCHEMA = "chemcrow_paper_evaluator_smoke_config_v3"
 
 
 def build_smoke_call() -> PaperEvaluationCall:
@@ -115,10 +115,17 @@ def run_paid_smoke(
     _assert_dedicated_core_node(rollout_base_url)
     core_payload = build_paper_task_request(call=call, runtime=runtime)
     status = _submit_once_and_poll(rollout_base_url, core_payload)
-    assessment = _assessment_from_core_status(status)
     if not receipt_path.is_file():
         raise RuntimeError("OpenRouter smoke usage receipt is missing")
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    if receipt.get("status") == "terminal_failure_or_ambiguous":
+        return seal_failed_smoke_attempt(
+            receipt_root=receipt_root,
+            core_completion_root=core_completion_root,
+            credential_probe_path=credential_probe_path,
+            output_path=output_path,
+        )
+    assessment = _assessment_from_core_status(status)
     if (
         receipt.get("status") != "terminal_success"
         or receipt.get("call_id") != call.call_id
@@ -193,6 +200,100 @@ def run_paid_smoke(
     return result
 
 
+def seal_failed_smoke_attempt(
+    *,
+    receipt_root: Path,
+    core_completion_root: Path,
+    credential_probe_path: Path,
+    output_path: Path,
+) -> dict[str, Any]:
+    """Seal an already-terminal failed claim without issuing any upstream request."""
+
+    call = build_smoke_call()
+    claim_path = receipt_root / f"{call.call_id}.claim.json"
+    receipt_path = receipt_root / f"{call.call_id}.receipt.json"
+    if output_path.exists():
+        raise RuntimeError("paper smoke failure report already exists")
+    if not claim_path.is_file() or not receipt_path.is_file():
+        raise RuntimeError("paper smoke claim and terminal failure receipt are required")
+    claim = json.loads(claim_path.read_text(encoding="utf-8"))
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    if (
+        claim.get("call_id") != call.call_id
+        or receipt.get("call_id") != call.call_id
+        or receipt.get("status") != "terminal_failure_or_ambiguous"
+        or claim.get("request_sha256") != receipt.get("request_sha256")
+    ):
+        raise RuntimeError("paper smoke failure lineage is invalid")
+    completion_matches = list(core_completion_root.glob(f"task_{call.call_id}/*.json"))
+    if len(completion_matches) != 1:
+        raise RuntimeError("failed paper smoke Core completion authority is not unique")
+    completion_path = completion_matches[0]
+    completion_hash = file_sha256(completion_path)
+    completion = json.loads(completion_path.read_text(encoding="utf-8"))
+    core_status = str(completion.get("status") or "")
+    core_error = str(completion.get("error") or "")
+    if core_status != "ERROR":
+        raise RuntimeError("failed paper smoke Core completion is not ERROR")
+    probe_hash = file_sha256(credential_probe_path)
+    result = {
+        "schema_version": PAPER_SMOKE_SCHEMA,
+        "status": "FAIL_CLOSED",
+        "request_claim_id": call.call_id,
+        "execution_route": (
+            "PaperEvaluatorHarness -> dedicated OpenEvo Rollout -> dedicated OpenEvo "
+            "Gateway -> test-only auth shim -> OpenRouter"
+        ),
+        "core_route": PAPER_CORE_ROUTE,
+        "model_requested": PAPER_EVALUATOR_MODEL,
+        "model_reported": None,
+        "provider_requested": PAPER_EVALUATOR_PROVIDER,
+        "provider_reported": None,
+        "temperature": PAPER_EVALUATOR_TEMPERATURE,
+        "max_output_tokens": PAPER_EVALUATOR_MAX_OUTPUT_TOKENS,
+        "fallback_disabled": True,
+        "require_parameters": True,
+        "data_collection": PAPER_EVALUATOR_DATA_COLLECTION,
+        "upstream_http_status": receipt.get("upstream_http_status"),
+        "upstream_error_code": receipt.get("upstream_error_code"),
+        "upstream_error_category": receipt.get("upstream_error_category"),
+        "upstream_error_message_sha256": receipt.get("upstream_error_message_sha256"),
+        "upstream_response_sha256": receipt.get("upstream_response_sha256"),
+        "upstream_response_body_included": False,
+        "schema_valid": False,
+        "usage_metadata_present": False,
+        "estimated_cost_usd": None,
+        "billing_status": "NO_USAGE_RECEIPT_UPSTREAM_FAILURE; billing not proven",
+        "provider_request_attempts": 1,
+        "successful_model_completions": 0,
+        "automatic_retry_allowed": False,
+        "core_terminal_status": core_status,
+        "core_error_sha256": canonical_sha256(core_error),
+        "core_completion_sha256": completion_hash,
+        "credential_probe_sha256": probe_hash,
+        "shim_claim_sha256": file_sha256(claim_path),
+        "shim_receipt_sha256": file_sha256(receipt_path),
+        "included_in_formal_42_call_ledger": False,
+        "included_in_benchmark_metrics": False,
+        "prompt_or_response_body_in_report": False,
+        "formal_paper_authorization_consumed": False,
+        "test_authorization_literal": PAPER_SMOKE_AUTHORIZATION,
+        "test_authorization_source": "explicit_user_message_2026-08-25",
+        "raw_core_completion_retained": False,
+        "sealed_from_existing_terminal_evidence_only": True,
+        "paid_model_calls_during_sealing": 0,
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    _exclusive_json_write(output_path, result)
+    completion_path.unlink()
+    try:
+        completion_path.parent.rmdir()
+    except OSError:
+        pass
+    return result
+
+
 def _exclusive_json_write(path: Path, payload: dict[str, Any]) -> None:
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
@@ -212,6 +313,10 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--credential-probe", type=Path, required=True)
     run.add_argument("--output", type=Path, required=True)
     run.add_argument("--allow-paid", action="store_true")
+    seal_failure = commands.add_parser("seal-failure")
+    seal_failure.add_argument("--config", type=Path, required=True)
+    seal_failure.add_argument("--credential-probe", type=Path, required=True)
+    seal_failure.add_argument("--output", type=Path, required=True)
     return parser
 
 
@@ -239,7 +344,25 @@ def main(argv: list[str] | None = None) -> None:
         return
     config = json.loads(args.config.resolve().read_text(encoding="utf-8"))
     if config.get("schema_version") != PAPER_SMOKE_CONFIG_SCHEMA:
-        raise SystemExit("paper smoke config is not the frozen v2 schema")
+        raise SystemExit("paper smoke config is not the frozen v3 schema")
+    if args.command == "seal-failure":
+        result = seal_failed_smoke_attempt(
+            receipt_root=Path(str(config["receipt_root"])).resolve(),
+            core_completion_root=Path(str(config["core_completion_root"])).resolve(),
+            credential_probe_path=args.credential_probe.resolve(),
+            output_path=args.output.resolve(),
+        )
+        print(
+            json.dumps(
+                {
+                    "status": result["status"],
+                    "paid_model_calls_during_sealing": 0,
+                    "request_claim_id": result["request_claim_id"],
+                },
+                sort_keys=True,
+            )
+        )
+        return
     result = run_paid_smoke(
         rollout_base_url=str(config["rollout_base_url"]),
         runtime=dict(config["runtime"]),
@@ -253,14 +376,18 @@ def main(argv: list[str] | None = None) -> None:
         json.dumps(
             {
                 "status": result["status"],
-                "paid_model_calls": result["paid_model_calls"],
-                "model": result["model_reported"],
-                "provider": result["provider_reported"],
+                "paid_model_calls": result.get(
+                    "paid_model_calls", result.get("successful_model_completions", 0)
+                ),
+                "model": result.get("model_reported"),
+                "provider": result.get("provider_reported"),
                 "schema_valid": result["schema_valid"],
             },
             sort_keys=True,
         )
     )
+    if result["status"] != "PASS":
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

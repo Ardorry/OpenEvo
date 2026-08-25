@@ -4,14 +4,15 @@ Updated: 2026-08-25 Asia/Shanghai
 
 Never paste a credential into chat or commit it. The formal benchmark and 42-call paper evaluation
 remain blocked. The OpenRouter key is valid and the frozen `$11.83266` ceiling is funded. The user
-approved OpenAI-only `data_collection=allow`; the remaining OpenRouter blocker is that this revision
-has not passed a separately authorized Core smoke. The historical v1 attempt remains a terminal 403.
+approved OpenAI-only `data_collection=allow`, but the v2 Core smoke also received upstream HTTP 403.
+The remaining blocker is now an OpenRouter account/workspace/member/key guardrail that requires
+dashboard access. Both v1 and v2 claims are terminal and must not be retried.
 
 ## 1. Credentials and API keys
 
 | Action | Why required | Exact variable/action | Scope | How to verify |
 |---|---|---|---|---|
-| Validate the approved OpenAI data-policy revision | `/key` and `/credits` passed; the v1 request combined OpenAI-only routing with `data_collection=deny` and failed before any model/provider/usage receipt. The user approved `data_collection=allow`. | Do not delete or retry claim `paper-chemcrow-smoke-core-v1`. A future v2 smoke requires literal `I_AUTHORIZE_ONE_CORE_PAPER_GPT4_SMOKE_V2_20260825` and call ID `paper-chemcrow-smoke-core-v2`. | Paper evaluator only | A separately authorized v2 Core smoke returns HTTP 200, model `openai/gpt-4`, provider `OpenAI`, strict schema, and a usage receipt |
+| Resolve the remaining OpenRouter 403 guardrail | `/key`, `/credits`, model visibility, endpoint status, and required-parameter support pass; OpenAI-only `data_collection=allow` still returns 403 without content-filter metadata. The inference key cannot read management guardrails. | In OpenRouter Dashboard → Settings → Privacy → Guardrails, check account/workspace/member/key policy. Set `enforce_zdr_openai=false`; allow provider `openai` and model `openai/gpt-4`; ensure neither is ignored; ensure guardrail budget is sufficient. Do not paste a management key or secrets into chat. | Paper evaluator only | After a new explicit authorization, v3 call `paper-chemcrow-smoke-core-v3` returns HTTP 200, provider `OpenAI`, strict schema, and usage receipt |
 | Decide whether to configure WebSearch | `SERP_API_KEY` is absent and WebSearch fails explicitly | Put `SERP_API_KEY` only in an ignored 0600 env file if this paid/external service is approved | Tasks needing current web evidence | One separately authorized call has `source=live` and provider-side usage matches |
 | Decide whether hosted RXN is an allowed fallback | Local RXN works; hosted RXN is optional and time-limited | `RXN4CHEM_API_KEY`, `RXN4CHEM_PROJECT_ID`, optional `RXN4CHEMISTRY_BASE_URL` | RXN-dependent tasks only | One separately authorized hosted prediction returns a real provider receipt |
 | Keep excluded keys absent unless the protocol changes | ChemSpace procurement and hidden-model literature search are deliberately excluded | `CHEMSPACE_API_KEY`, `SEMANTIC_SCHOLAR_API_KEY`, `OPENAI_API_KEY` | Reduced-profile benchmark | Credential report continues to show these routes excluded |
@@ -87,7 +88,8 @@ These decisions block formal claims involving the corresponding tools, not deter
   login flow; never copy it into the repository. Verify with the zero-model preflight.
 - OpenRouter is restricted to the post-hoc paper evaluator. The key must remain only in the ignored
   0600 file. The current key/credit gate passes. OpenAI-only `data_collection=allow` is approved and
-  implemented but still requires a separately authorized v2 Core smoke.
+  implemented, but v2 still failed with 403. Dashboard guardrail repair and a separately authorized
+  v3 Core smoke are required.
 - Formal paper authorization must remain unconsumed until a protocol-compatible 14-task sealed set
   and frozen 42-call plan exist:
 
@@ -112,10 +114,10 @@ Potentially quota-consuming operations are Candidate, three Reflectors, both int
 evaluations, the final evaluator, SerpAPI, hosted RXN, and the GPT-4 paper evaluator. Local RXN has no
 per-call API fee.
 
-No further call is currently authorized. The v1 smoke claim is terminal and must never be retried or
-deleted. The prepared v2 claim has not been submitted. Formal GPT-4 evaluation remains 42 calls with
-a frozen list-price ceiling of `$11.83266`; it requires the formal authorization literal,
-`--allow-paid`, a complete plan hash, and a successful new preflight.
+No further call is currently authorized. The v1 and v2 smoke claims are terminal and must never be
+retried or deleted. The prepared v3 claim has not been submitted. Formal GPT-4 evaluation remains
+42 calls with a frozen list-price ceiling of `$11.83266`; it requires the formal authorization
+literal, `--allow-paid`, a complete plan hash, and a successful new preflight.
 
 ## 8. Tasks that cannot currently run faithfully
 
@@ -193,8 +195,9 @@ remains ambiguous and must never be automatically redispatched.
 
 ### C. Other required decisions
 
-- Authorize at most one v2 Core smoke if the approved OpenAI-only `data_collection=allow` route is to
-  be live-validated. Keep model, provider, fallback, strict-JSON, and Core restrictions frozen.
+- Repair the OpenRouter OpenAI-group ZDR/provider/model/budget guardrail in the dashboard, then
+  separately authorize at most one v3 Core smoke. Keep model, provider, fallback, strict-JSON, and
+  Core restrictions frozen.
 - Approve/reject RXN-Sandbox and MolBloom licenses for formal metrics.
 - Freeze the formal tool profile with WebSearch absent or explicitly configured.
 - Approve the `chemcrow-12` safety scoring policy.

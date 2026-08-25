@@ -1,9 +1,10 @@
 # ChemCrow paper evaluator readiness
 
 > Superseded-state notice (2026-08-25): the credential balance blocker documented below has been
-> cleared, but the only authorized Core-managed GPT-4 smoke failed closed at OpenRouter HTTP 403 and
-> was not retried. The user subsequently approved OpenAI-only routing with
-> `data_collection=allow`; this revision is implemented but not live-verified. Current authority is
+> cleared, but the initial authorized Core-managed GPT-4 smoke failed closed at OpenRouter HTTP 403
+> and was not retried. The user subsequently approved OpenAI-only routing with
+> `data_collection=allow`; the v2 live request still received HTTP 403, indicating a remaining
+> account/workspace/member/key guardrail. Current authority is
 > `NEXT_STAGE_READINESS_AUDIT.md` plus the value-free root
 > receipts `OPENROUTER_CREDENTIAL_PROBE.json` and `OPENROUTER_GPT4_CORE_PAID_SMOKE.json`. Formal
 > 42-call evaluation remains unauthorized and unstarted.
@@ -13,9 +14,9 @@ Generated: 2026-08-25 Asia/Shanghai
 ## Outcome
 
 The paper-compatible evaluator integration is implemented and passed unit plus zero-paid MOCK Core
-routing tests. One historical v1 OpenRouter attempt failed with HTTP 403; no v2 request has been
-made. Formal 14-task scoring is currently **BLOCKED** because `full-v3` was stopped with only 12 of
-14 task pairs fully sealed and the approved v2 paper route lacks a live receipt.
+routing tests. Both v1 and v2 OpenRouter attempts failed with HTTP 403. Formal 14-task scoring is
+currently **BLOCKED** because `full-v3` was stopped with only 12 of 14 task pairs fully sealed and
+the approved paper route lacks a successful live receipt.
 
 ## Recovered official scoring semantics
 
@@ -108,16 +109,16 @@ sealed. Current provider metadata: <https://openrouter.ai/openai/gpt-4/providers
   `/home/lhy-h/work/chemcrowrun/reports/PAPER_EVALUATOR_PREFLIGHT.json`
 - official human-review packet tests: PASS; 42 blinded comparisons, four independent reviewer
   slots each, published 0--10 three-dimensional scale
-- current test suite: 49 passed; Ruff PASS
+- current test suite: 66 passed; Ruff PASS
 - current human packet preparation: BLOCKED with zero model calls until the composite 14-task
   manifest exists; see `/home/lhy-h/work/chemcrowrun/reports/PAPER_HUMAN_REVIEW_PREPARE.json`
 
 ## Current blockers
 
-1. `OPENROUTER_API_KEY` is present in the ignored permission-0600 file and authenticates, but the
-   zero-model credits probe reports `VALID_INSUFFICIENT_CREDITS` for the frozen `$11.83266`
-   ceiling. Add sufficient OpenRouter credit, then repeat the zero-model probe.
-2. The paid authorization literal remains empty intentionally.
+1. `OPENROUTER_API_KEY` is present in the ignored permission-0600 file, authenticates, and covers
+   the frozen `$11.83266` ceiling. The remaining paper-evaluator blocker is an external OpenRouter
+   guardrail: both isolated Core-routed smoke attempts received upstream HTTP 403.
+2. No further smoke or formal paid authorization literal is present intentionally.
 3. `full-v3` has 12 sealed/reset pairs. Task 14 is interrupted and task 15 never started. A
    14-task paper-compatible mean cannot be produced from this run as-is.
 4. Four independent expert chemists are required for a paper-comparable blinded final review
