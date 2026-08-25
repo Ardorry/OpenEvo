@@ -1,0 +1,27 @@
+{
+  "schema_version": "chemcrow_readiness_three_pipeline_live_selection_v4",
+  "recorded_before_execution": true,
+  "recorded_at": "2026-08-26T02:42:00+08:00",
+  "experiment_id": "chemcrow-task-local-readiness-three-pipeline-live-v4",
+  "task_ids_in_order": ["chemcrow-02", "chemcrow-03", "chemcrow-06"],
+  "first_task_gate": "chemcrow-02",
+  "source_authoritative_config": "full.v4-three-pipeline.yaml",
+  "allowed_config_differences": ["experiment_id", "task_ids", "run_root", "cache_root", "ledger_root"],
+  "supersedes_failed_live_run": "chemcrow-task-local-readiness-three-pipeline-live-v3",
+  "superseded_failure": "task03 evolved Candidate credential-isolation canary failed before Candidate execution; failed pair is not reused",
+  "repair_under_test": [
+    "publish and read back injection receipt before Candidate terminalization",
+    "verify the same injection receipt after Candidate execution",
+    "skip periodic cleanup reconciliation while dispatcher owns an inflight session",
+    "late Rollout DELETE does not rewrite terminal cancel authority",
+    "persist only a closed sanitized Codex canary failure category"
+  ],
+  "artifact_protocol": "chemcrow-three-isolated-artifacts-v1",
+  "artifact_types": ["text_memory", "skill_bundle", "agent_system"],
+  "candidate_and_reflector_model": "gpt-5.5",
+  "tool_profile": "public-source-reduced-local-rxn-no-serp-v1",
+  "mock_or_fixture_allowed": false,
+  "failed_pair_reuse_allowed": false,
+  "production_full_v4_authorized": false,
+  "authorization_scope": "user-authorized bounded real three-task readiness preflight only"
+}

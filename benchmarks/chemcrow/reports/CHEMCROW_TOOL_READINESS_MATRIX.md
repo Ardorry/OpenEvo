@@ -24,9 +24,14 @@ be `live` or same-pair canonical `cache_replay`; `mock=0` and `fixture=0` are ha
 | arbitrary Python | excluded fail-closed | legacy LangChain REPL | not called | paper tool surface | intentionally absent | unavailable, declared |
 | proprietary paper-only tools | none | restricted APIs | absent | proprietary tools | public source has no faithful implementation | unavailable, declared |
 
-Evidence root: `/home/lhy-h/work/chemcrowrun/runs/readiness-three-pipeline-v1/`. The local smoke has
-six PASS checks; the external/local-RXN smoke has eight PASS checks; both contain zero model, mock,
-and fixture calls.
+Zero-model evidence root: `/home/lhy-h/work/chemcrowrun/runs/readiness-three-pipeline-v1/`. The local
+smoke has six PASS checks and the external/local-RXN smoke has eight PASS checks.
+
+Real paired evidence root:
+`/home/lhy-h/work/chemcrowrun/runs/readiness-three-pipeline-live-v4/`. Tasks `02`, `03`, and `06`
+completed 3 G1/G2 pairs with 77 tool calls: 71 live observations, 6 same-pair canonical cache
+replays, `mock=0`, and `fixture=0`. The completed-run audit status is PASS. Cache replay is retained
+only under the frozen pair-scoped reproducibility policy and is explicitly counted.
 
 ## Per-task accounting
 

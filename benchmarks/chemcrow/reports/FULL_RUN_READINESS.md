@@ -5,99 +5,150 @@ Generated: 2026-08-26 (Asia/Shanghai)
 ## Final verdict
 
 ```text
-BLOCKED_EXTERNAL
+READY_FOR_FULL_CHEMCROW_TASK_LOCAL_RUN
+PAPER_EVALUATOR_ROUTE_READY
+THREE_ARTIFACT_LIVE_PREFLIGHT_READY
+READY_FOR_FULL_RUN
 ```
 
-The repository is not allowed to print `READY_FOR_FULL_RUN`: Gate H is externally blocked and Gate
-E cannot yet supply live three-artifact proof. The authoritative batch and production 42-call batch
-remain unstarted.
+The readiness work is complete. The authoritative 14-task run, production 42-call GPT-4
+evaluation, and human review were not started.
 
-## Evidence classes
+## OpenRouter request-delta finding
 
-### Historical evidence
+The v5-v8 and old minimal-direct HTTP 403s were route-specific, not account failures. The exact
+causal delta was `httpx` environment-proxy inheritance:
 
-- `full-v1/v2/v3`, old artifacts, claims, receipts, task-14 interruption,
-  `STOPPED_BY_USER.json`, and task-15 unstarted state were preserved.
-- `full-v3` has 12 sealed single-artifact pairs and is `LEGACY_PROVISIONAL` under the new protocol.
-- Historical V2 HTTP 403 cause remains `UNPROVEN`.
+- `trust_env=False`: identical neutral request body, direct HKG egress, HTTP 403, router
+  `attempt=0`, no selected endpoint.
+- validated environment proxy enabled: identical body SHA256, SJC egress, HTTP 200,
+  `attempt=1`, provider `OpenAI` selected.
 
-### New engineering evidence
+The shim now requires `--use-environment-proxy` for this deployment, rejects credential-bearing
+proxy URLs, records only a sanitized proxy identity, and captures the actual outgoing request shape
+immediately before transmission. Core's incoming
+`response_format={"type":"json_object"}` contract is still validated and claim-bound; only the
+unsupported upstream transport field is omitted. `user`, logprob/token-ID fields, tools, plugins,
+and other forbidden fields are absent. See `OPENROUTER_REQUEST_DIFF_AUDIT.json`.
 
-- Three independent Memory/Skill/Agent-System jobs, typed artifacts, lineage, sibling isolation,
-  separation checks, exact-three injection, fairness, seal/reset, and leakage gates are implemented.
-- Paper shim validates and claims the incoming strict-JSON request before omitting unsupported
-  `response_format` from the first-party legacy GPT-4 transport payload.
-- Upstream text still requires JSON parsing and strict `DualStudentAssessment` validation, with no
-  retry for invalid output.
-- `PAPER_COMPARISON_MATRIX.json` maps all 42 logical comparisons without inventing hashes for
-  not-yet-produced full-v4 answers.
+Historical V2 HTTP 403 cause remains **UNPROVEN**. The legacy GPT-4 `response_format` HTTP 400
+incompatibility remains independently **PROVEN**.
 
-### New paid/debug smoke evidence
+## Paper Evaluator Core smoke
 
-- Core v5-v8: four unique claims, four terminal HTTP 403 receipts, zero successful completions,
-  zero usage receipts.
-- Minimal direct v1: one unique claim, HTTP 403, router `attempt=0`, OpenAI and Azure both
-  `selected=false`, zero successful completions, zero usage receipts.
-- v4 infrastructure-only failure: zero provider attempts.
-- New provider-request attempts: 5; all retained historical debug attempts: 7; automatic retries: 0.
-- Debug spend is unknown because no usage receipt exists; it is not represented as zero.
-- Production claims/results: empty and untouched.
-
-### New live three-artifact preflight evidence
-
-- Zero-paid preflight for tasks `02`, `03`, `06`: PASS.
-- Real Candidate pairs: 0.
-- Real Memory/Skill/Agent-System jobs: `0/0/0`.
-- Real three-artifact injections, pair seals, and reset receipts: 0.
-- Reason: the unrelated but terminal Paper route blocker was established first; paid subscription
-  execution would not remove it. This live gate remains mandatory after OpenRouter repair.
-
-### Remaining paper deviations
-
-- The public evaluator prompt is a compatibility reconstruction, not verbatim historical text.
-- The current GPT-4 service is not a frozen paper-era snapshot.
-- Local RXN, deterministic safety extraction, absent web/literature/price tools, and modern RDKit
-  differ from the paper environment. See `CHEMCROW_TOOL_READINESS_MATRIX.md`.
-- GPT-4 grades are post-hoc 0-10 overall grades and must remain distinct from OpenEvo internal 0-4
-  three-dimensional diagnostics and human three-dimensional 0-10 scores.
-
-### Remaining human actions
-
-1. Repair the OpenRouter account/workspace/key policy so a minimal first-party `openai/gpt-4` call
-   is eligible. The ordinary inference key cannot inspect the exact policy assignment.
-2. After the full-v4 run and 42-call evaluation, obtain four independent expert reviews for all 42
-   blinded comparisons: 168 completed review forms.
-3. Record the intended scientific label as reduced-profile unless the documented paper-tool
-   deviations are separately resolved.
-
-## External blocker evidence
-
-The same 403 response and router metadata occur through both the complete Core route and a minimal
-direct request. Router metadata reports `attempt=0`; neither available endpoint was selected. This
-means no first-party OpenAI request was attempted. Current credential validity, credits, and model
-visibility pass. The exact active policy rule is inaccessible to the ordinary key.
-
-Required repair: inspect account/workspace/member/API-key privacy, ZDR, provider/model allow/ignore,
-guardrail, and budget assignments in OpenRouter's management UI/context. Make first-party provider
-`openai` eligible for `openai/gpt-4`. Do not enable fallback or switch models.
-
-## Final local verification
+Fresh v10 passed the complete route:
 
 ```text
-focused protocol/Paper tests: 50 passed
-full ChemCrow pytest: 81 passed, 2 unchanged non-blocking dependency warnings
-Ruff: PASS
-git diff --check: PASS after the matrix EOF repair
+PaperEvaluatorHarness -> dedicated Rollout -> dedicated Gateway -> auth shim
+-> OpenRouter -> openai/gpt-4 -> first-party OpenAI
 ```
 
-The warnings are Starlette's `httpx` TestClient deprecation and a Pydantic Settings unresolved
-forward-reference warning. Neither is introduced by this change and neither changes runtime gates.
+| Property | Result |
+|---|---|
+| HTTP | 200 |
+| model | `openai/gpt-4` |
+| provider | `OpenAI` |
+| temperature | 0.1 |
+| fallback | false |
+| JSON valid | yes |
+| `DualStudentAssessment` valid | yes |
+| usage receipt | present, 257 prompt + 136 completion tokens |
+| reported cost | $0.01587 |
+| production ledger | untouched |
 
-## Commands after the blocker is repaired
+Additional request-delta debugging used 4 attempts, 3 successful completions, one unreceipted 403,
+and $0.03252 proven total cost. No automatic retry occurred. Debug claims and receipts are separate
+from production. Evidence: `OPENROUTER_GPT4_CORE_PAID_SMOKE_V10.json`.
 
-Do not run these while this report says `BLOCKED_EXTERNAL`. The Core/RXN services must first pass
-their health checks. Load model/auth settings from an ignored credential file or export the exact
-non-secret model identities:
+## Live three-artifact preflight
+
+Fresh live-v4 completed representative tasks `02`, `03`, and `06` through real Core-managed GPT-5.5
+Candidate, evaluator, and Reflector executions.
+
+| Evidence | Count |
+|---|---:|
+| sealed pairs | 3 |
+| Memory jobs | 3 |
+| Skill jobs | 3 |
+| AgentSystem jobs | 3 |
+| unique artifacts | 9 |
+| sibling-isolation records | 9 |
+| exact-three injection receipts | 3 |
+| bare-S0 reset receipts | 3 |
+| live observations | 71 |
+| allowed cache replay observations | 6 |
+| MOCK | 0 |
+| fixture | 0 |
+
+All three pairs passed the completed-run audit. Failed/partial v1-v3 preflight identities were
+preserved and not reused. The evidence root is
+`/home/lhy-h/work/chemcrowrun/runs/readiness-three-pipeline-live-v4`; the value-free digest summary
+is `THREE_ARTIFACT_LIVE_PREFLIGHT_V4.json`.
+
+Live execution exposed and repaired baseline empty-inventory ordering and Core lifecycle races.
+Runtime injection is now read back and published before Candidate execution and read back again
+after execution to reject mutation. Periodic cleanup cannot race a dispatcher-owned session, late
+DELETE cannot rewrite terminal cancel authority, and Codex canary failures retain only a closed
+sanitized category.
+
+## Protocol and legacy audit
+
+- Candidate and all three Reflectors use GPT-5.5 through native Codex subscription transcript mode,
+  OpenEvo Rollout/Gateway/Core, and the pinned managed runtime image.
+- G1 requires empty artifact inventory. G2 requires exactly one task-local `text_memory`, one
+  `skill_bundle`, and one `agent_system`; no fourth artifact is accepted.
+- Byte, normalized-text, and frozen near-duplicate checks fail closed. Task/pair lineage,
+  responsibility separation, sibling isolation, model/tool/config parity, feedback leakage, pair
+  seal, destruction, and reset are enforced.
+- Paper GPT-4 and human scores remain post-hoc and never enter evolution.
+- Historical full-v3 contains 12 sealed single-memory pairs but zero typed Skill/AgentSystem jobs and
+  zero three-artifact injections. It is `LEGACY_PROVISIONAL` and cannot be combined with new task
+  14/15 pairs. The authoritative next run is a fresh 14-task `full-v4-three-pipeline`.
+
+## Tools, scoring, and 42-call blueprint
+
+The 14 repository tasks are `01-10,12-15`; the manifest hash is
+`8c69883d4a2424ed66f4dea0b9d0a0496129556e998902f278ad36a72d132604`.
+`CHEMCROW_TOOL_READINESS_MATRIX.md` accounts for every task and public reduced-profile capability.
+Unavailable paper-only web/literature/price/proprietary tools remain declared deviations rather than
+mocked equivalents.
+
+`PAPER_COMPARISON_MATRIX.json` maps 14 tasks × 3 comparisons = 42 calls:
+
+- `historical_control`: compatible paper-control reconstruction, not a verbatim prompt/model
+  snapshot reproduction;
+- `baseline`: full-v4 G1 vs historical GPT-4, project-added;
+- `evolved`: full-v4 G2 vs historical GPT-4, project-added.
+
+The blueprint is READY and the production ledger is empty. Fourteen historical-control hashes are
+frozen. The 28 G1/G2 hashes are expected deferred materialization from future authoritative sealed
+outputs and are not a readiness failure.
+
+Scoring layers remain separate: OpenEvo internal three-dimensional 0-4 diagnostics, post-hoc GPT-4
+overall 0-10 grades, and four-expert human three-dimensional 0-10 review.
+
+## Verification
+
+```text
+Core Gateway/runtime integration tests: 300 passed
+full ChemCrow pytest: 89 passed, 2 unchanged dependency warnings
+ChemCrow Ruff: PASS
+changed Core Ruff: PASS
+git diff --check: PASS
+```
+
+## Remaining non-blocking deviations and human work
+
+- This is a public-source reduced-profile benchmark, not a paper-identical tool environment.
+- Local RXN and modern RDKit differ from paper-era services; price, literature, and configured web
+  search are unavailable.
+- The evaluator prompt label remains `CHEMCROW_EVALUATORGPT_PROMPT_COMPATIBLE_V1`.
+- Four independent expert chemists must complete 42 blinded comparisons each (168 forms) for the
+  formal human layer. A smaller panel must be labeled exploratory.
+
+## Exact full-volume commands — do not execute without the corresponding authorization
+
+Set the frozen non-secret identities in every Candidate terminal:
 
 ```bash
 cd /home/lhy-h/work/chemcrowrun/openevo
@@ -110,9 +161,6 @@ export OPENEVO_ROLLOUT_BASE_URL=http://127.0.0.1:8080
 
 ### 1. Authoritative fresh 14-task run
 
-First rerun zero-model preflight, then complete the paid representative preflight `02,03,06` with a
-fresh readiness run ID and audit it. Only after its real receipts pass:
-
 ```bash
 export CHEMCROW_FULL_RUN_AUTHORIZATION=I_UNDERSTAND_THIS_MAY_INCUR_COST
 uv run --project benchmarks/chemcrow openevo-chemcrow run \
@@ -120,28 +168,28 @@ uv run --project benchmarks/chemcrow openevo-chemcrow run \
   --allow-paid
 ```
 
-Never resume an ambiguous claimed phase. The initial authoritative invocation is `run`, not
-`resume`.
+Use `run`, not `resume`, initially. Never redispatch an ambiguous claimed phase.
 
-### 2 and 3. G1/G2 aggregate, then completed-run audit
-
-The implementation audit requires `aggregate.json`, so the safe execution order is aggregate first,
-then audit even though the logical reporting list names audit before aggregate:
+### 2. G1/G2 aggregate generation
 
 ```bash
 uv run --project benchmarks/chemcrow openevo-chemcrow aggregate-run \
   --config benchmarks/chemcrow/configs/full.v4-three-pipeline.yaml \
   --no-model-calls
+```
 
+### 3. Completed-run audit
+
+```bash
 uv run --project benchmarks/chemcrow openevo-chemcrow audit-run \
   --config benchmarks/chemcrow/configs/full.v4-three-pipeline.yaml \
   --core-completions /home/lhy-h/work/chemcrowrun/core-state/completions \
   --output /home/lhy-h/work/chemcrowrun/runs/full-v4-three-pipeline/completed_run.audit.json
 ```
 
-### 4. Production 42-call GPT-4 evaluation
+### 4. Production 42-call GPT-4 paper evaluation
 
-First create/freeze the plan with zero model calls:
+First materialize and freeze the zero-model plan:
 
 ```bash
 set -a
@@ -155,12 +203,34 @@ uv run --project benchmarks/chemcrow openevo-chemcrow paper-evaluator-preflight 
   --no-model-calls
 ```
 
-After that report is `READY_FOR_EXPLICIT_PAID_AUTHORIZATION`, start the dedicated paper Rollout,
-Gateway, and shim in separate terminals using
-`configs/openevo_paper_evaluator_topology.yaml` and the frozen full-v4 plan/receipt root. Then:
+After that report is ready, start the production Rollout, shim, and Gateway in separate terminals:
 
 ```bash
+uv run --project benchmarks/chemcrow python -m openevo.rollout.server \
+  --config benchmarks/chemcrow/configs/openevo_paper_evaluator_topology.yaml --log-level info
+```
+
+```bash
+set -a; source /home/lhy-h/work/chemcrowrun/.env.paper-evaluator; set +a
 export CHEMCROW_PAPER_EVALUATOR_AUTHORIZATION=I_AUTHORIZE_42_SEALED_PAPER_EVALUATIONS
+uv run --project benchmarks/chemcrow python -m openevo_chemcrow.openrouter_shim \
+  --host 127.0.0.1 --port 8400 --use-environment-proxy \
+  --plan /home/lhy-h/work/chemcrowrun/runs/paper-evaluator-full-v4-three-pipeline/private/plan.json \
+  --receipt-root /home/lhy-h/work/chemcrowrun/runs/paper-evaluator-full-v4-three-pipeline/openrouter-receipts
+```
+
+```bash
+uv run --project benchmarks/chemcrow python -m openevo.gateway.server \
+  --config benchmarks/chemcrow/configs/openevo_paper_evaluator_topology.yaml \
+  --node-id chemcrow-paper-gateway-01 --log-level info
+```
+
+Then execute the frozen calls:
+
+```bash
+set -a; source /home/lhy-h/work/chemcrowrun/.env.paper-evaluator; set +a
+export CHEMCROW_PAPER_EVALUATOR_AUTHORIZATION=I_AUTHORIZE_42_SEALED_PAPER_EVALUATIONS
+export CHEMCROW_PAPER_EVALUATOR_MAX_USD=11.83266
 uv run --project benchmarks/chemcrow openevo-chemcrow paper-evaluator-run \
   --config benchmarks/chemcrow/configs/paper_evaluator.full-v4-three-pipeline.yaml \
   --allow-paid
@@ -175,7 +245,7 @@ uv run --project benchmarks/chemcrow openevo-chemcrow paper-human-review-prepare
   --no-model-calls
 ```
 
-## Explicit full-volume authorization values
+## Explicit authorization variables
 
 ```text
 CHEMCROW_FULL_RUN_AUTHORIZATION=I_UNDERSTAND_THIS_MAY_INCUR_COST
@@ -183,12 +253,4 @@ CHEMCROW_PAPER_EVALUATOR_AUTHORIZATION=I_AUTHORIZE_42_SEALED_PAPER_EVALUATIONS
 CHEMCROW_PAPER_EVALUATOR_MAX_USD=11.83266
 ```
 
-The debug-only recovery values are separate and do not authorize production:
-
-```text
-CHEMCROW_PAPER_SMOKE_AUTHORIZATION=I_AUTHORIZE_ONE_CORE_PAPER_GPT4_SMOKE_V9_20260826
-CHEMCROW_PAPER_SMOKE_MAX_USD=2.00
-```
-
-Exact branch, HEAD, working-tree status, pytest count, Ruff, and `git diff --check` are recorded in
-the terminal handoff after the report commit.
+The v10 smoke/debug authorization strings do not authorize either full-volume operation.

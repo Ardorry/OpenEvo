@@ -31,18 +31,10 @@ class ThreeArtifactRolloutPort(OpenEvoRolloutPort):
         pair_id: str,
         mcp_url: str | None,
     ) -> tuple[Trajectory, CoreInjectionReceiptSummary | None]:
-        if role not in {"baseline", "evolved"}:
-            raise ValueError("candidate role must be baseline or evolved")
-        if role == "baseline" and artifact_ids_by_type:
-            raise ValueError("baseline cannot receive evolution artifacts")
-        expected_types = set(THREE_ARTIFACT_ORDER)
-        if role == "evolved" and set(artifact_ids_by_type) != expected_types:
-            raise ValueError(
-                "evolved candidate requires exactly memory, skill_bundle, agent_system"
-            )
-        artifact_ids = [artifact_ids_by_type[kind] for kind in THREE_ARTIFACT_ORDER]
-        if len(artifact_ids) != len(set(artifact_ids)):
-            raise ValueError("one artifact ID cannot be registered under multiple types")
+        artifact_ids = _ordered_candidate_artifact_ids(
+            role=role,
+            artifact_ids_by_type=artifact_ids_by_type,
+        )
 
         run_id = f"{pair_id}-{role}-{uuid.uuid4().hex[:10]}"
         # Reuse the audited bare-S0 builder for all runtime/agent/tool settings.
@@ -92,6 +84,24 @@ class ThreeArtifactRolloutPort(OpenEvoRolloutPort):
             polling_retries=polling_retries,
         )
         return trajectory, receipt
+
+
+def _ordered_candidate_artifact_ids(
+    *, role: str, artifact_ids_by_type: dict[ArtifactKind, str]
+) -> list[str]:
+    if role not in {"baseline", "evolved"}:
+        raise ValueError("candidate role must be baseline or evolved")
+    if role == "baseline":
+        if artifact_ids_by_type:
+            raise ValueError("baseline cannot receive evolution artifacts")
+        return []
+    expected_types = set(THREE_ARTIFACT_ORDER)
+    if set(artifact_ids_by_type) != expected_types:
+        raise ValueError("evolved candidate requires exactly memory, skill_bundle, agent_system")
+    artifact_ids = [artifact_ids_by_type[kind] for kind in THREE_ARTIFACT_ORDER]
+    if len(artifact_ids) != len(set(artifact_ids)):
+        raise ValueError("one artifact ID cannot be registered under multiple types")
+    return artifact_ids
 
 
 def _three_artifact_injection_receipt(

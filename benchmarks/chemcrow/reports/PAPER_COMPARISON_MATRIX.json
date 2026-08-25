@@ -1121,19 +1121,21 @@
   },
   "comparisons_per_task": 3,
   "experiment_id": "chemcrow-task-local-full-v4-three-pipeline",
-  "formal_plan_blockers": [
-    "authoritative full-v4 has no sealed 14-task output set",
-    "28 baseline/evolved prompt hashes and source hashes cannot be frozen before those outputs exist",
-    "Paper Evaluator live Core route is externally blocked"
+  "blueprint_ready": true,
+  "deferred_materialization": [
+    "authoritative full-v4 sealed outputs will bind the 28 baseline/evolved source and prompt hashes",
+    "production preflight will replace template hashes with final hashes before any production call"
   ],
+  "formal_plan_blockers": [],
   "formal_plan_ready": false,
   "frozen_prompt_hash_count": 14,
   "generated_at": "2026-08-26 Asia/Shanghai",
   "pending_prompt_hash_count": 28,
+  "production_ledger_clean": true,
   "protocol": "CHEMCROW_EVALUATORGPT_PROMPT_COMPATIBLE_V1",
   "schema_version": "chemcrow_paper_comparison_matrix_v2",
   "source_pair_protocol": "chemcrow-three-isolated-artifacts-v1",
-  "status": "BLOCKED_PENDING_FULL_V4_SEALED_OUTPUTS",
+  "status": "READY_BLUEPRINT_DEFERRED_FULL_V4_BINDING",
   "task_count": 14,
   "task_ids": [
     "chemcrow-01",

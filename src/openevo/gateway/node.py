@@ -2346,6 +2346,14 @@ class GatewayNodeManager:
                 prepared_credential.close()
 
     async def cancel(self, session_id: str) -> bool:
+        ownership = self._cleanup_retries.get(session_id)
+        delivery = None if ownership is None else ownership.delivery_state
+        if delivery is not None and delivery.complete:
+            # Rollout sends an idempotent DELETE as soon as its callback returns.
+            # Terminal delivery already owns the remaining root cleanup, so a new
+            # cancel authority would race that finalization.
+            return True
+
         def persist_cancel_authority(managed: ManagedSession) -> None:
             if not _is_codex_subscription_agent(managed.request.agent):
                 return
@@ -2841,6 +2849,7 @@ class GatewayNodeManager:
         managed.timer.mark("run", "started")
 
         harness: BaseHarness | None = None
+        published_injection_receipt: dict[str, object] | None = None
         try:
             runtime = managed.runtime
             if runtime is None:
@@ -2870,6 +2879,22 @@ class GatewayNodeManager:
                     managed,
                     harness,
                 )
+            if (
+                evolution_injection is not None
+                and evolution_injection.staged.injection_plan is not None
+            ):
+                published_injection_receipt = await self._await_with_budget(
+                    _runtime_injection_receipt_from_readback(
+                        runtime=runtime,
+                        target_dir=self.evolution.context.target_dir,
+                        plan=evolution_injection.staged.injection_plan,
+                    ),
+                    managed,
+                )
+                self._publish_runtime_injection_receipt(
+                    managed,
+                    published_injection_receipt,
+                )
 
             # Run
             steps = harness.run_steps(request.instruction)
@@ -2883,7 +2908,7 @@ class GatewayNodeManager:
                 evolution_injection is not None
                 and evolution_injection.staged.injection_plan is not None
             ):
-                receipt = await self._await_with_budget(
+                final_receipt = await self._await_with_budget(
                     _runtime_injection_receipt_from_readback(
                         runtime=runtime,
                         target_dir=self.evolution.context.target_dir,
@@ -2891,7 +2916,8 @@ class GatewayNodeManager:
                     ),
                     managed,
                 )
-                self._publish_runtime_injection_receipt(managed, receipt)
+                if final_receipt != published_injection_receipt:
+                    raise ValueError("runtime injection changed during agent execution")
             self._redact_core_capture_authority(managed)
 
         except GatewayExecutionTimeout as exc:
@@ -7026,9 +7052,9 @@ class GatewayNodeManager:
     async def _cleanup_retry_loop(self) -> None:
         while True:
             await asyncio.sleep(_CLEANUP_RETRY_INTERVAL_SECONDS)
-            await self._reconcile_cleanup_retries()
+            await self._reconcile_cleanup_retries(skip_inflight=True)
 
-    async def _reconcile_cleanup_retries(self) -> None:
+    async def _reconcile_cleanup_retries(self, *, skip_inflight: bool = False) -> None:
         retries = getattr(self, "_cleanup_retries", None)
         if not retries:
             return
@@ -7038,6 +7064,12 @@ class GatewayNodeManager:
             self._cleanup_reconcile_lock = lock
         async with lock:
             for session_id, ownership in list(retries.items()):
+                if (
+                    skip_inflight
+                    and ownership.managed is not None
+                    and ownership.managed.inflight
+                ):
+                    continue
                 try:
                     await self._reconcile_cleanup_ownership(ownership)
                 except Exception as exc:

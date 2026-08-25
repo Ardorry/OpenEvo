@@ -259,7 +259,23 @@ class CodexHarness(BaseHarness):
                 result.return_code != 0
                 or (result.stdout or "").strip() != CODEX_SUBSCRIPTION_CANARY_OK
             ):
-                raise RuntimeError("Codex subscription credential isolation could not be proven")
+                stderr = result.stderr or ""
+                category = next(
+                    (
+                        candidate
+                        for candidate in (
+                            "exec_nonzero",
+                            "validation_failed",
+                            "refusal_exhausted",
+                        )
+                        if f"openevo-codex-canary:{candidate}" in stderr
+                    ),
+                    "prerequisite_failed",
+                )
+                raise RuntimeError(
+                    "Codex subscription credential isolation could not be proven "
+                    f"({category})"
+                )
 
         # Runtime-provided skills are untrusted task context. Subscription
         # readiness must be proven before Codex can discover them.

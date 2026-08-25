@@ -1684,6 +1684,39 @@ def _attach_cancellable_subscription(
 
 
 @pytest.mark.asyncio
+async def test_late_cancel_does_not_rewrite_completed_terminal_delivery(
+    tmp_path: Path,
+) -> None:
+    manager = _postrun_manager(calls=[])
+    manager._cleanup_journal_dir = tmp_path / "journal"
+    session_dir = tmp_path / "session"
+    session_dir.mkdir(mode=0o700)
+    result = _session_result(session_id="late-terminal-delete")
+    managed = _managed_postrun_session(session_dir, result)
+    managed.request.agent = AgentSpec(
+        harness="codex",
+        settings={"auth_mode": "subscription", "capture_mode": "transcript"},
+    )
+    managed.session_root_identity = capture_session_root_identity(session_dir)
+    managed.runtime = FakeRuntime()
+    _attach_cancellable_subscription(manager, managed)
+    ownership = manager._prepare_terminal_delivery(managed, result)
+    assert ownership.delivery_state is not None
+    ownership = manager._advance_terminal_delivery(
+        ownership,
+        callback_succeeded=True,
+    )
+    assert ownership.delivery_state is not None
+    assert ownership.delivery_state.complete is True
+    revision = ownership.revision
+
+    assert await manager.cancel(managed.session_id) is True
+
+    assert manager._cleanup_retries[managed.session_id].revision == revision
+    assert managed.cancel_requested is False
+
+
+@pytest.mark.asyncio
 async def test_cancel_authority_is_durable_before_runtime_side_effect(
     tmp_path: Path,
 ) -> None:

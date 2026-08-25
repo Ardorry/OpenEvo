@@ -429,6 +429,7 @@ class SessionDispatcher:
             )
         finally:
             async with self._condition:
+                managed.inflight = False
                 self._sessions.pop(managed.session_id, None)
                 self._condition.notify_all()
 

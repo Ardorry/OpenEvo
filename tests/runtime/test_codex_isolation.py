@@ -137,6 +137,9 @@ def test_codex_subscription_canary_uses_real_exec_and_validates_boundaries() -> 
     assert "turn.completed" in command
     assert command.count("/opt/codex/bin/codex exec ") == 2
     assert command.count("< /dev/null") == 2
+    assert "openevo-codex-canary:exec_nonzero" in command
+    assert "openevo-codex-canary:validation_failed" in command
+    assert "openevo-codex-canary:refusal_exhausted" in command
     assert "O_NOFOLLOW" in command
     assert "0o500" in command
     assert "hashlib.sha256" in command

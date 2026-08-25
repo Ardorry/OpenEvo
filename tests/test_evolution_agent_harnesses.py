@@ -836,11 +836,50 @@ async def test_codex_subscription_setup_fails_closed_without_exact_canary(
     runtime = RecordingRuntime(tmp_path)
     harness.env["OPENEVO_SKILLS_DIR"] = "/openevo/session/evolution/skills"
 
-    with pytest.raises(RuntimeError, match="credential isolation could not be proven"):
+    with pytest.raises(
+        RuntimeError,
+        match=r"credential isolation could not be proven \(prerequisite_failed\)",
+    ):
         await harness.setup(runtime)
 
     assert harness.subscription_credential_isolation_receipt is None
     assert not any("cp -R --" in command for command in runtime.commands)
+
+
+@pytest.mark.asyncio
+async def test_codex_subscription_setup_reports_only_closed_canary_failure_category(
+    tmp_path: Path,
+) -> None:
+    class CategorizedFailureRuntime(RecordingRuntime):
+        async def exec(
+            self,
+            command: str,
+            *,
+            cwd: str | None = None,
+            env: dict[str, str] | None = None,
+            timeout_sec: float | None = None,
+        ) -> ExecResult:
+            del cwd, env, timeout_sec
+            self.commands.append(command)
+            return ExecResult(
+                stderr="provider detail must not be copied\n"
+                "openevo-codex-canary:exec_nonzero\n",
+                return_code=1,
+            )
+
+    harness = CodexHarness(
+        AgentSpec(
+            harness="codex",
+            settings={"auth_mode": "subscription", "capture_mode": "transcript"},
+        )
+    )
+    runtime = CategorizedFailureRuntime(tmp_path)
+
+    with pytest.raises(RuntimeError) as captured:
+        await harness.setup(runtime)
+
+    assert str(captured.value).endswith("(exec_nonzero)")
+    assert "provider detail" not in str(captured.value)
 
 
 @pytest.mark.asyncio

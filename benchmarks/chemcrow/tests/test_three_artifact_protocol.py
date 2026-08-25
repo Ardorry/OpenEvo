@@ -35,6 +35,7 @@ from openevo_chemcrow.three_artifact_protocol import (
     ThreeArtifactTaskLocalProtocolRunner,
 )
 from openevo_chemcrow.three_artifact_runtime import (
+    _ordered_candidate_artifact_ids,
     _three_artifact_injection_receipt,
     candidate_pair_request_parity,
 )
@@ -69,6 +70,36 @@ class FakeThreeCandidate:
                 agent_system_artifact_id=mapping[ArtifactKind.AGENT_SYSTEM],
             )
         return trajectory, receipt
+
+
+def test_real_candidate_port_accepts_bare_baseline_inventory():
+    assert _ordered_candidate_artifact_ids(role="baseline", artifact_ids_by_type={}) == []
+    with pytest.raises(ValueError, match="baseline cannot receive"):
+        _ordered_candidate_artifact_ids(
+            role="baseline",
+            artifact_ids_by_type={ArtifactKind.TEXT_MEMORY: "unexpected"},
+        )
+
+
+def test_real_candidate_port_requires_exact_distinct_evolved_inventory():
+    mapping = {
+        ArtifactKind.TEXT_MEMORY: "memory",
+        ArtifactKind.SKILL_BUNDLE: "skill",
+        ArtifactKind.AGENT_SYSTEM: "agent-system",
+    }
+    assert _ordered_candidate_artifact_ids(
+        role="evolved", artifact_ids_by_type=mapping
+    ) == ["memory", "skill", "agent-system"]
+    with pytest.raises(ValueError, match="exactly memory"):
+        _ordered_candidate_artifact_ids(
+            role="evolved",
+            artifact_ids_by_type={ArtifactKind.TEXT_MEMORY: "memory"},
+        )
+    with pytest.raises(ValueError, match="one artifact ID"):
+        _ordered_candidate_artifact_ids(
+            role="evolved",
+            artifact_ids_by_type={kind: "same" for kind in THREE_ARTIFACT_ORDER},
+        )
 
 
 class FakeThreeEvolution:

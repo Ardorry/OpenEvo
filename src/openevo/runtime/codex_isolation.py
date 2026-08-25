@@ -565,7 +565,10 @@ def codex_subscription_exec_canary_command(
                     f"python3 -c {shlex.quote(_CANARY_SCRIPT_AUTHORITY_SOURCE)} "
                     f'verify {shlex.quote(attempt["script"])})"'
                 ),
-                '  test "$codex_rc" -eq 0',
+                '  if test "$codex_rc" -ne 0; then',
+                "    printf '%s\\n' openevo-codex-canary:exec_nonzero >&2",
+                "    exit 1",
+                "  fi",
                 "  set +e",
                 f"  {validator}",
                 "  validator_rc=$?",
@@ -583,10 +586,14 @@ def codex_subscription_exec_canary_command(
                 f"    {success_inventory}",
                 "    canary_passed=1",
                 '  elif test "$validator_rc" -ne 42; then',
+                "    printf '%s\\n' openevo-codex-canary:validation_failed >&2",
                 "    exit 1",
                 "  else",
                 f"    {refusal_inventory}",
-                f"    if test {attempt['number']} -eq 2; then exit 1; fi",
+                f"    if test {attempt['number']} -eq 2; then",
+                "      printf '%s\\n' openevo-codex-canary:refusal_exhausted >&2",
+                "      exit 1",
+                "    fi",
                 "  fi",
                 "fi",
             ]

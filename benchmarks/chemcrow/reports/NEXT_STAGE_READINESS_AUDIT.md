@@ -5,177 +5,114 @@ Audit date: 2026-08-26 (Asia/Shanghai)
 ## Verdict
 
 ```text
-BLOCKED_EXTERNAL
+READY_FOR_FULL_RUN
 ```
 
-The local implementation, deterministic protocol checks, reduced-profile tool checks, and
-Paper-Evaluator transport compatibility fix are complete. The remaining hard blocker is current
-OpenRouter routing state: both the Core-managed route and a minimal direct diagnostic return HTTP
-403 before any provider is selected. No authoritative 14-task run or production 42-call paper
-evaluation was started.
+The safe next scientific operation is a fresh 14-task
+`chemcrow-task-local-full-v4-three-pipeline` run. Historical full-v3 remains provisional and may not
+be extended into the authoritative result.
 
-## Authoritative experiment authority
+## Frozen authority
 
 - Branch: `chemcrow-task-local-evolution-v1`.
-- Frozen task IDs: `01-10, 12-15` (14 tasks; repository IDs remain authoritative).
+- Task IDs: `01-10,12-15` (14 tasks; repository IDs remain authoritative).
 - Task manifest SHA256:
   `8c69883d4a2424ed66f4dea0b9d0a0496129556e998902f278ad36a72d132604`.
-- Frozen next experiment: `chemcrow-task-local-full-v4-three-pipeline`.
 - Full-v4 config SHA256:
   `6aebd03667c0b88adb7fe26ec635891eabcbaf925e9d2c4fd62cdc6bf8bbf152`.
-- Frozen S0 SHA256:
-  `065df958ce3c1015d30534f50be85240deb4f45bbb5648bc05f05457812a14f4`.
-- Runtime image ID:
+- Live-preflight S0 SHA256:
+  `8d3935a4c968d1988102ffdbb1adef8a28de80ace3bca58cd8543f0c6a92154f`.
+- Runtime image:
   `sha256:7a0079f9cb1bce5768cff5bce3d1181811c6a231ad800cac8fb503d66852c81b`.
 
-The authoritative next run must be a fresh 14-task `full-v4-three-pipeline`. The historical
-`full-v3` experiment cannot be continued or combined with new three-artifact tasks.
+The live-v4 readiness config differs from authoritative full-v4 only in experiment ID, task subset,
+and run/cache/ledger roots.
 
-## Three-pipeline implementation
+## Three-pipeline proof
 
-The task-local protocol now admits exactly three independent Core-managed GPT-5.5 Reflector jobs:
+Every task uses three independent Core-managed GPT-5.5 jobs:
 
 1. Memory -> `text_memory`
 2. Skill -> `skill_bundle`
 3. Agent System -> `agent_system`
 
-All three prompts and allowed-evidence packages are frozen before any sibling output exists. Each
-job has its own dataset, job ID, rollout, prompt hash, lineage, registration, and expected injection
-binding. Registration occurs only after all outputs pass byte-identical, normalized-identical,
-near-duplicate, role-responsibility, task/pair lineage, and baseline-answer-copy checks. The frozen
-near-duplicate thresholds are trigram Jaccard `0.90` or normalized sequence ratio `0.95`, applied at
-12 or more normalized tokens. Any violation fails closed.
+Prompts and evidence packages freeze before sibling output exists. Each job has a unique job ID,
+prompt hash, lineage, artifact ID, registration, and expected injection binding. Byte-identical,
+normalized-identical, trigram-Jaccard `0.90`, sequence `0.95`, responsibility, lineage, and baseline
+answer-copy guards fail closed.
 
-G1 requires an empty artifact inventory. G2 requires exactly the three task-local IDs and no fourth
-artifact. Model, settings, native Codex harness, Core route, runtime, image, tools, network policy,
-timeouts, S0, and workspace handoff are parity-bound. A sealed pair requires a Core injection
-summary and a bare-S0 reset receipt. Paper scores, human grades, historical answers, hidden answers,
-future output, prior-task state, and sibling output are rejected from Reflector evidence.
+The fresh live-v4 proof on tasks `02`, `03`, and `06` has:
 
-## Zero-paid readiness evidence
+| Evidence | Count |
+|---|---:|
+| completed pairs | 3 |
+| independent Reflector jobs | 9 |
+| Memory / Skill / AgentSystem jobs | 3 / 3 / 3 |
+| unique artifacts | 9 |
+| sibling-isolation records | 9 |
+| exact-three Core injection receipts | 3 |
+| reset receipts | 3 |
+| mock / fixture observations | 0 / 0 |
 
-`/home/lhy-h/work/chemcrowrun/runs/readiness-three-pipeline-v1/preflight.json` is `READY` with zero
-model calls. It binds representative tasks `02`, `03`, and `06`, all GPT-5.5 roles, native Codex,
-OpenEvo Core, the immutable runtime, exact three-artifact G2 inventory, empty G1 inventory, and the
-14-task manifest.
+All three pairs passed the authoritative completed-run audit. Failed prior preflights were preserved
+and not reused.
 
-Tool evidence in the same root records:
+## Paper Evaluator proof
 
-- 19 declared tools;
-- six deterministic local live checks: PASS;
-- eight public-network/local-RXN live checks: PASS;
-- mock observations: 0;
-- fixture observations: 0;
-- model calls: 0.
+Request-delta testing proved the old 403s were caused by direct HKG egress when the shim set
+`trust_env=False`. The exact same neutral body succeeded through the configured environment proxy
+with SJC egress. The shim now validates the proxy contract, refuses credential-bearing proxy URLs,
+and records only sanitized descriptors.
 
-The paid three-task Candidate/Reflector/G2 preflight was deliberately not started after the paper
-route became externally blocked. Spending those subscription calls cannot clear or diagnose the
-OpenRouter gate, and a live preflight would still leave the overall full-run readiness result
-blocked. It remains required after the external route is repaired.
+Fresh Core v10 passed HTTP 200 through the dedicated Paper harness/Rollout/Gateway/shim path with
+model `openai/gpt-4`, provider `OpenAI`, temperature 0.1, fallback disabled, valid JSON, valid
+`DualStudentAssessment`, and a usage receipt. No production claim or result exists.
 
 ## Legacy full-v3 audit
-
-The immutable historical root contains 12 sealed pairs for tasks `01-10,12,13`, 12 reset receipts,
-and 12 single `text_memory` artifact receipts. It contains:
 
 | Evidence | Count |
 |---|---:|
 | sealed pairs | 12 |
 | memory artifacts | 12 |
-| skill_bundle artifacts | 0 |
-| agent_system artifacts | 0 |
-| typed Memory Reflector jobs | 0 |
-| typed Skill Reflector jobs | 0 |
-| typed AgentSystem Reflector jobs | 0 |
-| tasks with three independent jobs | 0 |
-| tasks with sibling-isolation evidence | 0 |
-| G2 receipts binding all three artifacts | 0 |
+| skill artifacts | 0 |
+| agent-system artifacts | 0 |
+| typed three-Reflector jobs | 0 |
 | tasks satisfying the new protocol | 0 |
 
-Task 14 retains interrupted evidence and `STOPPED_BY_USER.json`; task 15 was not started. Nothing was
-modified. Classification: `LEGACY_PROVISIONAL`.
+Classification: `LEGACY_PROVISIONAL`. Task 14 interruption evidence and `STOPPED_BY_USER.json`
+remain untouched; task 15 remains unstarted.
 
-## Paper Evaluator compatibility and live evidence
+## Tool and scoring boundary
 
-The shim still validates incoming `response_format={"type":"json_object"}` and includes the
-validated request in claim/hash semantics. It then removes `response_format` only from the upstream
-legacy GPT-4 transport payload. The returned text is accepted only after `json.loads` and strict
-`DualStudentAssessment` Pydantic validation. Invalid JSON, invalid schema, and grades outside
-`[0,10]` fail closed without retry. Model, provider, temperature, token limit, and prompt-hash
-semantics are unchanged.
+All 14 tasks are mapped in `CHEMCROW_TOOL_READINESS_MATRIX.md`. The reduced public profile has
+working RDKit, MolBloom, PubChem, Wikipedia, conversion, safety, similarity/weight/groups, local RXN
+prediction, and local RXN retrosynthesis routes. Missing web/literature/price/proprietary tools are
+declared deviations; they cannot be silently mocked.
 
-Historical V2 HTTP 403 exact cause: **UNPROVEN**. It must not be attributed to `response_format`.
-The first-party legacy GPT-4 `response_format` HTTP 400 incompatibility is independently
-**PROVEN** by the retained strict A/B evidence.
-
-Current debug evidence is stronger and separate:
-
-- v4 failed inside Core before the shim because the dedicated Gateway used the wrong project
-  environment; it was fixed and sealed with zero provider attempts.
-- Core v5-v8 each reached the shim and returned HTTP 403; each has a fresh claim and terminal
-  sanitized receipt and was never retried.
-- v6-v8 router metadata records `attempt=0`, two candidate endpoints (`OpenAI`, `Azure`), and both
-  `selected=false`.
-- The minimal direct v1 diagnostic omitted Core, Gateway, shim, `response_format`, and `user`, but
-  returned the identical HTTP 403 and routing metadata.
-- `/key`, `/credits`, and model visibility still pass with the ordinary inference key.
-- New provider-request attempts in this readiness goal: 5. Including historical v1/v2 retained
-  attempts: 7. Successful completions and usage receipts: 0. Billing/spend is not proven and is not
-  reported as zero.
-- All debug claims and results are outside the production 42-call ledger.
-
-This rules out the current Core/Gateway/shim path, request body, prompt, and the now-removed optional
-fields as causes of the active 403. The remaining operational cause is an external OpenRouter
-account/workspace/key routing policy that excludes every endpoint before selection. Its exact rule
-cannot be read with the ordinary inference key. OpenRouter's router metadata and provider-selection
-documentation describe these pre-provider routing fields:
-<https://openrouter.ai/docs/guides/features/router-metadata> and
-<https://openrouter.ai/docs/guides/routing/provider-selection>.
+Internal 0-4 diagnostic scores, post-hoc GPT-4 overall 0-10 grades, and human three-dimensional
+0-10 scores remain distinct. Paper GPT-4 output is excluded from Reflector evidence.
 
 ## 42-call audit
 
-`PAPER_COMPARISON_MATRIX.json` contains 14 tasks x 3 comparisons = 42 rows:
-
-- `historical_control`: historical ChemCrow vs historical GPT-4; closest public paper-style control,
-  but only prompt-compatible, not a verbatim historical-prompt/model-snapshot reproduction.
-- `baseline`: full-v4 G1 vs historical GPT-4; project-added metric.
-- `evolved`: full-v4 G2 vs historical GPT-4; project-added metric.
-
-The 14 historical-control prompt and source hashes are frozen. The 28 G1/G2 prompt and source hashes
-are intentionally null until the authoritative full-v4 outputs exist; template hashes are provided
-but do not masquerade as final prompt hashes. Therefore the blueprint is complete, but the formal
-plan is not yet ready and the production ledger remains clean.
+`PAPER_COMPARISON_MATRIX.json` proves 14 tasks × 3 comparisons = 42 rows. It records call ID, task,
+comparison, student systems, source identities/hashes, prompt hash or deferred template hash, and
+paper-control/project-added status. The blueprint is READY. The 28 baseline/evolved hashes will be
+materialized only from the future sealed full-v4 output set; that is an expected prerequisite for
+production execution, not a readiness defect. The production ledger is empty.
 
 ## Gate summary
 
-| Gate | Status | Reason |
+| Gate | Status | Evidence |
 |---|---|---|
-| A Repository | PASS at handoff | fixes/reports committed; exact HEAD and clean status in terminal handoff |
-| B Candidate architecture | PASS (code/preflight) | GPT-5.5, native Codex, Core-managed immutable runtime |
-| C Three-artifact evolution | PASS (code/tests) | three jobs/types/prompts/lineages plus isolation and duplicate gates |
-| D Task-local protocol | PASS (code/tests) | bare G1, exact-three G2, seal/reset/cross-task gates |
-| E Live representative preflight | BLOCKED/NOT RUN | real Candidate/three-Reflector/G2 proof still required after external repair |
-| F Tools | PASS for declared reduced profile | all 14 tasks mapped; mock/fixture forbidden; paper deviations explicit |
-| G Internal scoring | PASS (code/tests) | same G1/G2 evaluator; paper/human layers isolated |
-| H Paper Evaluator | BLOCKED_EXTERNAL | current OpenRouter HTTP 403, router attempt 0, no selected provider |
-| I 42-call plan | BLOCKED | 28 hashes require sealed full-v4 outputs; production ledger clean |
-| J Tests | PASS at handoff | exact results recorded in `FULL_RUN_READINESS.md` and terminal handoff |
+| A Repository | PASS at final handoff | correct branch, committed fixes, clean tree |
+| B Candidate architecture | PASS | GPT-5.5, native Codex, Core-managed pinned runtime |
+| C Three-artifact evolution | PASS | three live typed pipelines plus duplicate/isolation gates |
+| D Task-local protocol | PASS | bare G1, exact-three G2, seal/reset/cross-task guards |
+| E Live representative preflight | PASS | tasks 02/03/06, 3 pairs, 9 jobs/artifacts |
+| F Tools | PASS reduced profile | 14-task matrix; mock=0, fixture=0 |
+| G Internal scoring | PASS | same G1/G2 evaluator; feedback boundary enforced |
+| H Paper Evaluator | PASS | Core v10 HTTP 200, OpenAI, valid assessment/usage receipt |
+| I 42-call blueprint | PASS | 42 mappings; deferred full-v4 hashes expected; ledger clean |
+| J Tests | PASS | 89 ChemCrow + 300 Core integration; Ruff/diff PASS |
 
-## Exact unblock action
-
-Using OpenRouter Dashboard or a management-authorized context, inspect all current account,
-workspace, member, and API-key routing/privacy/guardrail assignments for this inference key. Ensure
-`openai/gpt-4` and first-party provider `openai` are eligible, no stricter ZDR/data policy excludes
-OpenAI, no ignored/allowlisted model or provider rule excludes it, and no applicable budget is
-exhausted. Do not change the frozen model, provider, fallback, temperature, or strict validation.
-
-After repair, use the prepared fresh v9 call only; never retry v1-v8 or the direct diagnostic:
-
-```text
-CHEMCROW_PAPER_SMOKE_AUTHORIZATION=I_AUTHORIZE_ONE_CORE_PAPER_GPT4_SMOKE_V9_20260826
-CHEMCROW_PAPER_SMOKE_MAX_USD=2.00
-```
-
-The v9 smoke must return HTTP 200, model `openai/gpt-4`, provider `OpenAI`, valid JSON, valid
-Pydantic assessment, and a usage receipt before the representative live preflight may complete the
-remaining readiness gates.
+Exact launch commands and authorization literals are maintained in `FULL_RUN_READINESS.md`.

@@ -9,7 +9,11 @@ import pytest
 
 from openevo.gateway.dispatcher import ManagedSession, SessionDispatcher, SessionStage
 from openevo.gateway import node as node_module, session_files
-from openevo.gateway.node import GatewayNodeManager, GatewayReadinessError
+from openevo.gateway.node import (
+    CleanupRetryOwnership,
+    GatewayNodeManager,
+    GatewayReadinessError,
+)
 from openevo.gateway.session import SessionRegistry
 from openevo.gateway.session_files import CredentialRedactor, HeldCodexCredentialAuthority
 from openevo.gateway.storage import SessionStore
@@ -1181,6 +1185,59 @@ async def test_manager_shutdown_reconciles_session_without_created_runtime(
 
 
 @pytest.mark.asyncio
+async def test_periodic_cleanup_reconciliation_skips_dispatcher_inflight_session(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = GatewayNodeManager.__new__(GatewayNodeManager)
+    manager._cleanup_reconcile_lock = asyncio.Lock()
+    request = SessionDispatchRequest(
+        session_id="inflight-cleanup",
+        task_id="task",
+        instruction="work",
+        remaining_timeout_seconds=10,
+        agent=AgentSpec(harness="shell", custom_shell=ExecInput(command="true")),
+    )
+    managed = ManagedSession(
+        request=request,
+        timer=StageTimer(),
+        session_dir=tmp_path,
+        artifacts_dir=tmp_path / "artifacts",
+        inflight=True,
+    )
+    ownership = CleanupRetryOwnership(
+        session_id=managed.session_id,
+        session_dir=tmp_path,
+        session_root_identity=None,
+        log_authority_dir=None,
+        log_authority_identity=None,
+        credential_dir=None,
+        credential_root_identity=None,
+        credential_auth_identity=None,
+        runtime_id=None,
+        container_id=None,
+        eval_runtime_id=None,
+        eval_container_id=None,
+        runtime=None,
+        phase="runtime_active",
+        managed=managed,
+    )
+    manager._cleanup_retries = {managed.session_id: ownership}
+    calls: list[str] = []
+
+    async def reconcile(candidate: CleanupRetryOwnership) -> None:
+        calls.append(candidate.session_id)
+
+    monkeypatch.setattr(manager, "_reconcile_cleanup_ownership", reconcile)
+
+    await manager._reconcile_cleanup_retries(skip_inflight=True)
+    assert calls == []
+
+    await manager._reconcile_cleanup_retries()
+    assert calls == [managed.session_id]
+
+
+@pytest.mark.asyncio
 async def test_manager_shutdown_reconciles_independent_eval_prewarm_runtime(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1588,6 +1645,7 @@ async def test_wait_terminated_requires_postrun_owner_to_release_session(tmp_pat
         await asyncio.wait_for(cleanup, timeout=1)
         await asyncio.wait_for(waiter, timeout=1)
         assert managed.session_id not in dispatcher._sessions
+        assert managed.inflight is False
     finally:
         allow_postrun.set()
         await asyncio.gather(cleanup, waiter, return_exceptions=True)

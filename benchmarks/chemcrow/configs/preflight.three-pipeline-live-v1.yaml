@@ -1,0 +1,110 @@
+schema_version: chemcrow_experiment_v4
+experiment_id: chemcrow-task-local-readiness-three-pipeline-live-v1
+artifact_protocol: three_isolated_v1
+task_manifest: ../tasks.jsonl
+task_ids: [chemcrow-02, chemcrow-03, chemcrow-06]
+feedback_mode: F2
+artifact_separation:
+  normalized_token_ngram_size: 3
+  near_duplicate_jaccard_threshold: 0.90
+  near_duplicate_sequence_threshold: 0.95
+  minimum_tokens_for_near_duplicate_check: 12
+  baseline_answer_sequence_threshold: 0.98
+  responsibility_policy_version: chemcrow_artifact_responsibility_v1
+  minimum_tokens_for_responsibility_check: 8
+run_root: ../../../../runs/readiness-three-pipeline-live-v1
+cache_root: ../../../../caches/readiness-three-pipeline-live-v1
+ledger_root: ../../../../runs/readiness-three-pipeline-live-v1/claims
+evolution_store:
+  backend_url: http://127.0.0.1:8200
+  db_path: ../../../../core-state/evolution/core.sqlite3
+  artifact_root: ../../../../core-state/evolution/artifacts
+controlled_chemicals_csv: ../../../../vendor/chemcrow-public/chemcrow/data/chem_wep_smi.csv
+network_enabled: true
+rollout_base_url: ${OPENEVO_ROLLOUT_BASE_URL}
+candidate:
+  timeout_seconds: 900
+  runtime: &managed_runtime
+    backend: docker
+    profile: managed_science
+    container_user: host
+    image: sha256:7a0079f9cb1bce5768cff5bce3d1181811c6a231ad800cac8fb503d66852c81b
+    prepare:
+      - type: exec
+        command: >-
+          mkdir -p /openevo/session/home/.codex /openevo/session/home/.openevo-codex-readiness /openevo/session/workspace /openevo/session/logs/agent && chmod 700 /openevo/session/home /openevo/session/home/.codex /openevo/session/home/.openevo-codex-readiness /openevo/session/logs /openevo/session/logs/agent
+    env:
+      HOME: /openevo/session/home
+      PATH: /opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    network: host
+    workdir: /openevo/session/workspace
+    gpus: 0
+    allow_internet: true
+    import_path: null
+    kwargs: {}
+  agent:
+    harness: codex
+    import_path: null
+    model_name: ${OPENEVO_CANDIDATE_MODEL}
+    settings: &high_settings {auth_mode: subscription, capture_mode: transcript, reasoning_effort: high, reasoning_summary: auto}
+    env: {}
+    mcp_servers: []
+    skills_path: null
+    custom_shell: null
+  builder: &transcript_builder {strategy: agent_transcript, config: {}}
+  metadata: {policy_version: chemcrow-readiness-three-pipeline-live-v1, rollout_step: 0}
+reflectors:
+  memory:
+    timeout_seconds: 900
+    runtime: *managed_runtime
+    agent: &reflector_agent
+      harness: codex
+      import_path: null
+      model_name: ${OPENEVO_REFLECTOR_MODEL}
+      settings: *high_settings
+      env: {}
+      mcp_servers: []
+      skills_path: null
+      custom_shell: null
+    builder: *transcript_builder
+    metadata: {policy_version: chemcrow-reflector-memory-isolated-v1}
+  skill_bundle:
+    timeout_seconds: 900
+    runtime: *managed_runtime
+    agent: *reflector_agent
+    builder: *transcript_builder
+    metadata: {policy_version: chemcrow-reflector-skill-isolated-v1}
+  agent_system:
+    timeout_seconds: 900
+    runtime: *managed_runtime
+    agent: *reflector_agent
+    builder: *transcript_builder
+    metadata: {policy_version: chemcrow-reflector-agent-system-isolated-v1}
+evolution_evaluator:
+  timeout_seconds: 600
+  runtime: *managed_runtime
+  agent:
+    harness: codex
+    import_path: null
+    model_name: ${OPENEVO_EVOLUTION_EVALUATOR_MODEL}
+    settings: {auth_mode: subscription, capture_mode: transcript, reasoning_effort: medium, reasoning_summary: auto}
+    env: {}
+    mcp_servers: []
+    skills_path: null
+    custom_shell: null
+  builder: *transcript_builder
+  metadata: {policy_version: chemcrow-evolution-evaluator-v1}
+final_evaluator:
+  timeout_seconds: 600
+  runtime: *managed_runtime
+  agent:
+    harness: codex
+    import_path: null
+    model_name: ${OPENEVO_FINAL_EVALUATOR_MODEL}
+    settings: *high_settings
+    env: {}
+    mcp_servers: []
+    skills_path: null
+    custom_shell: null
+  builder: *transcript_builder
+  metadata: {policy_version: chemcrow-final-evaluator-v1}

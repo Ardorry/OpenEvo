@@ -4,8 +4,9 @@
 > `text_memory` protocol at commit `d55f7f4b5`. It is superseded for current readiness by
 > `NEXT_STAGE_READINESS_AUDIT.md`. OpenRouter credits are now sufficient, the one-call Core smoke
 > failed closed with upstream HTTP 403, and the new three-Reflector protocol is a separate versioned
-> path. The user subsequently approved OpenAI-only `data_collection=allow`; the v2 Core smoke still
-> received upstream HTTP 403, narrowing the remaining blocker to account/workspace guardrails. The
+> path. The later request-delta audit proved the present-day 403s were caused by direct HKG egress
+> when the debug client disabled environment-proxy inheritance. Fresh Core v10 now passes HTTP 200
+> through SJC with first-party OpenAI. There is no active account/workspace guardrail blocker. The
 > 12 sealed pairs below remain unchanged historical evidence.
 
 Generated: 2026-08-25 Asia/Shanghai
@@ -329,11 +330,14 @@ stored.
 - Separate provider request attempts: 2 (v1 and v2); successful completions: 0; billing is unknown
   because neither 403 response included a usage receipt.
 
-## 10. Remaining human actions and blockers
+## 10. Historical action list — superseded
 
-1. Repair the OpenRouter account/workspace/member/key guardrail that still rejects OpenAI GPT-4
-   with HTTP 403. Credit already covers the frozen `$11.83266` ceiling.
-2. Decide whether to authorize a fresh isolated task-14 pair after the stopped, never-sealed claim.
+This section records the 2026-08-25 snapshot and is not current run authority. Use
+`FULL_RUN_READINESS.md`; do not perform Dashboard repair or a two-task full-v3 continuation.
+
+1. The former OpenRouter guardrail hypothesis is resolved as a request-egress difference; no
+   Dashboard change is required.
+2. Do not authorize a fresh isolated full-v3 task-14 repair for the authoritative result.
    If approved, the exact literal is
    `I_AUTHORIZE_FRESH_CHEMCROW_14_PAIR_AFTER_USER_STOP`; it will create a user-bound receipt tied to
    prior claim SHA-256
