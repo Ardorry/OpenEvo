@@ -1,0 +1,94 @@
+"""OpenEvo Core harness for one sealed ChemCrow paper-evaluator call."""
+
+from __future__ import annotations
+
+import shlex
+
+from openevo.harness.base import BaseHarness
+from openevo.runtime.models import ExecInput
+
+from .paper_evaluator import (
+    PAPER_EVALUATOR_MAX_OUTPUT_TOKENS,
+    PAPER_EVALUATOR_MODEL,
+    PAPER_EVALUATOR_TEMPERATURE,
+)
+
+_RUNTIME_CLIENT = r'''
+import json
+import os
+import urllib.request
+
+base_url = os.environ["OPENAI_BASE_URL"].rstrip("/")
+payload = {
+    "model": os.environ["PAPER_EVALUATOR_MODEL"],
+    "temperature": float(os.environ["PAPER_EVALUATOR_TEMPERATURE"]),
+    "max_tokens": int(os.environ["PAPER_EVALUATOR_MAX_TOKENS"]),
+    "stream": False,
+    "user": os.environ["PAPER_EVALUATOR_CALL_ID"],
+    "response_format": {"type": "json_object"},
+    "messages": [
+        {
+            "role": "system",
+            "content": "ChemCrow sealed-output paper evaluator. Return strict JSON only.",
+        },
+        {"role": "user", "content": os.environ["PAPER_EVALUATOR_PROMPT"]},
+    ],
+}
+request = urllib.request.Request(
+    base_url + "/chat/completions",
+    data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+    headers={
+        "Authorization": "Bearer " + os.environ["OPENAI_API_KEY"],
+        "Content-Type": "application/json",
+    },
+    method="POST",
+)
+with urllib.request.urlopen(request, timeout=300) as response:
+    body = json.loads(response.read().decode("utf-8"))
+content = body["choices"][0]["message"]["content"]
+parsed = json.loads(content)
+print(json.dumps({"role": "assistant", "content": json.dumps(parsed, sort_keys=True)}))
+'''.strip()
+
+PAPER_RUNTIME_GATEWAY_BASE_URL = "http://host.docker.internal:8110/v1"
+
+
+class PaperEvaluatorHarness(BaseHarness):
+    """Execute the judge inside Core's runtime and through Core's Gateway.
+
+    The OpenRouter key is never present in this runtime.  Core injects a
+    session-scoped Gateway credential, and the dedicated local auth shim owns
+    the actual upstream credential.
+    """
+
+    def run_steps(self, instruction: str) -> list[ExecInput]:
+        call_id = self.env.get("PAPER_EVALUATOR_CALL_ID", "")
+        if not call_id.startswith("paper-chemcrow-"):
+            raise ValueError("paper evaluator call ID is absent or invalid")
+        if self.model_name != PAPER_EVALUATOR_MODEL:
+            raise ValueError("paper evaluator model is not the frozen openai/gpt-4 model")
+        if float(self.settings.get("temperature", -1)) != PAPER_EVALUATOR_TEMPERATURE:
+            raise ValueError("paper evaluator temperature must be exactly 0.1")
+        if int(self.settings.get("max_tokens", -1)) != PAPER_EVALUATOR_MAX_OUTPUT_TOKENS:
+            raise ValueError("paper evaluator max_tokens differs from the frozen limit")
+        runtime_gateway = str(self.settings.get("runtime_gateway_base_url") or "")
+        if runtime_gateway != PAPER_RUNTIME_GATEWAY_BASE_URL:
+            raise ValueError("paper runtime Gateway address differs from the frozen Core route")
+        if any(name.startswith("OPENEVO_") and "ARTIFACT" in name for name in self.env):
+            raise ValueError("paper evaluator must not consume evolution artifacts")
+        return [
+            ExecInput(
+                command=f"python3 -c {shlex.quote(_RUNTIME_CLIENT)}",
+                env={
+                    # Docker Desktop's container loopback is not the WSL host.
+                    # Only the address is adapted; OPENAI_API_KEY remains the
+                    # Core-injected, session-scoped Gateway credential.
+                    "OPENAI_BASE_URL": PAPER_RUNTIME_GATEWAY_BASE_URL,
+                    "PAPER_EVALUATOR_CALL_ID": call_id,
+                    "PAPER_EVALUATOR_MODEL": PAPER_EVALUATOR_MODEL,
+                    "PAPER_EVALUATOR_TEMPERATURE": str(PAPER_EVALUATOR_TEMPERATURE),
+                    "PAPER_EVALUATOR_MAX_TOKENS": str(PAPER_EVALUATOR_MAX_OUTPUT_TOKENS),
+                    "PAPER_EVALUATOR_PROMPT": instruction,
+                },
+            )
+        ]

@@ -16,11 +16,20 @@ import yaml
 
 from .aggregate import aggregate_results
 from .audit import audit_completed_run
+from .credentials import credential_report
 from .evaluation import OpenEvoEvolutionEvaluator, OpenEvoFinalEvaluator
 from .hashing import file_sha256
 from .ledger import AmbiguousPhaseClaimError, PhaseLedger
 from .models import ArtifactKind, FeedbackMode, PairResult, TaskItem
 from .native_evolution import NativeEvolutionEngine
+from .paper_core import run_paper_evaluation_plan
+from .paper_evaluator import (
+    FROZEN_PAPER_TASK_IDS,
+    assert_sealed_run_ready,
+    build_paper_evaluation_plan,
+    extract_historical_answers,
+    paper_cost_ceiling,
+)
 from .protocol import TaskLocalProtocolRunner
 from .runtime import (
     CORE_MANAGED_CODEX_ROUTE,
@@ -459,6 +468,127 @@ def command_audit_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_credential_check(args: argparse.Namespace) -> int:
+    payload = credential_report()
+    output = args.output.resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    print(
+        json.dumps(
+            {
+                "status": payload["status"],
+                "model_calls": 0,
+                "paid_operations": 0,
+                "secret_values_included": False,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0 if payload["status"] == "READY_REDUCED_PROFILE" else 2
+
+
+def command_paper_evaluator_preflight(args: argparse.Namespace) -> int:
+    config_path = args.config.resolve()
+    config = _load_yaml(config_path)
+    output = args.output.resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    task_manifest = _path(config_path, str(config["task_manifest"]))
+    tasks = _read_tasks(task_manifest)
+    task_ids = [task.task_id for task in tasks]
+    report: dict[str, Any] = {
+        "schema_version": "chemcrow_paper_evaluator_preflight_v1",
+        "status": "BLOCKED",
+        "model_calls": 0,
+        "paid_operations": 0,
+        "protocol_task_ids": list(FROZEN_PAPER_TASK_IDS),
+        "observed_task_ids": task_ids,
+        "cost_ceiling": paper_cost_ceiling(),
+        "openrouter_environment_presence": {
+            name: bool(os.environ.get(name))
+            for name in (
+                "OPENROUTER_API_KEY",
+                "OPENROUTER_BASE_URL",
+                "CHEMCROW_PAPER_EVALUATOR_MODEL",
+                "CHEMCROW_PAPER_EVALUATOR_MAX_USD",
+                "CHEMCROW_PAPER_EVALUATOR_AUTHORIZATION",
+            )
+        },
+        "secret_values_included": False,
+        "historical_answers_extracted": False,
+    }
+    try:
+        pairs = assert_sealed_run_ready(
+            run_root=_path(config_path, str(config["run_root"])),
+            experiment_id=str(config["experiment_id"]),
+            task_ids=task_ids,
+            completed_run_audit=_path(config_path, str(config["completed_run_audit"])),
+        )
+        historical = extract_historical_answers(
+            runs_root=_path(config_path, str(config["historical_runs_root"]))
+        )
+        plan = build_paper_evaluation_plan(
+            tasks=tasks,
+            pairs=pairs,
+            historical=historical,
+        )
+        plan_path = _path(config_path, str(config["plan_path"]))
+        plan_path.parent.mkdir(parents=True, exist_ok=True)
+        serialized_plan = json.dumps(plan, indent=2, sort_keys=True) + "\n"
+        if plan_path.exists():
+            if plan_path.read_text(encoding="utf-8") != serialized_plan:
+                raise ValueError("existing paper evaluator plan differs from frozen inputs")
+        else:
+            descriptor = os.open(
+                plan_path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+            )
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(serialized_plan)
+        report.update(
+            {
+                "status": "READY_FOR_EXPLICIT_PAID_AUTHORIZATION",
+                "historical_answers_extracted": True,
+                "plan_path": str(plan_path),
+                "plan_sha256": file_sha256(plan_path),
+                "call_count": plan["call_count"],
+            }
+        )
+    except (FileNotFoundError, TypeError, ValueError) as exc:
+        report["blocking_reason"] = str(exc)
+    output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(
+        json.dumps(
+            {
+                "status": report["status"],
+                "model_calls": 0,
+                "paid_operations": 0,
+                "secret_values_included": False,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0 if report["status"] == "READY_FOR_EXPLICIT_PAID_AUTHORIZATION" else 2
+
+
+def command_paper_evaluator_run(args: argparse.Namespace) -> int:
+    config_path = args.config.resolve()
+    config = _resolve_env(_load_yaml(config_path))
+    aggregate = run_paper_evaluation_plan(
+        plan_path=_path(config_path, str(config["plan_path"])),
+        rollout_base_url=str(config["rollout_base_url"]),
+        runtime=dict(config["runtime"]),
+        result_root=_path(config_path, str(config["result_root"])),
+        shim_receipt_root=_path(config_path, str(config["shim_receipt_root"])),
+        historical_runs_root=_path(config_path, str(config["historical_runs_root"])),
+        allow_paid=args.allow_paid,
+    )
+    print(json.dumps({"status": aggregate["status"], "result_count": aggregate["result_count"]}))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="openevo-chemcrow")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -485,6 +615,18 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--core-completions", type=Path, required=True)
     audit.add_argument("--output", type=Path, required=True)
     audit.set_defaults(function=command_audit_run)
+    credentials = commands.add_parser("credential-check")
+    credentials.add_argument("--output", type=Path, required=True)
+    credentials.set_defaults(function=command_credential_check)
+    paper_preflight = commands.add_parser("paper-evaluator-preflight")
+    paper_preflight.add_argument("--config", type=Path, required=True)
+    paper_preflight.add_argument("--output", type=Path, required=True)
+    paper_preflight.add_argument("--no-model-calls", action="store_true", required=True)
+    paper_preflight.set_defaults(function=command_paper_evaluator_preflight)
+    paper_run = commands.add_parser("paper-evaluator-run")
+    paper_run.add_argument("--config", type=Path, required=True)
+    paper_run.add_argument("--allow-paid", action="store_true")
+    paper_run.set_defaults(function=command_paper_evaluator_run)
     for name, resume in (("run", False), ("resume", True)):
         command = commands.add_parser(name)
         command.add_argument("--config", type=Path, required=True)

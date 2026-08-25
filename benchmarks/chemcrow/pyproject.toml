@@ -15,11 +15,12 @@ dependencies = [
     "openevo==0.1.10",
     "pydantic>=2.9,<3",
     "rdkit>=2024.9,<2026",
+    "tiktoken>=0.7,<1",
 ]
 
 [project.optional-dependencies]
 hosted-rxn = ["rxn4chemistry>=1.5,<2"]
-dev = ["pytest>=8,<9", "pytest-cov>=5,<8", "ruff>=0.8,<1"]
+dev = ["pytest>=8,<9", "pytest-asyncio>=0.24,<1", "pytest-cov>=5,<8", "ruff>=0.8,<1"]
 
 [project.scripts]
 openevo-chemcrow = "openevo_chemcrow.cli:main"
