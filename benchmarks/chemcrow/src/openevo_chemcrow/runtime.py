@@ -24,6 +24,7 @@ class OpenEvoRolloutError(RuntimeError):
 
 
 CORE_MANAGED_CODEX_ROUTE = "openevo_core_rollout_gateway_managed_codex_v1"
+_ROLLOUT_TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 
 
 def assert_core_managed_codex_config(candidate: dict[str, Any]) -> None:
@@ -190,18 +191,18 @@ class OpenEvoRolloutPort:
         )
         started = time.monotonic()
         tool_receipt_offset = self._tool_receipt_count(mcp_url)
-        with httpx.Client(timeout=30.0) as client:
+        # This is a loopback Core control-plane connection. Never let host
+        # HTTP(S)_PROXY settings intercept it.
+        with httpx.Client(timeout=30.0, trust_env=False) as client:
             response = client.post(f"{self.base_url}/rollout/task/submit", json=payload)
             response.raise_for_status()
-            while True:
-                status_response = client.get(f"{self.base_url}/rollout/task/{run_id}")
-                status_response.raise_for_status()
-                status = status_response.json()
-                if status.get("status") in {"completed", "failed", "cancelled"}:
-                    break
-                if time.monotonic() - started > float(payload["timeout_seconds"]) + 60:
-                    raise OpenEvoRolloutError("rollout polling exceeded the admitted timeout")
-                time.sleep(self.poll_seconds)
+            status, polling_retries = _poll_rollout_until_terminal(
+                client=client,
+                url=f"{self.base_url}/rollout/task/{run_id}",
+                started=started,
+                admitted_timeout_seconds=float(payload["timeout_seconds"]),
+                poll_seconds=self.poll_seconds,
+            )
         return _normalize_rollout(
             status,
             run_id=run_id,
@@ -212,6 +213,7 @@ class OpenEvoRolloutPort:
             wall_time=time.monotonic() - started,
             tool_receipts=self._tool_receipts_since(mcp_url, tool_receipt_offset),
             declared_tool_bridge=mcp_url is not None,
+            polling_retries=polling_retries,
         )
 
     @staticmethod
@@ -219,7 +221,11 @@ class OpenEvoRolloutPort:
         if not mcp_url:
             return 0
         local_url = _local_tool_service_url(mcp_url)
-        response = httpx.get(local_url.removesuffix("/mcp") + "/receipts", timeout=5.0)
+        response = httpx.get(
+            local_url.removesuffix("/mcp") + "/receipts",
+            timeout=5.0,
+            trust_env=False,
+        )
         response.raise_for_status()
         receipts = response.json().get("receipts", [])
         if not isinstance(receipts, list):
@@ -231,7 +237,11 @@ class OpenEvoRolloutPort:
         if not mcp_url:
             return []
         local_url = _local_tool_service_url(mcp_url)
-        response = httpx.get(local_url.removesuffix("/mcp") + "/receipts", timeout=5.0)
+        response = httpx.get(
+            local_url.removesuffix("/mcp") + "/receipts",
+            timeout=5.0,
+            trust_env=False,
+        )
         response.raise_for_status()
         receipts = response.json().get("receipts", [])
         if not isinstance(receipts, list) or offset > len(receipts):
@@ -241,6 +251,45 @@ class OpenEvoRolloutPort:
 
 def _local_tool_service_url(mcp_url: str) -> str:
     return mcp_url.replace("://host.docker.internal", "://127.0.0.1", 1)
+
+
+def _poll_rollout_until_terminal(
+    *,
+    client: httpx.Client,
+    url: str,
+    started: float,
+    admitted_timeout_seconds: float,
+    poll_seconds: float,
+) -> tuple[dict[str, Any], int]:
+    """Poll one already-submitted rollout without redispatching it.
+
+    A transport failure on this GET is ambiguous only for the observation, not
+    for provider execution: the rollout was durably submitted before polling.
+    Retrying this read keeps the pair-scoped tool service alive while Core owns
+    the single admitted phase. The original timeout remains the hard bound.
+    """
+    transport_retries = 0
+    deadline = started + admitted_timeout_seconds + 60.0
+    while True:
+        try:
+            status_response = client.get(url)
+            status_response.raise_for_status()
+            status = status_response.json()
+        except httpx.TransportError as error:
+            transport_retries += 1
+            if time.monotonic() > deadline:
+                raise OpenEvoRolloutError(
+                    "rollout polling transport failed through the admitted timeout"
+                ) from error
+            time.sleep(poll_seconds)
+            continue
+        if not isinstance(status, dict):
+            raise OpenEvoRolloutError("rollout status endpoint returned a non-object payload")
+        if status.get("status") in _ROLLOUT_TERMINAL_STATUSES:
+            return status, transport_retries
+        if time.monotonic() > deadline:
+            raise OpenEvoRolloutError("rollout polling exceeded the admitted timeout")
+        time.sleep(poll_seconds)
 
 
 def _message_content(message: dict[str, Any]) -> str:
@@ -266,6 +315,7 @@ def _normalize_rollout(
     wall_time: float,
     tool_receipts: list[dict[str, Any]] | None = None,
     declared_tool_bridge: bool = False,
+    polling_retries: int = 0,
 ) -> Trajectory:
     results = payload.get("results")
     if not isinstance(results, list) or len(results) != 1 or not isinstance(results[0], dict):
@@ -378,7 +428,7 @@ def _normalize_rollout(
         tool_calls=tool_calls,
         observations=observations,
         visible_reasoning_summaries=visible_summaries,
-        retries=int(metadata.get("retries") or 0),
+        retries=int(metadata.get("retries") or 0) + polling_retries,
         wall_time_seconds=wall_time,
         token_metadata=metadata.get("token_usage", {}),
         cost_metadata=metadata.get("cost", {}),

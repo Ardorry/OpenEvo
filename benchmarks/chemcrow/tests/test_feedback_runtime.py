@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import time
 
+import httpx
 import pytest
 
 from openevo_chemcrow.feedback import reflector_feedback_payload, runtime_feedback
@@ -15,10 +17,49 @@ from openevo_chemcrow.runtime import (
     CORE_MANAGED_CODEX_ROUTE,
     OpenEvoRolloutError,
     _normalize_rollout,
+    _poll_rollout_until_terminal,
     assert_core_managed_codex_config,
     build_task_request,
     s0_config_hash,
 )
+
+
+class _StatusResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self.payload
+
+
+class _TransientStatusClient:
+    def __init__(self):
+        self.calls = 0
+
+    def get(self, _url):
+        self.calls += 1
+        if self.calls == 1:
+            raise httpx.RemoteProtocolError("server disconnected without a response")
+        if self.calls == 2:
+            return _StatusResponse({"status": "running"})
+        return _StatusResponse({"status": "completed", "results": []})
+
+
+def test_rollout_poll_transport_error_retries_read_only_without_redispatch():
+    client = _TransientStatusClient()
+    status, retries = _poll_rollout_until_terminal(
+        client=client,
+        url="http://rollout/rollout/task/already-submitted",
+        started=time.monotonic(),
+        admitted_timeout_seconds=10.0,
+        poll_seconds=0.0,
+    )
+    assert status["status"] == "completed"
+    assert retries == 1
+    assert client.calls == 3
 
 
 def test_resolved_model_identity_changes_s0_hash(core_candidate_config):

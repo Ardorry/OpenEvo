@@ -667,7 +667,9 @@ class ChemCrowToolRegistry:
                 "device": "cpu",
             }
         timeout = float(os.environ.get("CHEMCROW_RXN_TIMEOUT_SECONDS", "660"))
-        response = httpx.post(url, json=payload, timeout=timeout)
+        # This adapter path is explicitly for the self-hosted/local RXN
+        # service; host proxy configuration must not intercept loopback RPC.
+        response = httpx.post(url, json=payload, timeout=timeout, trust_env=False)
         response.raise_for_status()
         result = response.json()
         if not isinstance(result, dict):

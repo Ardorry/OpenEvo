@@ -1,0 +1,27 @@
+{
+  "schema_version": "chemcrow_full_selection_v2",
+  "recorded_before_execution": true,
+  "recorded_at": "2026-08-25T11:44:29+08:00",
+  "experiment_id": "chemcrow-task-local-full-v2",
+  "replaces_engineering_invalidated_experiment_id": "chemcrow-task-local-full-v1",
+  "invalidation_receipt_sha256": "cd7543619fd0bba2f113595d0ae980f9a21dc2a221da6f42e266dd81dd1ac381",
+  "replacement_reason": "Infrastructure-only replacement after loopback Core polling was intercepted by a host proxy and closed the pair tool service; replacement is not score or answer driven.",
+  "task_ids_in_order": [
+    "chemcrow-01", "chemcrow-02", "chemcrow-03", "chemcrow-04",
+    "chemcrow-05", "chemcrow-06", "chemcrow-07", "chemcrow-08",
+    "chemcrow-09", "chemcrow-10", "chemcrow-12", "chemcrow-13",
+    "chemcrow-14", "chemcrow-15"
+  ],
+  "task_count": 14,
+  "selection_identical_to_full_v1": true,
+  "tool_profile": "public-source-reduced-local-rxn-no-serp-v1",
+  "feedback_mode": "F2",
+  "artifact_type": "text_memory",
+  "safety_sensitive_scored_task_ids": ["chemcrow-12"],
+  "safety_demonstrations_included": false,
+  "historical_answers_included": false,
+  "mock_or_fixture_allowed": false,
+  "result_label": "PROVISIONAL_LLM_JUDGED_RESULT",
+  "polling_policy": "Read-only retry after a successful single POST; no phase redispatch.",
+  "loopback_proxy_policy": "Core, receipt, and local RXN HTTP explicitly use trust_env=false."
+}

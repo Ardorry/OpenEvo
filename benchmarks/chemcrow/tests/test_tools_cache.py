@@ -82,8 +82,8 @@ def test_local_rxn_uses_official_mcpo_payload_and_fails_closed(monkeypatch):
         def json(self):
             return self.payload
 
-    def fake_post(url, *, json, timeout):
-        requests.append((url, json, timeout))
+    def fake_post(url, *, json, timeout, trust_env):
+        requests.append((url, json, timeout, trust_env))
         return Response({"status": "success", "result": []})
 
     monkeypatch.setattr("openevo_chemcrow.tools.httpx.post", fake_post)
@@ -96,6 +96,7 @@ def test_local_rxn_uses_official_mcpo_payload_and_fails_closed(monkeypatch):
     assert requests[0][1]["reactants_list"] == ["CCO.O"]
     assert requests[1][1]["product"] == "CCO"
     assert requests[0][1]["device"] == requests[1][1]["device"] == "cpu"
+    assert requests[0][3] is False and requests[1][3] is False
 
     monkeypatch.setattr(
         "openevo_chemcrow.tools.httpx.post",

@@ -231,8 +231,12 @@ def command_preflight(args: argparse.Namespace) -> int:
     rollout_url = os.environ.get("OPENEVO_ROLLOUT_BASE_URL")
     if rollout_url:
         try:
-            health = httpx.get(rollout_url.rstrip("/") + "/health", timeout=5.0)
-            nodes = httpx.get(rollout_url.rstrip("/") + "/nodes", timeout=5.0)
+            health = httpx.get(
+                rollout_url.rstrip("/") + "/health", timeout=5.0, trust_env=False
+            )
+            nodes = httpx.get(
+                rollout_url.rstrip("/") + "/nodes", timeout=5.0, trust_env=False
+            )
             health.raise_for_status()
             nodes.raise_for_status()
             node_payload = nodes.json()
@@ -255,6 +259,7 @@ def command_preflight(args: argparse.Namespace) -> int:
             response = httpx.get(
                 str(evolution_store["backend_url"]).rstrip("/") + "/v1/health",
                 timeout=5.0,
+                trust_env=False,
             )
             response.raise_for_status()
             health_payload = response.json()
@@ -272,7 +277,7 @@ def command_preflight(args: argparse.Namespace) -> int:
         parsed = urlsplit(rxn_url)
         openapi_url = urlunsplit((parsed.scheme, parsed.netloc, "/openapi.json", "", ""))
         try:
-            response = httpx.get(openapi_url, timeout=5.0)
+            response = httpx.get(openapi_url, timeout=5.0, trust_env=False)
             response.raise_for_status()
             paths = response.json().get("paths", {})
             rxn_health = {
