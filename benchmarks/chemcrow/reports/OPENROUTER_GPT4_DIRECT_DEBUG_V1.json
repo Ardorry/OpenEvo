@@ -1,0 +1,47 @@
+{
+  "call_id": "paper-chemcrow-direct-debug-v1",
+  "claim_sha256": "a5a1a9ec0ba89913b570bf2309d40d85579bf613eca552f6431697b226fa3853",
+  "created_at": "2026-08-25T16:28:56.386012+00:00",
+  "credential_included": false,
+  "credential_probe_sha256": "e66a30960dddf814683b71a87d1ae200de3204d206a7e16d68daa0165de7a3f9",
+  "estimated_cost_usd": null,
+  "failure": "upstream_http_403",
+  "formal_paper_authorization_consumed": false,
+  "included_in_benchmark_metrics": false,
+  "included_in_formal_42_call_ledger": false,
+  "openrouter_attempt": 0,
+  "openrouter_endpoint_total": 2,
+  "openrouter_endpoints": [
+    {
+      "model": "openai/gpt-4",
+      "provider": "OpenAI",
+      "selected": false
+    },
+    {
+      "model": "openai/gpt-4",
+      "provider": "Azure",
+      "selected": false
+    }
+  ],
+  "openrouter_is_byok": false,
+  "openrouter_metadata_body_included": false,
+  "openrouter_metadata_sha256": "11eef4ec4232ca1cb5f62574b1bba2a23858e969a9c9cab90fddd545375e7af7",
+  "openrouter_region": "HKG",
+  "openrouter_requested": "openai/gpt-4",
+  "openrouter_strategy": "direct",
+  "openrouter_summary_sha256": "15d8eadcbf31fd549db8b32d0b0bb9c39cd9e3c91f44fe41b206b9bce49360eb",
+  "prompt_or_response_body_in_report": false,
+  "prompt_or_response_included": false,
+  "provider_request_attempts": 1,
+  "receipt_sha256": "aab6a09fd77548e72506e12517981a8b0d6ceb8b0dc4a1ea6646efd95b4cb3b0",
+  "request_sha256": "c99860dfc195865e559b7f82cc6e42c9e1e3ee4cf03b3fc92adece26524430b2",
+  "schema_version": "chemcrow_paper_direct_debug_v1",
+  "status": "FAIL_CLOSED",
+  "successful_model_completions": 0,
+  "upstream_error_category": "other_upstream_error",
+  "upstream_error_code": 403,
+  "upstream_error_message_sha256": "325ed86c3c8a4e49a6a58f70313f78be8a0cc71dc2cfe15af527735a1edc62aa",
+  "upstream_http_status": 403,
+  "upstream_response_body_included": false,
+  "upstream_response_sha256": "c3552fec8bde16a08ea46640a8de28f5a17c61dfcb82942e34a93a4c92fa38d8"
+}

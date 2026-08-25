@@ -1,5 +1,12 @@
 # ChemCrow paper evaluator readiness
 
+> Superseded, 2026-08-26: current authority is `FULL_RUN_READINESS.md` and
+> `NEXT_STAGE_READINESS_AUDIT.md`. Historical V2's exact 403 cause remains unproven. The current
+> blocker is supported by new Core v6-v8 and minimal-direct evidence: OpenRouter returns HTTP 403
+> with router `attempt=0` and no selected endpoint even after `response_format` and `user` are absent.
+> A fresh v9 Core smoke is prepared but unattempted. The old full-v3 composite/repair path below is
+> prohibited for the authoritative result; a fresh 14-task full-v4-three-pipeline is required.
+
 > Superseded-state notice (2026-08-25): the credential balance blocker documented below has been
 > cleared, but the initial authorized Core-managed GPT-4 smoke failed closed at OpenRouter HTTP 403
 > and was not retried. The user subsequently approved OpenAI-only routing with

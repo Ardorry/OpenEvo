@@ -1,18 +1,21 @@
 # OpenEvo ChemCrow Task-Local Integration
 
 This package treats ChemCrow as benchmark tasks plus a chemistry-tool environment. It does
-not instantiate the legacy `ChemCrow` GPT-4/LangChain agent. Candidate, Reflector, evolution
-evaluator, and final evaluator remain separate OpenEvo runtime/provider roles with frozen
-model settings.
+not instantiate the legacy `ChemCrow` GPT-4/LangChain agent. Candidate, three typed Reflectors,
+evolution evaluator, and final evaluator remain separate OpenEvo runtime/provider roles with
+frozen model settings.
 
-All four Codex roles are admitted only through OpenEvo Core Rollout/Gateway and execute in the
+All six Codex roles are admitted only through OpenEvo Core Rollout/Gateway and execute in the
 immutable managed Docker runtime. Host `codex exec`, custom shells, custom runtimes, and caller
 MCP injection fail closed. ChemCrow tools are exposed through a pair-scoped receipt-producing
 REST bridge because the Core subscription contract forbids caller MCP servers.
 
-The mandatory item protocol is:
+The mandatory authoritative item protocol is:
 
-`bare S0 -> baseline -> feedback -> one native Reflector job -> same-item evolved -> seal -> reset`
+`bare S0 -> G1 -> internal feedback -> three isolated native Reflector jobs -> exactly three typed artifacts -> G2 -> seal -> destroy task-local artifacts -> bare-S0 reset`
+
+The three jobs independently produce `text_memory`, `skill_bundle`, and `agent_system`. Their prompts
+are frozen before sibling output exists, and duplicate/near-duplicate outputs fail closed.
 
 No artifact, feedback, trajectory, tool cache, or active Core store is inherited by the next
 item. A pair-scoped tool server may replay only identical canonical tool calls within that
@@ -51,23 +54,25 @@ the regular final evaluator. Preflight performs zero model calls:
 
 ```bash
 uv run --project benchmarks/chemcrow openevo-chemcrow paper-evaluator-preflight \
-  --config benchmarks/chemcrow/configs/paper_evaluator.full-v3.yaml \
+  --config benchmarks/chemcrow/configs/paper_evaluator.full-v4-three-pipeline.yaml \
   --output /home/lhy-h/work/chemcrowrun/reports/PAPER_EVALUATOR_PREFLIGHT.json \
   --no-model-calls
 ```
 
-The current `full-v3` is stopped and contains only 12 fully sealed pairs, so this command correctly
-returns `BLOCKED`. Do not run the paid command until a complete 14-task authority exists.
+The current `full-v3` is stopped and contains 12 legacy single-artifact pairs. It is
+`LEGACY_PROVISIONAL` and cannot be combined with new three-artifact pairs. The authoritative source
+must be a fresh complete `full-v4-three-pipeline`; until it exists this command correctly returns
+`BLOCKED`.
 
 The published human-expert layer is separate again. ChemCrow Source Data Fig. 4 records three
 scores on a 0--10 scale (`Chemically accurate`, `Quality of reasoning`, `Task completed`) from four
 expert chemists. The existing OpenEvo 0--4 three-dimensional judge remains an internal diagnostic,
-not the paper's human score. Once the composite 14-task authority is sealed, prepare 42 blinded
+not the paper's human score. Once the fresh full-v4 14-task authority is sealed, prepare 42 blinded
 comparisons and four response forms per comparison without a model call:
 
 ```bash
 uv run --project benchmarks/chemcrow openevo-chemcrow paper-human-review-prepare \
-  --config benchmarks/chemcrow/configs/paper_human_review.composite-v1.yaml \
+  --config benchmarks/chemcrow/configs/paper_human_review.full-v4-three-pipeline.yaml \
   --output /home/lhy-h/work/chemcrowrun/reports/PAPER_HUMAN_REVIEW_PREPARE.json \
   --no-model-calls
 ```
@@ -78,10 +83,8 @@ randomized as A/B, with no runtime trajectory or system identity. Four completed
 reviews per comparison are required for a paper-comparable human result; fewer reviews are
 exploratory.
 
-Those 12 pairs pass a standalone sealed-subset audit and can be preserved. The smallest 14-task
-closure is the frozen `paper_repair.v1.yaml` task-14/task-15 run followed by
-`paper-composite-audit`; it remains fail-closed until the user explicitly authorizes the duplicate
-task-14 pair that replaces the interrupted, never-sealed pair.
+Those 12 pairs remain useful historical evidence only. The authoritative experiment is the frozen
+fresh 14-task `full.v4-three-pipeline.yaml`; no task-14-only repair or mixed aggregate is allowed.
 
 Local RXN services use exact image IDs:
 

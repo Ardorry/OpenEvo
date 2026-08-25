@@ -1,5 +1,12 @@
 # ChemCrow paper evaluator v2 smoke audit
 
+> Historical-scope correction, 2026-08-26: this file records the immutable V2 attempt only. Its
+> exact HTTP 403 cause is **UNPROVEN**; the guardrail discussion below was a hypothesis, not proof.
+> The separately proven legacy GPT-4 `response_format=json_object` HTTP 400 incompatibility does
+> not explain V2's 403. Current v6-v8 plus minimal-direct evidence now proves a separate present-day
+> pre-provider routing exclusion (`attempt=0`, all endpoints unselected). See
+> `NEXT_STAGE_READINESS_AUDIT.md`; do not modify or retry the historical V2 claim/receipt.
+
 Date: 2026-08-25 Asia/Shanghai
 
 ## Verdict

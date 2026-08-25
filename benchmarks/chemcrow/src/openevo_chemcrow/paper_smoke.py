@@ -34,10 +34,10 @@ from .paper_evaluator import (
     render_compatible_prompt,
 )
 
-PAPER_SMOKE_AUTHORIZATION = "I_AUTHORIZE_ONE_CORE_PAPER_GPT4_SMOKE_V4_20260825"
-PAPER_SMOKE_CALL_ID = "paper-chemcrow-smoke-core-v4"
-PAPER_SMOKE_SCHEMA = "chemcrow_paper_evaluator_paid_smoke_v4"
-PAPER_SMOKE_CONFIG_SCHEMA = "chemcrow_paper_evaluator_smoke_config_v4"
+PAPER_SMOKE_AUTHORIZATION = "I_AUTHORIZE_ONE_CORE_PAPER_GPT4_SMOKE_V9_20260826"
+PAPER_SMOKE_CALL_ID = "paper-chemcrow-smoke-core-v9"
+PAPER_SMOKE_SCHEMA = "chemcrow_paper_evaluator_paid_smoke_v9"
+PAPER_SMOKE_CONFIG_SCHEMA = "chemcrow_paper_evaluator_smoke_config_v9"
 
 
 def build_smoke_call() -> PaperEvaluationCall:
@@ -56,7 +56,7 @@ def build_smoke_call() -> PaperEvaluationCall:
         student_a_system="historical_chemcrow",
         prompt=prompt,
         prompt_sha256=canonical_sha256(prompt),
-        source_pair_id="test-only:paper-smoke-v4",
+        source_pair_id="test-only:paper-smoke-v9",
         source_pair_result_sha256="0" * 64,
         source_output_id="test-only:student-a",
         source_output_sha256=canonical_sha256("Water has molecular formula H2O."),
@@ -141,6 +141,10 @@ def run_paid_smoke(
         or receipt.get("require_parameters") is not True
         or receipt.get("data_collection") != PAPER_EVALUATOR_DATA_COLLECTION
         or receipt.get("temperature") != PAPER_EVALUATOR_TEMPERATURE
+        or receipt.get("internal_response_format_validated") is not True
+        or receipt.get("upstream_response_format_omitted") is not True
+        or receipt.get("internal_call_identity_validated") is not True
+        or receipt.get("upstream_user_omitted") is not True
     ):
         raise RuntimeError("OpenRouter smoke receipt differs from frozen route")
 
@@ -177,6 +181,10 @@ def run_paid_smoke(
         "upstream_response_format_omitted": receipt[
             "upstream_response_format_omitted"
         ],
+        "internal_call_identity_validated": receipt[
+            "internal_call_identity_validated"
+        ],
+        "upstream_user_omitted": receipt["upstream_user_omitted"],
         "request_prompt_sha256": call.prompt_sha256,
         "response_assessment_sha256": canonical_sha256(assessment.model_dump(mode="json")),
         "usage": {
@@ -283,6 +291,10 @@ def seal_failed_smoke_attempt(
         "upstream_response_format_omitted": receipt.get(
             "upstream_response_format_omitted"
         ),
+        "internal_call_identity_validated": receipt.get(
+            "internal_call_identity_validated"
+        ),
+        "upstream_user_omitted": receipt.get("upstream_user_omitted"),
         "usage_metadata_present": False,
         "estimated_cost_usd": None,
         "billing_status": "NO_USAGE_RECEIPT_UPSTREAM_FAILURE; billing not proven",
@@ -316,6 +328,61 @@ def seal_failed_smoke_attempt(
     return result
 
 
+def seal_unreached_smoke_infrastructure_failure(
+    *,
+    receipt_root: Path,
+    core_completion_root: Path,
+    credential_probe_path: Path,
+    output_path: Path,
+) -> dict[str, Any]:
+    """Seal a Core failure that provably happened before the auth shim claim."""
+
+    call = build_smoke_call()
+    claim_path = receipt_root / f"{call.call_id}.claim.json"
+    receipt_path = receipt_root / f"{call.call_id}.receipt.json"
+    if output_path.exists():
+        raise RuntimeError("paper smoke infrastructure report already exists")
+    if claim_path.exists() or receipt_path.exists():
+        raise RuntimeError("provider claim/receipt exists; infrastructure-only seal is forbidden")
+    completion_matches = list(core_completion_root.glob(f"task_{call.call_id}/*.json"))
+    if len(completion_matches) != 1:
+        raise RuntimeError("infrastructure-failed Core completion authority is not unique")
+    completion_path = completion_matches[0]
+    completion = json.loads(completion_path.read_text(encoding="utf-8"))
+    core_status = str(completion.get("status") or "")
+    core_error = str(completion.get("error") or "")
+    if core_status != "ERROR" or not core_error:
+        raise RuntimeError("infrastructure-failed Core completion is not terminal ERROR")
+    result = {
+        "schema_version": PAPER_SMOKE_SCHEMA,
+        "status": "FAIL_CLOSED_INFRASTRUCTURE_BEFORE_PROVIDER",
+        "request_claim_id": call.call_id,
+        "core_route": PAPER_CORE_ROUTE,
+        "model_requested": PAPER_EVALUATOR_MODEL,
+        "provider_requested": PAPER_EVALUATOR_PROVIDER,
+        "temperature": PAPER_EVALUATOR_TEMPERATURE,
+        "provider_request_attempts": 0,
+        "paid_model_calls": 0,
+        "estimated_cost_usd": 0.0,
+        "shim_claim_exists": False,
+        "shim_receipt_exists": False,
+        "core_terminal_status": core_status,
+        "core_error_sha256": canonical_sha256(core_error),
+        "core_completion_sha256": file_sha256(completion_path),
+        "credential_probe_sha256": file_sha256(credential_probe_path),
+        "included_in_formal_42_call_ledger": False,
+        "included_in_benchmark_metrics": False,
+        "formal_paper_authorization_consumed": False,
+        "prompt_or_response_body_in_report": False,
+        "credential_included": False,
+        "raw_core_completion_retained": True,
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    _exclusive_json_write(output_path, result)
+    return result
+
+
 def _exclusive_json_write(path: Path, payload: dict[str, Any]) -> None:
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
@@ -339,6 +406,10 @@ def build_parser() -> argparse.ArgumentParser:
     seal_failure.add_argument("--config", type=Path, required=True)
     seal_failure.add_argument("--credential-probe", type=Path, required=True)
     seal_failure.add_argument("--output", type=Path, required=True)
+    seal_infrastructure = commands.add_parser("seal-infrastructure-failure")
+    seal_infrastructure.add_argument("--config", type=Path, required=True)
+    seal_infrastructure.add_argument("--credential-probe", type=Path, required=True)
+    seal_infrastructure.add_argument("--output", type=Path, required=True)
     return parser
 
 
@@ -366,7 +437,26 @@ def main(argv: list[str] | None = None) -> None:
         return
     config = json.loads(args.config.resolve().read_text(encoding="utf-8"))
     if config.get("schema_version") != PAPER_SMOKE_CONFIG_SCHEMA:
-        raise SystemExit("paper smoke config is not the frozen v4 schema")
+        raise SystemExit("paper smoke config is not the frozen v9 schema")
+    if args.command == "seal-infrastructure-failure":
+        result = seal_unreached_smoke_infrastructure_failure(
+            receipt_root=Path(str(config["receipt_root"])).resolve(),
+            core_completion_root=Path(str(config["core_completion_root"])).resolve(),
+            credential_probe_path=args.credential_probe.resolve(),
+            output_path=args.output.resolve(),
+        )
+        print(
+            json.dumps(
+                {
+                    "status": result["status"],
+                    "provider_request_attempts": 0,
+                    "paid_model_calls": 0,
+                    "request_claim_id": result["request_claim_id"],
+                },
+                sort_keys=True,
+            )
+        )
+        return
     if args.command == "seal-failure":
         result = seal_failed_smoke_attempt(
             receipt_root=Path(str(config["receipt_root"])).resolve(),

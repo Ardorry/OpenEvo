@@ -1,5 +1,12 @@
 # HUMAN ACTION REQUIRED
 
+> Superseded, 2026-08-26: use `FULL_RUN_READINESS.md` for current authority. The exact historical V2
+> 403 cause remains unproven. New Core and minimal-direct diagnostics establish only that the current
+> OpenRouter policy rejects routing before provider selection (`attempt=0`, OpenAI/Azure unselected).
+> Do not follow the legacy task-14 repair/composite instructions below for an authoritative result;
+> the required next benchmark is a fresh 14-task `full-v4-three-pipeline` after the external paper
+> route and live representative preflight pass.
+
 Updated: 2026-08-25 Asia/Shanghai
 
 Never paste a credential into chat or commit it. The formal benchmark and 42-call paper evaluation

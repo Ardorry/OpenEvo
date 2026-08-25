@@ -81,6 +81,7 @@ async def test_openrouter_shim_pins_route_and_writes_value_free_receipt(tmp_path
         "data_collection": "allow",
     }
     assert "response_format" not in observed["payload"]
+    assert "user" not in observed["payload"]
     assert "return_token_ids" not in observed["payload"]
     claim = json.loads(
         (receipt_root / "paper-chemcrow-01-baseline.claim.json").read_text()
@@ -94,6 +95,8 @@ async def test_openrouter_shim_pins_route_and_writes_value_free_receipt(tmp_path
     assert receipt["list_price_cost_usd"] == 0.006
     assert receipt["internal_response_format_validated"] is True
     assert receipt["upstream_response_format_omitted"] is True
+    assert receipt["internal_call_identity_validated"] is True
+    assert receipt["upstream_user_omitted"] is True
 
 
 @pytest.mark.asyncio
@@ -103,16 +106,50 @@ async def test_openrouter_shim_seals_sanitized_upstream_failure_metadata(tmp_pat
     async def upstream(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             403,
+            headers={"X-Generation-Id": "gen-safe-diagnostic"},
             json={
                 "error": {
                     "code": 403,
                     "message": sensitive_message,
-                    "metadata": {
-                        "openrouter_metadata": {
-                            "pipeline": [{"stage": "PRIVATE GUARDRAIL NAME"}]
-                        }
+                    "error_type": "not_found",
+                    "http_status": 403,
+                    "metadata": {"patterns": ["PRIVATE ROUTING DETAIL"]},
+                    "availability": {
+                        "code": "privacy_restricted",
+                        "retryable": False,
+                        "requested_models": ["openai/gpt-4"],
+                        "affected_providers": ["openai", "azure"],
+                        "excluded_by": ["data_policy/zdr"],
                     },
-                }
+                },
+                "openrouter_metadata": {
+                    "requested": "openai/gpt-4",
+                    "strategy": "direct",
+                    "attempt": 1,
+                    "endpoints": {
+                        "total": 1,
+                        "available": [
+                            {
+                                "provider": "OpenAI",
+                                "model": "openai/gpt-4",
+                                "selected": False,
+                            }
+                        ],
+                    },
+                    "pipeline": [
+                        {
+                            "type": "guardrail",
+                            "name": "content-filter",
+                            "guardrail_scope": "api-key",
+                            "summary": "PRIVATE GUARDRAIL NAME",
+                            "data": {
+                                "action": "blocked",
+                                "detected": True,
+                                "patterns": ["PRIVATE PROMPT"],
+                            },
+                        }
+                    ],
+                },
             },
         )
 
@@ -158,11 +195,29 @@ async def test_openrouter_shim_seals_sanitized_upstream_failure_metadata(tmp_pat
     assert receipt["upstream_http_status"] == 403
     assert receipt["upstream_error_code"] == 403
     assert receipt["upstream_error_category"] == "provider_data_policy"
+    assert receipt["upstream_error_type"] == "not_found"
+    assert receipt["upstream_declared_http_status"] == 403
+    assert receipt["upstream_availability_code"] == "privacy_restricted"
+    assert receipt["upstream_availability_retryable"] is False
+    assert receipt["upstream_availability_affected_providers"] == ["openai", "azure"]
+    assert receipt["upstream_availability_excluded_by"] == ["data_policy/zdr"]
     assert receipt["upstream_error_message_sha256"] == canonical_sha256(sensitive_message)
     assert receipt["upstream_response_body_included"] is False
     assert receipt["openrouter_metadata_body_included"] is False
+    assert receipt["upstream_generation_id"] == "gen-safe-diagnostic"
+    assert receipt["openrouter_attempt"] == 1
+    assert receipt["openrouter_endpoint_total"] == 1
+    assert receipt["openrouter_endpoints"] == [
+        {"provider": "OpenAI", "model": "openai/gpt-4", "selected": False}
+    ]
+    assert receipt["openrouter_pipeline"][0]["type"] == "guardrail"
+    assert receipt["openrouter_pipeline"][0]["name"] == "content-filter"
+    assert receipt["openrouter_pipeline"][0]["action"] == "blocked"
+    assert receipt["openrouter_pipeline"][0]["detected"] is True
     assert receipt["internal_response_format_validated"] is True
     assert receipt["upstream_response_format_omitted"] is True
+    assert receipt["internal_call_identity_validated"] is True
+    assert receipt["upstream_user_omitted"] is True
 
 
 @pytest.mark.asyncio

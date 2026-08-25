@@ -135,6 +135,12 @@ def create_openrouter_shim_app(
         # parsing and DualStudentAssessment validation remain downstream and
         # fail closed without a retry.
         upstream_payload.pop("response_format", None)
+        # ``user`` is the internal, already-claimed call identity.  It has no
+        # remaining transport purpose after the exclusive claim is written, so
+        # omit it to keep the legacy GPT-4 upstream payload minimal.  The live
+        # v7/direct A/B proved that this omission alone does not clear the
+        # current pre-provider 403; do not describe it as that failure's cause.
+        upstream_payload.pop("user", None)
         upstream_payload["provider"] = {
             "only": [PAPER_EVALUATOR_PROVIDER],
             "allow_fallbacks": False,
@@ -310,6 +316,8 @@ def _success_receipt(
         "data_collection": PAPER_EVALUATOR_DATA_COLLECTION,
         "internal_response_format_validated": True,
         "upstream_response_format_omitted": True,
+        "internal_call_identity_validated": True,
+        "upstream_user_omitted": True,
     }
 
 
@@ -335,6 +343,8 @@ def _write_failure_receipt(
             "credential_included": False,
             "internal_response_format_validated": True,
             "upstream_response_format_omitted": True,
+            "internal_call_identity_validated": True,
+            "upstream_user_omitted": True,
             **safe_metadata,
         },
     )
@@ -348,6 +358,11 @@ def _safe_upstream_failure_metadata(response: httpx.Response) -> dict[str, Any]:
         "upstream_response_sha256": hashlib.sha256(response.content).hexdigest(),
         "upstream_response_body_included": False,
     }
+    generation_id = response.headers.get("x-generation-id")
+    if generation_id and len(generation_id) <= 128 and all(
+        character.isalnum() or character in "._-" for character in generation_id
+    ):
+        result["upstream_generation_id"] = generation_id
     try:
         payload = response.json()
     except ValueError:
@@ -364,19 +379,135 @@ def _safe_upstream_failure_metadata(response: httpx.Response) -> dict[str, Any]:
         and all(character.isalnum() or character in "._-" for character in code)
     ):
         result["upstream_error_code"] = code
+    error_type = _safe_label(error.get("error_type"))
+    if error_type is not None:
+        result["upstream_error_type"] = error_type
+    declared_http_status = error.get("http_status")
+    if isinstance(declared_http_status, int) and 100 <= declared_http_status <= 599:
+        result["upstream_declared_http_status"] = declared_http_status
     message = error.get("message")
     if isinstance(message, str):
         result["upstream_error_message_sha256"] = canonical_sha256(message)
         result["upstream_error_category"] = _classify_upstream_error(message)
     else:
         result["upstream_error_category"] = "missing_upstream_error_message"
-    metadata = error.get("metadata")
-    if isinstance(metadata, dict):
-        router_metadata = metadata.get("openrouter_metadata")
-        if isinstance(router_metadata, dict):
-            result["openrouter_metadata_sha256"] = canonical_sha256(router_metadata)
-            result["openrouter_metadata_body_included"] = False
+    error_metadata = error.get("metadata")
+    if isinstance(error_metadata, dict):
+        result["upstream_error_metadata_sha256"] = canonical_sha256(error_metadata)
+        result["upstream_error_metadata_body_included"] = False
+        metadata_error_type = _safe_label(error_metadata.get("error_type"))
+        if metadata_error_type is not None:
+            result["upstream_metadata_error_type"] = metadata_error_type
+        provider_code = _safe_label(error_metadata.get("provider_code"))
+        if provider_code is not None:
+            result["upstream_provider_error_code"] = provider_code
+    availability = error.get("availability")
+    if isinstance(availability, dict):
+        result["upstream_availability_sha256"] = canonical_sha256(availability)
+        result["upstream_availability_body_included"] = False
+        availability_code = _safe_label(availability.get("code"))
+        if availability_code is not None:
+            result["upstream_availability_code"] = availability_code
+        if isinstance(availability.get("retryable"), bool):
+            result["upstream_availability_retryable"] = availability["retryable"]
+        for key in ("requested_models", "affected_providers", "excluded_by"):
+            values = availability.get(key)
+            if isinstance(values, list):
+                result[f"upstream_availability_{key}"] = [
+                    label
+                    for label in (_safe_label(value) for value in values[:32])
+                    if label is not None
+                ]
+    # OpenRouter returns router metadata beside ``error`` rather than nested
+    # inside it.  Retain only categorical routing evidence and hashes; free-form
+    # summaries, patterns, prompt fragments, and provider bodies remain absent.
+    router_metadata = payload.get("openrouter_metadata")
+    if isinstance(router_metadata, dict):
+        result.update(_safe_router_metadata(router_metadata))
     return result
+
+
+def _safe_router_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "openrouter_metadata_sha256": canonical_sha256(metadata),
+        "openrouter_metadata_body_included": False,
+    }
+    for key in ("requested", "strategy", "region"):
+        value = metadata.get(key)
+        if isinstance(value, str) and len(value) <= 128 and all(
+            character.isalnum() or character in "._-/" for character in value
+        ):
+            result[f"openrouter_{key}"] = value
+    attempt = metadata.get("attempt")
+    if isinstance(attempt, int) and 0 <= attempt <= 64:
+        result["openrouter_attempt"] = attempt
+    if isinstance(metadata.get("is_byok"), bool):
+        result["openrouter_is_byok"] = metadata["is_byok"]
+    summary = metadata.get("summary")
+    if isinstance(summary, str):
+        result["openrouter_summary_sha256"] = canonical_sha256(summary)
+
+    endpoints = metadata.get("endpoints")
+    if isinstance(endpoints, dict):
+        total = endpoints.get("total")
+        if isinstance(total, int) and 0 <= total <= 1024:
+            result["openrouter_endpoint_total"] = total
+        available = endpoints.get("available")
+        if isinstance(available, list):
+            result["openrouter_endpoints"] = [
+                {
+                    "provider": _safe_label(item.get("provider")),
+                    "model": _safe_label(item.get("model")),
+                    "selected": item.get("selected") if isinstance(item.get("selected"), bool) else None,
+                }
+                for item in available[:16]
+                if isinstance(item, dict)
+            ]
+
+    attempts = metadata.get("attempts")
+    if isinstance(attempts, list):
+        result["openrouter_provider_attempts"] = [
+            {
+                "provider": _safe_label(item.get("provider")),
+                "model": _safe_label(item.get("model")),
+                "status": item.get("status") if isinstance(item.get("status"), int) else None,
+            }
+            for item in attempts[:16]
+            if isinstance(item, dict)
+        ]
+
+    pipeline = metadata.get("pipeline")
+    if isinstance(pipeline, list):
+        safe_pipeline: list[dict[str, Any]] = []
+        for item in pipeline[:32]:
+            if not isinstance(item, dict):
+                continue
+            entry: dict[str, Any] = {
+                "type": _safe_label(item.get("type")),
+                "name": _safe_label(item.get("name")),
+                "scope": _safe_label(item.get("guardrail_scope")),
+            }
+            summary = item.get("summary")
+            if isinstance(summary, str):
+                entry["summary_sha256"] = canonical_sha256(summary)
+            data = item.get("data")
+            if isinstance(data, dict):
+                entry["data_sha256"] = canonical_sha256(data)
+                for key in ("action", "decision", "confidence_level"):
+                    entry[key] = _safe_label(data.get(key))
+                if isinstance(data.get("detected"), bool):
+                    entry["detected"] = data["detected"]
+            safe_pipeline.append(entry)
+        result["openrouter_pipeline"] = safe_pipeline
+    return result
+
+
+def _safe_label(value: Any) -> str | None:
+    if not isinstance(value, str) or not (0 < len(value) <= 128):
+        return None
+    if not all(character.isalnum() or character in " ._-/" for character in value):
+        return None
+    return value
 
 
 def _classify_upstream_error(message: str) -> str:

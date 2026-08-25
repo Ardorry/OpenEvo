@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import json
 
+import httpx
 import pytest
 
+from openevo_chemcrow.paper_direct_debug import (
+    DIRECT_DEBUG_AUTHORIZATION,
+    run_direct_debug,
+)
 from openevo_chemcrow.paper_evaluator import DualStudentAssessment
 from openevo_chemcrow.paper_smoke import (
     PAPER_SMOKE_AUTHORIZATION,
@@ -11,6 +16,7 @@ from openevo_chemcrow.paper_smoke import (
     build_smoke_call,
     main,
     run_paid_smoke,
+    seal_unreached_smoke_infrastructure_failure,
 )
 
 
@@ -46,14 +52,16 @@ def test_smoke_call_is_separate_from_formal_42_call_inventory():
     }
 
 
-@pytest.mark.parametrize("version", ("v1", "v2", "v3"))
-def test_historical_smoke_config_cannot_launch_v4_call(tmp_path, version):
+@pytest.mark.parametrize(
+    "version", ("v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8")
+)
+def test_historical_smoke_config_cannot_launch_v9_call(tmp_path, version):
     config = tmp_path / f"{version}.json"
     config.write_text(
         json.dumps({"schema_version": f"chemcrow_paper_evaluator_smoke_config_{version}"}),
         encoding="utf-8",
     )
-    with pytest.raises(SystemExit, match="not the frozen v4 schema"):
+    with pytest.raises(SystemExit, match="not the frozen v9 schema"):
         main(
             [
                 "run",
@@ -105,6 +113,8 @@ def test_paid_smoke_seals_hash_only_report_and_removes_raw_completion(monkeypatc
         "completed_at": "2026-08-25T00:00:00+00:00",
         "internal_response_format_validated": True,
         "upstream_response_format_omitted": True,
+        "internal_call_identity_validated": True,
+        "upstream_user_omitted": True,
     }
 
     monkeypatch.setenv("CHEMCROW_PAPER_SMOKE_AUTHORIZATION", PAPER_SMOKE_AUTHORIZATION)
@@ -142,6 +152,8 @@ def test_paid_smoke_seals_hash_only_report_and_removes_raw_completion(monkeypatc
     assert result["pydantic_assessment_valid"] is True
     assert result["internal_response_format_validated"] is True
     assert result["upstream_response_format_omitted"] is True
+    assert result["internal_call_identity_validated"] is True
+    assert result["upstream_user_omitted"] is True
     assert not completion.exists()
     text = output.read_text(encoding="utf-8")
     assert "CORE BODY MUST NOT REMAIN" not in text
@@ -215,6 +227,8 @@ def test_paid_smoke_seals_terminal_upstream_failure_without_assessment(monkeypat
                     "upstream_response_sha256": "c" * 64,
                     "internal_response_format_validated": True,
                     "upstream_response_format_omitted": True,
+                    "internal_call_identity_validated": True,
+                    "upstream_user_omitted": True,
                 }
             ),
             encoding="utf-8",
@@ -263,3 +277,85 @@ def test_paid_smoke_requires_separate_test_authorization(monkeypatch, tmp_path):
             output_path=tmp_path / "output.json",
             allow_paid=True,
         )
+
+
+def test_unreached_infrastructure_failure_proves_zero_provider_attempts(tmp_path):
+    receipt_root = tmp_path / "receipts"
+    receipt_root.mkdir()
+    completion_root = tmp_path / "completions"
+    completion = completion_root / f"task_{PAPER_SMOKE_CALL_ID}" / "result.json"
+    completion.parent.mkdir(parents=True)
+    completion.write_text(
+        json.dumps({"status": "ERROR", "error": "agent import failed"}),
+        encoding="utf-8",
+    )
+    probe = tmp_path / "probe.json"
+    probe.write_text('{"status":"VALID"}\n', encoding="utf-8")
+    output = tmp_path / "infrastructure-failure.json"
+    result = seal_unreached_smoke_infrastructure_failure(
+        receipt_root=receipt_root,
+        core_completion_root=completion_root,
+        credential_probe_path=probe,
+        output_path=output,
+    )
+    assert result["status"] == "FAIL_CLOSED_INFRASTRUCTURE_BEFORE_PROVIDER"
+    assert result["provider_request_attempts"] == result["paid_model_calls"] == 0
+    assert result["shim_claim_exists"] is result["shim_receipt_exists"] is False
+    assert completion.exists()
+    assert "agent import failed" not in output.read_text(encoding="utf-8")
+
+
+def test_direct_debug_is_single_claimed_hash_only_nonformal_call(tmp_path, monkeypatch):
+    observed = {}
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        observed["request"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "id": "gen-direct-debug",
+                "model": "openai/gpt-4",
+                "provider": "OpenAI",
+                "choices": [
+                    {"message": {"role": "assistant", "content": '{"ok":true}'}}
+                ],
+                "usage": {"prompt_tokens": 20, "completion_tokens": 5},
+            },
+        )
+
+    probe = tmp_path / "probe.json"
+    probe.write_text(
+        json.dumps(
+            {
+                "status": "VALID",
+                "auth_valid": True,
+                "credit_probe_success": True,
+                "model_calls": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(
+        "CHEMCROW_PAPER_DIRECT_DEBUG_AUTHORIZATION", DIRECT_DEBUG_AUTHORIZATION
+    )
+    monkeypatch.setenv("CHEMCROW_PAPER_EVALUATOR_MODEL", "openai/gpt-4")
+    monkeypatch.setenv("CHEMCROW_PAPER_SMOKE_MAX_USD", "1")
+    output = tmp_path / "direct-report.json"
+    result = run_direct_debug(
+        api_key="DO_NOT_PERSIST",
+        base_url="http://mock.invalid/v1",
+        receipt_root=tmp_path / "receipts",
+        credential_probe_path=probe,
+        output_path=output,
+        allow_paid=True,
+        transport=httpx.MockTransport(upstream),
+    )
+    assert result["status"] == "PASS"
+    assert result["included_in_formal_42_call_ledger"] is False
+    assert observed["request"]["provider"]["only"] == ["openai"]
+    assert observed["request"]["provider"]["require_parameters"] is True
+    assert "response_format" not in observed["request"]
+    assert "user" not in observed["request"]
+    text = output.read_text(encoding="utf-8")
+    assert "DO_NOT_PERSIST" not in text
+    assert "Return exactly" not in text
