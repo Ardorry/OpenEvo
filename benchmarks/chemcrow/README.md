@@ -59,6 +59,11 @@ uv run --project benchmarks/chemcrow openevo-chemcrow paper-evaluator-preflight 
 The current `full-v3` is stopped and contains only 12 fully sealed pairs, so this command correctly
 returns `BLOCKED`. Do not run the paid command until a complete 14-task authority exists.
 
+Those 12 pairs pass a standalone sealed-subset audit and can be preserved. The smallest 14-task
+closure is the frozen `paper_repair.v1.yaml` task-14/task-15 run followed by
+`paper-composite-audit`; it remains fail-closed until the user explicitly authorizes the duplicate
+task-14 pair that replaces the interrupted, never-sealed pair.
+
 Local RXN services use exact image IDs:
 
 ```bash

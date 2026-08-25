@@ -81,7 +81,7 @@ sealed. Current provider metadata: <https://openrouter.ai/openai/gpt-4/providers
 ## Verification
 
 - Ruff: PASS
-- ChemCrow test suite: 40 passed
+- ChemCrow test suite: 44 passed
 - Historical answer extraction: 14/14, with task 12's later safety-refusal overwrite correctly
   selected instead of its earlier output
 - Historical teacher grades: 14/14
@@ -101,6 +101,21 @@ sealed. Current provider metadata: <https://openrouter.ai/openai/gpt-4/providers
 3. `full-v3` has 12 sealed/reset pairs. Task 14 is interrupted and task 15 never started. A
    14-task paper-compatible mean cannot be produced from this run as-is.
 4. A chemistry expert is still required for blinded final review.
+
+The first 12 pairs have now passed a separate sealed-subset audit: 12 unique artifacts, 12 Core
+runtime-injection receipts, 60 terminal phases, 302 real/cache-replay tool observations, and zero
+MOCK/fixture observations. They do not need to be rerun. A frozen two-task repair config for tasks
+14 and 15 has the identical S0 hash and identical Candidate/Reflector/evaluator role configs. Its
+zero-model preflight passes Core, Evolution Backend, Docker image, local RXN, and role parity; it is
+blocked only because no duplicate-task authorization receipt has been created.
+
+The prepared composite path is:
+
+`12 sealed full-v3 pairs + fresh task-14/task-15 repair -> composite audit -> 14-task paper plan`
+
+It will accept task 14 only when an authorization receipt is bound to the exact interrupted claim
+hash. The pending template is
+`configs/CHEMCROW_14_DUPLICATE_AUTHORIZATION.example.json`; it is not an authorization.
 
 No paid command should be issued until blocker 3 is resolved and a new preflight says
 `READY_FOR_EXPLICIT_PAID_AUTHORIZATION`.
@@ -152,3 +167,19 @@ uv run --project benchmarks/chemcrow openevo-chemcrow paper-evaluator-run \
 The exact safe-resume command is the same command. It validates and skips sealed results, but if a
 shim claim exists without a sealed result it stops instead of redispatching that call. Never delete
 a claim to force a retry; audit the provider-side effect first.
+
+After the API key is written, validate it without a model call or charge:
+
+```bash
+cd /home/lhy-h/work/chemcrowrun/openevo
+set -a
+source /home/lhy-h/work/chemcrowrun/.env.paper-evaluator
+set +a
+uv run --project benchmarks/chemcrow openevo-chemcrow paper-credential-probe \
+  --output /home/lhy-h/work/chemcrowrun/reports/OPENROUTER_CREDENTIAL_PROBE.json \
+  --no-model-calls
+```
+
+The probe uses OpenRouter's documented `GET /api/v1/key` endpoint. It records only validity and
+boolean capacity checks; key labels, identifiers, limits, usage values, and the key itself are not
+written. Documentation: <https://openrouter.ai/docs/api/api-reference/api-keys/get-current-key>.

@@ -74,6 +74,11 @@ The paper evaluator defaults are already frozen in the ignored 0600 file:
 `CHEMCROW_PAPER_EVALUATOR_MAX_USD`. Only `OPENROUTER_API_KEY` is missing. Keep
 `CHEMCROW_PAPER_EVALUATOR_AUTHORIZATION` empty until a complete 14-task preflight has passed.
 
+After adding the key, validate it with the zero-model command documented in
+`PAPER_EVALUATOR_READINESS.md`. It calls only OpenRouter `GET /api/v1/key`, records no key metadata
+values, and verifies whether the remaining-limit field (when present) is sufficient for the frozen
+`$11.83266` ceiling.
+
 Immediate decision required:
 
 - `preflight-v1` already has five possible provider-effect phases for `chemcrow-02`.
@@ -139,7 +144,14 @@ The valid claim is a public-source, tool-audited reduced ChemCrow environment, n
     by the interrupted pair, then create a composite 14-task audit; (b) run no more Candidate calls
     and accept a clearly labeled 12-task exploratory judge; or (c) authorize a fresh 14-task run.
     Option (a) is the smallest path compatible with a 14-task aggregate, but it requires explicit
-    duplicate-call authorization and a composite-audit implementation before execution.
+    duplicate-call authorization and a passing composite audit before paper evaluation.
+
+The composite audit and two-task repair configuration are now implemented. The first 12 pairs pass
+their sealed-subset audit and will not be rerun. To choose option (a), explicitly authorize the
+literal `I_AUTHORIZE_FRESH_CHEMCROW_14_PAIR_AFTER_USER_STOP`. That authorization will be written to
+`/home/lhy-h/work/chemcrowrun/manifests/CHEMCROW_14_DUPLICATE_AUTHORIZATION.json`, bound to prior
+claim SHA256 `bfa5d6f880bb0f8b1f0149ceef364c51e2a0fe2e290734e0ca3827078fcae40b`. Until then the file
+must remain absent and both repair preflight and composite audit remain blocked.
 
 How to verify readiness after decisions:
 
