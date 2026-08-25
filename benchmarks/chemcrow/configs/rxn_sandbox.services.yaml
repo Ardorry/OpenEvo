@@ -1,0 +1,65 @@
+name: chemcrow-rxn-sandbox
+
+services:
+  redis:
+    image: sha256:691577adaf11927f4bb8871d40a5dd69a5c300d4453b742e8f6383c3e6e8d2e1
+    command: ["redis-server", "--requirepass", "ubuntu"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "ubuntu", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  broker:
+    image: sha256:e582c0bc7766f3342496d8485efb5a1df782b5ce3886ad017e2eaae442311f69
+    environment:
+      RABBITMQ_DEFAULT_USER: ubuntu
+      RABBITMQ_DEFAULT_PASS: ubuntu
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  worker:
+    image: sha256:15ebc9fe49d38acab1acb85c112c492279e3efe7e66588242551062e3c1e2947
+    environment:
+      CELERY_QUEUE: product_prediction,retro_prediction
+      CELERY_BROKER_URL: amqp://ubuntu:ubuntu@broker:5672//
+      CELERY_RESULT_BACKEND: redis://:ubuntu@redis:6379/0
+      CELERY_CONCURRENCY: "1"
+      CELERY_MAX_TASKS_PER_CHILD: "1"
+      RXN_LOG_LEVEL: info
+      RXN_TORCH_NUM_THREADS: "2"
+    volumes:
+      - /home/lhy-h/work/chemcrowrun/vendor/rxn-sandbox/models:/app/models:ro
+      - /home/lhy-h/work/chemcrowrun/vendor/rxn-sandbox/vocab:/app/vocab:ro
+      - /home/lhy-h/work/chemcrowrun/vendor/rxn-sandbox/scripts:/app/scripts:ro
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      broker:
+        condition: service_healthy
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  mcp:
+    image: sha256:6e5f5709d3f167a3d375a3014ae853c67e8e7b5fa0801d45103128172a72ee99
+    environment:
+      CELERY_BROKER_URL: amqp://ubuntu:ubuntu@broker:5672//
+      CELERY_RESULT_BACKEND: redis://:ubuntu@redis:6379/0
+    ports:
+      - 127.0.0.1:8300:8000
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      broker:
+        condition: service_healthy
+      worker:
+        condition: service_started
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]

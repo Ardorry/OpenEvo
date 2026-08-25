@@ -67,3 +67,39 @@ def test_pair_cache_replays_only_inside_pair(tmp_path):
     assert replay.source == ObservationSource.CACHE_REPLAY
     assert second_pair.source == ObservationSource.LIVE
     assert calls == 2
+
+
+def test_local_rxn_uses_official_mcpo_payload_and_fails_closed(monkeypatch):
+    requests = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def fake_post(url, *, json, timeout):
+        requests.append((url, json, timeout))
+        return Response({"status": "success", "result": []})
+
+    monkeypatch.setattr("openevo_chemcrow.tools.httpx.post", fake_post)
+    monkeypatch.setenv("CHEMCROW_RXN_PREDICT_URL", "http://rxn/product_prediction")
+    monkeypatch.setenv("CHEMCROW_RXN_RETRO_URL", "http://rxn/retro_prediction")
+    registry = ChemCrowToolRegistry(network_enabled=True)
+    prediction = registry.execute("ReactionPredict", {"query": "CCO.O"}, call_id="forward")
+    retro = registry.execute("ReactionRetrosynthesis", {"query": "CCO"}, call_id="retro")
+    assert prediction.error is None and retro.error is None
+    assert requests[0][1]["reactants_list"] == ["CCO.O"]
+    assert requests[1][1]["product"] == "CCO"
+    assert requests[0][1]["device"] == requests[1][1]["device"] == "cpu"
+
+    monkeypatch.setattr(
+        "openevo_chemcrow.tools.httpx.post",
+        lambda *args, **kwargs: Response({"status": "error", "message": "worker unavailable"}),
+    )
+    failed = registry.execute("ReactionPredict", {"query": "CCO"}, call_id="failed")
+    assert "worker unavailable" in (failed.error or "")

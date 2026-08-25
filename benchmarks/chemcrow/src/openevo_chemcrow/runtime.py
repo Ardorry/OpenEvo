@@ -6,6 +6,14 @@ import uuid
 from typing import Any
 
 import httpx
+from openevo.runtime.codex_isolation import validate_codex_subscription_surface
+from openevo.runtime.managed import (
+    MANAGED_HOME,
+    MANAGED_PATH,
+    MANAGED_SUBSCRIPTION_PREPARE_COMMAND,
+    MANAGED_WORKSPACE,
+    require_immutable_managed_runtime_image,
+)
 
 from .hashing import canonical_sha256
 from .models import ObservationSource, TaskItem, ToolCall, ToolObservation, Trajectory
@@ -13,6 +21,52 @@ from .models import ObservationSource, TaskItem, ToolCall, ToolObservation, Traj
 
 class OpenEvoRolloutError(RuntimeError):
     pass
+
+
+CORE_MANAGED_CODEX_ROUTE = "openevo_core_rollout_gateway_managed_codex_v1"
+
+
+def assert_core_managed_codex_config(candidate: dict[str, Any]) -> None:
+    """Reject every Candidate/Reflector/Judge route that could bypass Core."""
+    runtime = candidate.get("runtime")
+    agent = candidate.get("agent")
+    builder = candidate.get("builder")
+    if not isinstance(runtime, dict) or not isinstance(agent, dict) or not isinstance(builder, dict):
+        raise TypeError(
+            "Codex execution requires explicit Core-managed runtime, agent, and builder configs"
+        )
+    if runtime.get("backend") != "docker" or runtime.get("container_user") != "host":
+        raise ValueError("Codex execution requires the OpenEvo Core managed Docker host-user runtime")
+    require_immutable_managed_runtime_image(
+        profile=runtime.get("profile"),
+        image=runtime.get("image"),
+    )
+    if runtime.get("import_path") is not None or runtime.get("kwargs") not in ({}, None):
+        raise ValueError("custom runtime loaders/options are forbidden for Core-managed Codex")
+    if runtime.get("workdir") != MANAGED_WORKSPACE:
+        raise ValueError("Codex execution requires the Core-managed workspace")
+    if runtime.get("env") != {"HOME": MANAGED_HOME, "PATH": MANAGED_PATH}:
+        raise ValueError("Codex execution requires the exact Core-managed runtime environment")
+    if runtime.get("prepare") != [
+        {"type": "exec", "command": MANAGED_SUBSCRIPTION_PREPARE_COMMAND}
+    ]:
+        raise ValueError("Codex execution requires the exact Core-managed prepare recipe")
+    if agent.get("harness") != "codex" or agent.get("import_path") is not None:
+        raise ValueError("Codex execution requires the native OpenEvo Codex harness")
+    if agent.get("custom_shell") is not None:
+        raise ValueError("custom shell execution is forbidden for Core-managed Codex")
+    if agent.get("mcp_servers") not in ([], None):
+        raise ValueError("Core-managed subscription Codex forbids caller-supplied MCP servers")
+    settings = agent.get("settings")
+    if not isinstance(settings, dict) or settings.get("auth_mode") != "subscription":
+        raise ValueError("Codex execution requires Core-managed subscription authentication")
+    validate_codex_subscription_surface(
+        settings=settings,
+        env=agent.get("env") or {},
+        mcp_servers=agent.get("mcp_servers") or [],
+    )
+    if builder.get("strategy") not in {"agent_transcript", "transcript", "pure_text"}:
+        raise ValueError("Core-managed Codex requires transcript capture")
 
 
 def s0_config_hash(candidate: dict[str, Any]) -> str:
@@ -36,6 +90,7 @@ def build_task_request(
     artifact_ids: list[str],
     mcp_url: str | None,
 ) -> dict[str, Any]:
+    assert_core_managed_codex_config(candidate)
     if role not in {"baseline", "evolved"}:
         raise ValueError("candidate role must be baseline or evolved")
     if role == "baseline" and artifact_ids:
@@ -43,27 +98,35 @@ def build_task_request(
     if role == "evolved" and len(artifact_ids) != 1:
         raise ValueError("evolved candidate requires exactly one task-local artifact")
     agent = json.loads(json.dumps(candidate["agent"]))
-    servers = list(agent.get("mcp_servers", []))
+    instruction = task.prompt
     if mcp_url:
-        servers.append(
-            {
-                "name": "chemcrow-tools",
-                "transport": "streamable-http",
-                "url": mcp_url,
-            }
+        tool_base_url = mcp_url.removesuffix("/mcp")
+        instruction = (
+            f"{task.prompt}\n\n"
+            "CHEMCROW TOOL ENVIRONMENT (observable benchmark evidence):\n"
+            f"Base URL: {tool_base_url}\n"
+            "Available tools: wikipedia, Name2SMILES, Mol2CAS, SMILES2Name, PatentCheck, "
+            "MolSimilarity, SMILES2Weight, FunctionalGroups, ExplosiveCheck, ControlChemCheck, "
+            "SimilarityToControlChem, SafetySummary, WebSearch, ReactionPredict, "
+            "ReactionRetrosynthesis.\n"
+            "Invoke a tool from the shell using exactly: curl -fsS -X POST "
+            "'<BASE_URL>/tool/<TOOL_NAME>' -H 'Content-Type: application/json' "
+            "--data '{\"query\":\"<QUERY>\"}'. Treat returned JSON as the tool observation. "
+            "Unavailable tools fail explicitly. Do not simulate tool results."
         )
-    agent["mcp_servers"] = servers
     metadata = json.loads(json.dumps(candidate.get("metadata", {})))
     metadata.update(
         {
             "run_id": run_id,
             "task_tags": ["chemcrow", task.broad_category, task.task_id],
             "evolution": {"context_artifact_ids": list(artifact_ids)},
+            "execution_route": CORE_MANAGED_CODEX_ROUTE,
+            "host_codex_exec_forbidden": True,
         }
     )
     return {
         "task_id": run_id,
-        "instruction": task.prompt,
+        "instruction": instruction,
         "num_samples": 1,
         "timeout_seconds": candidate.get("timeout_seconds", 900.0),
         "runtime": candidate.get("runtime"),
@@ -85,6 +148,7 @@ class OpenEvoRolloutPort:
         candidate: dict[str, Any],
         poll_seconds: float = 2.0,
     ) -> None:
+        assert_core_managed_codex_config(candidate)
         self.base_url = base_url.rstrip("/")
         self.candidate = json.loads(json.dumps(candidate))
         self.poll_seconds = poll_seconds
@@ -109,6 +173,7 @@ class OpenEvoRolloutPort:
             mcp_url=mcp_url,
         )
         started = time.monotonic()
+        tool_receipt_offset = self._tool_receipt_count(mcp_url)
         with httpx.Client(timeout=30.0) as client:
             response = client.post(f"{self.base_url}/rollout/task/submit", json=payload)
             response.raise_for_status()
@@ -129,7 +194,30 @@ class OpenEvoRolloutPort:
             artifact_ids=artifact_ids,
             config_sha256=self.config_sha256,
             wall_time=time.monotonic() - started,
+            tool_receipts=self._tool_receipts_since(mcp_url, tool_receipt_offset),
         )
+
+    @staticmethod
+    def _tool_receipt_count(mcp_url: str | None) -> int:
+        if not mcp_url:
+            return 0
+        response = httpx.get(mcp_url.removesuffix("/mcp") + "/receipts", timeout=5.0)
+        response.raise_for_status()
+        receipts = response.json().get("receipts", [])
+        if not isinstance(receipts, list):
+            raise OpenEvoRolloutError("ChemCrow tool receipt endpoint returned invalid data")
+        return len(receipts)
+
+    @staticmethod
+    def _tool_receipts_since(mcp_url: str | None, offset: int) -> list[dict[str, Any]]:
+        if not mcp_url:
+            return []
+        response = httpx.get(mcp_url.removesuffix("/mcp") + "/receipts", timeout=5.0)
+        response.raise_for_status()
+        receipts = response.json().get("receipts", [])
+        if not isinstance(receipts, list) or offset > len(receipts):
+            raise OpenEvoRolloutError("ChemCrow tool receipt stream regressed or is invalid")
+        return [item for item in receipts[offset:] if isinstance(item, dict)]
 
 
 def _message_content(message: dict[str, Any]) -> str:
@@ -153,6 +241,7 @@ def _normalize_rollout(
     artifact_ids: list[str],
     config_sha256: str,
     wall_time: float,
+    tool_receipts: list[dict[str, Any]] | None = None,
 ) -> Trajectory:
     results = payload.get("results")
     if not isinstance(results, list) or len(results) != 1 or not isinstance(results[0], dict):
@@ -217,6 +306,20 @@ def _normalize_rollout(
     if status_value not in {"COMPLETED", "ERROR", "TIMEOUT"}:
         status_value = "ERROR"
     metadata = trajectory.get("metadata") if isinstance(trajectory.get("metadata"), dict) else {}
+    for receipt in tool_receipts or []:
+        arguments = receipt.get("arguments")
+        raw_observation = receipt.get("observation")
+        if not isinstance(arguments, dict) or not isinstance(raw_observation, dict):
+            raise OpenEvoRolloutError("ChemCrow tool receipt is malformed")
+        observation = ToolObservation.model_validate(raw_observation)
+        tool_calls.append(
+            ToolCall(
+                call_id=observation.call_id,
+                tool_name=observation.tool_name,
+                arguments=arguments,
+            )
+        )
+        observations.append(observation)
     return Trajectory(
         run_id=run_id,
         task_id=task_id,

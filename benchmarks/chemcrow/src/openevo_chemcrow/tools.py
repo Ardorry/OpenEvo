@@ -293,8 +293,8 @@ TOOL_INVENTORY: tuple[dict[str, Any], ...] = (
         "paper_only_absent": False,
         "safe": True,
         "human_setup": True,
-        "status": "blocked until hosted credentials or a verified local service exist",
-        "failure_reason": "legacy Docker image is unavailable locally and registry manifest lookup failed",
+        "status": "local RXN-Sandbox service passed endpoint and forward-prediction smoke",
+        "failure_reason": None,
     },
     {
         "name": "ReactionRetrosynthesis",
@@ -309,8 +309,8 @@ TOOL_INVENTORY: tuple[dict[str, Any], ...] = (
         "paper_only_absent": False,
         "safe": True,
         "human_setup": True,
-        "status": "blocked until hosted credentials or a verified local service exist",
-        "failure_reason": "legacy local route embeds an obsolete hidden GPT summarizer and old images are unavailable",
+        "status": "local RXN-Sandbox service passed endpoint and single-step retro smoke",
+        "failure_reason": None,
     },
     {
         "name": "paper-only restricted tools",
@@ -637,21 +637,45 @@ class ChemCrowToolRegistry:
         _molecule(query)
         url = os.environ.get("CHEMCROW_RXN_PREDICT_URL")
         if url:
-            return self._post_local_rxn(url, query)
+            return self._post_local_rxn(url, query, retrosynthesis=False)
         return self._hosted_rxn(query, retrosynthesis=False)
 
     def _reaction_retrosynthesis(self, query: str) -> Any:
         _molecule(query)
         url = os.environ.get("CHEMCROW_RXN_RETRO_URL")
         if url:
-            return self._post_local_rxn(url, query)
+            return self._post_local_rxn(url, query, retrosynthesis=True)
         return self._hosted_rxn(query, retrosynthesis=True)
 
-    def _post_local_rxn(self, url: str, query: str) -> Any:
+    def _post_local_rxn(self, url: str, query: str, *, retrosynthesis: bool) -> Any:
         self._require_network()
-        response = httpx.post(url, json={"smiles": query}, timeout=self.timeout_seconds)
+        payload: dict[str, Any]
+        if retrosynthesis:
+            payload = {
+                "product": query,
+                "topn": 3,
+                "num_beams": 3,
+                "fap": 0.6,
+                "fld": 0.2,
+                "device": "cpu",
+            }
+        else:
+            payload = {
+                "reactants_list": [query],
+                "topn": 3,
+                "num_beams": 3,
+                "device": "cpu",
+            }
+        timeout = float(os.environ.get("CHEMCROW_RXN_TIMEOUT_SECONDS", "660"))
+        response = httpx.post(url, json=payload, timeout=timeout)
         response.raise_for_status()
-        return response.json()
+        result = response.json()
+        if not isinstance(result, dict):
+            raise TypeError("local RXN returned a non-object JSON payload")
+        if result.get("status") != "success":
+            detail = result.get("message", result.get("detail", "unknown RXN failure"))
+            raise RuntimeError(f"local RXN status={result.get('status')!r}: {detail}")
+        return result
 
     def _hosted_rxn(self, query: str, *, retrosynthesis: bool) -> Any:
         key = os.environ.get("RXN4CHEM_API_KEY")

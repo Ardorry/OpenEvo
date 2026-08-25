@@ -9,7 +9,9 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
+import httpx
 import yaml
 
 from .aggregate import aggregate_results
@@ -19,7 +21,13 @@ from .ledger import AmbiguousPhaseClaimError, PhaseLedger
 from .models import ArtifactKind, FeedbackMode, PairResult, TaskItem
 from .native_evolution import NativeEvolutionEngine
 from .protocol import TaskLocalProtocolRunner
-from .runtime import OpenEvoRolloutPort, build_task_request, s0_config_hash
+from .runtime import (
+    CORE_MANAGED_CODEX_ROUTE,
+    OpenEvoRolloutPort,
+    assert_core_managed_codex_config,
+    build_task_request,
+    s0_config_hash,
+)
 from .tasks import extract_safety_demonstrations, extract_scored_tasks, write_jsonl
 from .tool_service import PairToolService
 from .tools import TOOL_INVENTORY, ChemCrowToolRegistry, environment_presence
@@ -156,6 +164,16 @@ def command_preflight(args: argparse.Namespace) -> int:
     unknown = sorted(set(selected) - set(ids))
     env_names = sorted(_env_names(config))
     candidate = config["candidate"]
+    role_configs = {
+        role: config[role]
+        for role in ("candidate", "reflector", "evolution_evaluator", "final_evaluator")
+    }
+    core_route_error = None
+    try:
+        for role_config in role_configs.values():
+            assert_core_managed_codex_config(role_config)
+    except ValueError as exc:
+        core_route_error = str(exc)
     s0_hash = s0_config_hash(candidate)
     baseline_request = build_task_request(
         task=items[0], run_id="preflight-baseline", role="baseline", candidate=candidate, artifact_ids=[], mcp_url="http://127.0.0.1:9/mcp"
@@ -170,6 +188,8 @@ def command_preflight(args: argparse.Namespace) -> int:
         and baseline_request["instruction"] == evolved_request["instruction"]
     )
     docker_ok = False
+    managed_image_ok = False
+    managed_image_id = None
     if shutil.which("docker"):
         check = subprocess.run(
             ["docker", "info", "--format", "{{.ServerVersion}}"],
@@ -179,6 +199,73 @@ def command_preflight(args: argparse.Namespace) -> int:
             check=False,
         )
         docker_ok = check.returncode == 0
+        if docker_ok:
+            image_check = subprocess.run(
+                [
+                    "docker",
+                    "image",
+                    "inspect",
+                    str(candidate["runtime"]["image"]),
+                    "--format",
+                    '{{.Id}}|{{index .Config.Labels "io.openevo.managed-runtime"}}',
+                ],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+            image_parts = image_check.stdout.strip().split("|", 1)
+            managed_image_ok = (
+                image_check.returncode == 0
+                and len(image_parts) == 2
+                and image_parts[0] == candidate["runtime"]["image"]
+                and image_parts[1] == "true"
+            )
+            managed_image_id = image_parts[0] if image_parts and image_parts[0] else None
+    core_health: dict[str, Any] = {"reachable": False, "healthy_nodes": 0}
+    rollout_url = os.environ.get("OPENEVO_ROLLOUT_BASE_URL")
+    if rollout_url:
+        try:
+            health = httpx.get(rollout_url.rstrip("/") + "/health", timeout=5.0)
+            nodes = httpx.get(rollout_url.rstrip("/") + "/nodes", timeout=5.0)
+            health.raise_for_status()
+            nodes.raise_for_status()
+            node_payload = nodes.json()
+            core_health = {
+                "reachable": health.json().get("status") == "ok",
+                "registered_nodes": len(node_payload) if isinstance(node_payload, list) else 0,
+                "healthy_nodes": (
+                    sum(bool(item.get("healthy")) for item in node_payload)
+                    if isinstance(node_payload, list)
+                    else 0
+                ),
+            }
+        except (httpx.HTTPError, TypeError, ValueError):
+            pass
+    rxn_health: dict[str, Any] = {"configured": False, "reachable": False, "paths": []}
+    rxn_url = os.environ.get("CHEMCROW_RXN_PREDICT_URL")
+    if rxn_url:
+        rxn_health["configured"] = True
+        parsed = urlsplit(rxn_url)
+        openapi_url = urlunsplit((parsed.scheme, parsed.netloc, "/openapi.json", "", ""))
+        try:
+            response = httpx.get(openapi_url, timeout=5.0)
+            response.raise_for_status()
+            paths = response.json().get("paths", {})
+            rxn_health = {
+                "configured": True,
+                "reachable": isinstance(paths, dict),
+                "paths": sorted(paths) if isinstance(paths, dict) else [],
+            }
+        except (httpx.HTTPError, TypeError, ValueError):
+            pass
+    codex_auth = Path.home() / ".codex" / "auth.json"
+    codex_auth_metadata = {
+        "credential_name": "Codex subscription auth.json",
+        "present": codex_auth.is_file(),
+        "mode": oct(codex_auth.stat().st_mode & 0o777) if codex_auth.is_file() else None,
+        "owner_uid": codex_auth.stat().st_uid if codex_auth.is_file() else None,
+    }
     checks = {
         "no_model_calls": True,
         "unknown_selected_task_ids": unknown,
@@ -193,7 +280,15 @@ def command_preflight(args: argparse.Namespace) -> int:
         "rdkit_importable": importlib.util.find_spec("rdkit") is not None,
         "mcp_importable": importlib.util.find_spec("mcp") is not None,
         "docker_server_ready": docker_ok,
-        "candidate_runtime_image_bound": "HUMAN_ACTION_REQUIRED" not in json.dumps(candidate),
+        "candidate_runtime_image_bound": managed_image_ok,
+        "managed_runtime_image_id": managed_image_id,
+        "all_codex_roles_core_managed": core_route_error is None,
+        "codex_execution_route": CORE_MANAGED_CODEX_ROUTE,
+        "host_codex_exec_forbidden": True,
+        "core_route_error": core_route_error,
+        "openevo_core_health": core_health,
+        "local_rxn_health": rxn_health,
+        "model_authentication": codex_auth_metadata,
         "required_environment_presence": environment_presence(env_names),
     }
     ready_for_model_calls = (
@@ -205,6 +300,10 @@ def command_preflight(args: argparse.Namespace) -> int:
         and checks["mcp_importable"]
         and docker_ok
         and checks["candidate_runtime_image_bound"]
+        and checks["all_codex_roles_core_managed"]
+        and core_health["reachable"]
+        and core_health["healthy_nodes"] > 0
+        and codex_auth_metadata["present"]
         and all(checks["required_environment_presence"].values())
     )
     payload = {
@@ -251,10 +350,11 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
     candidate = OpenEvoRolloutPort(base_url=str(config["rollout_base_url"]), candidate=config["candidate"])
     evolution_eval_port = OpenEvoRolloutPort(base_url=str(config["rollout_base_url"]), candidate=config["evolution_evaluator"])
     final_eval_port = OpenEvoRolloutPort(base_url=str(config["rollout_base_url"]), candidate=config["final_evaluator"])
+    reflector_port = OpenEvoRolloutPort(base_url=str(config["rollout_base_url"]), candidate=config["reflector"])
     evolution = NativeEvolutionEngine(
         run_root=run_root,
         artifact_kind=ArtifactKind(config["artifact_type"]),
-        reflector_config=config["reflector"],
+        reflector_rollout=reflector_port,
     )
     runner = TaskLocalProtocolRunner(
         run_root=run_root,

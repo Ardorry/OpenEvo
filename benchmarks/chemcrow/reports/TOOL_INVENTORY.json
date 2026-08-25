@@ -318,7 +318,7 @@
         "RXN4CHEM_PROJECT_ID",
         "CHEMCROW_RXN_PREDICT_URL"
       ],
-      "failure_reason": "legacy Docker image is unavailable locally and registry manifest lookup failed",
+      "failure_reason": null,
       "human_setup": true,
       "import_path": "chemcrow.tools.rxn4chem.RXNPredict or chemcrow.tools.reactions.RXNPredictLocal",
       "local_network": "hosted API or local service",
@@ -327,7 +327,7 @@
       "purpose": "forward reaction prediction",
       "safe": true,
       "service": "IBM RXN or RXN-Sandbox/local endpoint",
-      "status": "blocked until hosted credentials or a verified local service exist"
+      "status": "local RXN-Sandbox service passed endpoint and forward-prediction smoke"
     },
     {
       "class": "C/D",
@@ -341,7 +341,7 @@
         "RXN4CHEM_PROJECT_ID",
         "CHEMCROW_RXN_RETRO_URL"
       ],
-      "failure_reason": "legacy local route embeds an obsolete hidden GPT summarizer and old images are unavailable",
+      "failure_reason": null,
       "human_setup": true,
       "import_path": "chemcrow.tools.rxn4chem.RXNRetrosynthesis or chemcrow.tools.reactions.RXNRetrosynthesisLocal",
       "local_network": "hosted API or local service",
@@ -350,7 +350,7 @@
       "purpose": "retrosynthetic route prediction",
       "safe": true,
       "service": "IBM RXN or RXN-Sandbox/local endpoint",
-      "status": "blocked until hosted credentials or a verified local service exist"
+      "status": "local RXN-Sandbox service passed endpoint and single-step retro smoke"
     },
     {
       "class": "E",
