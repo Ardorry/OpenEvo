@@ -17,5 +17,7 @@
     "chemcrow-06"
   ],
   "maximum_paid_pairs": 3,
-  "authorization_status": "NOT_AUTHORIZED"
+  "authorization_status": "AUTHORIZED_BY_USER",
+  "authorization_recorded_at_utc": "2026-08-25T02:24:53Z",
+  "authorization_scope": "fixed_three_task_paid_preflight_only_before_full_run_review"
 }
