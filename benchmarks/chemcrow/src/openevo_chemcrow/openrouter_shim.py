@@ -128,6 +128,13 @@ def create_openrouter_shim_app(
         upstream_payload = dict(incoming)
         for field in _CORE_INJECTED_FIELDS:
             upstream_payload.pop(field, None)
+        # Legacy first-party OpenAI GPT-4 does not accept the Chat Completions
+        # ``json_object`` transport parameter.  The internal contract above
+        # still requires and hashes that exact field; only the already-claimed
+        # transport copy is adapted for the pinned upstream model.  Strict JSON
+        # parsing and DualStudentAssessment validation remain downstream and
+        # fail closed without a retry.
+        upstream_payload.pop("response_format", None)
         upstream_payload["provider"] = {
             "only": [PAPER_EVALUATOR_PROVIDER],
             "allow_fallbacks": False,
@@ -301,6 +308,8 @@ def _success_receipt(
         "provider_only": [PAPER_EVALUATOR_PROVIDER],
         "require_parameters": True,
         "data_collection": PAPER_EVALUATOR_DATA_COLLECTION,
+        "internal_response_format_validated": True,
+        "upstream_response_format_omitted": True,
     }
 
 
@@ -324,6 +333,8 @@ def _write_failure_receipt(
             "completed_at": datetime.now(UTC).isoformat(),
             "prompt_or_response_included": False,
             "credential_included": False,
+            "internal_response_format_validated": True,
+            "upstream_response_format_omitted": True,
             **safe_metadata,
         },
     )
@@ -423,11 +434,10 @@ def main(argv: list[str] | None = None) -> None:
         or plan.get("call_count") != PAPER_EVALUATOR_CALL_COUNT
     ):
         raise SystemExit("paper evaluator plan authority is invalid")
-    allowed = {
-        str(call["call_id"]): str(call["prompt_sha256"])
-        for call in plan.get("calls", [])
-        if isinstance(call, dict)
-    }
+    from .paper_evaluator import PaperEvaluationCall
+
+    validated_calls = [PaperEvaluationCall.model_validate(call) for call in plan.get("calls", [])]
+    allowed = {call.call_id: call.prompt_sha256 for call in validated_calls}
     if len(allowed) != PAPER_EVALUATOR_CALL_COUNT:
         raise SystemExit("paper evaluator plan allowlist is incomplete")
     configured_budget = float(os.environ.get("CHEMCROW_PAPER_EVALUATOR_MAX_USD", "0"))

@@ -80,13 +80,20 @@ async def test_openrouter_shim_pins_route_and_writes_value_free_receipt(tmp_path
         "require_parameters": True,
         "data_collection": "allow",
     }
+    assert "response_format" not in observed["payload"]
     assert "return_token_ids" not in observed["payload"]
+    claim = json.loads(
+        (receipt_root / "paper-chemcrow-01-baseline.claim.json").read_text()
+    )
+    assert claim["request_sha256"] == canonical_sha256(request)
     receipt_text = (receipt_root / "paper-chemcrow-01-baseline.receipt.json").read_text()
     assert "DO_NOT_PERSIST_THIS_KEY" not in receipt_text
     assert "PRIVATE PROMPT" not in receipt_text
     receipt = json.loads(receipt_text)
     assert receipt["provider"] == "OpenAI"
     assert receipt["list_price_cost_usd"] == 0.006
+    assert receipt["internal_response_format_validated"] is True
+    assert receipt["upstream_response_format_omitted"] is True
 
 
 @pytest.mark.asyncio
@@ -154,6 +161,8 @@ async def test_openrouter_shim_seals_sanitized_upstream_failure_metadata(tmp_pat
     assert receipt["upstream_error_message_sha256"] == canonical_sha256(sensitive_message)
     assert receipt["upstream_response_body_included"] is False
     assert receipt["openrouter_metadata_body_included"] is False
+    assert receipt["internal_response_format_validated"] is True
+    assert receipt["upstream_response_format_omitted"] is True
 
 
 @pytest.mark.asyncio

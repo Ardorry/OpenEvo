@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -12,8 +11,8 @@ from openevo_chemcrow.composite import (
     validate_duplicate_authorization_receipt,
     validate_repair_execution_parity,
 )
-from openevo_chemcrow.hashing import file_sha256
-from openevo_chemcrow.models import TaskItem
+from openevo_chemcrow.hashing import canonical_sha256, file_sha256
+from openevo_chemcrow.models import TaskItem, Trajectory
 from openevo_chemcrow.paper_core import PAPER_CORE_ROUTE, build_paper_task_request
 from openevo_chemcrow.paper_evaluator import (
     FROZEN_PAPER_TASK_IDS,
@@ -29,6 +28,7 @@ from openevo_chemcrow.paper_evaluator import (
     validate_assessment_text,
 )
 from openevo_chemcrow.paper_harness import PaperEvaluatorHarness
+from openevo_chemcrow.three_artifact_models import ThreeArtifactPairResult
 
 
 def _tasks() -> list[TaskItem]:
@@ -58,9 +58,26 @@ def test_historical_grades_are_separate_post_judge_drift_metadata(runs_root):
 def test_plan_has_exactly_three_fixed_comparisons_per_task(runs_root):
     tasks = _tasks()
     pairs = {
-        task.task_id: SimpleNamespace(
-            baseline=SimpleNamespace(answer=f"sealed baseline {task.task_id}"),
-            evolved=SimpleNamespace(answer=f"sealed evolved {task.task_id}"),
+        task.task_id: ThreeArtifactPairResult.model_construct(
+            task_id=task.task_id,
+            pair_id=f"test-full-v4--{task.task_id}",
+            baseline=Trajectory(
+                run_id=f"baseline-{task.task_id}",
+                task_id=task.task_id,
+                role="baseline",
+                status="COMPLETED",
+                answer=f"sealed baseline {task.task_id}",
+                candidate_config_sha256="s0",
+            ),
+            evolved=Trajectory(
+                run_id=f"evolved-{task.task_id}",
+                task_id=task.task_id,
+                role="evolved",
+                status="COMPLETED",
+                answer=f"sealed evolved {task.task_id}",
+                candidate_config_sha256="s0",
+                artifact_ids=["memory", "skill", "agent-system"],
+            ),
         )
         for task in tasks
     }
@@ -74,6 +91,7 @@ def test_plan_has_exactly_three_fixed_comparisons_per_task(runs_root):
     assert plan["call_count"] == PAPER_EVALUATOR_CALL_COUNT == 42
     assert plan["reflector_access"] is False
     assert plan["sealed_output_only"] is True
+    assert plan["source_pair_protocol"] == "chemcrow-three-isolated-artifacts-v1"
     assert plan["provider_only"] == ["openai"]
     assert plan["data_collection"] == "allow"
     assert {call["comparison"] for call in plan["calls"]} == {
@@ -82,6 +100,20 @@ def test_plan_has_exactly_three_fixed_comparisons_per_task(runs_root):
         "evolved",
     }
     assert max(call["estimated_input_tokens"] for call in plan["calls"]) <= 6991
+    assert all(call["prompt_sha256"] for call in plan["calls"])
+    assert all(call["source_output_id"] for call in plan["calls"])
+    assert all(call["source_output_sha256"] for call in plan["calls"])
+
+
+def test_paper_plan_rejects_legacy_single_artifact_pairs(runs_root):
+    tasks = _tasks()
+    legacy_pairs = {task.task_id: object() for task in tasks}
+    with pytest.raises(TypeError, match="legacy single-artifact"):
+        build_paper_evaluation_plan(
+            tasks=tasks,
+            pairs=legacy_pairs,  # type: ignore[arg-type]
+            historical=extract_historical_answers(runs_root=runs_root),
+        )
 
 
 def test_exact_context_list_price_ceiling_is_frozen():
@@ -130,6 +162,14 @@ def test_strict_paper_assessment_schema():
     assert assessment.student_a.grade == 8.5
     with pytest.raises(ValueError, match="Markdown fence"):
         validate_assessment_text("```json\n{}\n```")
+    with pytest.raises(ValueError):
+        validate_assessment_text("not JSON")
+    with pytest.raises(ValueError):
+        validate_assessment_text('{"student_a":{},"student_b":{}}')
+    invalid_grade = assessment.model_dump(mode="json")
+    invalid_grade["student_a"]["grade"] = 10.1
+    with pytest.raises(ValueError):
+        validate_assessment_text(json.dumps(invalid_grade))
 
 
 def test_paper_harness_routes_only_through_core_gateway():
@@ -161,11 +201,17 @@ def test_paper_core_request_has_no_reflector_or_evolution_context():
         comparison="baseline",
         student_a_system="openevo_baseline",
         prompt="sealed prompt",
-        prompt_sha256="a" * 64,
+        prompt_sha256=canonical_sha256("sealed prompt"),
+        source_pair_id="pair-1",
+        source_pair_result_sha256="b" * 64,
+        source_output_id="baseline-1",
+        source_output_sha256="c" * 64,
         historical_source_sha256="b" * 64,
         target_answer_sha256="c" * 64,
         historical_gpt4_answer_sha256="d" * 64,
         estimated_input_tokens=100,
+        metric_classification="project_added_openevo_metric",
+        paper_comparable=False,
     )
     request = build_paper_task_request(
         call=call,

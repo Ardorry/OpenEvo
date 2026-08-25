@@ -239,6 +239,8 @@ def _validate_plan_authority(plan: dict[str, Any]) -> None:
         or plan.get("call_count") != PAPER_EVALUATOR_CALL_COUNT
         or plan.get("reflector_access") is not False
         or plan.get("sealed_output_only") is not True
+        or plan.get("source_pair_protocol")
+        != "chemcrow-three-isolated-artifacts-v1"
     ):
         raise ValueError("paper evaluator plan authority is invalid")
 

@@ -34,10 +34,10 @@ from .paper_evaluator import (
     render_compatible_prompt,
 )
 
-PAPER_SMOKE_AUTHORIZATION = "I_AUTHORIZE_ONE_CORE_PAPER_GPT4_SMOKE_V3_20260825"
-PAPER_SMOKE_CALL_ID = "paper-chemcrow-smoke-core-v3"
-PAPER_SMOKE_SCHEMA = "chemcrow_paper_evaluator_paid_smoke_v3"
-PAPER_SMOKE_CONFIG_SCHEMA = "chemcrow_paper_evaluator_smoke_config_v3"
+PAPER_SMOKE_AUTHORIZATION = "I_AUTHORIZE_ONE_CORE_PAPER_GPT4_SMOKE_V4_20260825"
+PAPER_SMOKE_CALL_ID = "paper-chemcrow-smoke-core-v4"
+PAPER_SMOKE_SCHEMA = "chemcrow_paper_evaluator_paid_smoke_v4"
+PAPER_SMOKE_CONFIG_SCHEMA = "chemcrow_paper_evaluator_smoke_config_v4"
 
 
 def build_smoke_call() -> PaperEvaluationCall:
@@ -56,10 +56,16 @@ def build_smoke_call() -> PaperEvaluationCall:
         student_a_system="historical_chemcrow",
         prompt=prompt,
         prompt_sha256=canonical_sha256(prompt),
+        source_pair_id="test-only:paper-smoke-v4",
+        source_pair_result_sha256="0" * 64,
+        source_output_id="test-only:student-a",
+        source_output_sha256=canonical_sha256("Water has molecular formula H2O."),
         historical_source_sha256="0" * 64,
         target_answer_sha256=canonical_sha256("Water has molecular formula H2O."),
         historical_gpt4_answer_sha256=canonical_sha256("The molecular formula of water is H2O."),
         estimated_input_tokens=estimate_chat_input_tokens(prompt),
+        metric_classification="paper_control_reconstruction",
+        paper_comparable=True,
     )
 
 
@@ -163,6 +169,14 @@ def run_paid_smoke(
         "data_collection": receipt["data_collection"],
         "upstream_http_status": receipt["upstream_http_status"],
         "schema_valid": True,
+        "json_parse_valid": True,
+        "pydantic_assessment_valid": True,
+        "internal_response_format_validated": receipt[
+            "internal_response_format_validated"
+        ],
+        "upstream_response_format_omitted": receipt[
+            "upstream_response_format_omitted"
+        ],
         "request_prompt_sha256": call.prompt_sha256,
         "response_assessment_sha256": canonical_sha256(assessment.model_dump(mode="json")),
         "usage": {
@@ -261,6 +275,14 @@ def seal_failed_smoke_attempt(
         "upstream_response_sha256": receipt.get("upstream_response_sha256"),
         "upstream_response_body_included": False,
         "schema_valid": False,
+        "json_parse_valid": False,
+        "pydantic_assessment_valid": False,
+        "internal_response_format_validated": receipt.get(
+            "internal_response_format_validated"
+        ),
+        "upstream_response_format_omitted": receipt.get(
+            "upstream_response_format_omitted"
+        ),
         "usage_metadata_present": False,
         "estimated_cost_usd": None,
         "billing_status": "NO_USAGE_RECEIPT_UPSTREAM_FAILURE; billing not proven",
@@ -344,7 +366,7 @@ def main(argv: list[str] | None = None) -> None:
         return
     config = json.loads(args.config.resolve().read_text(encoding="utf-8"))
     if config.get("schema_version") != PAPER_SMOKE_CONFIG_SCHEMA:
-        raise SystemExit("paper smoke config is not the frozen v3 schema")
+        raise SystemExit("paper smoke config is not the frozen v4 schema")
     if args.command == "seal-failure":
         result = seal_failed_smoke_attempt(
             receipt_root=Path(str(config["receipt_root"])).resolve(),

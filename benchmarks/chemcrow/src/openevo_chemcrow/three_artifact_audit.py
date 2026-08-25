@@ -35,6 +35,9 @@ def audit_three_artifact_run(
         raise ValueError("audit task inventory must be non-empty and unique")
     seen_artifact_ids: set[str] = set()
     source_counts: dict[str, int] = {}
+    artifact_type_counts: dict[str, int] = {}
+    sibling_isolation_evidence_count = 0
+    reset_receipt_count = 0
     tool_calls = 0
     tool_errors = 0
     for task_id in task_ids:
@@ -53,6 +56,10 @@ def audit_three_artifact_run(
         if [item.artifact_type for item in artifacts] != list(THREE_ARTIFACT_ORDER):
             raise ValueError(f"typed artifact inventory differs: {pair_id}")
         ids = [item.artifact_id for item in artifacts]
+        for item in artifacts:
+            artifact_type_counts[item.artifact_type.value] = (
+                artifact_type_counts.get(item.artifact_type.value, 0) + 1
+            )
         if seen_artifact_ids.intersection(ids):
             raise ValueError(f"cross-task artifact reuse: {pair_id}")
         seen_artifact_ids.update(ids)
@@ -107,6 +114,7 @@ def audit_three_artifact_run(
             )
         ):
             raise ValueError(f"three-artifact reset is incomplete: {pair_id}")
+        reset_receipt_count += 1
 
         claims_root = run_root / "claims" / pair_id
         claims = {path.stem: path for path in claims_root.glob("*.json")}
@@ -133,6 +141,7 @@ def audit_three_artifact_run(
                     raise ValueError(f"Reflector leakage receipt missing: {pair_id}/{phase}")
                 if authority.get("sibling_artifact_ids") != []:
                     raise ValueError(f"Reflector saw sibling artifact IDs: {pair_id}/{phase}")
+                sibling_isolation_evidence_count += 1
         if (
             evaluator_ids["baseline_internal_evaluator"]
             != evaluator_ids["evolved_internal_evaluator"]
@@ -141,16 +150,20 @@ def audit_three_artifact_run(
         if evaluator_ids["baseline_internal_evaluator"] == evaluator_ids["final_evaluator"]:
             raise ValueError(f"internal/final evaluator separation failed: {pair_id}")
 
-        _audit_core_completion(
+        baseline_receipt_hash = _audit_core_completion(
             core_completion_root=core_completion_root,
             run_id=result.baseline.run_id,
             expected_by_type={},
         )
-        _audit_core_completion(
+        if baseline_receipt_hash is not None:
+            raise ValueError(f"baseline unexpectedly returned an injection receipt: {pair_id}")
+        evolved_receipt_hash = _audit_core_completion(
             core_completion_root=core_completion_root,
             run_id=result.evolved.run_id,
             expected_by_type={item.artifact_type.value: item.artifact_id for item in artifacts},
         )
+        if evolved_receipt_hash != result.injection_receipt.receipt_sha256:
+            raise ValueError(f"Core injection receipt hash differs from pair seal: {pair_id}")
         for run in (result.baseline, result.evolved):
             if len(run.tool_calls) != len(run.observations):
                 raise ValueError(f"tool call/observation mismatch: {run.run_id}")
@@ -184,7 +197,20 @@ def audit_three_artifact_run(
         "s0_config_sha256": expected_s0_hash,
         "unique_artifact_count": len(seen_artifact_ids),
         "independent_reflector_job_count": len(seen_artifact_ids),
+        "artifact_type_counts": dict(sorted(artifact_type_counts.items())),
+        "memory_reflector_job_count": artifact_type_counts.get(
+            ArtifactKind.TEXT_MEMORY.value, 0
+        ),
+        "skill_reflector_job_count": artifact_type_counts.get(
+            ArtifactKind.SKILL_BUNDLE.value, 0
+        ),
+        "agent_system_reflector_job_count": artifact_type_counts.get(
+            ArtifactKind.AGENT_SYSTEM.value, 0
+        ),
+        "artifact_registration_count": len(seen_artifact_ids),
+        "sibling_isolation_evidence_count": sibling_isolation_evidence_count,
         "core_evolved_injection_receipt_count": len(task_ids),
+        "reset_receipt_count": reset_receipt_count,
         "tool_calls": tool_calls,
         "tool_errors": tool_errors,
         "observation_source_counts": dict(sorted(source_counts.items())),
@@ -205,7 +231,7 @@ def _audit_core_completion(
     core_completion_root: Path,
     run_id: str,
     expected_by_type: dict[str, str],
-) -> None:
+) -> str | None:
     matches = list(core_completion_root.glob(f"task_{run_id}/*.json"))
     if len(matches) != 1:
         raise ValueError(f"Core completion authority is not unique: {run_id}")
@@ -222,7 +248,7 @@ def _audit_core_completion(
     if not expected_by_type:
         if evolution.get("context_artifact_ids") != [] or receipt is not None:
             raise ValueError(f"baseline Core context was not bare S0: {run_id}")
-        return
+        return None
     if evolution.get("context_injected") is not True or not isinstance(receipt, dict):
         raise ValueError(f"Core injection receipt is missing: {run_id}")
     artifacts = receipt.get("artifacts")
@@ -239,3 +265,4 @@ def _audit_core_completion(
         ArtifactKind.AGENT_SYSTEM.value,
     }:
         raise ValueError(f"Core artifact type mapping differs: {run_id}")
+    return canonical_sha256(receipt)

@@ -46,14 +46,14 @@ def test_smoke_call_is_separate_from_formal_42_call_inventory():
     }
 
 
-@pytest.mark.parametrize("version", ("v1", "v2"))
-def test_historical_smoke_config_cannot_launch_v3_call(tmp_path, version):
+@pytest.mark.parametrize("version", ("v1", "v2", "v3"))
+def test_historical_smoke_config_cannot_launch_v4_call(tmp_path, version):
     config = tmp_path / f"{version}.json"
     config.write_text(
         json.dumps({"schema_version": f"chemcrow_paper_evaluator_smoke_config_{version}"}),
         encoding="utf-8",
     )
-    with pytest.raises(SystemExit, match="not the frozen v3 schema"):
+    with pytest.raises(SystemExit, match="not the frozen v4 schema"):
         main(
             [
                 "run",
@@ -103,6 +103,8 @@ def test_paid_smoke_seals_hash_only_report_and_removes_raw_completion(monkeypatc
         "list_price_cost_usd": 0.006,
         "openrouter_reported_cost_usd": 0.006,
         "completed_at": "2026-08-25T00:00:00+00:00",
+        "internal_response_format_validated": True,
+        "upstream_response_format_omitted": True,
     }
 
     monkeypatch.setenv("CHEMCROW_PAPER_SMOKE_AUTHORIZATION", PAPER_SMOKE_AUTHORIZATION)
@@ -136,6 +138,10 @@ def test_paid_smoke_seals_hash_only_report_and_removes_raw_completion(monkeypatc
     assert result["paid_model_calls"] == 1
     assert result["included_in_formal_42_call_ledger"] is False
     assert result["raw_core_completion_retained"] is False
+    assert result["json_parse_valid"] is True
+    assert result["pydantic_assessment_valid"] is True
+    assert result["internal_response_format_validated"] is True
+    assert result["upstream_response_format_omitted"] is True
     assert not completion.exists()
     text = output.read_text(encoding="utf-8")
     assert "CORE BODY MUST NOT REMAIN" not in text
@@ -207,6 +213,8 @@ def test_paid_smoke_seals_terminal_upstream_failure_without_assessment(monkeypat
                     "upstream_error_category": "other_upstream_error",
                     "upstream_error_message_sha256": "b" * 64,
                     "upstream_response_sha256": "c" * 64,
+                    "internal_response_format_validated": True,
+                    "upstream_response_format_omitted": True,
                 }
             ),
             encoding="utf-8",

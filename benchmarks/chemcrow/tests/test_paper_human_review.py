@@ -16,6 +16,7 @@ from openevo_chemcrow.paper_human_review import (
     validate_paper_human_review_response,
     write_paper_human_review_bundle,
 )
+from openevo_chemcrow.three_artifact_models import ThreeArtifactPairResult
 
 
 def _tasks() -> list[TaskItem]:
@@ -23,9 +24,11 @@ def _tasks() -> list[TaskItem]:
     return [TaskItem.model_validate_json(line) for line in path.read_text().splitlines()]
 
 
-def _pairs(tasks: list[TaskItem]) -> dict[str, SimpleNamespace]:
+def _pairs(tasks: list[TaskItem]) -> dict[str, ThreeArtifactPairResult]:
     return {
-        task.task_id: SimpleNamespace(
+        task.task_id: ThreeArtifactPairResult.model_construct(
+            task_id=task.task_id,
+            pair_id=f"test-full-v4--{task.task_id}",
             baseline=SimpleNamespace(answer=f"Current response one for {task.task_id}."),
             evolved=SimpleNamespace(answer=f"Current response two for {task.task_id}."),
         )
@@ -37,7 +40,7 @@ def test_official_human_bundle_freezes_published_scale_and_blinding(runs_root):
     tasks = _tasks()
     bundle = build_paper_human_review_bundle(
         tasks=tasks,
-        pairs=_pairs(tasks),  # type: ignore[arg-type]
+        pairs=_pairs(tasks),
         historical=extract_historical_answers(runs_root=runs_root),
         randomization_secret="1" * 64,
     )
@@ -74,7 +77,7 @@ def test_human_bundle_writes_private_packets_and_four_review_forms(tmp_path, run
     tasks = _tasks()
     bundle = build_paper_human_review_bundle(
         tasks=tasks,
-        pairs=_pairs(tasks),  # type: ignore[arg-type]
+        pairs=_pairs(tasks),
         historical=extract_historical_answers(runs_root=runs_root),
         randomization_secret="2" * 64,
     )

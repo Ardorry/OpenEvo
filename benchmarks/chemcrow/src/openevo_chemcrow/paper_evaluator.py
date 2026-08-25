@@ -14,10 +14,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .hashing import canonical_sha256, file_sha256
-from .models import PairResult, TaskItem
+from .models import TaskItem
+from .three_artifact_models import ThreeArtifactPairResult
 
 PAPER_EVALUATOR_PROTOCOL = "CHEMCROW_EVALUATORGPT_PROMPT_COMPATIBLE_V1"
 PAPER_EVALUATOR_MODEL = "openai/gpt-4"
@@ -65,10 +66,38 @@ class PaperEvaluationCall(BaseModel):
     student_b_system: Literal["historical_gpt4"] = "historical_gpt4"
     prompt: str
     prompt_sha256: str
+    source_pair_id: str
+    source_pair_result_sha256: str
+    source_output_id: str
+    source_output_sha256: str
     historical_source_sha256: str
     target_answer_sha256: str
     historical_gpt4_answer_sha256: str
     estimated_input_tokens: int
+    metric_classification: Literal[
+        "paper_control_reconstruction",
+        "project_added_openevo_metric",
+    ]
+    paper_comparable: bool
+
+    @model_validator(mode="after")
+    def _bind_prompt_and_sources(self) -> PaperEvaluationCall:
+        if self.prompt_sha256 != canonical_sha256(self.prompt):
+            raise ValueError("paper evaluator prompt hash differs from prompt bytes")
+        if self.source_output_sha256 != self.target_answer_sha256:
+            raise ValueError("paper evaluator source output hash differs from target answer")
+        if self.comparison == "historical_control":
+            if (
+                self.metric_classification != "paper_control_reconstruction"
+                or self.paper_comparable is not True
+            ):
+                raise ValueError("historical control classification differs")
+        elif (
+            self.metric_classification != "project_added_openevo_metric"
+            or self.paper_comparable is not False
+        ):
+            raise ValueError("OpenEvo comparison must remain project-added")
+        return self
 
 
 @dataclass(frozen=True)
@@ -178,7 +207,7 @@ def assert_sealed_run_ready(
     experiment_id: str,
     task_ids: list[str],
     completed_run_audit: Path,
-) -> dict[str, PairResult]:
+) -> dict[str, ThreeArtifactPairResult]:
     """Fail closed unless all 14 task-local pairs and the aggregate are sealed."""
     if tuple(task_ids) != FROZEN_PAPER_TASK_IDS:
         raise ValueError("paper evaluation requires the frozen 14-task ChemCrow order")
@@ -191,8 +220,15 @@ def assert_sealed_run_ready(
         or audit.get("experiment_id") != experiment_id
         or audit.get("task_ids") != task_ids
         or audit.get("task_count") != len(task_ids)
+        or audit.get("artifact_protocol") != "chemcrow-three-isolated-artifacts-v1"
+        or audit.get("unique_artifact_count") != len(task_ids) * 3
+        or audit.get("independent_reflector_job_count") != len(task_ids) * 3
+        or audit.get("core_evolved_injection_receipt_count") != len(task_ids)
+        or audit.get("mock_or_fixture_observations") != 0
     ):
-        raise ValueError("completed-run audit does not bind the full frozen task inventory")
+        raise ValueError(
+            "completed-run audit does not bind the full three-artifact frozen task inventory"
+        )
     aggregate_path = run_root / "aggregate.json"
     if not aggregate_path.is_file():
         raise ValueError("sealed aggregate.json is missing")
@@ -200,22 +236,24 @@ def assert_sealed_run_ready(
     if aggregate.get("task_count") != len(task_ids):
         raise ValueError("aggregate does not cover the frozen 14-task inventory")
 
-    pairs: dict[str, PairResult] = {}
+    pairs: dict[str, ThreeArtifactPairResult] = {}
     for task_id in task_ids:
         item_root = run_root / f"{experiment_id}--{task_id}"
         required = (
             "baseline.trajectory.json",
             "evolved.trajectory.json",
+            "artifacts.receipt.json",
+            "injection.receipt.summary.json",
             "pair.result.json",
             "reset.receipt.json",
         )
         missing = [name for name in required if not (item_root / name).is_file()]
         if missing:
             raise ValueError(f"unsealed task {task_id}: missing {missing}")
-        pair = PairResult.model_validate_json(
+        pair = ThreeArtifactPairResult.model_validate_json(
             (item_root / "pair.result.json").read_text(encoding="utf-8")
         )
-        if pair.task_id != task_id:
+        if pair.task_id != task_id or pair.pair_id != f"{experiment_id}--{task_id}":
             raise ValueError(f"pair task authority mismatch: {task_id}")
         pairs[task_id] = pair
     return pairs
@@ -224,7 +262,7 @@ def assert_sealed_run_ready(
 def build_paper_evaluation_plan(
     *,
     tasks: list[TaskItem],
-    pairs: dict[str, PairResult],
+    pairs: dict[str, ThreeArtifactPairResult],
     historical: dict[str, HistoricalAnswers],
 ) -> dict[str, Any]:
     if [task.task_id for task in tasks] != list(FROZEN_PAPER_TASK_IDS):
@@ -232,13 +270,46 @@ def build_paper_evaluation_plan(
     calls: list[PaperEvaluationCall] = []
     for task in tasks:
         pair = pairs[task.task_id]
+        if not isinstance(pair, ThreeArtifactPairResult):
+            raise TypeError(
+                "paper evaluation requires authoritative three-artifact pair results; "
+                "legacy single-artifact pairs are provisional only"
+            )
         old = historical[task.task_id]
         variants = (
-            ("historical_control", "historical_chemcrow", old.chemcrow_answer),
-            ("baseline", "openevo_baseline", pair.baseline.answer),
-            ("evolved", "openevo_evolved", pair.evolved.answer),
+            (
+                "historical_control",
+                "historical_chemcrow",
+                old.chemcrow_answer,
+                f"historical-notebook:{task.task_id}",
+                old.notebook_sha256,
+                f"{task.task_id}:historical_chemcrow",
+            ),
+            (
+                "baseline",
+                "openevo_baseline",
+                pair.baseline.answer,
+                pair.pair_id,
+                canonical_sha256(pair.model_dump(mode="json")),
+                pair.baseline.run_id,
+            ),
+            (
+                "evolved",
+                "openevo_evolved",
+                pair.evolved.answer,
+                pair.pair_id,
+                canonical_sha256(pair.model_dump(mode="json")),
+                pair.evolved.run_id,
+            ),
         )
-        for comparison, student_a_system, answer_a in variants:
+        for (
+            comparison,
+            student_a_system,
+            answer_a,
+            source_pair_id,
+            source_pair_result_sha256,
+            source_output_id,
+        ) in variants:
             prompt = render_compatible_prompt(
                 task_prompt=task.prompt,
                 student_a=answer_a,
@@ -258,10 +329,20 @@ def build_paper_evaluation_plan(
                     student_a_system=student_a_system,
                     prompt=prompt,
                     prompt_sha256=canonical_sha256(prompt),
+                    source_pair_id=source_pair_id,
+                    source_pair_result_sha256=source_pair_result_sha256,
+                    source_output_id=source_output_id,
+                    source_output_sha256=canonical_sha256(answer_a),
                     historical_source_sha256=old.notebook_sha256,
                     target_answer_sha256=canonical_sha256(answer_a),
                     historical_gpt4_answer_sha256=canonical_sha256(old.gpt4_answer),
                     estimated_input_tokens=estimated,
+                    metric_classification=(
+                        "paper_control_reconstruction"
+                        if comparison == "historical_control"
+                        else "project_added_openevo_metric"
+                    ),
+                    paper_comparable=comparison == "historical_control",
                 )
             )
     if len(calls) != PAPER_EVALUATOR_CALL_COUNT:
@@ -281,6 +362,7 @@ def build_paper_evaluation_plan(
         "reflector_access": False,
         "evolution_feedback_access": False,
         "sealed_output_only": True,
+        "source_pair_protocol": "chemcrow-three-isolated-artifacts-v1",
         "contains_historical_student_answers": True,
         "call_count": len(calls),
         "cost_ceiling": ceiling,

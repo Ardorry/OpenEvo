@@ -120,6 +120,8 @@ class ThreeArtifactTaskLocalProtocolRunner:
             or baseline.artifact_ids
         ):
             raise ValueError("baseline authority is invalid")
+        if baseline.status != "COMPLETED" or not baseline.answer.strip():
+            raise ValueError("baseline Candidate did not complete with a final answer")
         if baseline.candidate_config_sha256 != self.candidate.config_sha256:
             raise ValueError("baseline is not bound to frozen S0 configuration")
         if ledger:
@@ -258,6 +260,8 @@ class ThreeArtifactTaskLocalProtocolRunner:
             raise ValueError("G2 did not return a three-artifact injection receipt")
         if evolved.task_id != task.task_id or evolved.role != "evolved":
             raise ValueError("evolved authority is invalid")
+        if evolved.status != "COMPLETED" or not evolved.answer.strip():
+            raise ValueError("evolved Candidate did not complete with a final answer")
         if baseline.candidate_config_sha256 != evolved.candidate_config_sha256:
             raise ValueError("baseline/evolved candidate configuration parity failed")
         if evolved.artifact_ids != bundle.artifact_ids():

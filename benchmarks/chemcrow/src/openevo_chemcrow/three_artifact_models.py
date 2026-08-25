@@ -29,6 +29,10 @@ class ArtifactSeparationPolicy(BaseModel):
     near_duplicate_sequence_threshold: float = Field(default=0.95, ge=0.0, le=1.0)
     minimum_tokens_for_near_duplicate_check: int = Field(default=12, ge=1)
     baseline_answer_sequence_threshold: float = Field(default=0.98, ge=0.0, le=1.0)
+    responsibility_policy_version: Literal["chemcrow_artifact_responsibility_v1"] = (
+        "chemcrow_artifact_responsibility_v1"
+    )
+    minimum_tokens_for_responsibility_check: int = Field(default=8, ge=1)
 
 
 class ThreeArtifactReceipt(BaseModel):
@@ -70,6 +74,8 @@ class ThreeArtifactBundleReceipt(BaseModel):
     byte_identical_pairs: list[list[str]] = Field(default_factory=list)
     normalized_identical_pairs: list[list[str]] = Field(default_factory=list)
     near_duplicate_pairs: list[dict[str, object]] = Field(default_factory=list)
+    baseline_answer_copy: list[dict[str, object]] = Field(default_factory=list)
+    responsibility_violations: list[dict[str, object]] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _validate_bundle(self) -> ThreeArtifactBundleReceipt:
@@ -97,6 +103,8 @@ class ThreeArtifactBundleReceipt(BaseModel):
             self.byte_identical_pairs
             or self.normalized_identical_pairs
             or self.near_duplicate_pairs
+            or self.baseline_answer_copy
+            or self.responsibility_violations
         ):
             raise ValueError("artifact separation guard detected duplicate content")
         return self
@@ -162,6 +170,25 @@ class ThreeArtifactPairResult(BaseModel):
     def _pair_invariants(self) -> ThreeArtifactPairResult:
         artifacts = self.artifact_bundle.artifacts
         artifact_ids = [item.artifact_id for item in artifacts]
+        if self.artifact_bundle.task_id != self.task_id:
+            raise ValueError("artifact bundle task lineage differs from pair")
+        if self.artifact_bundle.pair_id != self.pair_id:
+            raise ValueError("artifact bundle pair lineage differs from pair")
+        if self.artifact_bundle.parent_run_id != self.baseline.run_id:
+            raise ValueError("artifact bundle parent differs from baseline run")
+        if self.baseline.task_id != self.task_id or self.evolved.task_id != self.task_id:
+            raise ValueError("Candidate trajectory task lineage differs from pair")
+        if self.baseline.role != "baseline" or self.evolved.role != "evolved":
+            raise ValueError("Candidate trajectory roles differ from paired protocol")
+        if self.baseline.run_id == self.evolved.run_id:
+            raise ValueError("baseline and evolved Candidate runs must be independent")
+        if (
+            self.baseline.status != "COMPLETED"
+            or self.evolved.status != "COMPLETED"
+            or not self.baseline.answer.strip()
+            or not self.evolved.answer.strip()
+        ):
+            raise ValueError("both Candidate runs must complete with final answers")
         if self.baseline.artifact_ids:
             raise ValueError("baseline must start from bare S0")
         if self.evolved.artifact_ids != artifact_ids:
@@ -177,6 +204,13 @@ class ThreeArtifactPairResult(BaseModel):
             raise ValueError("Core injection type mapping differs from registered artifacts")
         if self.baseline.candidate_config_sha256 != self.evolved.candidate_config_sha256:
             raise ValueError("candidate pair configuration differs")
+        if self.baseline.candidate_config_sha256 != self.s0_hash:
+            raise ValueError("Candidate configuration is not bound to pair S0")
+        if (
+            self.baseline_internal_evaluation.evaluator_run_id
+            == self.evolved_internal_evaluation.evaluator_run_id
+        ):
+            raise ValueError("G1/G2 internal evaluations must be independent calls")
         if self.baseline_internal_evaluation.evaluator_role != "evolution_evaluator":
             raise ValueError("G1 internal evaluation used the wrong role")
         if self.evolved_internal_evaluation.evaluator_role != "evolution_evaluator":

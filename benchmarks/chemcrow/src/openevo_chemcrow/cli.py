@@ -24,7 +24,7 @@ from .composite import (
 )
 from .credentials import credential_report, probe_openrouter_key
 from .evaluation import OpenEvoEvolutionEvaluator, OpenEvoFinalEvaluator
-from .hashing import file_sha256
+from .hashing import canonical_sha256, file_sha256
 from .ledger import AmbiguousPhaseClaimError, PhaseLedger
 from .models import ArtifactKind, FeedbackMode, PairResult, TaskItem
 from .native_evolution import NativeEvolutionEngine
@@ -67,6 +67,7 @@ from .tools import TOOL_INVENTORY, ChemCrowToolRegistry, environment_presence
 
 _ENV_PATTERN = re.compile(r"^\$\{([A-Z][A-Z0-9_]*)\}$")
 _PAID_AUTHORIZATION = "I_UNDERSTAND_THIS_MAY_INCUR_COST"
+_AUTHORITATIVE_MODEL = "gpt-5.5"
 
 
 def _read_tasks(path: Path) -> list[TaskItem]:
@@ -133,6 +134,20 @@ def _bounded_task_prefix(
     if len(matches) != 1:
         raise ValueError("--stop-after-task-id must name exactly one configured task")
     return selected[: matches[0] + 1]
+
+
+def _assert_authoritative_role_models(role_configs: dict[str, dict[str, Any]]) -> None:
+    observed: dict[str, str] = {}
+    for role, role_config in role_configs.items():
+        agent = role_config.get("agent")
+        if not isinstance(agent, dict):
+            raise TypeError(f"{role} has no closed agent configuration")
+        observed[role] = str(agent.get("model_name") or "")
+    wrong = sorted(role for role, model in observed.items() if model != _AUTHORITATIVE_MODEL)
+    if wrong:
+        raise ValueError(
+            "authoritative ChemCrow roles must all use frozen gpt-5.5: " + ", ".join(wrong)
+        )
 
 
 def command_extract(args: argparse.Namespace) -> int:
@@ -211,6 +226,85 @@ def command_tool_smoke(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_tool_live_smoke(args: argparse.Namespace) -> int:
+    """Exercise every enabled external reduced-profile capability without model calls."""
+
+    registry = ChemCrowToolRegistry(
+        controlled_chemicals_csv=args.controlled_chemicals_csv,
+        network_enabled=True,
+        timeout_seconds=args.timeout_seconds,
+    )
+    requests = (
+        ("wikipedia", "Aspirin"),
+        ("Name2SMILES", "aspirin"),
+        ("Mol2CAS", "aspirin"),
+        ("SMILES2Name", "CC(=O)OC1=CC=CC=C1C(=O)O"),
+        ("ExplosiveCheck", "aspirin"),
+        ("SafetySummary", "aspirin"),
+        ("ReactionPredict", "CCO.CC(=O)O"),
+        ("ReactionRetrosynthesis", "CC(=O)OC1=CC=CC=C1C(=O)O"),
+    )
+    checks: dict[str, dict[str, Any]] = {}
+    for index, (tool_name, query) in enumerate(requests, start=1):
+        observation = registry.execute(
+            tool_name,
+            {"query": query},
+            call_id=f"live-readiness-{index:02d}-{tool_name.lower()}",
+        )
+        checks[tool_name] = {
+            "call_id": observation.call_id,
+            "canonical_arguments_sha256": observation.canonical_arguments_sha256,
+            "source": observation.source,
+            "error": observation.error,
+            "result_present": observation.result is not None,
+            "result_sha256": (
+                canonical_sha256(observation.result)
+                if observation.result is not None
+                else None
+            ),
+            "elapsed_seconds": observation.elapsed_seconds,
+            "result_body_included": False,
+        }
+    errors = sorted(name for name, value in checks.items() if value["error"] is not None)
+    sources = sorted({str(value["source"]) for value in checks.values()})
+    payload = {
+        "schema_version": "chemcrow_external_tool_live_smoke_v1",
+        "status": "PASS" if not errors else "FAIL_CLOSED",
+        "logical_tool_calls": len(checks),
+        "model_calls": 0,
+        "mock_observations": 0,
+        "fixture_observations": 0,
+        "sources": sources,
+        "failed_tools": errors,
+        "web_search": {
+            "configured": bool(os.environ.get("SERP_API_KEY")),
+            "called": False,
+            "reason": "not configured" if not os.environ.get("SERP_API_KEY") else "separate credentialed capability",
+        },
+        "excluded_capabilities": {
+            "LiteratureSearch": "excluded because the legacy implementation adds hidden model calls",
+            "GetMoleculePrice": "excluded commercial procurement capability",
+            "python_repl": "excluded arbitrary-code capability",
+        },
+        "checks": checks,
+    }
+    output = args.output.resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(
+        json.dumps(
+            {
+                "status": payload["status"],
+                "logical_tool_calls": len(checks),
+                "failed_tools": errors,
+                "model_calls": 0,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0 if not errors else 2
+
+
 def command_preflight(args: argparse.Namespace) -> int:
     config_path = args.config.resolve()
     config = _load_yaml(config_path)
@@ -271,6 +365,11 @@ def command_preflight(args: argparse.Namespace) -> int:
             assert_core_managed_codex_config(role_config)
     except ValueError as exc:
         core_route_error = str(exc)
+    model_identity_error = None
+    try:
+        _assert_authoritative_role_models(role_configs)
+    except (TypeError, ValueError) as exc:
+        model_identity_error = str(exc)
     s0_hash = s0_config_hash(candidate)
     baseline_request = build_task_request(
         task=items[0],
@@ -409,6 +508,7 @@ def command_preflight(args: argparse.Namespace) -> int:
         "unknown_selected_task_ids": unknown,
         "manifest_count": len(items),
         "manifest_frozen_count_is_14": len(items) == 14,
+        "manifest_task_ids_match_authority": tuple(ids) == FROZEN_PAPER_TASK_IDS,
         "candidate_pair_parity": parity,
         "candidate_pair_parity_receipt": parity_receipt,
         "artifact_protocol": config.get("artifact_protocol", "legacy_single_artifact_v1"),
@@ -426,9 +526,11 @@ def command_preflight(args: argparse.Namespace) -> int:
         "candidate_runtime_image_bound": managed_image_ok,
         "managed_runtime_image_id": managed_image_id,
         "all_codex_roles_core_managed": core_route_error is None,
+        "all_model_roles_frozen_gpt_5_5": model_identity_error is None,
         "codex_execution_route": CORE_MANAGED_CODEX_ROUTE,
         "host_codex_exec_forbidden": True,
         "core_route_error": core_route_error,
+        "model_identity_error": model_identity_error,
         "openevo_core_health": core_health,
         "openevo_evolution_health": evolution_health,
         "local_rxn_health": rxn_health,
@@ -443,6 +545,7 @@ def command_preflight(args: argparse.Namespace) -> int:
     ready_for_model_calls = (
         not unknown
         and checks["manifest_frozen_count_is_14"]
+        and checks["manifest_task_ids_match_authority"]
         and parity
         and checks["python_version_supported"]
         and checks["rdkit_importable"]
@@ -450,6 +553,7 @@ def command_preflight(args: argparse.Namespace) -> int:
         and docker_ok
         and checks["candidate_runtime_image_bound"]
         and checks["all_codex_roles_core_managed"]
+        and checks["all_model_roles_frozen_gpt_5_5"]
         and checks["runtime_config_resolved"]
         and checks["duplicate_authorization_valid"]
         and checks["execution_parity_valid"]
@@ -548,6 +652,16 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
         reflectors = config.get("reflectors")
         if not isinstance(reflectors, dict):
             raise ValueError("three_isolated_v1 Reflector configs are absent")
+        _assert_authoritative_role_models(
+            {
+                "candidate": config["candidate"],
+                "reflector_memory": reflectors["memory"],
+                "reflector_skill_bundle": reflectors["skill_bundle"],
+                "reflector_agent_system": reflectors["agent_system"],
+                "evolution_evaluator": config["evolution_evaluator"],
+                "final_evaluator": config["final_evaluator"],
+            }
+        )
         reflector_ports = {
             ArtifactKind.TEXT_MEMORY: OpenEvoRolloutPort(
                 base_url=str(config["rollout_base_url"]), candidate=reflectors["memory"]
@@ -680,6 +794,13 @@ def command_audit_run(args: argparse.Namespace) -> int:
         if config.get("task_ids") == "all"
         else list(config["task_ids"])
     )
+    task_ids = [
+        item.task_id
+        for item in _bounded_task_prefix(
+            [item for item in items if item.task_id in task_ids],
+            stop_after_task_id=args.stop_after_task_id,
+        )
+    ]
     if config.get("artifact_protocol") == "three_isolated_v1":
         reflectors = config.get("reflectors")
         if not isinstance(reflectors, dict):
@@ -694,6 +815,7 @@ def command_audit_run(args: argparse.Namespace) -> int:
             task_ids=task_ids,
             expected_s0_hash=s0_config_hash(config["candidate"]),
             expected_reflector_model=models.pop(),
+            require_aggregate=True,
         )
     else:
         payload = audit_completed_run(
@@ -708,6 +830,62 @@ def command_audit_run(args: argparse.Namespace) -> int:
         json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     print(json.dumps({"status": payload["status"], "task_count": payload["task_count"]}))
+    return 0
+
+
+def command_aggregate_run(args: argparse.Namespace) -> int:
+    config_path = args.config.resolve()
+    config = _resolve_env(_load_yaml(config_path))
+    if config.get("artifact_protocol") != "three_isolated_v1":
+        raise ValueError("authoritative aggregate requires three_isolated_v1")
+    manifest_path = _path(config_path, str(config["task_manifest"]))
+    items = _read_tasks(manifest_path)
+    task_ids = (
+        [item.task_id for item in items]
+        if config.get("task_ids") == "all"
+        else list(config["task_ids"])
+    )
+    task_ids = [
+        item.task_id
+        for item in _bounded_task_prefix(
+            [item for item in items if item.task_id in task_ids],
+            stop_after_task_id=args.stop_after_task_id,
+        )
+    ]
+    run_root = _path(config_path, str(config["run_root"]))
+    results: list[ThreeArtifactPairResult] = []
+    for task_id in task_ids:
+        pair_id = f"{config['experiment_id']}--{task_id}"
+        path = run_root / pair_id / "pair.result.json"
+        if not path.is_file():
+            raise ValueError(f"sealed three-artifact pair is missing: {pair_id}")
+        result = ThreeArtifactPairResult.model_validate_json(path.read_text(encoding="utf-8"))
+        if result.task_id != task_id or result.pair_id != pair_id:
+            raise ValueError(f"sealed pair authority differs: {pair_id}")
+        if result.reset_receipt_sha256 != file_sha256(
+            run_root / pair_id / "reset.receipt.json"
+        ):
+            raise ValueError(f"sealed reset receipt differs: {pair_id}")
+        results.append(result)
+    aggregate = aggregate_three_artifact_results(results)
+    output = args.output.resolve() if args.output else run_root / "aggregate.json"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    serialized = json.dumps(aggregate, indent=2, sort_keys=True) + "\n"
+    if output.exists() and output.read_text(encoding="utf-8") != serialized:
+        raise ValueError("existing aggregate differs from sealed pair authority")
+    if not output.exists():
+        output.write_text(serialized, encoding="utf-8")
+    print(
+        json.dumps(
+            {
+                "status": aggregate["status"],
+                "task_count": aggregate["task_count"],
+                "model_calls": 0,
+                "output_sha256": file_sha256(output),
+            },
+            sort_keys=True,
+        )
+    )
     return 0
 
 
@@ -891,10 +1069,20 @@ def command_paper_human_review_prepare(args: argparse.Namespace) -> int:
     try:
         tasks = _read_tasks(_path(config_path, str(config["task_manifest"])))
         task_ids = [task.task_id for task in tasks]
-        pairs = load_composite_pairs(
-            manifest_path=_path(config_path, str(config["composite_manifest"])),
-            task_ids=task_ids,
-        )
+        if config.get("composite_manifest"):
+            pairs = load_composite_pairs(
+                manifest_path=_path(config_path, str(config["composite_manifest"])),
+                task_ids=task_ids,
+            )
+        else:
+            pairs = assert_sealed_run_ready(
+                run_root=_path(config_path, str(config["run_root"])),
+                experiment_id=str(config["experiment_id"]),
+                task_ids=task_ids,
+                completed_run_audit=_path(
+                    config_path, str(config["completed_run_audit"])
+                ),
+            )
         historical = extract_historical_answers(
             runs_root=_path(config_path, str(config["historical_runs_root"]))
         )
@@ -979,6 +1167,11 @@ def build_parser() -> argparse.ArgumentParser:
     smoke.add_argument("--controlled-chemicals-csv", type=Path, required=True)
     smoke.add_argument("--output", type=Path, required=True)
     smoke.set_defaults(function=command_tool_smoke)
+    live_smoke = commands.add_parser("tool-live-smoke")
+    live_smoke.add_argument("--controlled-chemicals-csv", type=Path, required=True)
+    live_smoke.add_argument("--output", type=Path, required=True)
+    live_smoke.add_argument("--timeout-seconds", type=float, default=30.0)
+    live_smoke.set_defaults(function=command_tool_live_smoke)
     preflight = commands.add_parser("preflight")
     preflight.add_argument("--config", type=Path, required=True)
     preflight.add_argument("--output", type=Path)
@@ -988,7 +1181,14 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--config", type=Path, required=True)
     audit.add_argument("--core-completions", type=Path, required=True)
     audit.add_argument("--output", type=Path, required=True)
+    audit.add_argument("--stop-after-task-id")
     audit.set_defaults(function=command_audit_run)
+    aggregate = commands.add_parser("aggregate-run")
+    aggregate.add_argument("--config", type=Path, required=True)
+    aggregate.add_argument("--output", type=Path)
+    aggregate.add_argument("--no-model-calls", action="store_true", required=True)
+    aggregate.add_argument("--stop-after-task-id")
+    aggregate.set_defaults(function=command_aggregate_run)
     credentials = commands.add_parser("credential-check")
     credentials.add_argument("--output", type=Path, required=True)
     credentials.set_defaults(function=command_credential_check)

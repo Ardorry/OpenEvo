@@ -16,8 +16,9 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from .hashing import canonical_sha256, file_sha256
-from .models import PairResult, TaskItem
+from .models import TaskItem
 from .paper_evaluator import FROZEN_PAPER_TASK_IDS, HistoricalAnswers
+from .three_artifact_models import ThreeArtifactPairResult
 
 PAPER_HUMAN_REVIEW_PROTOCOL = "CHEMCROW_PAPER_HUMAN_REVIEW_COMPATIBLE_V1"
 PAPER_HUMAN_REVIEWER_COUNT = 4
@@ -59,7 +60,7 @@ class PaperHumanReviewResponse(BaseModel):
 def build_paper_human_review_bundle(
     *,
     tasks: list[TaskItem],
-    pairs: dict[str, PairResult],
+    pairs: dict[str, ThreeArtifactPairResult],
     historical: dict[str, HistoricalAnswers],
     randomization_secret: str,
 ) -> dict[str, Any]:
@@ -75,6 +76,11 @@ def build_paper_human_review_bundle(
     private_mappings: list[dict[str, Any]] = []
     for task in tasks:
         pair = pairs[task.task_id]
+        if not isinstance(pair, ThreeArtifactPairResult):
+            raise TypeError(
+                "formal human review requires authoritative three-artifact pair results; "
+                "legacy single-artifact pairs are provisional only"
+            )
         old = historical[task.task_id]
         comparisons = (
             ("historical_control", "historical_chemcrow", old.chemcrow_answer),
@@ -169,6 +175,7 @@ def build_paper_human_review_bundle(
         "dimensions": list(PAPER_HUMAN_DIMENSIONS),
         "randomization_secret_sha256": canonical_sha256(randomization_secret),
         "randomized_answer_order": True,
+        "source_pair_protocol": "chemcrow-three-isolated-artifacts-v1",
         "style_masking": "final_response_only_no_react_trajectory",
         "packets": packets,
         "private_mappings": private_mappings,

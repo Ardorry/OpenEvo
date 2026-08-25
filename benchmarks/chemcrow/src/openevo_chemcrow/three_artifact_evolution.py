@@ -59,17 +59,20 @@ _SYSTEM_CONTRACTS = {
     ArtifactKind.TEXT_MEMORY: (
         "You are Reflector-Memory. Produce short-lived same-task memory only: observed facts, "
         "missed tool evidence, verified corrections, and baseline failure lessons. Do not copy the "
-        "complete baseline answer, prescribe a long procedure, or write system policy."
+        "complete baseline answer, prescribe a long procedure, or write system policy. Explicitly "
+        "label at least one observation, correction, lesson, or fact."
     ),
     ArtifactKind.SKILL_BUNDLE: (
         "You are Reflector-Skill. Produce an executable same-task problem-solving workflow: tool "
         "selection rules, reasoning procedure, verification checklist, and recovery steps. Focus "
-        "on how to solve and verify; do not write a fact memory or high-level agent policy."
+        "on how to solve and verify; do not write a fact memory or high-level agent policy. Explicitly "
+        "label at least one procedure, workflow, checklist, step, or tool-selection rule."
     ),
     ArtifactKind.AGENT_SYSTEM: (
         "You are Reflector-AgentSystem. Produce same-task high-level behavioral rules for evidence "
         "discipline, tool grounding, hallucination suppression, verification, and final answer "
-        "composition. Focus on agent behavior; do not write a factual notebook or detailed workflow."
+        "composition. Focus on agent behavior; do not write a factual notebook or detailed workflow. "
+        "Explicitly label at least one behavior, policy, discipline, hallucination control, or final-answer rule."
     ),
 }
 _FORBIDDEN_FEEDBACK_KEYS = {
@@ -85,6 +88,51 @@ _FORBIDDEN_FEEDBACK_KEYS = {
     "ground_truth",
     "evolved_answer",
     "future_task",
+}
+_FORBIDDEN_FEEDBACK_TEXT_MARKERS = (
+    "paper evaluator",
+    "evaluatorgpt",
+    "paper grade",
+    "human expert",
+    "human score",
+    "historical chemcrow",
+    "historical gpt-4",
+    "historical gpt4",
+    "reference answer",
+    "hidden ground truth",
+    "future g2",
+    "evolved answer",
+)
+_RESPONSIBILITY_MARKERS = {
+    ArtifactKind.TEXT_MEMORY: (
+        "observed",
+        "observation",
+        "remember",
+        "baseline",
+        "correction",
+        "corrected",
+        "lesson",
+        "fact",
+    ),
+    ArtifactKind.SKILL_BUNDLE: (
+        "procedure",
+        "workflow",
+        "checklist",
+        "step",
+        "steps",
+        "tool selection",
+        "tool-selection",
+    ),
+    ArtifactKind.AGENT_SYSTEM: (
+        "behavior",
+        "policy",
+        "discipline",
+        "hallucination",
+        "unsupported",
+        "final answer",
+        "must",
+        "never",
+    ),
 }
 
 
@@ -151,6 +199,12 @@ class ThreeIsolatedEvolutionEngine:
             raise ValueError(
                 "Reflector feedback contains forbidden scoring/leakage keys: "
                 + ", ".join(forbidden)
+            )
+        forbidden_text = sorted(_find_forbidden_text(feedback_payload))
+        if forbidden_text:
+            raise ValueError(
+                "Reflector feedback contains forbidden scoring/leakage text: "
+                + ", ".join(forbidden_text)
             )
         evidence = {
             "task": {
@@ -259,6 +313,7 @@ class ThreeIsolatedEvolutionEngine:
                 input_evidence_hash=evidence_hash,
                 separation_policy=self.separation_policy,
                 artifacts=receipts,
+                **duplicate_findings,
             )
         except Exception as exc:
             for item in pending:
@@ -629,11 +684,16 @@ def detect_artifact_duplicates(
             and ratio >= policy.baseline_answer_sequence_threshold
         ):
             baseline_copy.append({"artifact_type": kind.value, "sequence_ratio": round(ratio, 6)})
+    responsibility_violations = _artifact_responsibility_violations(
+        artifacts,
+        policy=policy,
+    )
     return {
         "byte_identical_pairs": byte_pairs,
         "normalized_identical_pairs": normalized_pairs,
         "near_duplicate_pairs": near_pairs,
         "baseline_answer_copy": baseline_copy,
+        "responsibility_violations": responsibility_violations,
     }
 
 
@@ -655,3 +715,46 @@ def _find_forbidden_keys(value: Any) -> set[str]:
         for child in value:
             found.update(_find_forbidden_keys(child))
     return found
+
+
+def _find_forbidden_text(value: Any) -> set[str]:
+    found: set[str] = set()
+    if isinstance(value, dict):
+        for child in value.values():
+            found.update(_find_forbidden_text(child))
+    elif isinstance(value, list):
+        for child in value:
+            found.update(_find_forbidden_text(child))
+    elif isinstance(value, str):
+        normalized = unicodedata.normalize("NFKC", value).casefold()
+        found.update(marker for marker in _FORBIDDEN_FEEDBACK_TEXT_MARKERS if marker in normalized)
+    return found
+
+
+def _artifact_responsibility_violations(
+    artifacts: dict[ArtifactKind, str],
+    *,
+    policy: ArtifactSeparationPolicy,
+) -> list[dict[str, object]]:
+    violations: list[dict[str, object]] = []
+    for kind in THREE_ARTIFACT_ORDER:
+        normalized = normalize_artifact_text(artifacts[kind])
+        tokens = normalized.split()
+        markers = _RESPONSIBILITY_MARKERS[kind]
+        matched = sorted(marker for marker in markers if marker in normalized)
+        reasons: list[str] = []
+        if len(tokens) < policy.minimum_tokens_for_responsibility_check:
+            reasons.append("too_short")
+        if not matched:
+            reasons.append("missing_type_specific_responsibility_marker")
+        if reasons:
+            violations.append(
+                {
+                    "artifact_type": kind.value,
+                    "policy_version": policy.responsibility_policy_version,
+                    "reasons": reasons,
+                    "token_count": len(tokens),
+                    "matched_markers": matched,
+                }
+            )
+    return violations

@@ -4,8 +4,9 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 
-from openevo_chemcrow.cli import _bounded_task_prefix
+from openevo_chemcrow.cli import _assert_authoritative_role_models, _bounded_task_prefix
 from openevo_chemcrow.hashing import canonical_sha256
 from openevo_chemcrow.models import (
     ArtifactKind,
@@ -18,6 +19,7 @@ from openevo_chemcrow.models import (
 from openevo_chemcrow.protocol import BlindJudgeResult
 from openevo_chemcrow.three_artifact_evolution import (
     ThreeIsolatedEvolutionEngine,
+    _find_forbidden_text,
     _strict_reflector_content,
     detect_artifact_duplicates,
 )
@@ -26,6 +28,7 @@ from openevo_chemcrow.three_artifact_models import (
     ArtifactSeparationPolicy,
     CoreInjectionReceiptSummary,
     ThreeArtifactBundleReceipt,
+    ThreeArtifactPairResult,
     ThreeArtifactReceipt,
 )
 from openevo_chemcrow.three_artifact_protocol import (
@@ -205,6 +208,48 @@ def test_planned_task14_prefix_does_not_start_task15(task_item):
         _bounded_task_prefix([task_item, second], stop_after_task_id="missing")
 
 
+def test_authoritative_roles_reject_silent_model_substitution():
+    roles = {
+        role: {"agent": {"model_name": "gpt-5.5"}}
+        for role in (
+            "candidate",
+            "reflector_memory",
+            "reflector_skill_bundle",
+            "reflector_agent_system",
+            "evolution_evaluator",
+            "final_evaluator",
+        )
+    }
+    _assert_authoritative_role_models(roles)
+    roles["reflector_skill_bundle"]["agent"]["model_name"] = "gpt-5.4"
+    with pytest.raises(ValueError, match="reflector_skill_bundle"):
+        _assert_authoritative_role_models(roles)
+
+
+def test_full_v4_config_is_fresh_and_three_pipeline(monkeypatch):
+    monkeypatch.setenv("OPENEVO_ROLLOUT_BASE_URL", "http://127.0.0.1:8080")
+    for name in (
+        "OPENEVO_CANDIDATE_MODEL",
+        "OPENEVO_REFLECTOR_MODEL",
+        "OPENEVO_EVOLUTION_EVALUATOR_MODEL",
+        "OPENEVO_FINAL_EVALUATOR_MODEL",
+    ):
+        monkeypatch.setenv(name, "gpt-5.5")
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "configs"
+        / "full.v4-three-pipeline.yaml"
+    )
+    config = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert config["experiment_id"] == "chemcrow-task-local-full-v4-three-pipeline"
+    assert config["task_ids"] == "all"
+    assert config["artifact_protocol"] == "three_isolated_v1"
+    assert set(config["reflectors"]) == {"memory", "skill_bundle", "agent_system"}
+    assert "prior_run_root" not in config
+    assert "duplicate_authorization_receipt" not in config
+    assert config["run_root"].endswith("runs/full-v4-three-pipeline")
+
+
 def test_three_pipeline_protocol_reset_lineage_and_scoring_order(tmp_path, task_item):
     candidate = FakeThreeCandidate()
     evolution = FakeThreeEvolution()
@@ -243,6 +288,25 @@ def test_three_pipeline_protocol_reset_lineage_and_scoring_order(tmp_path, task_
         assert reset["memory_after"] == reset["skill_bundle_after"] == []
         assert reset["agent_system_after"] == []
     assert all("paper" not in json.dumps(payload).lower() for payload in evolution.inputs)
+
+    wrong_task = json.loads(first.model_dump_json())
+    wrong_task["baseline"]["task_id"] = "chemcrow-other"
+    with pytest.raises(ValueError, match="trajectory task lineage"):
+        ThreeArtifactPairResult.model_validate(wrong_task)
+
+    wrong_pair = json.loads(first.model_dump_json())
+    wrong_pair["artifact_bundle"]["pair_id"] = "other-pair"
+    for artifact in wrong_pair["artifact_bundle"]["artifacts"]:
+        artifact["pair_id"] = "other-pair"
+    with pytest.raises(ValueError, match="bundle pair lineage"):
+        ThreeArtifactPairResult.model_validate(wrong_pair)
+
+    reused_internal_call = json.loads(first.model_dump_json())
+    reused_internal_call["evolved_internal_evaluation"]["evaluator_run_id"] = (
+        reused_internal_call["baseline_internal_evaluation"]["evaluator_run_id"]
+    )
+    with pytest.raises(ValueError, match="independent calls"):
+        ThreeArtifactPairResult.model_validate(reused_internal_call)
 
 
 def test_native_three_reflectors_are_independent_and_sibling_blind(tmp_path, task_item):
@@ -336,6 +400,57 @@ def test_duplicate_guards_fail_closed(artifacts, expected_key):
         policy=ArtifactSeparationPolicy(),
     )
     assert findings[expected_key]
+
+
+def test_responsibility_policy_rejects_generic_or_swapped_artifacts():
+    findings = detect_artifact_duplicates(
+        {
+            ArtifactKind.TEXT_MEMORY: (
+                "Use a procedure and checklist to select tools and validate each step carefully."
+            ),
+            ArtifactKind.SKILL_BUNDLE: (
+                "Remember the observed baseline fact and retain the verified correction as a lesson."
+            ),
+            ArtifactKind.AGENT_SYSTEM: (
+                "Be useful, concise, accurate, careful, clear, complete, relevant, and consistent."
+            ),
+        },
+        baseline_answer="unrelated baseline answer",
+        policy=ArtifactSeparationPolicy(),
+    )
+    assert {item["artifact_type"] for item in findings["responsibility_violations"]} == {
+        "text_memory",
+        "skill_bundle",
+        "agent_system",
+    }
+
+
+def test_responsibility_policy_accepts_distinct_artifact_roles():
+    findings = detect_artifact_duplicates(
+        {
+            ArtifactKind.TEXT_MEMORY: (
+                "Observed fact: the baseline missed one tool result. Correction: retain its units "
+                "and remember the verified value for the same-task retry."
+            ),
+            ArtifactKind.SKILL_BUNDLE: (
+                "Procedure: select the declared chemistry tool, execute each step, and use a "
+                "verification checklist before composing the result."
+            ),
+            ArtifactKind.AGENT_SYSTEM: (
+                "Behavior policy: never invent evidence; suppress unsupported claims and apply "
+                "hallucination controls before writing the final answer."
+            ),
+        },
+        baseline_answer="unrelated baseline answer",
+        policy=ArtifactSeparationPolicy(),
+    )
+    assert not any(findings.values())
+
+
+def test_forbidden_paper_feedback_hidden_in_generic_text_is_detected():
+    assert _find_forbidden_text(
+        {"notes": ["The paper Evaluator result and paper grade should guide the retry."]}
+    ) == {"paper evaluator", "paper grade"}
 
 
 def test_reflector_strict_type_specific_schemas():

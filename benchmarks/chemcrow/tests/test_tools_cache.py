@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import argparse
+import json
+
 import pytest
 
 from openevo_chemcrow.cache import PairObservationCache, assert_real_metric_observations
+from openevo_chemcrow.cli import command_tool_live_smoke
 from openevo_chemcrow.hashing import canonical_sha256
 from openevo_chemcrow.models import ObservationSource, ToolObservation
 from openevo_chemcrow.tools import ChemCrowToolRegistry, ToolUnavailableError
@@ -104,3 +108,33 @@ def test_local_rxn_uses_official_mcpo_payload_and_fails_closed(monkeypatch):
     )
     failed = registry.execute("ReactionPredict", {"query": "CCO"}, call_id="failed")
     assert "worker unavailable" in (failed.error or "")
+
+
+def test_live_readiness_smoke_persists_hashes_without_result_bodies(tmp_path, monkeypatch):
+    class Registry:
+        def __init__(self, **kwargs):
+            assert kwargs["network_enabled"] is True
+
+        def execute(self, tool_name, arguments, *, call_id):
+            return ToolObservation(
+                call_id=call_id,
+                tool_name=tool_name,
+                canonical_arguments_sha256=canonical_sha256(arguments),
+                result={"public_service_body": f"body for {tool_name}"},
+                source="live",
+            )
+
+    monkeypatch.setattr("openevo_chemcrow.cli.ChemCrowToolRegistry", Registry)
+    output = tmp_path / "live-smoke.json"
+    status = command_tool_live_smoke(
+        argparse.Namespace(
+            controlled_chemicals_csv=tmp_path / "controlled.csv",
+            output=output,
+            timeout_seconds=1.0,
+        )
+    )
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert status == 0
+    assert payload["logical_tool_calls"] == 8
+    assert payload["mock_observations"] == payload["fixture_observations"] == 0
+    assert "body for" not in output.read_text(encoding="utf-8")
