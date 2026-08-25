@@ -35,5 +35,30 @@ def test_rest_tool_bridge_rejects_unknown_and_invalid_calls(tmp_path, controlled
         network_enabled=False,
     )
     with TestClient(server.streamable_http_app()) as client:
-        assert client.post("/tool/not-a-tool", json={"query": "CCO"}).status_code == 404
-        assert client.post("/tool/SMILES2Weight", json={"query": ""}).status_code == 422
+        unknown = client.post("/tool/not-a-tool", json={"query": "CCO"})
+        invalid = client.post("/tool/SMILES2Weight", json={"query": ""})
+        receipts = client.get("/receipts").json()["receipts"]
+    assert unknown.status_code == 404
+    assert invalid.status_code == 422
+    assert len(receipts) == 2
+    assert all(item["observation"]["error"] for item in receipts)
+
+
+def test_rest_tool_bridge_records_and_caches_registry_errors(tmp_path, controlled_csv):
+    server = build_server(
+        pair_id="pair-rest-errors",
+        cache_root=tmp_path,
+        controlled_chemicals_csv=controlled_csv,
+        host="127.0.0.1",
+        port=8767,
+        network_enabled=False,
+    )
+    with TestClient(server.streamable_http_app()) as client:
+        first = client.post("/tool/WebSearch", json={"query": "chemistry"})
+        second = client.post("/tool/WebSearch", json={"query": "chemistry"})
+        receipts = client.get("/receipts").json()["receipts"]
+    assert first.status_code == 200
+    assert first.json()["error"].startswith("ToolUnavailableError:")
+    assert first.json()["observation_source"] == "live"
+    assert second.json()["observation_source"] == "cache_replay"
+    assert len(receipts) == 2

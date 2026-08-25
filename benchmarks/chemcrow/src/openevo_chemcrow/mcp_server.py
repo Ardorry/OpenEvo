@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -12,6 +13,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from .cache import PairObservationCache
+from .hashing import canonical_sha256
+from .models import ObservationSource, ToolObservation
 from .tools import ChemCrowToolRegistry, ToolInputError, ToolUnavailableError
 
 _EXPOSED_TOOLS = (
@@ -51,25 +54,17 @@ def build_server(
     server = FastMCP("ChemCrow Tools", host=host, port=port, json_response=True)
     receipts: list[dict[str, Any]] = []
 
-    def execute_tool(tool_name: str, query: str) -> dict[str, Any]:
-        arguments = {"query": query}
-        call_id = f"chemcrow-{uuid.uuid4().hex}"
-        try:
-            observation = cache.execute(
-                call_id=call_id,
-                tool_name=tool_name,
-                arguments=arguments,
-                live=lambda: registry.execute(tool_name, arguments, call_id=call_id),
-            )
-        except (ToolUnavailableError, ToolInputError) as exc:
-            raise RuntimeError(f"{tool_name} unavailable: {exc}") from exc
-        receipt = {
-            "arguments": arguments,
-            "observation": observation.model_dump(mode="json"),
-        }
-        receipts.append(receipt)
+    def record_observation(
+        *, arguments: dict[str, Any], observation: ToolObservation
+    ) -> dict[str, Any]:
+        receipts.append(
+            {
+                "arguments": arguments,
+                "observation": observation.model_dump(mode="json"),
+            }
+        )
         return {
-            "tool": tool_name,
+            "tool": observation.tool_name,
             "arguments": arguments,
             "result": observation.result,
             "error": observation.error,
@@ -78,6 +73,56 @@ def build_server(
             "elapsed_seconds": observation.elapsed_seconds,
             "call_id": observation.call_id,
         }
+
+    def error_observation(
+        *, tool_name: str, arguments: dict[str, Any], call_id: str, error: Exception
+    ) -> ToolObservation:
+        return ToolObservation(
+            call_id=call_id,
+            tool_name=tool_name,
+            canonical_arguments_sha256=canonical_sha256(arguments),
+            error=f"{type(error).__name__}: {error}",
+            source=ObservationSource.LIVE,
+            elapsed_seconds=0.0,
+        )
+
+    def execute_tool(tool_name: str, query: str) -> dict[str, Any]:
+        arguments = {"query": query}
+        call_id = f"chemcrow-{uuid.uuid4().hex}"
+        started = time.monotonic()
+
+        def execute_live() -> ToolObservation:
+            try:
+                return registry.execute(tool_name, arguments, call_id=call_id)
+            except (ToolUnavailableError, ToolInputError) as exc:
+                return error_observation(
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    call_id=call_id,
+                    error=exc,
+                ).model_copy(update={"elapsed_seconds": time.monotonic() - started})
+
+        observation = cache.execute(
+            call_id=call_id,
+            tool_name=tool_name,
+            arguments=arguments,
+            live=execute_live,
+        )
+        return record_observation(arguments=arguments, observation=observation)
+
+    def record_route_error(
+        *, tool_name: str, arguments: dict[str, Any], error: Exception
+    ) -> dict[str, Any]:
+        call_id = f"chemcrow-{uuid.uuid4().hex}"
+        return record_observation(
+            arguments=arguments,
+            observation=error_observation(
+                tool_name=tool_name,
+                arguments=arguments,
+                call_id=call_id,
+                error=error,
+            ),
+        )
 
     def make_tool(tool_name: str) -> Callable[[str], str]:
         def execute(query: str) -> str:
@@ -102,7 +147,12 @@ def build_server(
     async def rest_tool(request: Request) -> JSONResponse:
         tool_name = request.path_params["tool_name"]
         if tool_name not in _EXPOSED_TOOLS:
-            return JSONResponse({"error": "unknown ChemCrow tool"}, status_code=404)
+            payload = record_route_error(
+                tool_name=tool_name,
+                arguments={},
+                error=ToolUnavailableError("unknown ChemCrow tool"),
+            )
+            return JSONResponse(payload, status_code=404)
         try:
             body = await request.json()
             query = body.get("query") if isinstance(body, dict) else None
@@ -110,7 +160,13 @@ def build_server(
                 raise ToolInputError("tool requires a non-empty query string")
             return JSONResponse(execute_tool(tool_name, query.strip()))
         except (RuntimeError, ToolInputError, ValueError) as exc:
-            return JSONResponse({"error": str(exc), "tool": tool_name}, status_code=422)
+            arguments = {"query": query} if "query" in locals() else {}
+            payload = record_route_error(
+                tool_name=tool_name,
+                arguments=arguments,
+                error=exc,
+            )
+            return JSONResponse(payload, status_code=422)
     return server
 
 
