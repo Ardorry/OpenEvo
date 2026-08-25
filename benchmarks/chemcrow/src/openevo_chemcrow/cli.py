@@ -15,6 +15,7 @@ import httpx
 import yaml
 
 from .aggregate import aggregate_results
+from .audit import audit_completed_run
 from .evaluation import OpenEvoEvolutionEvaluator, OpenEvoFinalEvaluator
 from .hashing import file_sha256
 from .ledger import AmbiguousPhaseClaimError, PhaseLedger
@@ -157,12 +158,16 @@ def command_tool_smoke(args: argparse.Namespace) -> int:
 def command_preflight(args: argparse.Namespace) -> int:
     config_path = args.config.resolve()
     config = _load_yaml(config_path)
+    env_names = sorted(_env_names(config))
+    required_environment_presence = environment_presence(env_names)
+    runtime_config_resolved = all(required_environment_presence.values())
+    if runtime_config_resolved:
+        config = _resolve_env(config)
     manifest = _path(config_path, str(config["task_manifest"]))
     items = _read_tasks(manifest)
     ids = [item.task_id for item in items]
     selected = ids if config.get("task_ids") == "all" else list(config.get("task_ids", []))
     unknown = sorted(set(selected) - set(ids))
-    env_names = sorted(_env_names(config))
     candidate = config["candidate"]
     role_configs = {
         role: config[role]
@@ -308,7 +313,8 @@ def command_preflight(args: argparse.Namespace) -> int:
         "openevo_evolution_health": evolution_health,
         "local_rxn_health": rxn_health,
         "model_authentication": codex_auth_metadata,
-        "required_environment_presence": environment_presence(env_names),
+        "runtime_config_resolved": runtime_config_resolved,
+        "required_environment_presence": required_environment_presence,
     }
     ready_for_model_calls = (
         not unknown
@@ -320,6 +326,7 @@ def command_preflight(args: argparse.Namespace) -> int:
         and docker_ok
         and checks["candidate_runtime_image_bound"]
         and checks["all_codex_roles_core_managed"]
+        and checks["runtime_config_resolved"]
         and core_health["reachable"]
         and core_health["healthy_nodes"] > 0
         and evolution_health["reachable"]
@@ -422,6 +429,31 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
     return 0
 
 
+def command_audit_run(args: argparse.Namespace) -> int:
+    config_path = args.config.resolve()
+    config = _resolve_env(_load_yaml(config_path))
+    manifest_path = _path(config_path, str(config["task_manifest"]))
+    items = _read_tasks(manifest_path)
+    task_ids = (
+        [item.task_id for item in items]
+        if config.get("task_ids") == "all"
+        else list(config["task_ids"])
+    )
+    payload = audit_completed_run(
+        run_root=_path(config_path, str(config["run_root"])),
+        core_completion_root=args.core_completions.resolve(),
+        experiment_id=str(config["experiment_id"]),
+        task_ids=task_ids,
+        expected_s0_hash=s0_config_hash(config["candidate"]),
+    )
+    args.output.resolve().parent.mkdir(parents=True, exist_ok=True)
+    args.output.resolve().write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    print(json.dumps({"status": payload["status"], "task_count": payload["task_count"]}))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="openevo-chemcrow")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -443,6 +475,11 @@ def build_parser() -> argparse.ArgumentParser:
     preflight.add_argument("--output", type=Path)
     preflight.add_argument("--no-model-calls", action="store_true", required=True)
     preflight.set_defaults(function=command_preflight)
+    audit = commands.add_parser("audit-run")
+    audit.add_argument("--config", type=Path, required=True)
+    audit.add_argument("--core-completions", type=Path, required=True)
+    audit.add_argument("--output", type=Path, required=True)
+    audit.set_defaults(function=command_audit_run)
     for name, resume in (("run", False), ("resume", True)):
         command = commands.add_parser(name)
         command.add_argument("--config", type=Path, required=True)

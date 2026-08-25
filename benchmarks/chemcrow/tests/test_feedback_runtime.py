@@ -21,6 +21,14 @@ from openevo_chemcrow.runtime import (
 )
 
 
+def test_resolved_model_identity_changes_s0_hash(core_candidate_config):
+    unresolved = {
+        **core_candidate_config,
+        "agent": {**core_candidate_config["agent"], "model_name": "${CANDIDATE_MODEL}"},
+    }
+    assert s0_config_hash(unresolved) != s0_config_hash(core_candidate_config)
+
+
 def _trajectory(task_id: str = "chemcrow-test-01") -> Trajectory:
     return Trajectory(
         run_id="run-1",
