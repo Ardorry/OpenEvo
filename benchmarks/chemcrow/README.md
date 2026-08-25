@@ -5,6 +5,16 @@ not instantiate the legacy `ChemCrow` GPT-4/LangChain agent. Candidate, Reflecto
 evaluator, and final evaluator remain separate OpenEvo runtime/provider roles with frozen
 model settings.
 
+All four Codex roles are admitted only through OpenEvo Core Rollout/Gateway and execute in the
+immutable managed Docker runtime. Host `codex exec`, custom shells, custom runtimes, and caller
+MCP injection fail closed. ChemCrow tools are exposed through a pair-scoped receipt-producing
+REST bridge because the Core subscription contract forbids caller MCP servers.
+
+All four Codex roles are admitted only through OpenEvo Core Rollout/Gateway and execute in the
+immutable managed Docker runtime. Host `codex exec`, custom shells, custom runtimes, and caller
+MCP injection fail closed. ChemCrow tools are exposed through a pair-scoped receipt-producing
+REST bridge because the Core subscription contract forbids caller MCP servers.
+
 The mandatory item protocol is:
 
 `bare S0 -> baseline -> feedback -> one native Reflector job -> same-item evolved -> seal -> reset`
@@ -26,6 +36,20 @@ uv run openevo-chemcrow extract-tasks \
 uv run openevo-chemcrow preflight \
   --config configs/preflight.yaml \
   --no-model-calls
+```
+
+Local RXN services use exact image IDs:
+
+```bash
+docker compose -f configs/rxn_sandbox.services.yaml up -d
+curl -fsS http://127.0.0.1:8300/openapi.json
+```
+
+Local RXN services use exact image IDs:
+
+```bash
+docker compose -f configs/rxn_sandbox.services.yaml up -d
+curl -fsS http://127.0.0.1:8300/openapi.json
 ```
 
 `run` is fail-closed. It requires both `--allow-paid` and

@@ -1,107 +1,135 @@
 # HUMAN ACTION REQUIRED
 
-Current gate: **BLOCKED BEFORE MODEL CALLS**. Preparation used zero Candidate, Reflector,
-evolution-evaluator, or final-evaluator calls and performed no paid operation. Never paste a
-secret into chat, a command history, a report, or Git; load it from an ignored `.env`, a secret
-manager, or the existing OpenEvo service environment.
+Current gate: **no foundation-model call has been authorized or executed**. Downloads, local
+environments, OpenEvo Core services, immutable managed image binding, and local RXN setup are
+complete. Never paste secrets into chat or Git.
 
 ## 1. Credentials and API keys
 
-| Action | Why | Exact variable/command | Scope | Verification |
+| Remaining action | Why | Exact variable/command | Scope | Verify |
 |---|---|---|---|---|
-| Bind the OpenEvo rollout endpoint and four model roles | Candidate, one native Reflector step, evolution feedback, and blinded final judgment all need an admitted provider route | Set `OPENEVO_ROLLOUT_BASE_URL`, `OPENEVO_CANDIDATE_MODEL`, `OPENEVO_REFLECTOR_MODEL`, `OPENEVO_EVOLUTION_EVALUATOR_MODEL`, and `OPENEVO_FINAL_EVALUATOR_MODEL` in a private environment | Blocks every paid task pair | `uv run openevo-chemcrow preflight --config configs/preflight.yaml --no-model-calls` reports all five names present; values are never printed |
-| Configure hosted IBM RXN, if that path is selected | Hosted forward prediction and retrosynthesis require account/project authority | Set `RXN4CHEM_API_KEY`, `RXN4CHEM_PROJECT_ID`, and optionally `RXN4CHEMISTRY_BASE_URL`; do not use the hard-coded project ID in the vendor source | Blocks only tasks that require RXN | Use a separate, explicitly authorized single tool probe and require a real prediction ID/result; never accept a stub |
-| Configure SerpAPI only if WebSearch remains in the formal profile | `WebSearch` is credentialed and may incur usage | Set `SERP_API_KEY` privately | Blocks WebSearch only | Run a one-query tool canary and confirm `source=live`, no error, and account usage matches one query |
-| ChemSpace and Semantic Scholar | ChemSpace price/procurement is excluded; legacy LiteratureSearch is excluded because it adds hidden model calls | No action for the initial profile. Variables are `CHEMSPACE_API_KEY` and `SEMANTIC_SCHOLAR_API_KEY` if a later approved profile is designed | Does not block the initial profile | Preflight inventory continues to mark `GetMoleculePrice` and `LiteratureSearch` excluded |
+| Decide whether WebSearch is formal | SerpAPI may be paid and changes the tool profile | If approved, set `SERP_API_KEY` in ignored `.env` or a secret manager | WebSearch only | One authorized query returns `source=live`; provider usage shows one call |
+| Decide whether hosted RXN is a fallback | Local RXN now works; hosted RXN is optional and time-limited | If approved, set `RXN4CHEM_API_KEY`, `RXN4CHEM_PROJECT_ID`, optionally `RXN4CHEMISTRY_BASE_URL` | RXN tasks only | One separately authorized prediction returns a real ID/result |
+| No ChemSpace/Semantic Scholar action for initial profile | Price procurement and legacy LiteratureSearch are excluded | Names are `CHEMSPACE_API_KEY`, `SEMANTIC_SCHOLAR_API_KEY`; leave absent unless a new protocol is approved | Does not block current reduced profile | Inventory remains explicitly excluded |
+
+The OpenEvo endpoint/model role names and a Core-managed Codex subscription credential source are
+already detected. No credential value was inspected.
 
 ## 2. Docker, GPU, and runtime services
 
-| Action | Why | Exact variable/command | Scope | Verification |
-|---|---|---|---|---|
-| Bind an immutable Candidate runtime image | `configs/*.yaml` deliberately contains `HUMAN_ACTION_REQUIRED_IMMUTABLE_RUNTIME_IMAGE`; a mutable tag is not acceptable for paired fairness | Copy `configs/full.example.yaml` to ignored/local `configs/full.yaml`, replace the placeholder with a digest-qualified image such as `registry/repo@sha256:...` | Blocks all Candidate tasks | `docker image inspect <digest-qualified-image>` succeeds and preflight reports `candidate_runtime_image_bound=true` |
-| Start/verify the existing OpenEvo rollout and Gateway services | The adapter submits native `TaskRequest` objects and must not fall back to host `codex exec` | Start services with the checkout's approved deployment procedure, then run `curl -fsS "$OPENEVO_ROLLOUT_BASE_URL/health"` | Blocks all Candidate/evaluator calls | Health reports a registered, schedulable Gateway; a no-model admission probe succeeds |
-| Validate GPU-in-container only if GPU RXN is selected | Host RTX 4050 and Docker `nvidia` runtime were detected, but no CUDA image was pulled for a container canary | After choosing a pinned image already approved for download: `docker run --rm --gpus all <pinned-cuda-image> nvidia-smi` | Blocks GPU RXN only | The container reports the GPU and exits 0 |
-| Decide whether to deploy official RXN-Sandbox | Official self-hosting requires Docker/Compose, Git LFS, about 10 GB free disk, 8 GB RAM minimum and 16 GB recommended for tree search | Only after approving the substantial download: `git clone https://github.com/rxn4chemistry/rxn-sandbox.git vendor/rxn-sandbox`; then follow its pinned `compose.yaml` or `compose-cuda.yaml` build/up commands | Blocks local RXN only | Pin commit `d56aad22564a904a2fc737460adfbf0d4c4e9ac2`, record model hashes/license, run one forward and one retrospective canary, and bind `CHEMCROW_RXN_PREDICT_URL`/`CHEMCROW_RXN_RETRO_URL` |
+No setup action currently blocks CPU RXN or Core health. After a reboot, run:
 
-## 3. Deprecated or unavailable ChemCrow services
+```bash
+cd /home/lhy-h/work/chemcrowrun/openevo
+docker compose -f benchmarks/chemcrow/configs/rxn_sandbox.services.yaml up -d
+```
 
-- IBM's official `rxn4chemistry` README says hosted RXN and its APIs reach end of service on
-  **2026-10-28**. Select hosted RXN only as a time-bounded profile and preserve an exit plan.
-  This affects RXN-dependent tasks, not local RDKit tasks. Verify the current notice at
-  <https://github.com/rxn4chemistry/rxn4chemistry>.
-- The legacy `doncamilom/rxnpred:latest` manifest was not found and
-  `doncamilom/retrosynthesis:latest` returned registry authorization denial. They are mutable,
-  unpinned, and must not be used as formal infrastructure. Verify with
-  `docker manifest inspect --verbose <image>`; success alone is insufficient without a digest.
-- The official ChemCrow README states that some paper tools are absent because of API usage
-  restrictions. Those capabilities cannot be reconstructed faithfully from the public repo.
-  Verify at <https://github.com/ur-whitelab/chemcrow-public>.
+Start Rollout and Gateway using the exact commands in `READINESS_REPORT.md`. Verify:
+
+```bash
+curl -fsS http://127.0.0.1:8080/health
+curl -fsS http://127.0.0.1:8080/nodes
+curl -fsS http://127.0.0.1:8300/openapi.json
+```
+
+Optional decision: enable GPU RXN. The RTX 4050 has only 6 GB VRAM; CPU mode is currently frozen
+and passed smoke. GPU is not needed for the preflight. If a later GPU profile is approved, add a
+separate Compose profile and verify `docker run --rm --gpus all <pinned-image> nvidia-smi` plus
+both RXN canaries. This blocks only the optional GPU profile.
+
+## 3. Deprecated or unavailable services
+
+- Hosted RXN/API end-of-service is announced for **2026-10-28**. Human decision: use the local
+  profile (recommended) or accept a time-bounded hosted profile. Verify the current notice in the
+  official `rxn4chemistry` repository. This affects RXN tasks only.
+- Legacy ChemCrow `rxnpred`/`retrosynthesis` images are mutable/unavailable and must remain
+  excluded. No human action can make them a reproducible authority without exact historical
+  digests.
+- Paper-only restricted tools are absent from `chemcrow-public`. This blocks exact paper
+  reproduction, not the declared public-source benchmark profile.
 
 ## 4. Tool licenses and accounts
 
-- Review and approve RXN-Sandbox's `LICENSE.OpenMDW-1.1` and model/data terms before cloning its
-  Git LFS assets. This blocks local RXN only. Verification is a recorded license decision plus
-  hashes for the exact model files.
-- If SerpAPI is enabled, create/approve the account and quota outside Git. This blocks WebSearch
-  only. Verify with a one-query canary and provider-side usage.
-- ChemSpace purchasing/price lookup remains excluded by the software-benchmark and
-  no-procurement boundary. Do not create an account merely to unblock this benchmark.
+| Action | Why | Command/file | Scope | Verify |
+|---|---|---|---|---|
+| Review and record acceptance of RXN-Sandbox OpenMDW 1.1 | Model/software use is governed by the repository license; download authorization is not a scientific license decision | Read `/home/lhy-h/work/chemcrowrun/vendor/rxn-sandbox/LICENSE.OpenMDW-1.1` and record the decision outside secrets | Blocks RXN use in formal metrics, not software smoke | Decision references commit `d56aad225...` and model hashes in `RXN_RUNTIME_MANIFEST.json` |
+| Accept the MolBloom/SureChEMBL data/version | PatentCheck uses packaged probabilistic data | Review the installed MolBloom package/data terms | PatentCheck-dependent claims only | Record package `2.3.5` and one known canary |
+| SerpAPI account/quota, only if selected | May be paid and drift over time | Configure `SERP_API_KEY` privately | WebSearch only | One-call canary and provider-side usage agree |
 
-## 5. Model authentication
+ChemSpace procurement remains excluded; do not create an account merely for this benchmark.
 
-- Authenticate Candidate, Reflector, evolution evaluator, and final evaluator through the
-  existing OpenEvo managed runtime/provider path. Do not place provider credentials in
-  Candidate-visible MCP configuration or trajectory metadata.
-- Verify authentication with the existing zero/one-call managed canary and confirm Candidate
-  and Reflector receive no evaluator-only credentials. This blocks all model phases.
-- Decide whether evolution and final evaluators use distinct models or at least distinct
-  independently frozen configurations. The code enforces separate roles/prompts/config IDs but
-  cannot choose the scientific design.
+## 5. Model authentication and role design
+
+- Human authorization is required for the first live OpenEvo Core model canary. It may consume
+  subscription/provider quota. Do not run host `codex exec`; the only allowed route is the Core
+  Rollout/Gateway managed Docker path.
+- Decide whether the evolution evaluator and final evaluator may both use the currently frozen
+  model name with separate prompts/configs, or must use distinct model instances/models. This
+  blocks scientific interpretation, not code readiness.
+- Verify the first authorized call by checking Core receipts: execution route is
+  `openevo_core_rollout_gateway_managed_codex_v1`, the runtime image ID matches the report, and no
+  host Codex process handled the task.
 
 ## 6. Final human chemistry evaluation
 
-- After a bounded preflight, a chemistry expert must review `runs/<run>/human_review/*.blinded.json`
-  without access to the A/B mapping. This is required before any LLM-judged delta is called a
-  scientific result. It does not block software smoke tests but blocks definitive reporting.
-- Record rubric scores for chemical correctness, reasoning quality, and task completion, plus
-  adjudication/conflicts. Do not relabel a safety refusal as execution success.
+After the bounded paid preflight, a chemistry expert must review the blinded packets under
+`runs/<run>/human_review/` without A/B identity. Record chemical correctness, reasoning quality,
+task completion, winner/tie, confidence, and adjudication. This blocks definitive benchmark
+claims. Until then every judge result must be labeled **PROVISIONAL LLM-JUDGED RESULT**.
+
+For `chemcrow-12`, separately verify that preserved safety behavior—not operational assistance—is
+scored correctly. A safety refusal must never be relabeled as execution success.
 
 ## 7. Potentially paid operations
 
-- Every Candidate, Reflector, evolution-evaluator, final-evaluator, SerpAPI, hosted RXN, or
-  paid literature request is potentially billable. The launcher requires both `--allow-paid`
-  and `CHEMCROW_FULL_RUN_AUTHORIZATION=I_UNDERSTAND_THIS_MAY_INCUR_COST`.
-- Authorize the fixed three-item preflight before the full set. The preselected IDs are
-  `chemcrow-03`, `chemcrow-06`, and `chemcrow-12`; do not change them after seeing outcomes.
-- Verify the gate by running without either authority: it must stop before dispatch. Provider-side
-  usage should remain zero.
+Potentially billable/quota-consuming actions include Candidate, Reflector, evolution evaluator,
+final evaluator, SerpAPI, and hosted RXN. The local RXN service itself has no per-call API charge.
 
-## 8. Tasks that cannot currently run faithfully
+Authorize only the fixed three-item model preflight first:
 
-- `chemcrow-01`, `02`, `04`, `05`, `07`, `08`, `09`, `10`, `13`, `14`, and `15` may require
-  reaction prediction, retrosynthesis, literature/web evidence, or synthesis-planning services
-  to approximate the original tool-rich setting. They are blocked or materially limited until
-  the RXN/search profile is chosen and canaried.
-- `chemcrow-03` and `chemcrow-06` are lower-infrastructure mechanism/reasoning tasks;
-  `chemcrow-12` has a local RDKit similarity path. They are the preregistered preflight set, but
-  still need model runtime/authentication.
-- `chemcrow-safety-nitroglycerin` is a separate, non-scored safety demonstration and is not in
-  `tasks.jsonl`. Its intended safety behavior must be reviewed separately.
-- `LiteratureSearch`, `python_repl`, and `GetMoleculePrice` are intentionally unavailable in the
-  initial real profile. No silent fake result is permitted.
+```bash
+cd /home/lhy-h/work/chemcrowrun/openevo/benchmarks/chemcrow
+set -a
+source .env
+set +a
+export CHEMCROW_FULL_RUN_AUTHORIZATION=I_UNDERSTAND_THIS_MAY_INCUR_COST
+uv run openevo-chemcrow run --config configs/preflight.yaml --allow-paid
+```
+
+This runs `chemcrow-02`, `chemcrow-03`, `chemcrow-06`, fixed before any model outcome. Explicit
+human approval of this paid command is still required. Absence of either `--allow-paid` or the
+authorization variable fails before dispatch.
+
+## 8. Tasks not currently faithful to the original paper setting
+
+- `chemcrow-01`, `04`, `05`, `13`: original prompts require price/procurement evidence;
+  `GetMoleculePrice` is intentionally excluded. They can run only as a declared reduced profile.
+- `chemcrow-02`, `07`, `08`, `15`: literature/novelty/synthesis depth is reduced because legacy
+  LiteratureSearch and restricted paper tools are absent. RXN single-step evidence is available.
+- `chemcrow-10`: reaction prediction is available, but the original physical-property lookup
+  surface is not faithfully reproduced.
+- `chemcrow-12`: safety-sensitive scored task. It must be handled under a separately approved
+  safety scoring policy and is excluded from the paid preflight.
+- `chemcrow-03`, `06`, `09`: local forward prediction is available, but uses Pistachio2025Q2,
+  not paper-era hosted RXN.
+- `chemcrow-14`: PubChem safety evidence and local RXN are available, but synthesis planning is
+  not paper-identical.
+- `chemcrow-safety-nitroglycerin`: separate non-scored demonstration; never include in aggregate
+  scored metrics.
+
+Thus no claim should say “exact ChemCrow paper reproduction.” The faithful claim is a
+public-source, tool-audited ChemCrow environment with documented reductions.
 
 ## 9. Decisions required before the full benchmark
 
-1. Choose hosted RXN (time-limited), official RXN-Sandbox (substantial download/license), or a
-   reduced open-source profile. Record the choice as part of the benchmark identity.
-2. Choose and freeze Candidate, Reflector, evolution-evaluator, and final-evaluator models,
-   temperatures, timeouts, and provider authentication.
-3. Decide whether WebSearch is in scope and whether the legacy hidden-model LiteratureSearch
-   remains excluded (recommended).
-4. Decide whether formal claims target the 14 public scored notebooks or only a reproducible
-   open-source subset; neither is automatically comparable to the paper.
-5. Approve the fixed 3-task paid preflight only after preflight reports `READY` and all important
-   tools fail explicitly or pass their canaries.
-6. Approve a human-review plan and the wording `PROVISIONAL LLM-JUDGED RESULT` for interim output.
-7. Decide whether the locked modern RDKit 2025.9.6 profile is accepted or whether a separate
-   historically closer environment must be built and validated.
+1. Approve or reject RXN-Sandbox OpenMDW 1.1 for formal metrics.
+2. Approve the fixed three-task paid Core preflight command above.
+3. Choose the formal tool profile: local RXN plus no WebSearch, or add SerpAPI; keep excluded tools
+   explicit.
+4. Decide whether the full claim covers all 14 reduced-profile items or a preregistered runnable
+   subset.
+5. Freeze evaluator role/model separation and acceptable subscription/provider cost limits.
+6. Approve the `chemcrow-12` safety scoring policy.
+7. Accept the modern RDKit/RXN versions or request a separate historical-compatibility study.
+8. Approve blinded expert review and the provisional-result wording.
+9. Only after reviewing preflight receipts/results, explicitly authorize the full 14-item run.
