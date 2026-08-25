@@ -1,0 +1,93 @@
+schema_version: chemcrow_experiment_v2
+experiment_id: chemcrow-task-local-full-v1
+task_manifest: ../tasks.jsonl
+task_ids: all
+feedback_mode: F2
+artifact_type: text_memory
+run_root: ../../../../runs/full-v1
+cache_root: ../../../../caches/full-v1
+ledger_root: ../../../../runs/full-v1/claims
+evolution_store:
+  backend_url: http://127.0.0.1:8200
+  db_path: ../../../../core-state/evolution/core.sqlite3
+  artifact_root: ../../../../core-state/evolution/artifacts
+controlled_chemicals_csv: ../../../../vendor/chemcrow-public/chemcrow/data/chem_wep_smi.csv
+network_enabled: true
+rollout_base_url: ${OPENEVO_ROLLOUT_BASE_URL}
+candidate:
+  timeout_seconds: 900
+  runtime: &managed_runtime
+    backend: docker
+    profile: managed_science
+    container_user: host
+    image: sha256:7a0079f9cb1bce5768cff5bce3d1181811c6a231ad800cac8fb503d66852c81b
+    prepare:
+      - type: exec
+        command: >-
+          mkdir -p /openevo/session/home/.codex /openevo/session/home/.openevo-codex-readiness /openevo/session/workspace /openevo/session/logs/agent && chmod 700 /openevo/session/home /openevo/session/home/.codex /openevo/session/home/.openevo-codex-readiness /openevo/session/logs /openevo/session/logs/agent
+    env:
+      HOME: /openevo/session/home
+      PATH: /opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    network: host
+    workdir: /openevo/session/workspace
+    gpus: 0
+    allow_internet: true
+    import_path: null
+    kwargs: {}
+  agent:
+    harness: codex
+    import_path: null
+    model_name: ${OPENEVO_CANDIDATE_MODEL}
+    settings:
+      auth_mode: subscription
+      capture_mode: transcript
+      reasoning_effort: high
+      reasoning_summary: auto
+    env: {}
+    mcp_servers: []
+    skills_path: null
+    custom_shell: null
+  builder: {strategy: agent_transcript, config: {}}
+  metadata: {policy_version: chemcrow-task-local-v1, rollout_step: 0}
+reflector:
+  timeout_seconds: 900
+  runtime: *managed_runtime
+  agent:
+    harness: codex
+    import_path: null
+    model_name: ${OPENEVO_REFLECTOR_MODEL}
+    settings: {auth_mode: subscription, capture_mode: transcript, reasoning_effort: high, reasoning_summary: auto}
+    env: {}
+    mcp_servers: []
+    skills_path: null
+    custom_shell: null
+  builder: {strategy: agent_transcript, config: {}}
+  metadata: {policy_version: chemcrow-reflector-v2-core-managed}
+evolution_evaluator:
+  timeout_seconds: 600
+  runtime: *managed_runtime
+  agent:
+    harness: codex
+    import_path: null
+    model_name: ${OPENEVO_EVOLUTION_EVALUATOR_MODEL}
+    settings: {auth_mode: subscription, capture_mode: transcript, reasoning_effort: medium, reasoning_summary: auto}
+    env: {}
+    mcp_servers: []
+    skills_path: null
+    custom_shell: null
+  builder: {strategy: agent_transcript, config: {}}
+  metadata: {policy_version: chemcrow-evolution-evaluator-v1}
+final_evaluator:
+  timeout_seconds: 600
+  runtime: *managed_runtime
+  agent:
+    harness: codex
+    import_path: null
+    model_name: ${OPENEVO_FINAL_EVALUATOR_MODEL}
+    settings: {auth_mode: subscription, capture_mode: transcript, reasoning_effort: high, reasoning_summary: auto}
+    env: {}
+    mcp_servers: []
+    skills_path: null
+    custom_shell: null
+  builder: {strategy: agent_transcript, config: {}}
+  metadata: {policy_version: chemcrow-final-evaluator-v1}

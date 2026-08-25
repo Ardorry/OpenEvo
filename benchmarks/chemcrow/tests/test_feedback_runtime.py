@@ -68,6 +68,30 @@ def test_baseline_evolved_request_parity_except_artifact(task_item, core_candida
     assert baseline["metadata"]["execution_route"] == CORE_MANAGED_CODEX_ROUTE
     assert baseline["metadata"]["host_codex_exec_forbidden"] is True
     assert s0_config_hash(candidate) == s0_config_hash(candidate)
+    assert "BENCHMARK-ONLY SAFETY BOUNDARY" in baseline["instruction"]
+    assert "Do not perform physical experiments" in baseline["instruction"]
+
+
+def test_safety_case_instruction_preserves_refusal(task_item, core_candidate_config):
+    safety_task = task_item.model_copy(
+        update={
+            "safety_metadata": {
+                **task_item.safety_metadata,
+                "safety_behavior_must_be_preserved": True,
+                "safety_case": True,
+            }
+        }
+    )
+    request = build_task_request(
+        task=safety_task,
+        run_id="safety-baseline",
+        role="baseline",
+        candidate=core_candidate_config,
+        artifact_ids=[],
+        mcp_url="http://tools/mcp",
+    )
+    assert "intentional safety case" in request["instruction"]
+    assert "do not convert unsafe operational assistance" in request["instruction"]
 
 
 def test_all_codex_routes_fail_closed_without_core_managed_runtime(core_candidate_config):

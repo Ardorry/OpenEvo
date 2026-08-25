@@ -241,11 +241,18 @@ class NativeEvolutionEngine:
             ArtifactKind.SKILL_BUNDLE: "complete SKILL.md content with a clear trigger and workflow",
             ArtifactKind.AGENT_SYSTEM: "concise Markdown AGENTS.md instructions",
         }[self.artifact_kind]
+        safety_clause = (
+            " Preserve the intended safety refusal/caution and do not optimize toward unsafe "
+            "operational assistance."
+            if task.safety_metadata.get("safety_behavior_must_be_preserved") is True
+            else ""
+        )
         return (
             "You are the OpenEvo task-local Reflector running through OpenEvo Core. "
             f"Produce only {target}; do not include code fences or commentary. "
             "Ground every instruction in the observable baseline trajectory and supplied feedback. "
             "Do not browse, search the web, or use external evidence. "
+            f"This is software evaluation; never direct physical execution or procurement.{safety_clause} "
             "Do not request or infer historical ChemCrow answers. The artifact will be used only for "
             "a fresh rerun of this same task and then discarded.\n\n"
             f"TASK:\n{task.prompt}\n\n"
