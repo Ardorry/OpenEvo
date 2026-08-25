@@ -137,9 +137,11 @@ def probe_openrouter_key(
     """Validate one OpenRouter key without making a model or paid request.
 
     OpenRouter's documented ``GET /api/v1/key`` endpoint returns key metadata.
-    This receipt deliberately reduces that response to booleans and a canonical
-    hash; labels, identifiers, limits, usage values, and the credential itself
-    are never written.
+    If the key has no spending limit, ``GET /api/v1/credits`` supplies the
+    account-level credit/usage fields needed for a boolean capacity check. This
+    receipt deliberately reduces both responses to booleans and canonical
+    hashes; labels, identifiers, balances, limits, usage values, and the
+    credential itself are never written.
     """
     if not api_key:
         return _openrouter_probe_report(status="BLOCKED_KEY_ABSENT")
@@ -172,10 +174,94 @@ def probe_openrouter_key(
     data = payload.get("data") if isinstance(payload, dict) else None
     if not isinstance(data, dict):
         return _openrouter_probe_report(status="INVALID_UPSTREAM_RESPONSE")
+    common_details = {
+        "upstream_http_status": response.status_code,
+        "upstream_response_sha256": canonical_sha256(payload),
+        "spending_limit_present": data.get("limit") is not None,
+        "limit_remaining_present": data.get("limit_remaining") is not None,
+        "expiration_present": data.get("expires_at") is not None,
+        "free_tier": bool(data.get("is_free_tier")),
+        "management_key": bool(data.get("is_management_key")),
+    }
     remaining = data.get("limit_remaining")
     sufficient: bool | None
     if remaining is None:
-        sufficient = None
+        try:
+            with httpx.Client(
+                base_url=base_url.rstrip("/"),
+                timeout=httpx.Timeout(30.0),
+                transport=transport,
+                trust_env=False,
+            ) as client:
+                credits_response = client.get(
+                    "/credits",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+        except httpx.RequestError:
+            return _openrouter_probe_report(
+                status="VALID_BALANCE_UNVERIFIED",
+                credit_endpoint_status="AMBIGUOUS_TRANSPORT_ERROR",
+                sufficient_remaining_for_frozen_ceiling=None,
+                **common_details,
+            )
+        if not credits_response.is_success:
+            return _openrouter_probe_report(
+                status="VALID_BALANCE_UNVERIFIED",
+                credit_endpoint_status="UPSTREAM_ERROR",
+                credit_upstream_http_status=credits_response.status_code,
+                sufficient_remaining_for_frozen_ceiling=None,
+                **common_details,
+            )
+        try:
+            credits_payload = credits_response.json()
+        except ValueError:
+            return _openrouter_probe_report(
+                status="VALID_BALANCE_UNVERIFIED",
+                credit_endpoint_status="INVALID_UPSTREAM_RESPONSE",
+                sufficient_remaining_for_frozen_ceiling=None,
+                **common_details,
+            )
+        credits_data = (
+            credits_payload.get("data") if isinstance(credits_payload, dict) else None
+        )
+        if not isinstance(credits_data, dict):
+            return _openrouter_probe_report(
+                status="VALID_BALANCE_UNVERIFIED",
+                credit_endpoint_status="INVALID_UPSTREAM_RESPONSE",
+                sufficient_remaining_for_frozen_ceiling=None,
+                **common_details,
+            )
+        total_credits = credits_data.get("total_credits")
+        total_usage = credits_data.get("total_usage")
+        if total_credits is None or total_usage is None:
+            return _openrouter_probe_report(
+                status="VALID_BALANCE_UNVERIFIED",
+                credit_endpoint_status="REQUIRED_FIELDS_ABSENT",
+                credit_upstream_response_sha256=canonical_sha256(credits_payload),
+                sufficient_remaining_for_frozen_ceiling=None,
+                **common_details,
+            )
+        try:
+            available = float(total_credits) - float(total_usage)
+            sufficient = available >= float(
+                paper_cost_ceiling()["list_price_ceiling_usd_total"]
+            )
+        except (TypeError, ValueError):
+            return _openrouter_probe_report(
+                status="VALID_BALANCE_UNVERIFIED",
+                credit_endpoint_status="INVALID_UPSTREAM_RESPONSE",
+                credit_upstream_response_sha256=canonical_sha256(credits_payload),
+                sufficient_remaining_for_frozen_ceiling=None,
+                **common_details,
+            )
+        common_details.update(
+            {
+                "credit_endpoint_status": "VALID",
+                "credit_upstream_http_status": credits_response.status_code,
+                "credit_upstream_response_sha256": canonical_sha256(credits_payload),
+                "credit_balance_fields_present": True,
+            }
+        )
     else:
         try:
             sufficient = float(remaining) >= float(
@@ -184,26 +270,22 @@ def probe_openrouter_key(
         except (TypeError, ValueError):
             return _openrouter_probe_report(status="INVALID_UPSTREAM_RESPONSE")
     return _openrouter_probe_report(
-        status="VALID",
-        upstream_http_status=response.status_code,
-        upstream_response_sha256=canonical_sha256(payload),
-        spending_limit_present=data.get("limit") is not None,
-        limit_remaining_present=remaining is not None,
+        status="VALID" if sufficient else "VALID_INSUFFICIENT_CREDITS",
         sufficient_remaining_for_frozen_ceiling=sufficient,
-        expiration_present=data.get("expires_at") is not None,
-        free_tier=bool(data.get("is_free_tier")),
-        management_key=bool(data.get("is_management_key")),
+        **common_details,
     )
 
 
 def _openrouter_probe_report(status: str, **details: Any) -> dict[str, Any]:
     return {
-        "schema_version": "chemcrow_openrouter_credential_probe_v1",
+        "schema_version": "chemcrow_openrouter_credential_probe_v2",
         "status": status,
-        "endpoint": "GET /api/v1/key",
+        "authentication_endpoint": "GET /api/v1/key",
+        "credit_endpoint": "GET /api/v1/credits",
         "model_calls": 0,
         "paid_operations": 0,
         "secret_values_included": False,
         "key_metadata_values_included": False,
+        "credit_values_included": False,
         **details,
     }

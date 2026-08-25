@@ -118,3 +118,40 @@ def test_openrouter_key_probe_rejects_unauthorized_key_without_body_leak():
 
     assert report["status"] == "INVALID_OR_UNAUTHORIZED"
     assert "DO_NOT_LEAK_BODY" not in json.dumps(report)
+
+
+def test_openrouter_key_probe_uses_credit_balance_when_key_has_no_limit():
+    sentinel = "DO_NOT_LEAK_CREDIT_VALUES"
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/key"):
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "label": sentinel,
+                        "limit": None,
+                        "limit_remaining": None,
+                        "expires_at": None,
+                        "is_free_tier": False,
+                        "is_management_key": False,
+                    }
+                },
+            )
+        assert request.url.path.endswith("/credits")
+        return httpx.Response(
+            200,
+            json={"data": {"total_credits": 5, "total_usage": 1, "private": sentinel}},
+        )
+
+    report = probe_openrouter_key(
+        api_key="configured-key",
+        base_url="http://mock.invalid/v1",
+        transport=httpx.MockTransport(upstream),
+    )
+
+    assert report["status"] == "VALID_INSUFFICIENT_CREDITS"
+    assert report["credit_endpoint_status"] == "VALID"
+    assert report["sufficient_remaining_for_frozen_ceiling"] is False
+    assert report["model_calls"] == report["paid_operations"] == 0
+    assert sentinel not in json.dumps(report)

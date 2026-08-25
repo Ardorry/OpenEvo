@@ -25,6 +25,11 @@ blinded chemistry-expert review.
 
 Primary paper reference: <https://www.nature.com/articles/s42256-024-00832-8>
 
+The official Source Data adds a distinct human-expert scale: four expert chemists scored each
+response from 0 to 10 on `Chemically accurate`, `Quality of reasoning`, and `Task completed`, with
+randomized response order. Consequently, the existing OpenEvo 0--4 three-dimensional evaluator is
+retained only as an internal diagnostic and must not be reported as the paper's human score.
+
 ## Frozen protocol
 
 - Model: `openai/gpt-4`
@@ -92,15 +97,22 @@ sealed. Current provider metadata: <https://openrouter.ai/openai/gpt-4/providers
 - zero-paid Core route MOCK smoke: PASS; see `PAPER_EVALUATOR_MOCK_CORE_SMOKE.json`
 - current real preflight: BLOCKED with zero model calls; see workspace report
   `/home/lhy-h/work/chemcrowrun/reports/PAPER_EVALUATOR_PREFLIGHT.json`
+- official human-review packet tests: PASS; 42 blinded comparisons, four independent reviewer
+  slots each, published 0--10 three-dimensional scale
+- current test suite: 49 passed; Ruff PASS
+- current human packet preparation: BLOCKED with zero model calls until the composite 14-task
+  manifest exists; see `/home/lhy-h/work/chemcrowrun/reports/PAPER_HUMAN_REVIEW_PREPARE.json`
 
 ## Current blockers
 
-1. `OPENROUTER_API_KEY` is absent. Add it only to the ignored permission-0600 file
-   `/home/lhy-h/work/chemcrowrun/.env.paper-evaluator`.
+1. `OPENROUTER_API_KEY` is present in the ignored permission-0600 file and authenticates, but the
+   zero-model credits probe reports `VALID_INSUFFICIENT_CREDITS` for the frozen `$11.83266`
+   ceiling. Add sufficient OpenRouter credit, then repeat the zero-model probe.
 2. The paid authorization literal remains empty intentionally.
 3. `full-v3` has 12 sealed/reset pairs. Task 14 is interrupted and task 15 never started. A
    14-task paper-compatible mean cannot be produced from this run as-is.
-4. A chemistry expert is still required for blinded final review.
+4. Four independent expert chemists are required for a paper-comparable blinded final review
+   (168 completed forms across 42 comparisons). A smaller panel must be labeled exploratory.
 
 The first 12 pairs have now passed a separate sealed-subset audit: 12 unique artifacts, 12 Core
 runtime-injection receipts, 60 terminal phases, 302 real/cache-replay tool observations, and zero
@@ -125,6 +137,16 @@ hash. The pending template is
 
 No paid command should be issued until blocker 3 is resolved and a new preflight says
 `READY_FOR_EXPLICIT_PAID_AUTHORIZATION`.
+
+After the composite audit passes, the official-scale human packet is prepared with no model call:
+
+```bash
+cd /home/lhy-h/work/chemcrowrun/openevo
+uv run --project benchmarks/chemcrow openevo-chemcrow paper-human-review-prepare \
+  --config benchmarks/chemcrow/configs/paper_human_review.composite-v1.yaml \
+  --output /home/lhy-h/work/chemcrowrun/reports/PAPER_HUMAN_REVIEW_PREPARE.json \
+  --no-model-calls
+```
 
 ## Commands after all blockers are cleared
 

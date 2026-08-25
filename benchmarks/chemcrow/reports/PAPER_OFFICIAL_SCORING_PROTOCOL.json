@@ -1,0 +1,81 @@
+{
+  "generated_on": "2026-08-25",
+  "model_calls": 0,
+  "paid_operations": 0,
+  "paper_evaluator_gate": {
+    "credential_status": "VALID_INSUFFICIENT_CREDITS",
+    "credential_values_included": false,
+    "explicit_paid_authorization_present": false,
+    "frozen_list_price_ceiling_usd": 11.83266,
+    "sufficient_remaining_for_frozen_ceiling": false
+  },
+  "protocol_layers": {
+    "openevo_internal_diagnostic": {
+      "dimensions": [
+        "chemical_correctness",
+        "reasoning_quality",
+        "task_completion"
+      ],
+      "feedback_may_enter_reflector": true,
+      "official_chemcrow_paper_score": false,
+      "scale": "0-4"
+    },
+    "paper_evaluator_gpt": {
+      "call_count": 42,
+      "comparisons_per_task": [
+        "historical_chemcrow_vs_historical_gpt4",
+        "openevo_baseline_vs_historical_gpt4",
+        "openevo_evolved_vs_historical_gpt4"
+      ],
+      "feedback_enters_reflector": false,
+      "model": "openai/gpt-4",
+      "output_fields": [
+        "grade",
+        "strengths",
+        "weaknesses",
+        "justification",
+        "feedback"
+      ],
+      "protocol": "CHEMCROW_EVALUATORGPT_PROMPT_COMPATIBLE_V1",
+      "scale": "0-10 single overall grade per student",
+      "sealed_output_only": true,
+      "temperature": 0.1,
+      "verbatim_prompt_reproduction": false
+    },
+    "paper_human_expert_review": {
+      "comparison_count": 42,
+      "condition_identity_blinded": true,
+      "dimensions": [
+        "Chemically accurate",
+        "Quality of reasoning",
+        "Task completed"
+      ],
+      "feedback_enters_reflector": false,
+      "protocol": "CHEMCROW_PAPER_HUMAN_REVIEW_COMPATIBLE_V1",
+      "randomized_answer_order": true,
+      "required_completed_review_forms": 168,
+      "required_independent_expert_chemists": 4,
+      "scale": "0-10 per dimension per response",
+      "sealed_output_only": true,
+      "style_masking": "final_response_only_no_react_trajectory",
+      "verbatim_historical_review_sheet_reproduction": false
+    }
+  },
+  "public_evidence": {
+    "article": {
+      "url": "https://www.nature.com/articles/s42256-024-00832-8"
+    },
+    "source_data_figure_4": {
+      "sha256": "9e3383177c975662b7e76e54f490a811bda690cb2b869ca47ad24439f5367b8d",
+      "size_bytes": 23245,
+      "url": "https://media.springernature.com/original/springer-static/esm/art%3A10.1038%2Fs42256-024-00832-8/MediaObjects/42256_2024_832_MOESM3_ESM.xlsx"
+    },
+    "supplementary_information": {
+      "sha256": "ac14f6ee5d5c00736eeb8d4bf4e25bbe8311763cc7b5935d5132f36d07eec02b",
+      "size_bytes": 8372987,
+      "url": "https://media.springernature.com/original/springer-static/esm/art%3A10.1038%2Fs42256-024-00832-8/MediaObjects/42256_2024_832_MOESM1_ESM.pdf"
+    }
+  },
+  "schema_version": "chemcrow_paper_official_scoring_protocol_v1",
+  "status": "IMPLEMENTED_BLOCKED_ON_SEALED_14_TASK_AUTHORITY_AND_HUMAN_ACTION"
+}

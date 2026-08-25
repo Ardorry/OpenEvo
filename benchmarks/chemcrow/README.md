@@ -59,6 +59,25 @@ uv run --project benchmarks/chemcrow openevo-chemcrow paper-evaluator-preflight 
 The current `full-v3` is stopped and contains only 12 fully sealed pairs, so this command correctly
 returns `BLOCKED`. Do not run the paid command until a complete 14-task authority exists.
 
+The published human-expert layer is separate again. ChemCrow Source Data Fig. 4 records three
+scores on a 0--10 scale (`Chemically accurate`, `Quality of reasoning`, `Task completed`) from four
+expert chemists. The existing OpenEvo 0--4 three-dimensional judge remains an internal diagnostic,
+not the paper's human score. Once the composite 14-task authority is sealed, prepare 42 blinded
+comparisons and four response forms per comparison without a model call:
+
+```bash
+uv run --project benchmarks/chemcrow openevo-chemcrow paper-human-review-prepare \
+  --config benchmarks/chemcrow/configs/paper_human_review.composite-v1.yaml \
+  --output /home/lhy-h/work/chemcrowrun/reports/PAPER_HUMAN_REVIEW_PREPARE.json \
+  --no-model-calls
+```
+
+The condition mapping and randomization secret are permission-0600 and private; public packet IDs
+are opaque and only the secret hash is exposed. Reviewer packets contain final responses only,
+randomized as A/B, with no runtime trajectory or system identity. Four completed independent
+reviews per comparison are required for a paper-comparable human result; fewer reviews are
+exploratory.
+
 Those 12 pairs pass a standalone sealed-subset audit and can be preserved. The smallest 14-task
 closure is the frozen `paper_repair.v1.yaml` task-14/task-15 run followed by
 `paper-composite-audit`; it remains fail-closed until the user explicitly authorizes the duplicate

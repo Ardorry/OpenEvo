@@ -36,6 +36,11 @@ from .paper_evaluator import (
     extract_historical_answers,
     paper_cost_ceiling,
 )
+from .paper_human_review import (
+    build_paper_human_review_bundle,
+    load_or_create_human_review_secret,
+    write_paper_human_review_bundle,
+)
 from .protocol import TaskLocalProtocolRunner
 from .runtime import (
     CORE_MANAGED_CODEX_ROUTE,
@@ -696,6 +701,76 @@ def command_paper_composite_audit(args: argparse.Namespace) -> int:
     return 0 if payload["status"] == "PASS" else 2
 
 
+def command_paper_human_review_prepare(args: argparse.Namespace) -> int:
+    config_path = args.config.resolve()
+    config = _load_yaml(config_path)
+    output = args.output.resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        tasks = _read_tasks(_path(config_path, str(config["task_manifest"])))
+        task_ids = [task.task_id for task in tasks]
+        pairs = load_composite_pairs(
+            manifest_path=_path(config_path, str(config["composite_manifest"])),
+            task_ids=task_ids,
+        )
+        historical = extract_historical_answers(
+            runs_root=_path(config_path, str(config["historical_runs_root"]))
+        )
+        output_root = _path(config_path, str(config["output_root"]))
+        randomization_secret = load_or_create_human_review_secret(output_root)
+        bundle = build_paper_human_review_bundle(
+            tasks=tasks,
+            pairs=pairs,
+            historical=historical,
+            randomization_secret=randomization_secret,
+        )
+        manifest = write_paper_human_review_bundle(
+            bundle=bundle,
+            output_root=output_root,
+        )
+        payload = {
+            "schema_version": "chemcrow_paper_human_review_prepare_v1",
+            "status": manifest["status"],
+            "task_count": manifest["task_count"],
+            "comparison_count": manifest["comparison_count"],
+            "required_independent_reviewer_count": manifest[
+                "required_independent_reviewer_count"
+            ],
+            "required_completed_review_count": manifest[
+                "required_completed_review_count"
+            ],
+            "score_minimum": manifest["score_minimum"],
+            "score_maximum": manifest["score_maximum"],
+            "dimensions": manifest["dimensions"],
+            "model_calls": 0,
+            "paid_operations": 0,
+            "answers_in_report": False,
+        }
+    except (FileNotFoundError, TypeError, ValueError) as exc:
+        payload = {
+            "schema_version": "chemcrow_paper_human_review_prepare_v1",
+            "status": "BLOCKED",
+            "blocking_reason": str(exc),
+            "model_calls": 0,
+            "paid_operations": 0,
+            "answers_in_report": False,
+        }
+    output.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    print(
+        json.dumps(
+            {
+                "status": payload["status"],
+                "model_calls": 0,
+                "paid_operations": 0,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0 if payload["status"] == "READY_FOR_FOUR_EXPERT_REVIEWERS" else 2
+
+
 def command_paper_evaluator_run(args: argparse.Namespace) -> int:
     config_path = args.config.resolve()
     config = _resolve_env(_load_yaml(config_path))
@@ -755,6 +830,11 @@ def build_parser() -> argparse.ArgumentParser:
     paper_composite.add_argument("--output", type=Path, required=True)
     paper_composite.add_argument("--no-model-calls", action="store_true", required=True)
     paper_composite.set_defaults(function=command_paper_composite_audit)
+    paper_human = commands.add_parser("paper-human-review-prepare")
+    paper_human.add_argument("--config", type=Path, required=True)
+    paper_human.add_argument("--output", type=Path, required=True)
+    paper_human.add_argument("--no-model-calls", action="store_true", required=True)
+    paper_human.set_defaults(function=command_paper_human_review_prepare)
     paper_run = commands.add_parser("paper-evaluator-run")
     paper_run.add_argument("--config", type=Path, required=True)
     paper_run.add_argument("--allow-paid", action="store_true")

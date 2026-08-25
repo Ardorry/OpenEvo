@@ -11,7 +11,7 @@ Never paste secrets into chat or commit them. The full benchmark is blocked.
 | Decide whether to enable SerpAPI | WebSearch is currently an explicit unavailable observation and may be paid | `SERP_API_KEY` in ignored `.env`/secret manager | WebSearch only | One separately authorized call yields `source=live` and provider usage agrees |
 | Decide whether hosted RXN is allowed as fallback | Local RXN works; hosted service is time-limited | `RXN4CHEM_API_KEY`, `RXN4CHEM_PROJECT_ID`, optional `RXN4CHEMISTRY_BASE_URL` | RXN tasks only | One separately authorized prediction returns a real provider ID/result |
 | Keep excluded service keys absent unless protocol changes | ChemSpace procurement and hidden-model literature search are excluded | `CHEMSPACE_API_KEY`, `SEMANTIC_SCHOLAR_API_KEY` | Does not block reduced profile | Inventory remains explicitly excluded |
-| Configure the sealed paper judge | The dedicated shim alone may authenticate to OpenRouter | `OPENROUTER_API_KEY` in `/home/lhy-h/work/chemcrowrun/.env.paper-evaluator` (mode 0600) | Paper-compatible evaluation only | Source the file, run `credential-check`, and confirm the key name is present without printing its value |
+| Fund the sealed paper judge key | The key authenticates, but available credits are below the frozen `$11.83266` worst-case ceiling | Add credit in OpenRouter; keep `OPENROUTER_API_KEY` only in `/home/lhy-h/work/chemcrowrun/.env.paper-evaluator` (mode 0600) | Paper-compatible evaluation only | Run `paper-credential-probe --no-model-calls`; require `status=VALID` and `sufficient_remaining_for_frozen_ceiling=true` |
 
 Model role names and the Core-managed Codex subscription auth source are already detected. If auth expires, renew it through the normal Codex login flow on the host; do not copy auth contents into the repository. Verify with the zero-model preflight and one explicitly authorized Core canary.
 
@@ -69,15 +69,16 @@ These services are currently running. GPU RXN is optional; CPU mode passed smoke
 
 ## 5. Model authentication and failed-preflight disposition
 
-The paper evaluator defaults are already frozen in the ignored 0600 file:
+The paper evaluator defaults and API key are configured in the ignored 0600 file:
 `OPENROUTER_BASE_URL`, `CHEMCROW_PAPER_EVALUATOR_MODEL`, and
-`CHEMCROW_PAPER_EVALUATOR_MAX_USD`. Only `OPENROUTER_API_KEY` is missing. Keep
+`CHEMCROW_PAPER_EVALUATOR_MAX_USD`. The key is valid, but the zero-model credits probe reports
+`VALID_INSUFFICIENT_CREDITS`. Keep
 `CHEMCROW_PAPER_EVALUATOR_AUTHORIZATION` empty until a complete 14-task preflight has passed.
 
-After adding the key, validate it with the zero-model command documented in
-`PAPER_EVALUATOR_READINESS.md`. It calls only OpenRouter `GET /api/v1/key`, records no key metadata
-values, and verifies whether the remaining-limit field (when present) is sufficient for the frozen
-`$11.83266` ceiling.
+After adding sufficient credit, validate it with the zero-model command documented in
+`PAPER_EVALUATOR_READINESS.md`. It calls OpenRouter `GET /api/v1/key` and, when the key has no
+spending limit, `GET /api/v1/credits`. It records no key, balance, limit, or usage values and emits
+only the boolean capacity result for the frozen `$11.83266` ceiling.
 
 Immediate decision required:
 
@@ -97,7 +98,25 @@ Also decide whether evolution and final evaluators may share the same model fami
 
 ## 6. Final human chemistry evaluation
 
-After any valid bounded preflight/full run, a chemistry expert must review blinded packets under `runs/<run>/human_review/`. Record the three rubric scores, winner/tie, confidence, and adjudication without seeing A/B identity. This blocks definitive benchmark claims.
+For paper-comparable human evaluation, four independent expert chemists must review the sealed
+offline packets. Each expert scores both blinded responses from 0 to 10 on `Chemically accurate`,
+`Quality of reasoning`, and `Task completed`, then records A/B/tie preference, confidence, and
+comments. Across 42 fixed comparisons this requires 168 completed response forms. Reviewers must
+not see the private A/B mapping. A smaller panel is exploratory and blocks definitive paper-level
+claims.
+
+After the composite 14-task audit passes, generate the packets without model calls:
+
+```bash
+cd /home/lhy-h/work/chemcrowrun/openevo
+uv run --project benchmarks/chemcrow openevo-chemcrow paper-human-review-prepare \
+  --config benchmarks/chemcrow/configs/paper_human_review.composite-v1.yaml \
+  --output /home/lhy-h/work/chemcrowrun/reports/PAPER_HUMAN_REVIEW_PREPARE.json \
+  --no-model-calls
+```
+
+Verify it is fixed when the report says `READY_FOR_FOUR_EXPERT_REVIEWERS`, there are 42 blinded
+packet files and 168 completed reviewer forms, and the private mapping remains mode 0600.
 
 For `chemcrow-12`, separately approve a safety scoring policy that rewards intended safety behavior and never relabels a refusal as execution success.
 
