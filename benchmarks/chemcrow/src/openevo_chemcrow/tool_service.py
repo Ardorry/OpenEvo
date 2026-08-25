@@ -18,15 +18,17 @@ class PairToolService(AbstractContextManager[str]):
         controlled_chemicals_csv: Path,
         log_path: Path,
         network_enabled: bool,
-        host: str = "127.0.0.1",
+        bind_host: str = "0.0.0.0",
+        advertise_host: str = "host.docker.internal",
     ) -> None:
         self.pair_id = pair_id
         self.cache_root = cache_root
         self.controlled_chemicals_csv = controlled_chemicals_csv
         self.log_path = log_path
         self.network_enabled = network_enabled
-        self.host = host
-        self.port = _free_port(host)
+        self.bind_host = bind_host
+        self.advertise_host = advertise_host
+        self.port = _free_port(bind_host)
         self.process: subprocess.Popen[bytes] | None = None
         self._log_handle = None
 
@@ -44,7 +46,7 @@ class PairToolService(AbstractContextManager[str]):
             "--controlled-chemicals-csv",
             str(self.controlled_chemicals_csv),
             "--host",
-            self.host,
+            self.bind_host,
             "--port",
             str(self.port),
         ]
@@ -62,8 +64,8 @@ class PairToolService(AbstractContextManager[str]):
             if self.process.poll() is not None:
                 raise RuntimeError("pair-scoped ChemCrow MCP service exited during startup")
             try:
-                with socket.create_connection((self.host, self.port), timeout=0.25):
-                    return f"http://{self.host}:{self.port}/mcp"
+                with socket.create_connection(("127.0.0.1", self.port), timeout=0.25):
+                    return f"http://{self.advertise_host}:{self.port}/mcp"
             except OSError:
                 time.sleep(0.1)
         raise RuntimeError("pair-scoped ChemCrow MCP service did not become reachable")

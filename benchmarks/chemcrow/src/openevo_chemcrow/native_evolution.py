@@ -47,10 +47,14 @@ class NativeEvolutionEngine:
         run_root: Path,
         artifact_kind: ArtifactKind,
         reflector_rollout: OpenEvoRolloutPort,
+        evolution_db_path: Path,
+        evolution_artifact_root: Path,
     ) -> None:
         self.run_root = run_root
         self.artifact_kind = artifact_kind
         self.reflector_rollout = reflector_rollout
+        self.evolution_db_path = evolution_db_path
+        self.evolution_artifact_root = evolution_artifact_root
 
     def evolve(
         self,
@@ -60,10 +64,9 @@ class NativeEvolutionEngine:
         feedback_payload: dict[str, Any],
         pair_id: str,
     ) -> ArtifactReceipt:
-        item_root = self.run_root / pair_id / "evolution"
         store = EvolutionStore(
-            db_path=item_root / "core.sqlite3",
-            artifact_root=item_root / "artifacts",
+            db_path=self.evolution_db_path,
+            artifact_root=self.evolution_artifact_root,
         )
         store.initialize()
         source_event_id = f"{pair_id}-baseline-feedback"
@@ -181,7 +184,7 @@ class NativeEvolutionEngine:
                 dataset_artifact_id=dataset.artifact_id,
                 dataset_uri=claim.job.input_artifacts[0].uri,
                 content=reflected.answer,
-                artifact_root=item_root / "artifacts",
+                artifact_root=self.evolution_artifact_root,
                 task=task,
                 reflector_run_id=reflected.run_id,
             )
@@ -242,6 +245,7 @@ class NativeEvolutionEngine:
             "You are the OpenEvo task-local Reflector running through OpenEvo Core. "
             f"Produce only {target}; do not include code fences or commentary. "
             "Ground every instruction in the observable baseline trajectory and supplied feedback. "
+            "Do not browse, search the web, or use external evidence. "
             "Do not request or infer historical ChemCrow answers. The artifact will be used only for "
             "a fresh rerun of this same task and then discarded.\n\n"
             f"TASK:\n{task.prompt}\n\n"

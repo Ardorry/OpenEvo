@@ -1,12 +1,15 @@
 schema_version: chemcrow_experiment_v1
-experiment_id: chemcrow-task-local-full-v1
+experiment_id: chemcrow-task-local-preflight-v2
 task_manifest: ../tasks.jsonl
-task_ids: all
+task_ids:
+  - chemcrow-02
+  - chemcrow-03
+  - chemcrow-06
 feedback_mode: F2
 artifact_type: text_memory
-run_root: ../../../../runs/full-v1
-cache_root: ../../../../caches/full-v1
-ledger_root: ../../../../runs/full-v1/claims
+run_root: ../../../../runs/preflight-v2
+cache_root: ../../../../caches/preflight-v2
+ledger_root: ../../../../runs/preflight-v2/claims
 evolution_store:
   backend_url: http://127.0.0.1:8200
   db_path: ../../../../core-state/evolution/core.sqlite3
@@ -47,8 +50,12 @@ candidate:
     mcp_servers: []
     skills_path: null
     custom_shell: null
-  builder: {strategy: agent_transcript, config: {}}
-  metadata: {policy_version: chemcrow-task-local-v1, rollout_step: 0}
+  builder:
+    strategy: agent_transcript
+    config: {}
+  metadata:
+    policy_version: chemcrow-task-local-v1
+    rollout_step: 0
 reflector:
   timeout_seconds: 900
   runtime: *managed_runtime
@@ -56,13 +63,20 @@ reflector:
     harness: codex
     import_path: null
     model_name: ${OPENEVO_REFLECTOR_MODEL}
-    settings: {auth_mode: subscription, capture_mode: transcript, reasoning_effort: high, reasoning_summary: auto}
+    settings:
+      auth_mode: subscription
+      capture_mode: transcript
+      reasoning_effort: high
+      reasoning_summary: auto
     env: {}
     mcp_servers: []
     skills_path: null
     custom_shell: null
-  builder: {strategy: agent_transcript, config: {}}
-  metadata: {policy_version: chemcrow-reflector-v2-core-managed}
+  builder:
+    strategy: agent_transcript
+    config: {}
+  metadata:
+    policy_version: chemcrow-reflector-v2-core-managed
 evolution_evaluator:
   timeout_seconds: 600
   runtime: *managed_runtime
@@ -70,13 +84,20 @@ evolution_evaluator:
     harness: codex
     import_path: null
     model_name: ${OPENEVO_EVOLUTION_EVALUATOR_MODEL}
-    settings: {auth_mode: subscription, capture_mode: transcript, reasoning_effort: medium, reasoning_summary: auto}
+    settings:
+      auth_mode: subscription
+      capture_mode: transcript
+      reasoning_effort: medium
+      reasoning_summary: auto
     env: {}
     mcp_servers: []
     skills_path: null
     custom_shell: null
-  builder: {strategy: agent_transcript, config: {}}
-  metadata: {policy_version: chemcrow-evolution-evaluator-v1}
+  builder:
+    strategy: agent_transcript
+    config: {}
+  metadata:
+    policy_version: chemcrow-evolution-evaluator-v1
 final_evaluator:
   timeout_seconds: 600
   runtime: *managed_runtime
@@ -84,10 +105,17 @@ final_evaluator:
     harness: codex
     import_path: null
     model_name: ${OPENEVO_FINAL_EVALUATOR_MODEL}
-    settings: {auth_mode: subscription, capture_mode: transcript, reasoning_effort: high, reasoning_summary: auto}
+    settings:
+      auth_mode: subscription
+      capture_mode: transcript
+      reasoning_effort: high
+      reasoning_summary: auto
     env: {}
     mcp_servers: []
     skills_path: null
     custom_shell: null
-  builder: {strategy: agent_transcript, config: {}}
-  metadata: {policy_version: chemcrow-final-evaluator-v1}
+  builder:
+    strategy: agent_transcript
+    config: {}
+  metadata:
+    policy_version: chemcrow-final-evaluator-v1

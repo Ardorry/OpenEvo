@@ -1,0 +1,20 @@
+{
+  "schema_version": "chemcrow_replacement_preflight_selection_v1",
+  "recorded_before_replacement_execution": true,
+  "recorded_at": "2026-08-25T10:39:56+08:00",
+  "replacement_experiment_id": "chemcrow-task-local-preflight-v2",
+  "replaces_invalidated_experiment_id": "chemcrow-task-local-preflight-v1",
+  "invalidation_receipt_sha256": "441b3af90a96541af1ca5e722814bb448d422b4300a46f06dfd32b8070d21e7b",
+  "task_ids": [
+    "chemcrow-02",
+    "chemcrow-03",
+    "chemcrow-06"
+  ],
+  "selection_method": "unchanged fixed selection from v1; no outcome-based reselection",
+  "maximum_paid_pairs": 3,
+  "reuse_prior_phase_ids": false,
+  "reuse_prior_provider_outputs": false,
+  "authorization_status": "AUTHORIZED_BY_USER",
+  "authorization_text": "完全授权",
+  "authorization_scope": "replacement fixed three-task preflight only; full benchmark remains gated pending readiness report"
+}

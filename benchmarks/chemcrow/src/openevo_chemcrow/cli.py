@@ -242,6 +242,24 @@ def command_preflight(args: argparse.Namespace) -> int:
             }
         except (httpx.HTTPError, TypeError, ValueError):
             pass
+    evolution_health: dict[str, Any] = {"configured": False, "reachable": False}
+    evolution_store = config.get("evolution_store")
+    if isinstance(evolution_store, dict) and evolution_store.get("backend_url"):
+        evolution_health["configured"] = True
+        try:
+            response = httpx.get(
+                str(evolution_store["backend_url"]).rstrip("/") + "/v1/health",
+                timeout=5.0,
+            )
+            response.raise_for_status()
+            health_payload = response.json()
+            evolution_health = {
+                "configured": True,
+                "reachable": health_payload.get("status") == "ok",
+                "db": health_payload.get("db"),
+            }
+        except (httpx.HTTPError, TypeError, ValueError):
+            pass
     rxn_health: dict[str, Any] = {"configured": False, "reachable": False, "paths": []}
     rxn_url = os.environ.get("CHEMCROW_RXN_PREDICT_URL")
     if rxn_url:
@@ -287,6 +305,7 @@ def command_preflight(args: argparse.Namespace) -> int:
         "host_codex_exec_forbidden": True,
         "core_route_error": core_route_error,
         "openevo_core_health": core_health,
+        "openevo_evolution_health": evolution_health,
         "local_rxn_health": rxn_health,
         "model_authentication": codex_auth_metadata,
         "required_environment_presence": environment_presence(env_names),
@@ -303,6 +322,7 @@ def command_preflight(args: argparse.Namespace) -> int:
         and checks["all_codex_roles_core_managed"]
         and core_health["reachable"]
         and core_health["healthy_nodes"] > 0
+        and evolution_health["reachable"]
         and codex_auth_metadata["present"]
         and all(checks["required_environment_presence"].values())
     )
@@ -355,6 +375,10 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
         run_root=run_root,
         artifact_kind=ArtifactKind(config["artifact_type"]),
         reflector_rollout=reflector_port,
+        evolution_db_path=_path(config_path, str(config["evolution_store"]["db_path"])),
+        evolution_artifact_root=_path(
+            config_path, str(config["evolution_store"]["artifact_root"])
+        ),
     )
     runner = TaskLocalProtocolRunner(
         run_root=run_root,

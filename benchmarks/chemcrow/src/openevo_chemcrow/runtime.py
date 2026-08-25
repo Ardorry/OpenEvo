@@ -112,7 +112,9 @@ def build_task_request(
             "Invoke a tool from the shell using exactly: curl -fsS -X POST "
             "'<BASE_URL>/tool/<TOOL_NAME>' -H 'Content-Type: application/json' "
             "--data '{\"query\":\"<QUERY>\"}'. Treat returned JSON as the tool observation. "
-            "Unavailable tools fail explicitly. Do not simulate tool results."
+            "Unavailable tools fail explicitly. Do not simulate tool results. Do not use Codex "
+            "built-in web search, browsing, or any external evidence path outside this declared "
+            "ChemCrow bridge."
         )
     metadata = json.loads(json.dumps(candidate.get("metadata", {})))
     metadata.update(
@@ -124,6 +126,10 @@ def build_task_request(
             "host_codex_exec_forbidden": True,
         }
     )
+    if artifact_ids:
+        metadata["openevo"] = {
+            "revision_id": "chemcrow-task-local:" + canonical_sha256(artifact_ids)
+        }
     return {
         "task_id": run_id,
         "instruction": instruction,
@@ -195,13 +201,15 @@ class OpenEvoRolloutPort:
             config_sha256=self.config_sha256,
             wall_time=time.monotonic() - started,
             tool_receipts=self._tool_receipts_since(mcp_url, tool_receipt_offset),
+            declared_tool_bridge=mcp_url is not None,
         )
 
     @staticmethod
     def _tool_receipt_count(mcp_url: str | None) -> int:
         if not mcp_url:
             return 0
-        response = httpx.get(mcp_url.removesuffix("/mcp") + "/receipts", timeout=5.0)
+        local_url = _local_tool_service_url(mcp_url)
+        response = httpx.get(local_url.removesuffix("/mcp") + "/receipts", timeout=5.0)
         response.raise_for_status()
         receipts = response.json().get("receipts", [])
         if not isinstance(receipts, list):
@@ -212,12 +220,17 @@ class OpenEvoRolloutPort:
     def _tool_receipts_since(mcp_url: str | None, offset: int) -> list[dict[str, Any]]:
         if not mcp_url:
             return []
-        response = httpx.get(mcp_url.removesuffix("/mcp") + "/receipts", timeout=5.0)
+        local_url = _local_tool_service_url(mcp_url)
+        response = httpx.get(local_url.removesuffix("/mcp") + "/receipts", timeout=5.0)
         response.raise_for_status()
         receipts = response.json().get("receipts", [])
         if not isinstance(receipts, list) or offset > len(receipts):
             raise OpenEvoRolloutError("ChemCrow tool receipt stream regressed or is invalid")
         return [item for item in receipts[offset:] if isinstance(item, dict)]
+
+
+def _local_tool_service_url(mcp_url: str) -> str:
+    return mcp_url.replace("://host.docker.internal", "://127.0.0.1", 1)
 
 
 def _message_content(message: dict[str, Any]) -> str:
@@ -242,6 +255,7 @@ def _normalize_rollout(
     config_sha256: str,
     wall_time: float,
     tool_receipts: list[dict[str, Any]] | None = None,
+    declared_tool_bridge: bool = False,
 ) -> Trajectory:
     results = payload.get("results")
     if not isinstance(results, list) or len(results) != 1 or not isinstance(results[0], dict):
@@ -306,6 +320,8 @@ def _normalize_rollout(
     if status_value not in {"COMPLETED", "ERROR", "TIMEOUT"}:
         status_value = "ERROR"
     metadata = trajectory.get("metadata") if isinstance(trajectory.get("metadata"), dict) else {}
+    if declared_tool_bridge:
+        _audit_declared_tool_surface(traces, receipt_count=len(tool_receipts or []))
     for receipt in tool_receipts or []:
         arguments = receipt.get("arguments")
         raw_observation = receipt.get("observation")
@@ -320,6 +336,29 @@ def _normalize_rollout(
             )
         )
         observations.append(observation)
+    task_metadata = (
+        metadata.get("task_metadata") if isinstance(metadata.get("task_metadata"), dict) else {}
+    )
+    if artifact_ids:
+        evolution = (
+            task_metadata.get("evolution")
+            if isinstance(task_metadata.get("evolution"), dict)
+            else {}
+        )
+        receipt = (
+            evolution.get("runtime_injection_receipt")
+            if isinstance(evolution.get("runtime_injection_receipt"), dict)
+            else {}
+        )
+        received_ids = {
+            item.get("artifact_id")
+            for item in receipt.get("artifacts", [])
+            if isinstance(item, dict)
+        }
+        if evolution.get("context_injected") is not True or received_ids != set(artifact_ids):
+            raise OpenEvoRolloutError(
+                "evolved run lacks the exact Core runtime artifact-injection receipt"
+            )
     return Trajectory(
         run_id=run_id,
         task_id=task_id,
@@ -336,3 +375,35 @@ def _normalize_rollout(
         candidate_config_sha256=config_sha256,
         artifact_ids=artifact_ids,
     )
+
+
+def _audit_declared_tool_surface(traces: list[Any], *, receipt_count: int) -> None:
+    bridge_execution_ids: set[str] = set()
+    builtin_web_search_ids: set[str] = set()
+    for trace in traces:
+        if not isinstance(trace, dict):
+            continue
+        trace_metadata = trace.get("metadata")
+        transcript = trace_metadata.get("transcript") if isinstance(trace_metadata, dict) else None
+        if not isinstance(transcript, str):
+            continue
+        for line in transcript.splitlines():
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            item = event.get("item") if isinstance(event, dict) else None
+            if not isinstance(item, dict):
+                continue
+            item_id = str(item.get("id") or "")
+            if item.get("type") == "web_search":
+                builtin_web_search_ids.add(item_id)
+            command = item.get("command")
+            if item.get("type") == "command_execution" and isinstance(command, str) and "/tool/" in command:
+                bridge_execution_ids.add(item_id)
+    if builtin_web_search_ids:
+        raise OpenEvoRolloutError("undeclared built-in web search was observed in Candidate runtime")
+    if len(bridge_execution_ids) != receipt_count:
+        raise OpenEvoRolloutError(
+            "Candidate ChemCrow bridge executions do not match the pair-scoped receipt stream"
+        )

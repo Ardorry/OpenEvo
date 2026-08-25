@@ -30,6 +30,8 @@ def test_native_core_event_dataset_job_and_core_managed_reflector(tmp_path, task
         run_root=tmp_path,
         artifact_kind=ArtifactKind.TEXT_MEMORY,
         reflector_rollout=reflector,
+        evolution_db_path=tmp_path / "global-evolution.sqlite3",
+        evolution_artifact_root=tmp_path / "global-artifacts",
     )
     baseline = Trajectory(
         run_id="baseline-run",
@@ -51,7 +53,8 @@ def test_native_core_event_dataset_job_and_core_managed_reflector(tmp_path, task
     assert receipt.artifact_type == ArtifactKind.TEXT_MEMORY
     assert receipt.reflector_run_id == "core-reflector-run"
     assert receipt.size_bytes > 0
-    assert (tmp_path / "pair-native" / "evolution" / "core.sqlite3").is_file()
+    assert (tmp_path / "global-evolution.sqlite3").is_file()
+    assert (tmp_path / "global-artifacts").is_dir()
 
 
 def test_native_evolution_has_no_host_codex_or_run_method_path():

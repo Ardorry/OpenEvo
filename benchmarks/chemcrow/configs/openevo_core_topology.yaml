@@ -27,4 +27,13 @@ gateway:
         base_url: http://127.0.0.1:8999
 
 evolution:
-  enabled: false
+  enabled: true
+  backend_url: http://127.0.0.1:8200
+  context:
+    target_dir: /openevo/session/evolution
+    timeout_seconds: 10
+    fail_open: false
+  event_export:
+    enabled: false
+    timeout_seconds: 10
+    fail_open: false

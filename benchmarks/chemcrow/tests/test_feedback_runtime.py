@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from openevo_chemcrow.feedback import reflector_feedback_payload, runtime_feedback
@@ -11,6 +13,8 @@ from openevo_chemcrow.models import (
 )
 from openevo_chemcrow.runtime import (
     CORE_MANAGED_CODEX_ROUTE,
+    OpenEvoRolloutError,
+    _normalize_rollout,
     assert_core_managed_codex_config,
     build_task_request,
     s0_config_hash,
@@ -69,3 +73,98 @@ def test_all_codex_routes_fail_closed_without_core_managed_runtime(core_candidat
     }
     with pytest.raises(ValueError, match="custom shell"):
         assert_core_managed_codex_config(shell_bypass)
+
+
+def _rollout_payload(*, evolution=None, transcript_events=()):
+    transcript = "\n".join(json.dumps(event) for event in transcript_events)
+    return {
+        "results": [
+            {
+                "status": "COMPLETED",
+                "trajectory": {
+                    "status": "COMPLETED",
+                    "metadata": {"task_metadata": {"evolution": evolution or {}}},
+                    "traces": [
+                        {
+                            "response_messages": [
+                                {"role": "assistant", "content": "answer"}
+                            ],
+                            "metadata": {"transcript": transcript},
+                        }
+                    ],
+                },
+            }
+        ]
+    }
+
+
+def test_evolved_rollout_requires_exact_core_injection_receipt():
+    payload = _rollout_payload(evolution={"context_injected": False})
+    with pytest.raises(OpenEvoRolloutError, match="artifact-injection receipt"):
+        _normalize_rollout(
+            payload,
+            run_id="evolved-1",
+            task_id="task-1",
+            role="evolved",
+            artifact_ids=["art-1"],
+            config_sha256="s0",
+            wall_time=1.0,
+        )
+
+    payload = _rollout_payload(
+        evolution={
+            "context_injected": True,
+            "runtime_injection_receipt": {"artifacts": [{"artifact_id": "art-1"}]},
+        }
+    )
+    trajectory = _normalize_rollout(
+        payload,
+        run_id="evolved-1",
+        task_id="task-1",
+        role="evolved",
+        artifact_ids=["art-1"],
+        config_sha256="s0",
+        wall_time=1.0,
+    )
+    assert trajectory.artifact_ids == ["art-1"]
+
+
+def test_declared_tool_surface_rejects_builtin_web_search_and_receipt_mismatch():
+    web_payload = _rollout_payload(
+        transcript_events=[{"item": {"id": "web-1", "type": "web_search"}}]
+    )
+    with pytest.raises(OpenEvoRolloutError, match="built-in web search"):
+        _normalize_rollout(
+            web_payload,
+            run_id="baseline-1",
+            task_id="task-1",
+            role="baseline",
+            artifact_ids=[],
+            config_sha256="s0",
+            wall_time=1.0,
+            declared_tool_bridge=True,
+        )
+
+    bridge_payload = _rollout_payload(
+        transcript_events=[
+            {
+                "item": {
+                    "id": "cmd-1",
+                    "type": "command_execution",
+                    "command": "curl http://tools/tool/SMILES2Weight",
+                }
+            }
+        ]
+    )
+    with pytest.raises(OpenEvoRolloutError, match="receipt stream"):
+        _normalize_rollout(
+            bridge_payload,
+            run_id="baseline-1",
+            task_id="task-1",
+            role="baseline",
+            artifact_ids=[],
+            config_sha256="s0",
+            wall_time=1.0,
+            tool_receipts=[],
+            declared_tool_bridge=True,
+        )

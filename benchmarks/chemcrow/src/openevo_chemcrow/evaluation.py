@@ -44,6 +44,7 @@ class OpenEvoEvolutionEvaluator:
     def evaluate(self, *, task: TaskItem, trajectory: Trajectory) -> EvaluatorFeedback:
         prompt = (
             "You are the evolution feedback evaluator. Evaluate the answer independently. "
+            "Do not browse, search the web, or use external evidence. "
             "Do not infer or request historical ChemCrow answers. Score each rubric from 0 to 4. "
             "Return JSON only with keys scores, strengths, weaknesses, actionable_critique, confidence. "
             "scores must contain chemical_correctness, reasoning_quality, task_completion.\n\n"
@@ -90,6 +91,7 @@ class OpenEvoFinalEvaluator:
     ) -> BlindJudgeResult:
         prompt = (
             "You are the blinded final evaluator, separate from the evolution evaluator. "
+            "Do not browse, search the web, or use external evidence. "
             "Do not infer or request historical ChemCrow answers. Compare A and B under the task. "
             "Score each from 0 to 4 for chemical_correctness, reasoning_quality, task_completion. "
             "Return JSON only: {scores_a:{...}, scores_b:{...}, winner:'A'|'B'|'tie', confidence:0..1}.\n\n"
