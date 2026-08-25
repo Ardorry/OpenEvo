@@ -9,6 +9,7 @@ from openevo_chemcrow.paper_smoke import (
     PAPER_SMOKE_AUTHORIZATION,
     PAPER_SMOKE_CALL_ID,
     build_smoke_call,
+    main,
     run_paid_smoke,
 )
 
@@ -45,6 +46,26 @@ def test_smoke_call_is_separate_from_formal_42_call_inventory():
     }
 
 
+def test_historical_v1_smoke_config_cannot_launch_v2_call(tmp_path):
+    config = tmp_path / "v1.json"
+    config.write_text(
+        json.dumps({"schema_version": "chemcrow_paper_evaluator_smoke_config_v1"}),
+        encoding="utf-8",
+    )
+    with pytest.raises(SystemExit, match="not the frozen v2 schema"):
+        main(
+            [
+                "run",
+                "--config",
+                str(config),
+                "--credential-probe",
+                str(tmp_path / "absent-probe.json"),
+                "--output",
+                str(tmp_path / "absent-output.json"),
+            ]
+        )
+
+
 def test_paid_smoke_seals_hash_only_report_and_removes_raw_completion(monkeypatch, tmp_path):
     receipt_root = tmp_path / "receipts"
     receipt_root.mkdir()
@@ -72,7 +93,7 @@ def test_paid_smoke_seals_hash_only_report_and_removes_raw_completion(monkeypatc
         "provider": "OpenAI",
         "allow_fallbacks": False,
         "require_parameters": True,
-        "data_collection": "deny",
+        "data_collection": "allow",
         "temperature": 0.1,
         "upstream_http_status": 200,
         "prompt_tokens": 100,

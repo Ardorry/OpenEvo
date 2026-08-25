@@ -23,6 +23,7 @@ from .paper_core import (
     build_paper_task_request,
 )
 from .paper_evaluator import (
+    PAPER_EVALUATOR_DATA_COLLECTION,
     PAPER_EVALUATOR_MAX_OUTPUT_TOKENS,
     PAPER_EVALUATOR_MODEL,
     PAPER_EVALUATOR_PROVIDER,
@@ -33,9 +34,10 @@ from .paper_evaluator import (
     render_compatible_prompt,
 )
 
-PAPER_SMOKE_AUTHORIZATION = "I_AUTHORIZE_ONE_CORE_PAPER_GPT4_SMOKE_20260825"
-PAPER_SMOKE_CALL_ID = "paper-chemcrow-smoke-core-v1"
-PAPER_SMOKE_SCHEMA = "chemcrow_paper_evaluator_paid_smoke_v1"
+PAPER_SMOKE_AUTHORIZATION = "I_AUTHORIZE_ONE_CORE_PAPER_GPT4_SMOKE_V2_20260825"
+PAPER_SMOKE_CALL_ID = "paper-chemcrow-smoke-core-v2"
+PAPER_SMOKE_SCHEMA = "chemcrow_paper_evaluator_paid_smoke_v2"
+PAPER_SMOKE_CONFIG_SCHEMA = "chemcrow_paper_evaluator_smoke_config_v2"
 
 
 def build_smoke_call() -> PaperEvaluationCall:
@@ -124,7 +126,7 @@ def run_paid_smoke(
         or str(receipt.get("provider", "")).casefold() != "openai"
         or receipt.get("allow_fallbacks") is not False
         or receipt.get("require_parameters") is not True
-        or receipt.get("data_collection") != "deny"
+        or receipt.get("data_collection") != PAPER_EVALUATOR_DATA_COLLECTION
         or receipt.get("temperature") != PAPER_EVALUATOR_TEMPERATURE
     ):
         raise RuntimeError("OpenRouter smoke receipt differs from frozen route")
@@ -236,6 +238,8 @@ def main(argv: list[str] | None = None) -> None:
         )
         return
     config = json.loads(args.config.resolve().read_text(encoding="utf-8"))
+    if config.get("schema_version") != PAPER_SMOKE_CONFIG_SCHEMA:
+        raise SystemExit("paper smoke config is not the frozen v2 schema")
     result = run_paid_smoke(
         rollout_base_url=str(config["rollout_base_url"]),
         runtime=dict(config["runtime"]),

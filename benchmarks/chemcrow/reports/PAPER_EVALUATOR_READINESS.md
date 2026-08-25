@@ -2,7 +2,9 @@
 
 > Superseded-state notice (2026-08-25): the credential balance blocker documented below has been
 > cleared, but the only authorized Core-managed GPT-4 smoke failed closed at OpenRouter HTTP 403 and
-> was not retried. Current authority is `NEXT_STAGE_READINESS_AUDIT.md` plus the value-free root
+> was not retried. The user subsequently approved OpenAI-only routing with
+> `data_collection=allow`; this revision is implemented but not live-verified. Current authority is
+> `NEXT_STAGE_READINESS_AUDIT.md` plus the value-free root
 > receipts `OPENROUTER_CREDENTIAL_PROBE.json` and `OPENROUTER_GPT4_CORE_PAID_SMOKE.json`. Formal
 > 42-call evaluation remains unauthorized and unstarted.
 
@@ -10,9 +12,10 @@ Generated: 2026-08-25 Asia/Shanghai
 
 ## Outcome
 
-The paper-compatible evaluator integration is implemented and passed unit plus zero-paid MOCK
-Core routing tests. No OpenRouter request and no real model call was made. Formal 14-task scoring
-is currently **BLOCKED** because `full-v3` was stopped with only 12 of 14 task pairs fully sealed.
+The paper-compatible evaluator integration is implemented and passed unit plus zero-paid MOCK Core
+routing tests. One historical v1 OpenRouter attempt failed with HTTP 403; no v2 request has been
+made. Formal 14-task scoring is currently **BLOCKED** because `full-v3` was stopped with only 12 of
+14 task pairs fully sealed and the approved v2 paper route lacks a live receipt.
 
 ## Recovered official scoring semantics
 
@@ -47,7 +50,7 @@ retained only as an internal diagnostic and must not be reported as the paper's 
 - Calls: 14 tasks x 3 comparisons = 42
 - Comparisons: historical ChemCrow vs historical GPT-4; OpenEvo baseline vs the same historical
   GPT-4; OpenEvo evolved vs the same historical GPT-4
-- No model fallback, no tools/plugins, `require_parameters=true`, `data_collection=deny`
+- No model fallback, no tools/plugins, `require_parameters=true`, `data_collection=allow`
 - No Reflector or evolution-feedback access
 - Historical answers are extracted only after a completed-run audit passes
 - The original A/B orientation is retained (target system is Student A, historical GPT-4 is

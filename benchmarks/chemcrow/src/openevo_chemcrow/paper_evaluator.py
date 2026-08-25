@@ -23,6 +23,7 @@ PAPER_EVALUATOR_PROTOCOL = "CHEMCROW_EVALUATORGPT_PROMPT_COMPATIBLE_V1"
 PAPER_EVALUATOR_MODEL = "openai/gpt-4"
 PAPER_EVALUATOR_TEMPERATURE = 0.1
 PAPER_EVALUATOR_PROVIDER = "openai"
+PAPER_EVALUATOR_DATA_COLLECTION = "allow"
 PAPER_EVALUATOR_CONTEXT_TOKENS = 8191
 PAPER_EVALUATOR_MAX_OUTPUT_TOKENS = 1200
 PAPER_EVALUATOR_INPUT_USD_PER_TOKEN = 0.00003
@@ -276,7 +277,7 @@ def build_paper_evaluation_plan(
         "provider_only": [PAPER_EVALUATOR_PROVIDER],
         "allow_fallbacks": False,
         "require_parameters": True,
-        "data_collection": "deny",
+        "data_collection": PAPER_EVALUATOR_DATA_COLLECTION,
         "reflector_access": False,
         "evolution_feedback_access": False,
         "sealed_output_only": True,

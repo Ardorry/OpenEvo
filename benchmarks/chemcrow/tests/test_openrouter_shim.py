@@ -15,6 +15,7 @@ async def test_openrouter_shim_pins_route_and_writes_value_free_receipt(tmp_path
 
     async def upstream(request: httpx.Request) -> httpx.Response:
         observed["authorization"] = request.headers.get("authorization")
+        observed["metadata_header"] = request.headers.get("x-openrouter-metadata")
         observed["payload"] = json.loads(request.content)
         return httpx.Response(
             200,
@@ -72,11 +73,12 @@ async def test_openrouter_shim_pins_route_and_writes_value_free_receipt(tmp_path
     assert response.status_code == 200
     assert repeated.status_code == 409
     assert observed["authorization"] == "Bearer DO_NOT_PERSIST_THIS_KEY"
+    assert observed["metadata_header"] == "enabled"
     assert observed["payload"]["provider"] == {
         "only": ["openai"],
         "allow_fallbacks": False,
         "require_parameters": True,
-        "data_collection": "deny",
+        "data_collection": "allow",
     }
     assert "return_token_ids" not in observed["payload"]
     receipt_text = (receipt_root / "paper-chemcrow-01-baseline.receipt.json").read_text()
@@ -85,6 +87,73 @@ async def test_openrouter_shim_pins_route_and_writes_value_free_receipt(tmp_path
     receipt = json.loads(receipt_text)
     assert receipt["provider"] == "OpenAI"
     assert receipt["list_price_cost_usd"] == 0.006
+
+
+@pytest.mark.asyncio
+async def test_openrouter_shim_seals_sanitized_upstream_failure_metadata(tmp_path):
+    sensitive_message = "No endpoints available under data policy; PRIVATE ROUTING DETAIL"
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            403,
+            json={
+                "error": {
+                    "code": 403,
+                    "message": sensitive_message,
+                    "metadata": {
+                        "openrouter_metadata": {
+                            "pipeline": [{"stage": "PRIVATE GUARDRAIL NAME"}]
+                        }
+                    },
+                }
+            },
+        )
+
+    receipt_root = tmp_path / "receipts"
+    app = create_openrouter_shim_app(
+        api_key="DO_NOT_PERSIST_THIS_KEY",
+        base_url="http://mock.invalid/v1",
+        receipt_root=receipt_root,
+        transport=httpx.MockTransport(upstream),
+        allowed_call_prompt_hashes={
+            "paper-chemcrow-01-baseline": canonical_sha256("PRIVATE PROMPT")
+        },
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://shim") as client:
+        response = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "openai/gpt-4",
+                "temperature": 0.1,
+                "max_tokens": 1200,
+                "stream": False,
+                "user": "paper-chemcrow-01-baseline",
+                "response_format": {"type": "json_object"},
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "ChemCrow sealed-output paper evaluator. Return strict JSON only.",
+                    },
+                    {"role": "user", "content": "PRIVATE PROMPT"},
+                ],
+            },
+        )
+
+    assert response.status_code == 502
+    receipt_text = (receipt_root / "paper-chemcrow-01-baseline.receipt.json").read_text()
+    assert sensitive_message not in receipt_text
+    assert "PRIVATE ROUTING DETAIL" not in receipt_text
+    assert "PRIVATE GUARDRAIL NAME" not in receipt_text
+    assert "PRIVATE PROMPT" not in receipt_text
+    assert "DO_NOT_PERSIST_THIS_KEY" not in receipt_text
+    receipt = json.loads(receipt_text)
+    assert receipt["upstream_http_status"] == 403
+    assert receipt["upstream_error_code"] == 403
+    assert receipt["upstream_error_category"] == "provider_data_policy"
+    assert receipt["upstream_error_message_sha256"] == canonical_sha256(sensitive_message)
+    assert receipt["upstream_response_body_included"] is False
+    assert receipt["openrouter_metadata_body_included"] is False
 
 
 @pytest.mark.asyncio

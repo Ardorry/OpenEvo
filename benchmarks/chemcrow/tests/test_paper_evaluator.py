@@ -75,6 +75,7 @@ def test_plan_has_exactly_three_fixed_comparisons_per_task(runs_root):
     assert plan["reflector_access"] is False
     assert plan["sealed_output_only"] is True
     assert plan["provider_only"] == ["openai"]
+    assert plan["data_collection"] == "allow"
     assert {call["comparison"] for call in plan["calls"]} == {
         "historical_control",
         "baseline",

@@ -12,6 +12,8 @@
     "sufficient_remaining_for_frozen_ceiling": true,
     "one_call_core_smoke_status": "FAIL_CLOSED_UPSTREAM_HTTP_403",
     "one_call_usage_receipt_present": false,
+    "approved_next_smoke_call_id": "paper-chemcrow-smoke-core-v2",
+    "approved_route_live_verified": false,
     "formal_42_call_authorization_consumed": false
   },
   "protocol_layers": {
@@ -32,8 +34,15 @@
         "openevo_baseline_vs_historical_gpt4",
         "openevo_evolved_vs_historical_gpt4"
       ],
-      "feedback_enters_reflector": false,
-      "model": "openai/gpt-4",
+            "feedback_enters_reflector": false,
+            "model": "openai/gpt-4",
+            "provider_only": [
+                "openai"
+            ],
+            "allow_fallbacks": false,
+            "require_parameters": true,
+            "data_collection": "allow",
+            "data_policy_authorization": "explicit user approval of scheme A on 2026-08-25",
       "output_fields": [
         "grade",
         "strengths",
@@ -82,5 +91,5 @@
     }
   },
   "schema_version": "chemcrow_paper_official_scoring_protocol_v1",
-  "status": "IMPLEMENTED_BLOCKED_ON_PROTOCOL_COMPATIBLE_14_TASK_AUTHORITY_OPENROUTER_403_AND_HUMAN_ACTION"
+    "status": "IMPLEMENTED_BLOCKED_ON_PROTOCOL_COMPATIBLE_14_TASK_AUTHORITY_OPENROUTER_V2_SMOKE_AND_HUMAN_ACTION"
 }

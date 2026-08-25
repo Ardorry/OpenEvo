@@ -8,6 +8,7 @@ prompt text, response text, or the credential.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from contextlib import asynccontextmanager
@@ -23,6 +24,7 @@ from .hashing import canonical_sha256
 from .paper_evaluator import (
     PAPER_EVALUATOR_AUTHORIZATION,
     PAPER_EVALUATOR_CALL_COUNT,
+    PAPER_EVALUATOR_DATA_COLLECTION,
     PAPER_EVALUATOR_INPUT_USD_PER_TOKEN,
     PAPER_EVALUATOR_MAX_OUTPUT_TOKENS,
     PAPER_EVALUATOR_MODEL,
@@ -76,6 +78,7 @@ def create_openrouter_shim_app(
             "status": "ok",
             "model": PAPER_EVALUATOR_MODEL,
             "provider_only": [PAPER_EVALUATOR_PROVIDER],
+            "data_collection": PAPER_EVALUATOR_DATA_COLLECTION,
             "credential_present": True,
             "credential_value_included": False,
         }
@@ -129,7 +132,7 @@ def create_openrouter_shim_app(
             "only": [PAPER_EVALUATOR_PROVIDER],
             "allow_fallbacks": False,
             "require_parameters": True,
-            "data_collection": "deny",
+            "data_collection": PAPER_EVALUATOR_DATA_COLLECTION,
         }
         try:
             response = await client.post(
@@ -138,6 +141,7 @@ def create_openrouter_shim_app(
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
+                    "X-OpenRouter-Metadata": "enabled",
                 },
             )
         except httpx.RequestError as exc:
@@ -157,6 +161,7 @@ def create_openrouter_shim_app(
                 call_id=call_id,
                 request_hash=request_hash,
                 failure=f"upstream_http_{response.status_code}",
+                upstream_metadata=_safe_upstream_failure_metadata(response),
             )
             raise HTTPException(
                 status_code=502,
@@ -295,11 +300,19 @@ def _success_receipt(
         "allow_fallbacks": False,
         "provider_only": [PAPER_EVALUATOR_PROVIDER],
         "require_parameters": True,
-        "data_collection": "deny",
+        "data_collection": PAPER_EVALUATOR_DATA_COLLECTION,
     }
 
 
-def _write_failure_receipt(path: Path, *, call_id: str, request_hash: str, failure: str) -> None:
+def _write_failure_receipt(
+    path: Path,
+    *,
+    call_id: str,
+    request_hash: str,
+    failure: str,
+    upstream_metadata: dict[str, Any] | None = None,
+) -> None:
+    safe_metadata = dict(upstream_metadata or {})
     _exclusive_json_write(
         path,
         {
@@ -311,8 +324,63 @@ def _write_failure_receipt(path: Path, *, call_id: str, request_hash: str, failu
             "completed_at": datetime.now(UTC).isoformat(),
             "prompt_or_response_included": False,
             "credential_included": False,
+            **safe_metadata,
         },
     )
+
+
+def _safe_upstream_failure_metadata(response: httpx.Response) -> dict[str, Any]:
+    """Return diagnostic hashes/categories without persisting the upstream body."""
+
+    result: dict[str, Any] = {
+        "upstream_http_status": response.status_code,
+        "upstream_response_sha256": hashlib.sha256(response.content).hexdigest(),
+        "upstream_response_body_included": False,
+    }
+    try:
+        payload = response.json()
+    except ValueError:
+        result["upstream_error_category"] = "non_json_upstream_error"
+        return result
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if not isinstance(error, dict):
+        result["upstream_error_category"] = "unstructured_upstream_error"
+        return result
+    code = error.get("code")
+    if isinstance(code, int) or (
+        isinstance(code, str)
+        and 0 < len(code) <= 64
+        and all(character.isalnum() or character in "._-" for character in code)
+    ):
+        result["upstream_error_code"] = code
+    message = error.get("message")
+    if isinstance(message, str):
+        result["upstream_error_message_sha256"] = canonical_sha256(message)
+        result["upstream_error_category"] = _classify_upstream_error(message)
+    else:
+        result["upstream_error_category"] = "missing_upstream_error_message"
+    metadata = error.get("metadata")
+    if isinstance(metadata, dict):
+        router_metadata = metadata.get("openrouter_metadata")
+        if isinstance(router_metadata, dict):
+            result["openrouter_metadata_sha256"] = canonical_sha256(router_metadata)
+            result["openrouter_metadata_body_included"] = False
+    return result
+
+
+def _classify_upstream_error(message: str) -> str:
+    lowered = message.casefold()
+    if "data policy" in lowered or "data collection" in lowered or "privacy" in lowered:
+        return "provider_data_policy"
+    if "no endpoint" in lowered or ("provider" in lowered and "available" in lowered):
+        return "provider_endpoint_routing"
+    if "guardrail" in lowered or "content filter" in lowered:
+        return "account_or_content_guardrail"
+    if "budget" in lowered or "spending limit" in lowered or "credit" in lowered:
+        return "budget_or_credit_guardrail"
+    if "permission" in lowered or "forbidden" in lowered or "allowlist" in lowered:
+        return "permission_or_allowlist"
+    return "other_upstream_error"
 
 
 def _exclusive_json_write(path: Path, payload: dict[str, Any]) -> None:

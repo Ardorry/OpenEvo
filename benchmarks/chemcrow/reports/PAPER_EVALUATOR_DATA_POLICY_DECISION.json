@@ -1,0 +1,26 @@
+{
+  "schema_version": "chemcrow_paper_evaluator_data_policy_decision_v1",
+  "status": "APPROVED_NOT_LIVE_VERIFIED",
+  "decision_date": "2026-08-25",
+  "authorization_source": "explicit user message approving scheme A",
+  "model": "openai/gpt-4",
+  "provider_only": [
+    "openai"
+  ],
+  "allow_fallbacks": false,
+  "require_parameters": true,
+  "data_collection": "allow",
+  "zdr_required": false,
+  "openrouter_prompt_logging_required": false,
+  "openrouter_prompt_logging_expected": false,
+  "upstream_retention_disclosure": "OpenAI is currently described by OpenRouter as not training on prompts but retaining prompts.",
+  "scope": "sealed post-hoc ChemCrow paper evaluator only",
+  "candidate_reflector_or_internal_evaluator_access": false,
+  "historical_v1_smoke_claim_id": "paper-chemcrow-smoke-core-v1",
+  "historical_v1_smoke_result": "UPSTREAM_HTTP_403_NO_RETRY",
+  "next_smoke_call_id": "paper-chemcrow-smoke-core-v2",
+  "next_smoke_requires_new_explicit_authorization": true,
+  "next_smoke_authorization_literal": "I_AUTHORIZE_ONE_CORE_PAPER_GPT4_SMOKE_V2_20260825",
+  "formal_42_call_authorization_consumed": false,
+  "paid_calls_performed_for_this_decision": 0
+}
