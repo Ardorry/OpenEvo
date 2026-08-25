@@ -171,9 +171,16 @@ def create_openrouter_shim_app(
                 request_hash=request_hash,
                 failure="invalid_upstream_json",
             )
-            raise HTTPException(status_code=502, detail="OpenRouter returned invalid JSON") from exc
+            raise HTTPException(
+                status_code=502, detail="OpenRouter returned invalid JSON"
+            ) from exc
         try:
-            receipt = _success_receipt(call_id, request_hash, payload)
+            receipt = _success_receipt(
+                call_id,
+                request_hash,
+                payload,
+                upstream_http_status=response.status_code,
+            )
         except HTTPException:
             _write_failure_receipt(
                 receipt_path,
@@ -205,7 +212,9 @@ def _validate_and_prepare(
     if "models" in request:
         raise HTTPException(status_code=400, detail="model fallback lists are forbidden")
     if "provider" in request:
-        raise HTTPException(status_code=400, detail="caller-supplied provider routing is forbidden")
+        raise HTTPException(
+            status_code=400, detail="caller-supplied provider routing is forbidden"
+        )
     if any(field in request for field in ("tools", "tool_choice", "plugins")):
         raise HTTPException(status_code=400, detail="tools and plugins are forbidden")
     if request.get("response_format") != {"type": "json_object"}:
@@ -238,7 +247,13 @@ def _validate_and_prepare(
     return call_id
 
 
-def _success_receipt(call_id: str, request_hash: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _success_receipt(
+    call_id: str,
+    request_hash: str,
+    payload: dict[str, Any],
+    *,
+    upstream_http_status: int,
+) -> dict[str, Any]:
     usage = payload.get("usage")
     if not isinstance(usage, dict):
         raise HTTPException(status_code=502, detail="OpenRouter response has no usage receipt")
@@ -246,10 +261,14 @@ def _success_receipt(call_id: str, request_hash: str, payload: dict[str, Any]) -
     completion_tokens = _nonnegative_int(usage.get("completion_tokens"), "completion_tokens")
     provider = str(payload.get("provider") or "")
     if provider.lower() != "openai":
-        raise HTTPException(status_code=502, detail="OpenRouter did not use the pinned OpenAI provider")
+        raise HTTPException(
+            status_code=502, detail="OpenRouter did not use the pinned OpenAI provider"
+        )
     model = str(payload.get("model") or "")
     if model != PAPER_EVALUATOR_MODEL:
-        raise HTTPException(status_code=502, detail="OpenRouter response model differs from frozen model")
+        raise HTTPException(
+            status_code=502, detail="OpenRouter response model differs from frozen model"
+        )
     list_cost = (
         prompt_tokens * PAPER_EVALUATOR_INPUT_USD_PER_TOKEN
         + completion_tokens * PAPER_EVALUATOR_OUTPUT_USD_PER_TOKEN
@@ -263,6 +282,8 @@ def _success_receipt(call_id: str, request_hash: str, payload: dict[str, Any]) -
         "response_id": payload.get("id"),
         "model": model,
         "provider": provider,
+        "upstream_http_status": upstream_http_status,
+        "temperature": PAPER_EVALUATOR_TEMPERATURE,
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "total_tokens": prompt_tokens + completion_tokens,
@@ -273,12 +294,12 @@ def _success_receipt(call_id: str, request_hash: str, payload: dict[str, Any]) -
         "credential_included": False,
         "allow_fallbacks": False,
         "provider_only": [PAPER_EVALUATOR_PROVIDER],
+        "require_parameters": True,
+        "data_collection": "deny",
     }
 
 
-def _write_failure_receipt(
-    path: Path, *, call_id: str, request_hash: str, failure: str
-) -> None:
+def _write_failure_receipt(path: Path, *, call_id: str, request_hash: str, failure: str) -> None:
     _exclusive_json_write(
         path,
         {

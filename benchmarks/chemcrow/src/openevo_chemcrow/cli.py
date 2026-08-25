@@ -50,6 +50,18 @@ from .runtime import (
     s0_config_hash,
 )
 from .tasks import extract_safety_demonstrations, extract_scored_tasks, write_jsonl
+from .three_artifact_aggregate import aggregate_three_artifact_results
+from .three_artifact_audit import audit_three_artifact_run
+from .three_artifact_evolution import ThreeIsolatedEvolutionEngine
+from .three_artifact_models import (
+    ArtifactSeparationPolicy,
+    ThreeArtifactPairResult,
+)
+from .three_artifact_protocol import ThreeArtifactTaskLocalProtocolRunner
+from .three_artifact_runtime import (
+    ThreeArtifactRolloutPort,
+    candidate_pair_request_parity,
+)
 from .tool_service import PairToolService
 from .tools import TOOL_INVENTORY, ChemCrowToolRegistry, environment_presence
 
@@ -112,6 +124,17 @@ def _path(config_path: Path, value: str) -> Path:
     return path if path.is_absolute() else (config_path.parent / path).resolve()
 
 
+def _bounded_task_prefix(
+    selected: list[TaskItem], *, stop_after_task_id: str | None
+) -> list[TaskItem]:
+    if stop_after_task_id is None:
+        return selected
+    matches = [index for index, item in enumerate(selected) if item.task_id == stop_after_task_id]
+    if len(matches) != 1:
+        raise ValueError("--stop-after-task-id must name exactly one configured task")
+    return selected[: matches[0] + 1]
+
+
 def command_extract(args: argparse.Namespace) -> int:
     items, audit = extract_scored_tasks(args.runs_root.resolve())
     write_jsonl(items, args.output.resolve())
@@ -143,7 +166,12 @@ def command_inventory(args: argparse.Namespace) -> int:
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(json.dumps({"tool_entries": len(TOOL_INVENTORY), "inventory_sha256": file_sha256(args.output)}, sort_keys=True))
+    print(
+        json.dumps(
+            {"tool_entries": len(TOOL_INVENTORY), "inventory_sha256": file_sha256(args.output)},
+            sort_keys=True,
+        )
+    )
     return 0
 
 
@@ -153,10 +181,18 @@ def command_tool_smoke(args: argparse.Namespace) -> int:
         network_enabled=False,
     )
     checks = {
-        "SMILES2Weight": registry.execute("SMILES2Weight", {"query": "CCO"}, call_id="smoke-weight"),
-        "MolSimilarity": registry.execute("MolSimilarity", {"query": "CCO.CCOC"}, call_id="smoke-similarity"),
-        "FunctionalGroups": registry.execute("FunctionalGroups", {"query": "CCO"}, call_id="smoke-groups"),
-        "ControlChemCheck": registry.execute("ControlChemCheck", {"query": "CCO"}, call_id="smoke-control"),
+        "SMILES2Weight": registry.execute(
+            "SMILES2Weight", {"query": "CCO"}, call_id="smoke-weight"
+        ),
+        "MolSimilarity": registry.execute(
+            "MolSimilarity", {"query": "CCO.CCOC"}, call_id="smoke-similarity"
+        ),
+        "FunctionalGroups": registry.execute(
+            "FunctionalGroups", {"query": "CCO"}, call_id="smoke-groups"
+        ),
+        "ControlChemCheck": registry.execute(
+            "ControlChemCheck", {"query": "CCO"}, call_id="smoke-control"
+        ),
         "SimilarityToControlChem": registry.execute(
             "SimilarityToControlChem", {"query": "CCO"}, call_id="smoke-control-similarity"
         ),
@@ -187,9 +223,7 @@ def command_preflight(args: argparse.Namespace) -> int:
     if config.get("duplicate_authorization_receipt"):
         try:
             validate_duplicate_authorization_receipt(
-                path=_path(
-                    config_path, str(config["duplicate_authorization_receipt"])
-                ),
+                path=_path(config_path, str(config["duplicate_authorization_receipt"])),
                 primary_run_root=_path(config_path, str(config["prior_run_root"])),
                 primary_experiment_id=str(config["prior_experiment_id"]),
             )
@@ -209,10 +243,28 @@ def command_preflight(args: argparse.Namespace) -> int:
     selected = ids if config.get("task_ids") == "all" else list(config.get("task_ids", []))
     unknown = sorted(set(selected) - set(ids))
     candidate = config["candidate"]
-    role_configs = {
-        role: config[role]
-        for role in ("candidate", "reflector", "evolution_evaluator", "final_evaluator")
-    }
+    three_artifact_protocol = config.get("artifact_protocol") == "three_isolated_v1"
+    if three_artifact_protocol:
+        reflectors = config.get("reflectors")
+        if not isinstance(reflectors, dict) or set(reflectors) != {
+            "memory",
+            "skill_bundle",
+            "agent_system",
+        }:
+            raise ValueError("three_isolated_v1 requires three explicit Reflector configs")
+        role_configs = {
+            "candidate": config["candidate"],
+            "reflector_memory": reflectors["memory"],
+            "reflector_skill_bundle": reflectors["skill_bundle"],
+            "reflector_agent_system": reflectors["agent_system"],
+            "evolution_evaluator": config["evolution_evaluator"],
+            "final_evaluator": config["final_evaluator"],
+        }
+    else:
+        role_configs = {
+            role: config[role]
+            for role in ("candidate", "reflector", "evolution_evaluator", "final_evaluator")
+        }
     core_route_error = None
     try:
         for role_config in role_configs.values():
@@ -221,17 +273,39 @@ def command_preflight(args: argparse.Namespace) -> int:
         core_route_error = str(exc)
     s0_hash = s0_config_hash(candidate)
     baseline_request = build_task_request(
-        task=items[0], run_id="preflight-baseline", role="baseline", candidate=candidate, artifact_ids=[], mcp_url="http://127.0.0.1:9/mcp"
+        task=items[0],
+        run_id="preflight-baseline",
+        role="baseline",
+        candidate=candidate,
+        artifact_ids=[],
+        mcp_url="http://127.0.0.1:9/mcp",
     )
-    evolved_request = build_task_request(
-        task=items[0], run_id="preflight-evolved", role="evolved", candidate=candidate, artifact_ids=["art-preflight"], mcp_url="http://127.0.0.1:9/mcp"
-    )
-    parity = (
-        baseline_request["agent"] == evolved_request["agent"]
-        and baseline_request["runtime"] == evolved_request["runtime"]
-        and baseline_request["builder"] == evolved_request["builder"]
-        and baseline_request["instruction"] == evolved_request["instruction"]
-    )
+    if three_artifact_protocol:
+        parity_receipt = candidate_pair_request_parity(
+            task=items[0],
+            candidate=candidate,
+            mcp_url="http://127.0.0.1:9/mcp",
+        )
+        parity = bool(
+            parity_receipt["all_invariant_fields_equal"]
+            and parity_receipt["only_allowed_metadata_drift"]
+        )
+    else:
+        evolved_request = build_task_request(
+            task=items[0],
+            run_id="preflight-evolved",
+            role="evolved",
+            candidate=candidate,
+            artifact_ids=["art-preflight"],
+            mcp_url="http://127.0.0.1:9/mcp",
+        )
+        parity = (
+            baseline_request["agent"] == evolved_request["agent"]
+            and baseline_request["runtime"] == evolved_request["runtime"]
+            and baseline_request["builder"] == evolved_request["builder"]
+            and baseline_request["instruction"] == evolved_request["instruction"]
+        )
+        parity_receipt = {"legacy_single_artifact_protocol": True}
     docker_ok = False
     managed_image_ok = False
     managed_image_id = None
@@ -271,12 +345,8 @@ def command_preflight(args: argparse.Namespace) -> int:
     rollout_url = os.environ.get("OPENEVO_ROLLOUT_BASE_URL")
     if rollout_url:
         try:
-            health = httpx.get(
-                rollout_url.rstrip("/") + "/health", timeout=5.0, trust_env=False
-            )
-            nodes = httpx.get(
-                rollout_url.rstrip("/") + "/nodes", timeout=5.0, trust_env=False
-            )
+            health = httpx.get(rollout_url.rstrip("/") + "/health", timeout=5.0, trust_env=False)
+            nodes = httpx.get(rollout_url.rstrip("/") + "/nodes", timeout=5.0, trust_env=False)
             health.raise_for_status()
             nodes.raise_for_status()
             node_payload = nodes.json()
@@ -340,8 +410,13 @@ def command_preflight(args: argparse.Namespace) -> int:
         "manifest_count": len(items),
         "manifest_frozen_count_is_14": len(items) == 14,
         "candidate_pair_parity": parity,
+        "candidate_pair_parity_receipt": parity_receipt,
+        "artifact_protocol": config.get("artifact_protocol", "legacy_single_artifact_v1"),
+        "three_isolated_reflector_configs": three_artifact_protocol,
         "historical_answer_fields_absent": all(
-            not {"answer", "trajectory", "evaluator_feedback", "reference_answer"}.intersection(item.model_fields_set)
+            not {"answer", "trajectory", "evaluator_feedback", "reference_answer"}.intersection(
+                item.model_fields_set
+            )
             for item in items
         ),
         "python_version_supported": tuple(__import__("sys").version_info[:2]) == (3, 11),
@@ -398,12 +473,20 @@ def command_preflight(args: argparse.Namespace) -> int:
     output = args.output or _path(config_path, str(config.get("run_root"))) / "preflight.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(json.dumps({"status": payload["status"], "model_calls": 0, "s0_config_sha256": s0_hash}, sort_keys=True))
+    print(
+        json.dumps(
+            {"status": payload["status"], "model_calls": 0, "s0_config_sha256": s0_hash},
+            sort_keys=True,
+        )
+    )
     return 0 if ready_for_model_calls else 2
 
 
 def _authorize_paid(args: argparse.Namespace) -> None:
-    if not args.allow_paid or os.environ.get("CHEMCROW_FULL_RUN_AUTHORIZATION") != _PAID_AUTHORIZATION:
+    if (
+        not args.allow_paid
+        or os.environ.get("CHEMCROW_FULL_RUN_AUTHORIZATION") != _PAID_AUTHORIZATION
+    ):
         raise PermissionError(
             "model execution is gated: pass --allow-paid and set CHEMCROW_FULL_RUN_AUTHORIZATION to the documented acknowledgement"
         )
@@ -427,45 +510,116 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
         )
     manifest_path = _path(config_path, str(config["task_manifest"]))
     items = _read_tasks(manifest_path)
-    requested = [item.task_id for item in items] if config.get("task_ids") == "all" else list(config["task_ids"])
+    requested = (
+        [item.task_id for item in items]
+        if config.get("task_ids") == "all"
+        else list(config["task_ids"])
+    )
     selected = [item for item in items if item.task_id in requested]
     if [item.task_id for item in selected] != requested:
         raise ValueError("requested task order differs from sanitized manifest authority")
+    full_selected_task_ids = [item.task_id for item in selected]
+    stop_after_task_id = getattr(args, "stop_after_task_id", None)
+    selected = _bounded_task_prefix(
+        selected,
+        stop_after_task_id=stop_after_task_id,
+    )
     run_root = _path(config_path, str(config["run_root"]))
     cache_root = _path(config_path, str(config["cache_root"]))
     ledger_root = _path(config_path, str(config["ledger_root"]))
     controlled_csv = _path(config_path, str(config["controlled_chemicals_csv"]))
-    candidate = OpenEvoRolloutPort(base_url=str(config["rollout_base_url"]), candidate=config["candidate"])
-    evolution_eval_port = OpenEvoRolloutPort(base_url=str(config["rollout_base_url"]), candidate=config["evolution_evaluator"])
-    final_eval_port = OpenEvoRolloutPort(base_url=str(config["rollout_base_url"]), candidate=config["final_evaluator"])
-    reflector_port = OpenEvoRolloutPort(base_url=str(config["rollout_base_url"]), candidate=config["reflector"])
-    evolution = NativeEvolutionEngine(
-        run_root=run_root,
-        artifact_kind=ArtifactKind(config["artifact_type"]),
-        reflector_rollout=reflector_port,
-        evolution_db_path=_path(config_path, str(config["evolution_store"]["db_path"])),
-        evolution_artifact_root=_path(
-            config_path, str(config["evolution_store"]["artifact_root"])
-        ),
+    three_artifact_protocol = config.get("artifact_protocol") == "three_isolated_v1"
+    candidate = (
+        ThreeArtifactRolloutPort(
+            base_url=str(config["rollout_base_url"]), candidate=config["candidate"]
+        )
+        if three_artifact_protocol
+        else OpenEvoRolloutPort(
+            base_url=str(config["rollout_base_url"]), candidate=config["candidate"]
+        )
     )
-    runner = TaskLocalProtocolRunner(
-        run_root=run_root,
-        candidate=candidate,
-        evolution=evolution,
-        evolution_evaluator=OpenEvoEvolutionEvaluator(evolution_eval_port),
-        final_evaluator=OpenEvoFinalEvaluator(final_eval_port),
-        feedback_mode=FeedbackMode(config["feedback_mode"]),
-        s0_hash=s0_config_hash(config["candidate"]),
-        real_mode=True,
-        ledger_root=ledger_root,
+    evolution_eval_port = OpenEvoRolloutPort(
+        base_url=str(config["rollout_base_url"]), candidate=config["evolution_evaluator"]
     )
-    results: list[PairResult] = []
+    final_eval_port = OpenEvoRolloutPort(
+        base_url=str(config["rollout_base_url"]), candidate=config["final_evaluator"]
+    )
+    if three_artifact_protocol:
+        reflectors = config.get("reflectors")
+        if not isinstance(reflectors, dict):
+            raise ValueError("three_isolated_v1 Reflector configs are absent")
+        reflector_ports = {
+            ArtifactKind.TEXT_MEMORY: OpenEvoRolloutPort(
+                base_url=str(config["rollout_base_url"]), candidate=reflectors["memory"]
+            ),
+            ArtifactKind.SKILL_BUNDLE: OpenEvoRolloutPort(
+                base_url=str(config["rollout_base_url"]), candidate=reflectors["skill_bundle"]
+            ),
+            ArtifactKind.AGENT_SYSTEM: OpenEvoRolloutPort(
+                base_url=str(config["rollout_base_url"]), candidate=reflectors["agent_system"]
+            ),
+        }
+        evolution = ThreeIsolatedEvolutionEngine(
+            run_root=run_root,
+            reflector_rollouts=reflector_ports,
+            evolution_db_path=_path(config_path, str(config["evolution_store"]["db_path"])),
+            evolution_artifact_root=_path(
+                config_path, str(config["evolution_store"]["artifact_root"])
+            ),
+            separation_policy=ArtifactSeparationPolicy.model_validate(
+                config.get("artifact_separation", {})
+            ),
+        )
+        runner = ThreeArtifactTaskLocalProtocolRunner(
+            run_root=run_root,
+            candidate=candidate,
+            evolution=evolution,
+            evolution_evaluator=OpenEvoEvolutionEvaluator(evolution_eval_port),
+            final_evaluator=OpenEvoFinalEvaluator(final_eval_port),
+            feedback_mode=FeedbackMode(config["feedback_mode"]),
+            s0_hash=s0_config_hash(config["candidate"]),
+            real_mode=True,
+            ledger_root=ledger_root,
+        )
+    else:
+        reflector_port = OpenEvoRolloutPort(
+            base_url=str(config["rollout_base_url"]), candidate=config["reflector"]
+        )
+        evolution = NativeEvolutionEngine(
+            run_root=run_root,
+            artifact_kind=ArtifactKind(config["artifact_type"]),
+            reflector_rollout=reflector_port,
+            evolution_db_path=_path(config_path, str(config["evolution_store"]["db_path"])),
+            evolution_artifact_root=_path(
+                config_path, str(config["evolution_store"]["artifact_root"])
+            ),
+        )
+        runner = TaskLocalProtocolRunner(
+            run_root=run_root,
+            candidate=candidate,
+            evolution=evolution,
+            evolution_evaluator=OpenEvoEvolutionEvaluator(evolution_eval_port),
+            final_evaluator=OpenEvoFinalEvaluator(final_eval_port),
+            feedback_mode=FeedbackMode(config["feedback_mode"]),
+            s0_hash=s0_config_hash(config["candidate"]),
+            real_mode=True,
+            ledger_root=ledger_root,
+        )
+    results: list[PairResult | ThreeArtifactPairResult] = []
     for item in selected:
         pair_id = f"{config['experiment_id']}--{item.task_id}"
         result_path = run_root / pair_id / "pair.result.json"
         if result_path.is_file():
-            result = PairResult.model_validate_json(result_path.read_text(encoding="utf-8"))
-            if result.reset_receipt_sha256 != file_sha256(run_root / pair_id / "reset.receipt.json"):
+            result = (
+                ThreeArtifactPairResult.model_validate_json(
+                    result_path.read_text(encoding="utf-8")
+                )
+                if three_artifact_protocol
+                else PairResult.model_validate_json(result_path.read_text(encoding="utf-8"))
+            )
+            if result.reset_receipt_sha256 != file_sha256(
+                run_root / pair_id / "reset.receipt.json"
+            ):
                 raise ValueError(f"sealed reset receipt drift: {pair_id}")
             results.append(result)
             continue
@@ -483,10 +637,36 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
             network_enabled=bool(config.get("network_enabled", True)),
         ) as mcp_url:
             results.append(runner.run_item(item, pair_id=pair_id, mcp_url=mcp_url))
-    aggregate = aggregate_results(results)
+    aggregate = (
+        aggregate_three_artifact_results(results)
+        if three_artifact_protocol
+        else aggregate_results(results)
+    )
     run_root.mkdir(parents=True, exist_ok=True)
-    (run_root / "aggregate.json").write_text(json.dumps(aggregate, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(json.dumps({"status": aggregate["status"], "task_count": aggregate["task_count"]}, sort_keys=True))
+    (run_root / "aggregate.json").write_text(
+        json.dumps(aggregate, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    if stop_after_task_id is not None:
+        prefix_receipt = {
+            "schema_version": "chemcrow_planned_prefix_stop_v1",
+            "status": "PLANNED_PREFIX_COMPLETE",
+            "experiment_id": str(config["experiment_id"]),
+            "configured_task_ids": full_selected_task_ids,
+            "completed_prefix_task_ids": [item.task_id for item in selected],
+            "stop_after_task_id": stop_after_task_id,
+            "config_sha256": file_sha256(config_path),
+            "resume_command_must_omit_stop_after_task_id": True,
+        }
+        prefix_path = run_root / f"PLANNED_PREFIX_STOP_AFTER_{stop_after_task_id}.json"
+        serialized_prefix = json.dumps(prefix_receipt, indent=2, sort_keys=True) + "\n"
+        if prefix_path.exists() and prefix_path.read_text(encoding="utf-8") != serialized_prefix:
+            raise ValueError("planned prefix receipt differs from current authority")
+        prefix_path.write_text(serialized_prefix, encoding="utf-8")
+    print(
+        json.dumps(
+            {"status": aggregate["status"], "task_count": aggregate["task_count"]}, sort_keys=True
+        )
+    )
     return 0
 
 
@@ -500,13 +680,29 @@ def command_audit_run(args: argparse.Namespace) -> int:
         if config.get("task_ids") == "all"
         else list(config["task_ids"])
     )
-    payload = audit_completed_run(
-        run_root=_path(config_path, str(config["run_root"])),
-        core_completion_root=args.core_completions.resolve(),
-        experiment_id=str(config["experiment_id"]),
-        task_ids=task_ids,
-        expected_s0_hash=s0_config_hash(config["candidate"]),
-    )
+    if config.get("artifact_protocol") == "three_isolated_v1":
+        reflectors = config.get("reflectors")
+        if not isinstance(reflectors, dict):
+            raise ValueError("three_isolated_v1 Reflector configs are absent")
+        models = {str(value["agent"]["model_name"]) for value in reflectors.values()}
+        if len(models) != 1:
+            raise ValueError("three Reflector models differ")
+        payload = audit_three_artifact_run(
+            run_root=_path(config_path, str(config["run_root"])),
+            core_completion_root=args.core_completions.resolve(),
+            experiment_id=str(config["experiment_id"]),
+            task_ids=task_ids,
+            expected_s0_hash=s0_config_hash(config["candidate"]),
+            expected_reflector_model=models.pop(),
+        )
+    else:
+        payload = audit_completed_run(
+            run_root=_path(config_path, str(config["run_root"])),
+            core_completion_root=args.core_completions.resolve(),
+            experiment_id=str(config["experiment_id"]),
+            task_ids=task_ids,
+            expected_s0_hash=s0_config_hash(config["candidate"]),
+        )
     args.output.resolve().parent.mkdir(parents=True, exist_ok=True)
     args.output.resolve().write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -519,9 +715,7 @@ def command_credential_check(args: argparse.Namespace) -> int:
     payload = credential_report()
     output = args.output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(
         json.dumps(
             {
@@ -576,9 +770,7 @@ def command_paper_evaluator_preflight(args: argparse.Namespace) -> int:
                 run_root=_path(config_path, str(config["run_root"])),
                 experiment_id=str(config["experiment_id"]),
                 task_ids=task_ids,
-                completed_run_audit=_path(
-                    config_path, str(config["completed_run_audit"])
-                ),
+                completed_run_audit=_path(config_path, str(config["completed_run_audit"])),
             )
         historical = extract_historical_answers(
             runs_root=_path(config_path, str(config["historical_runs_root"]))
@@ -631,15 +823,11 @@ def command_paper_evaluator_preflight(args: argparse.Namespace) -> int:
 def command_paper_credential_probe(args: argparse.Namespace) -> int:
     payload = probe_openrouter_key(
         api_key=os.environ.get("OPENROUTER_API_KEY", ""),
-        base_url=os.environ.get(
-            "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
-        ),
+        base_url=os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
     )
     output = args.output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(
         json.dumps(
             {
@@ -665,16 +853,12 @@ def command_paper_composite_audit(args: argparse.Namespace) -> int:
             primary_experiment_id=str(config["primary_experiment_id"]),
             repair_run_root=_path(config_path, str(config["repair_run_root"])),
             repair_experiment_id=str(config["repair_experiment_id"]),
-            core_completion_root=_path(
-                config_path, str(config["core_completion_root"])
-            ),
+            core_completion_root=_path(config_path, str(config["core_completion_root"])),
             expected_s0_hash=str(config["expected_s0_hash"]),
             duplicate_authorization_receipt=_path(
                 config_path, str(config["duplicate_authorization_receipt"])
             ),
-            composite_manifest_path=_path(
-                config_path, str(config["composite_manifest_path"])
-            ),
+            composite_manifest_path=_path(config_path, str(config["composite_manifest_path"])),
         )
     except (FileNotFoundError, TypeError, ValueError) as exc:
         payload = {
@@ -685,9 +869,7 @@ def command_paper_composite_audit(args: argparse.Namespace) -> int:
             "paid_operations": 0,
             "answers_included": False,
         }
-    output.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(
         json.dumps(
             {
@@ -733,12 +915,8 @@ def command_paper_human_review_prepare(args: argparse.Namespace) -> int:
             "status": manifest["status"],
             "task_count": manifest["task_count"],
             "comparison_count": manifest["comparison_count"],
-            "required_independent_reviewer_count": manifest[
-                "required_independent_reviewer_count"
-            ],
-            "required_completed_review_count": manifest[
-                "required_completed_review_count"
-            ],
+            "required_independent_reviewer_count": manifest["required_independent_reviewer_count"],
+            "required_completed_review_count": manifest["required_completed_review_count"],
             "score_minimum": manifest["score_minimum"],
             "score_maximum": manifest["score_maximum"],
             "dimensions": manifest["dimensions"],
@@ -755,9 +933,7 @@ def command_paper_human_review_prepare(args: argparse.Namespace) -> int:
             "paid_operations": 0,
             "answers_in_report": False,
         }
-    output.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(
         json.dumps(
             {
@@ -843,6 +1019,7 @@ def build_parser() -> argparse.ArgumentParser:
         command = commands.add_parser(name)
         command.add_argument("--config", type=Path, required=True)
         command.add_argument("--allow-paid", action="store_true")
+        command.add_argument("--stop-after-task-id")
         command.set_defaults(function=lambda args, resume=resume: command_run(args, resume=resume))
     return parser
 

@@ -12,9 +12,7 @@ from openevo_chemcrow.credentials import (
 )
 
 
-def test_credential_report_is_value_free_and_ready_for_local_profile(
-    monkeypatch, tmp_path
-):
+def test_credential_report_is_value_free_and_ready_for_local_profile(monkeypatch, tmp_path):
     sentinel = "DO_NOT_LEAK_THIS_SECRET_VALUE"
     for name in CONTROL_ENVIRONMENT_NAMES:
         monkeypatch.setenv(name, "configured-control")
@@ -41,9 +39,7 @@ def test_credential_report_marks_excluded_keys_and_missing_controls(monkeypatch,
     report = credential_report(codex_auth_file=tmp_path / "missing-auth.json")
 
     assert report["status"] == "BLOCKED"
-    assert set(report["missing_required_control_names"]) == set(
-        CONTROL_ENVIRONMENT_NAMES
-    )
+    assert set(report["missing_required_control_names"]) == set(CONTROL_ENVIRONMENT_NAMES)
     assert report["unexpected_legacy_or_excluded_key_names"] == ["OPENAI_API_KEY"]
 
 
@@ -101,6 +97,9 @@ def test_openrouter_key_probe_is_zero_model_and_value_free():
     )
 
     assert report["status"] == "VALID"
+    assert report["auth_valid"] is True
+    assert report["provider"] == "OpenRouter"
+    assert report["timestamp"]
     assert report["model_calls"] == report["paid_operations"] == 0
     assert report["sufficient_remaining_for_frozen_ceiling"] is True
     assert sentinel not in json.dumps(report)
@@ -152,6 +151,8 @@ def test_openrouter_key_probe_uses_credit_balance_when_key_has_no_limit():
 
     assert report["status"] == "VALID_INSUFFICIENT_CREDITS"
     assert report["credit_endpoint_status"] == "VALID"
+    assert report["auth_valid"] is True
+    assert report["credit_probe_success"] is True
     assert report["sufficient_remaining_for_frozen_ceiling"] is False
     assert report["model_calls"] == report["paid_operations"] == 0
     assert sentinel not in json.dumps(report)

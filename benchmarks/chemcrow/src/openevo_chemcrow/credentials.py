@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -58,12 +59,8 @@ def credential_report(*, codex_auth_file: Path | None = None) -> dict[str, Any]:
     optional = _presence(OPTIONAL_PROVIDER_CREDENTIAL_NAMES)
     paper = _presence(PAPER_EVALUATOR_ENVIRONMENT_NAMES)
     excluded = _presence(LEGACY_OR_EXCLUDED_CREDENTIAL_NAMES)
-    local_rxn = controls["CHEMCROW_RXN_PREDICT_URL"] and controls[
-        "CHEMCROW_RXN_RETRO_URL"
-    ]
-    hosted_rxn_credentials = optional["RXN4CHEM_API_KEY"] and optional[
-        "RXN4CHEM_PROJECT_ID"
-    ]
+    local_rxn = controls["CHEMCROW_RXN_PREDICT_URL"] and controls["CHEMCROW_RXN_RETRO_URL"]
+    hosted_rxn_credentials = optional["RXN4CHEM_API_KEY"] and optional["RXN4CHEM_PROJECT_ID"]
     hosted_rxn_package = importlib.util.find_spec("rxn4chemistry") is not None
     missing_controls = [name for name, present in controls.items() if not present]
     missing_core_model_controls = [
@@ -98,14 +95,10 @@ def credential_report(*, codex_auth_file: Path | None = None) -> dict[str, Any]:
         },
         "capability_status": {
             "core_candidate_reflector_evaluators": (
-                "ready"
-                if codex_auth_present and not missing_core_model_controls
-                else "blocked"
+                "ready" if codex_auth_present and not missing_core_model_controls else "blocked"
             ),
             "paper_evaluator_openrouter": (
-                "configured_not_authorized_or_tested"
-                if not missing_paper
-                else "blocked"
+                "configured_not_authorized_or_tested" if not missing_paper else "blocked"
             ),
             "reaction_prediction_and_retrosynthesis": (
                 "ready_local"
@@ -121,9 +114,7 @@ def credential_report(*, codex_auth_file: Path | None = None) -> dict[str, Any]:
         "missing_required_control_names": missing_controls,
         "missing_paper_evaluator_names": missing_paper,
         "unexpected_legacy_or_excluded_key_names": unexpected_excluded,
-        "full_run_authorization_present": bool(
-            os.environ.get("CHEMCROW_FULL_RUN_AUTHORIZATION")
-        ),
+        "full_run_authorization_present": bool(os.environ.get("CHEMCROW_FULL_RUN_AUTHORIZATION")),
         "ready_for_reduced_profile_setting_checks": reduced_profile_ready,
     }
 
@@ -221,9 +212,7 @@ def probe_openrouter_key(
                 sufficient_remaining_for_frozen_ceiling=None,
                 **common_details,
             )
-        credits_data = (
-            credits_payload.get("data") if isinstance(credits_payload, dict) else None
-        )
+        credits_data = credits_payload.get("data") if isinstance(credits_payload, dict) else None
         if not isinstance(credits_data, dict):
             return _openrouter_probe_report(
                 status="VALID_BALANCE_UNVERIFIED",
@@ -243,9 +232,7 @@ def probe_openrouter_key(
             )
         try:
             available = float(total_credits) - float(total_usage)
-            sufficient = available >= float(
-                paper_cost_ceiling()["list_price_ceiling_usd_total"]
-            )
+            sufficient = available >= float(paper_cost_ceiling()["list_price_ceiling_usd_total"])
         except (TypeError, ValueError):
             return _openrouter_probe_report(
                 status="VALID_BALANCE_UNVERIFIED",
@@ -277,9 +264,15 @@ def probe_openrouter_key(
 
 
 def _openrouter_probe_report(status: str, **details: Any) -> dict[str, Any]:
+    auth_valid = status.startswith("VALID")
+    credit_probe_success = details.get("credit_endpoint_status") == "VALID"
     return {
         "schema_version": "chemcrow_openrouter_credential_probe_v2",
         "status": status,
+        "timestamp": datetime.now(UTC).isoformat(),
+        "provider": "OpenRouter",
+        "auth_valid": auth_valid,
+        "credit_probe_success": credit_probe_success,
         "authentication_endpoint": "GET /api/v1/key",
         "credit_endpoint": "GET /api/v1/credits",
         "model_calls": 0,
