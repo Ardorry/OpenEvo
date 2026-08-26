@@ -42,6 +42,8 @@ def audit_three_artifact_run(
     tool_calls = 0
     tool_errors = 0
     verified_pre_candidate_no_effect_attempts = 0
+    completed_call_checkpoint_count = 0
+    confidence_transport_adaptation_count = 0
     for task_id in task_ids:
         pair_id = f"{experiment_id}--{task_id}"
         item_root = run_root / pair_id
@@ -139,6 +141,32 @@ def audit_three_artifact_run(
             if no_effect_attempts and phase != "baseline_candidate":
                 raise ValueError(f"no-effect replacement attached to wrong phase: {pair_id}/{phase}")
             verified_pre_candidate_no_effect_attempts += no_effect_attempts
+            phase_receipt = claim.get("receipt")
+            if not isinstance(phase_receipt, dict):
+                raise TypeError(f"phase receipt is not an object: {pair_id}/{phase}")
+            confidence_receipt = phase_receipt.get("confidence_parse_receipt")
+            if confidence_receipt is not None:
+                if (
+                    not isinstance(confidence_receipt, dict)
+                    or confidence_receipt.get("schema_version")
+                    != "chemcrow_internal_confidence_parse_receipt_v1"
+                    or confidence_receipt.get("policy_id")
+                    != "chemcrow_internal_confidence_transport_v1"
+                    or confidence_receipt.get("rubric_scores_changed") is not False
+                    or confidence_receipt.get("prompt_changed") is not False
+                ):
+                    raise ValueError(
+                        f"confidence parse receipt is invalid: {pair_id}/{phase}"
+                    )
+                confidence_transport_adaptation_count += int(
+                    confidence_receipt.get("adapted") is True
+                )
+            if "completed_call_checkpoint_sha256" in phase_receipt:
+                if phase != "baseline_internal_evaluator":
+                    raise ValueError(
+                        f"completed-call checkpoint attached to wrong phase: {pair_id}/{phase}"
+                    )
+                completed_call_checkpoint_count += 1
             authority = claim.get("authority")
             if not isinstance(authority, dict) or authority.get("task_id") != task_id:
                 raise ValueError(f"phase task authority mismatch: {pair_id}/{phase}")
@@ -229,6 +257,10 @@ def audit_three_artifact_run(
         "mock_or_fixture_observations": 0,
         "verified_pre_candidate_no_effect_attempt_count": (
             verified_pre_candidate_no_effect_attempts
+        ),
+        "completed_call_checkpoint_count": completed_call_checkpoint_count,
+        "confidence_transport_adaptation_count": (
+            confidence_transport_adaptation_count
         ),
     }
 

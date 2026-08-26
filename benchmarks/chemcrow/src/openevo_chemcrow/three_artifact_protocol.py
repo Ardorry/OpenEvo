@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Protocol
 
 from .cache import assert_real_metric_observations
+from .compatible_evaluation import confidence_parse_receipt
 from .feedback import feedback_hash, reflector_feedback_payload, runtime_feedback
 from .hashing import canonical_sha256, file_sha256
 from .models import (
@@ -92,6 +93,7 @@ class ThreeArtifactTaskLocalProtocolRunner:
         pair_id: str,
         mcp_url: str | None = None,
         allow_verified_baseline_replacement: bool = False,
+        recovered_baseline_checkpoint: tuple[Trajectory, EvaluatorFeedback] | None = None,
     ) -> ThreeArtifactPairResult:
         self._assert_bare_s0(task=task)
         ledger = (
@@ -100,72 +102,103 @@ class ThreeArtifactTaskLocalProtocolRunner:
             else None
         )
         event_order = ["s0_asserted"]
-        if ledger:
-            ledger.claim(
-                "baseline_candidate",
-                {
-                    "task_id": task.task_id,
-                    "s0_hash": self.s0_hash,
-                    "artifact_ids": [],
-                    "artifact_inventory": {},
-                },
-                allow_verified_replacement=allow_verified_baseline_replacement,
+        if recovered_baseline_checkpoint is not None:
+            if allow_verified_baseline_replacement:
+                raise ValueError("baseline replacement and checkpoint recovery cannot be combined")
+            baseline, baseline_evaluation = recovered_baseline_checkpoint
+            if (
+                baseline.task_id != task.task_id
+                or baseline.role != "baseline"
+                or baseline.status != "COMPLETED"
+                or not baseline.answer.strip()
+                or baseline.artifact_ids
+                or baseline.candidate_config_sha256 != self.candidate.config_sha256
+            ):
+                raise ValueError("recovered baseline checkpoint authority is invalid")
+            _assert_internal_evaluation(baseline_evaluation)
+            if baseline_evaluation.evaluator_role != "evolution_evaluator":
+                raise ValueError("recovered baseline evaluator role is invalid")
+            event_order.extend(
+                ["baseline", "runtime_feedback", "baseline_internal_evaluator"]
             )
-        baseline, baseline_injection = self.candidate.run_candidate_with_receipt(
-            task=task,
-            role="baseline",
-            artifact_ids_by_type={},
-            pair_id=pair_id,
-            mcp_url=mcp_url,
-        )
-        if baseline_injection is not None:
-            raise ValueError("baseline received a runtime injection receipt")
-        if (
-            baseline.task_id != task.task_id
-            or baseline.role != "baseline"
-            or baseline.artifact_ids
-        ):
-            raise ValueError("baseline authority is invalid")
-        if baseline.status != "COMPLETED" or not baseline.answer.strip():
-            raise ValueError("baseline Candidate did not complete with a final answer")
-        if baseline.candidate_config_sha256 != self.candidate.config_sha256:
-            raise ValueError("baseline is not bound to frozen S0 configuration")
-        if ledger:
-            ledger.terminal(
-                "baseline_candidate",
-                {
-                    "run_id": baseline.run_id,
-                    "trajectory_sha256": canonical_sha256(baseline.model_dump(mode="json")),
-                    "runtime_context": "bare_s0",
-                },
+        else:
+            if ledger:
+                ledger.claim(
+                    "baseline_candidate",
+                    {
+                        "task_id": task.task_id,
+                        "s0_hash": self.s0_hash,
+                        "artifact_ids": [],
+                        "artifact_inventory": {},
+                    },
+                    allow_verified_replacement=allow_verified_baseline_replacement,
+                )
+            baseline, baseline_injection = self.candidate.run_candidate_with_receipt(
+                task=task,
+                role="baseline",
+                artifact_ids_by_type={},
+                pair_id=pair_id,
+                mcp_url=mcp_url,
             )
-        event_order.append("baseline")
+            if baseline_injection is not None:
+                raise ValueError("baseline received a runtime injection receipt")
+            if (
+                baseline.task_id != task.task_id
+                or baseline.role != "baseline"
+                or baseline.artifact_ids
+            ):
+                raise ValueError("baseline authority is invalid")
+            if baseline.status != "COMPLETED" or not baseline.answer.strip():
+                raise ValueError("baseline Candidate did not complete with a final answer")
+            if baseline.candidate_config_sha256 != self.candidate.config_sha256:
+                raise ValueError("baseline is not bound to frozen S0 configuration")
+            if ledger:
+                ledger.terminal(
+                    "baseline_candidate",
+                    {
+                        "run_id": baseline.run_id,
+                        "trajectory_sha256": canonical_sha256(
+                            baseline.model_dump(mode="json")
+                        ),
+                        "runtime_context": "bare_s0",
+                    },
+                )
+            event_order.append("baseline")
+            runtime = runtime_feedback(baseline)
+            event_order.append("runtime_feedback")
+            if ledger:
+                ledger.claim(
+                    "baseline_internal_evaluator",
+                    {
+                        "task_id": task.task_id,
+                        "run_id": baseline.run_id,
+                        "evaluator_id": self.evolution_evaluator.evaluator_id,
+                        "paper_evaluator": False,
+                    },
+                )
+            baseline_evaluation = self.evolution_evaluator.evaluate(
+                task=task, trajectory=baseline
+            )
+            _assert_internal_evaluation(baseline_evaluation)
+            if ledger:
+                parse_receipt = confidence_parse_receipt(self.evolution_evaluator)
+                ledger.terminal(
+                    "baseline_internal_evaluator",
+                    {
+                        "evaluator_run_id": baseline_evaluation.evaluator_run_id,
+                        "feedback_sha256": canonical_sha256(
+                            baseline_evaluation.model_dump(mode="json")
+                        ),
+                        **(
+                            {"confidence_parse_receipt": parse_receipt}
+                            if parse_receipt is not None
+                            else {}
+                        ),
+                    },
+                )
+            event_order.append("baseline_internal_evaluator")
 
         runtime = runtime_feedback(baseline)
-        event_order.append("runtime_feedback")
-        if ledger:
-            ledger.claim(
-                "baseline_internal_evaluator",
-                {
-                    "task_id": task.task_id,
-                    "run_id": baseline.run_id,
-                    "evaluator_id": self.evolution_evaluator.evaluator_id,
-                    "paper_evaluator": False,
-                },
-            )
-        baseline_evaluation = self.evolution_evaluator.evaluate(task=task, trajectory=baseline)
-        _assert_internal_evaluation(baseline_evaluation)
-        if ledger:
-            ledger.terminal(
-                "baseline_internal_evaluator",
-                {
-                    "evaluator_run_id": baseline_evaluation.evaluator_run_id,
-                    "feedback_sha256": canonical_sha256(
-                        baseline_evaluation.model_dump(mode="json")
-                    ),
-                },
-            )
-        event_order.append("baseline_internal_evaluator")
 
         feedback_payload = reflector_feedback_payload(
             mode=self.feedback_mode,
@@ -309,12 +342,18 @@ class ThreeArtifactTaskLocalProtocolRunner:
         evolved_evaluation = self.evolution_evaluator.evaluate(task=task, trajectory=evolved)
         _assert_internal_evaluation(evolved_evaluation)
         if ledger:
+            parse_receipt = confidence_parse_receipt(self.evolution_evaluator)
             ledger.terminal(
                 "evolved_internal_evaluator",
                 {
                     "evaluator_run_id": evolved_evaluation.evaluator_run_id,
                     "feedback_sha256": canonical_sha256(
                         evolved_evaluation.model_dump(mode="json")
+                    ),
+                    **(
+                        {"confidence_parse_receipt": parse_receipt}
+                        if parse_receipt is not None
+                        else {}
                     ),
                 },
             )
@@ -342,12 +381,18 @@ class ThreeArtifactTaskLocalProtocolRunner:
             pair_id=pair_id,
         )
         if ledger:
+            parse_receipt = confidence_parse_receipt(self.final_evaluator)
             ledger.terminal(
                 "final_evaluator",
                 {
                     "mapping_seal_sha256": final.mapping_seal_sha256,
                     "winner": final.winner,
                     "pair_scores_sha256": canonical_sha256(final.model_dump(mode="json")),
+                    **(
+                        {"confidence_parse_receipt": parse_receipt}
+                        if parse_receipt is not None
+                        else {}
+                    ),
                 },
             )
         event_order.append("final_evaluator")

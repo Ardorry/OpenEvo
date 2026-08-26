@@ -16,6 +16,14 @@ import yaml
 
 from .aggregate import aggregate_results
 from .audit import audit_completed_run
+from .checkpoint_recovery import (
+    load_completed_baseline_evaluator_checkpoint,
+    reconcile_completed_baseline_evaluator_checkpoint,
+)
+from .compatible_evaluation import (
+    CompatibleOpenEvoEvolutionEvaluator,
+    CompatibleOpenEvoFinalEvaluator,
+)
 from .composite import (
     audit_paper_composite_repair,
     load_composite_pairs,
@@ -690,8 +698,8 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
             run_root=run_root,
             candidate=candidate,
             evolution=evolution,
-            evolution_evaluator=OpenEvoEvolutionEvaluator(evolution_eval_port),
-            final_evaluator=OpenEvoFinalEvaluator(final_eval_port),
+            evolution_evaluator=CompatibleOpenEvoEvolutionEvaluator(evolution_eval_port),
+            final_evaluator=CompatibleOpenEvoFinalEvaluator(final_eval_port),
             feedback_mode=FeedbackMode(config["feedback_mode"]),
             s0_hash=s0_config_hash(config["candidate"]),
             real_mode=True,
@@ -741,6 +749,7 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
             continue
         claim_dir = ledger_root / pair_id
         allow_verified_baseline_replacement = False
+        recovered_baseline_checkpoint = None
         if resume and claim_dir.is_dir() and any(claim_dir.glob("*.json")):
             ledger = (
                 VerifiedReplacementPhaseLedger(ledger_root, pair_id=pair_id)
@@ -754,6 +763,22 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
                         f"replacement-ready pair has unexpected phase claims: {pair_id}"
                     )
                 allow_verified_baseline_replacement = True
+            elif three_artifact_protocol:
+                recovered_baseline_checkpoint = (
+                    load_completed_baseline_evaluator_checkpoint(
+                        run_root=run_root,
+                        ledger_root=ledger_root,
+                        pair_id=pair_id,
+                        task=item,
+                        expected_candidate_config_sha256=candidate.config_sha256,
+                        expected_evaluator_id=runner.evolution_evaluator.evaluator_id,
+                    )
+                )
+                if recovered_baseline_checkpoint is None:
+                    ledger.audit_resume()
+                    raise AmbiguousPhaseClaimError(
+                        f"all claims for incomplete pair {pair_id} are terminal but reconstruction is not automatic; audit before replacement"
+                    )
             else:
                 ledger.audit_resume()
                 raise AmbiguousPhaseClaimError(
@@ -775,6 +800,7 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
                         allow_verified_baseline_replacement=(
                             allow_verified_baseline_replacement
                         ),
+                        recovered_baseline_checkpoint=recovered_baseline_checkpoint,
                     )
                 )
             else:
@@ -838,6 +864,52 @@ def command_recover_pre_candidate_no_effect(args: argparse.Namespace) -> int:
                 "status": receipt["status"],
                 "pair_id": receipt["pair_id"],
                 "receipt_path": str(receipt_path),
+                "model_calls": 0,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def command_recover_completed_baseline_evaluator(args: argparse.Namespace) -> int:
+    if not args.no_model_calls:
+        raise PermissionError("completed-call checkpoint recovery requires --no-model-calls")
+    config_path = args.config.resolve()
+    config = _resolve_env(_load_yaml(config_path))
+    if config.get("artifact_protocol") != "three_isolated_v1":
+        raise ValueError("completed-call checkpoint recovery requires three_isolated_v1")
+    manifest_path = _path(config_path, str(config["task_manifest"]))
+    tasks = {item.task_id: item for item in _read_tasks(manifest_path)}
+    if args.task_id not in tasks:
+        raise ValueError("checkpoint recovery task ID is outside the authoritative manifest")
+    evaluator_port = OpenEvoRolloutPort(
+        base_url=str(config["rollout_base_url"]),
+        candidate=config["evolution_evaluator"],
+    )
+    evaluator = CompatibleOpenEvoEvolutionEvaluator(evaluator_port)
+    run_root = _path(config_path, str(config["run_root"]))
+    checkpoint_path, recovery_path, _, _ = (
+        reconcile_completed_baseline_evaluator_checkpoint(
+            config_path=config_path,
+            run_root=run_root,
+            ledger_root=_path(config_path, str(config["ledger_root"])),
+            cache_root=_path(config_path, str(config["cache_root"])),
+            experiment_id=str(config["experiment_id"]),
+            task=tasks[args.task_id],
+            candidate_config=config["candidate"],
+            evaluator_config=config["evolution_evaluator"],
+            evaluator_id=evaluator.evaluator_id,
+            baseline_completion_path=args.baseline_completion.resolve(),
+            evaluator_completion_path=args.evaluator_completion.resolve(),
+        )
+    )
+    print(
+        json.dumps(
+            {
+                "status": "VERIFIED_COMPLETED_CALLS_NO_REDISPATCH",
+                "checkpoint_path": str(checkpoint_path),
+                "recovery_path": str(recovery_path),
                 "model_calls": 0,
             },
             sort_keys=True,
@@ -1283,6 +1355,15 @@ def build_parser() -> argparse.ArgumentParser:
     recovery.add_argument("--core-completion", type=Path, required=True)
     recovery.add_argument("--no-model-calls", action="store_true", required=True)
     recovery.set_defaults(function=command_recover_pre_candidate_no_effect)
+    checkpoint_recovery = commands.add_parser("recover-completed-baseline-evaluator")
+    checkpoint_recovery.add_argument("--config", type=Path, required=True)
+    checkpoint_recovery.add_argument("--task-id", required=True)
+    checkpoint_recovery.add_argument("--baseline-completion", type=Path, required=True)
+    checkpoint_recovery.add_argument("--evaluator-completion", type=Path, required=True)
+    checkpoint_recovery.add_argument("--no-model-calls", action="store_true", required=True)
+    checkpoint_recovery.set_defaults(
+        function=command_recover_completed_baseline_evaluator
+    )
     for name, resume in (("run", False), ("resume", True)):
         command = commands.add_parser(name)
         command.add_argument("--config", type=Path, required=True)

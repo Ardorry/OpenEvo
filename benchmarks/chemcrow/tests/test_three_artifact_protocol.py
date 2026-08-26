@@ -340,6 +340,60 @@ def test_three_pipeline_protocol_reset_lineage_and_scoring_order(tmp_path, task_
         ThreeArtifactPairResult.model_validate(reused_internal_call)
 
 
+def test_three_pipeline_resumes_from_completed_baseline_checkpoint(tmp_path, task_item):
+    candidate = FakeThreeCandidate()
+    evolution = FakeThreeEvolution()
+    runner = ThreeArtifactTaskLocalProtocolRunner(
+        run_root=tmp_path / "runs",
+        candidate=candidate,
+        evolution=evolution,
+        evolution_evaluator=FakeInternalEvaluator(),
+        final_evaluator=FakeFinalEvaluator(),
+        feedback_mode=FeedbackMode.F2,
+        s0_hash="s0",
+        real_mode=False,
+        ledger_root=None,
+    )
+    recovered_baseline = Trajectory(
+        run_id="recovered-baseline",
+        task_id=task_item.task_id,
+        role="baseline",
+        status="COMPLETED",
+        answer="preserved baseline answer",
+        candidate_config_sha256="s0",
+    )
+    recovered_evaluation = EvaluatorFeedback(
+        evaluator_role="evolution_evaluator",
+        evaluator_run_id="recovered-evaluator",
+        scores=RubricScores(
+            chemical_correctness=3,
+            reasoning_quality=3,
+            task_completion=3,
+        ),
+        confidence=1.0,
+    )
+
+    result = runner.run_item(
+        task_item,
+        pair_id="pair-recovered",
+        recovered_baseline_checkpoint=(recovered_baseline, recovered_evaluation),
+    )
+
+    assert candidate.calls == [
+        (
+            task_item.task_id,
+            "evolved",
+            {
+                ArtifactKind.TEXT_MEMORY: "art-pair-recovered-text_memory",
+                ArtifactKind.SKILL_BUNDLE: "art-pair-recovered-skill_bundle",
+                ArtifactKind.AGENT_SYSTEM: "art-pair-recovered-agent_system",
+            },
+        )
+    ]
+    assert result.baseline.run_id == "recovered-baseline"
+    assert result.baseline_internal_evaluation.evaluator_run_id == "recovered-evaluator"
+
+
 def test_native_three_reflectors_are_independent_and_sibling_blind(tmp_path, task_item):
     contents = {
         ArtifactKind.TEXT_MEMORY: (
