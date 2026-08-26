@@ -33,6 +33,12 @@ from .paper_calibration import (
     run_calibration_plan,
     selected_prompt_from_results,
 )
+from .paper_evaluator import (
+    PAPER_EVALUATOR_PROMPT_CANDIDATE,
+    PAPER_EVALUATOR_PROMPT_SHA256,
+    PAPER_EVALUATOR_PROTOCOL,
+    render_compatible_prompt,
+)
 
 
 def _load_config(path: Path) -> dict[str, Any]:
@@ -204,7 +210,7 @@ def _calibration_report(results: dict[str, Any], candidates_path: Path) -> str:
         result_rows.append(
             "| {candidate} | {mae:.3f} | {rmse:.3f} | {bias:.3f} | {pearson} | "
             "{spearman} | {pair:.3f} | {delta_mae:.3f} | {delta_rmse:.3f} | "
-            "{delta_spearman} | {parse} | {schema} |".format(
+            "{delta_spearman} | {parse} | {schema} | {provider} | ${cost:.5f} |".format(
                 candidate=candidate_id,
                 mae=metric["score_mae"],
                 rmse=metric["score_rmse"],
@@ -217,11 +223,31 @@ def _calibration_report(results: dict[str, Any], candidates_path: Path) -> str:
                 delta_spearman=_format_optional(metric["delta_spearman"]),
                 parse=metric["json_parse_failures"],
                 schema=metric["pydantic_schema_failures"],
+                provider=metric["provider_failures"],
+                cost=metric["proven_openrouter_reported_cost_usd"],
             )
         )
     selected = results["selected_candidate_id"]
     selected_metrics = results["metrics_by_candidate"][selected]
     selected_bootstrap = results["bootstrap_by_candidate"][selected]
+    bootstrap_rows = [
+        "| {metric} | {lower:.3f} | {upper:.3f} |".format(
+            metric=metric,
+            lower=interval["lower"],
+            upper=interval["upper"],
+        )
+        for metric, interval in selected_bootstrap["confidence_intervals_95"].items()
+    ]
+    repeatability_rows = [
+        "| {task_id} | {a} | {b} | {delta} | {stable} |".format(
+            task_id=row["task_id"],
+            a=row["student_a_grade_range"],
+            b=row["student_b_grade_range"],
+            delta=row["delta_range"],
+            stable=str(row["preference_stable"]).lower(),
+        )
+        for row in results["repeatability"]["tasks"]
+    ]
     return """# ChemCrow EvaluatorGPT-Compatible Historical Calibration
 
 ## Prompt recovery
@@ -245,11 +271,14 @@ and paper-grounding evidence are in [{candidates}]({candidates}).
 
 ## Results
 
-| candidate | MAE | RMSE | bias | Pearson | Spearman | pair agreement | delta MAE | delta RMSE | delta Spearman | parse failures | schema failures |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| candidate | MAE | RMSE | bias | Pearson | Spearman | pair agreement | delta MAE | delta RMSE | delta Spearman | parse failures | schema failures | provider failures | proven cost |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 {result_rows}
 
 Proven OpenRouter-reported cost: `${cost:.6f}` across {calls} paid calls.
+One already-successful first call required local result-seal recovery after a Rollout-envelope
+adapter bug; its existing HTTP 200 receipt and Core trajectory were reused with no provider
+redispatch. The regression is covered by the test suite.
 
 ## Selection
 
@@ -263,14 +292,23 @@ The complete ranking and numeric selection keys are preserved in
 - LOO held-out score error: {loo_score:.3f}
 - LOO held-out delta error: {loo_delta:.3f}
 - bootstrap seed/samples: {seed} / {samples}
-- selected-prompt 95% CIs: `{bootstrap}`
+
+| selected-prompt bootstrap metric | 95% CI lower | 95% CI upper |
+|---|---:|---:|
+{bootstrap_rows}
 
 ## Drift interpretation
 
 - Prompt uncertainty: nonzero because the authoritative exact prompt was not recovered.
 - Model/API drift: inseparable from prompt uncertainty in the compatible-prompt branch.
-- Judge stochasticity: `{repeatability}`. Repeat calls are reported separately and are not
-  averaged into primary calibration metrics.
+- Judge stochasticity: all three task preferences were stable across the primary call and two
+  additional repetitions.
+
+| task | Student A grade range | Student B grade range | delta range | preference stable |
+|---|---|---|---|---:|
+{repeatability_rows}
+
+Repeat calls are reported separately and are not averaged into primary calibration metrics.
 
 ## Final label
 
@@ -297,8 +335,8 @@ Selected score MAE {mae:.3f}; pairwise agreement {pair:.3f}; delta MAE {delta_ma
         loo_delta=results["leave_one_task_out"]["held_out_delta_error"],
         seed=BOOTSTRAP_SEED,
         samples=BOOTSTRAP_SAMPLES,
-        bootstrap=selected_bootstrap["confidence_intervals_95"],
-        repeatability=results["repeatability"],
+        bootstrap_rows="\n".join(bootstrap_rows),
+        repeatability_rows="\n".join(repeatability_rows),
         final_label=results["final_label"],
         agreement=results["historical_agreement"],
         mae=selected_metrics["score_mae"],
@@ -309,6 +347,66 @@ Selected score MAE {mae:.3f}; pairwise agreement {pair:.3f}; delta MAE {delta_ma
 
 def _format_optional(value: float | None) -> str:
     return "NA" if value is None else f"{value:.3f}"
+
+
+def _update_production_blueprint(
+    *, paths: dict[str, Path], dataset: dict[str, Any], results: dict[str, Any]
+) -> None:
+    matrix_path = paths["reports"] / "PAPER_COMPARISON_MATRIX.json"
+    matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+    if matrix.get("call_count") != 42 or len(matrix.get("calls", [])) != 42:
+        raise ValueError("production paper comparison blueprint is not the frozen 42-call matrix")
+    if (
+        results.get("selected_candidate_id") != PAPER_EVALUATOR_PROMPT_CANDIDATE
+        or results.get("selected_prompt_sha256") != PAPER_EVALUATOR_PROMPT_SHA256
+        or results.get("status") != "COMPLETE"
+    ):
+        raise ValueError("production prompt constants differ from completed calibration")
+    historical = {item["repo_task_id"]: item for item in dataset["tasks"]}
+    frozen = pending = 0
+    for call in matrix["calls"]:
+        task_id = str(call["task_id"])
+        record = historical[task_id]
+        call["prompt_candidate_id"] = PAPER_EVALUATOR_PROMPT_CANDIDATE
+        call["prompt_candidate_sha256"] = PAPER_EVALUATOR_PROMPT_SHA256
+        call["evaluator_instruction_template_sha256"] = PAPER_EVALUATOR_PROMPT_SHA256
+        call["historically_calibrated_compatible_prompt"] = True
+        if call["comparison"] == "historical_control":
+            prompt = render_compatible_prompt(
+                task_prompt=record["task_text"],
+                student_a=record["historical_chemcrow_final_answer"],
+                student_b=record["historical_no_tools_gpt4_final_answer"],
+            )
+            call["prompt_sha256"] = canonical_sha256(prompt)
+            call.pop("prompt_template_sha256", None)
+            frozen += 1
+        else:
+            call["prompt_sha256"] = None
+            call["prompt_sha256_pending_reason"] = (
+                "actual prompt binds the not-yet-produced sealed full-v4 answer"
+            )
+            call["prompt_template_sha256"] = PAPER_EVALUATOR_PROMPT_SHA256
+            pending += 1
+    if frozen != 14 or pending != 28:
+        raise AssertionError("production prompt blueprint inventory differs")
+    matrix.update(
+        {
+            "protocol": PAPER_EVALUATOR_PROTOCOL,
+            "prompt_candidate_id": PAPER_EVALUATOR_PROMPT_CANDIDATE,
+            "prompt_candidate_sha256": PAPER_EVALUATOR_PROMPT_SHA256,
+            "evaluator_instruction_template_sha256": PAPER_EVALUATOR_PROMPT_SHA256,
+            "exact_prompt_recovered": False,
+            "historically_calibrated_compatible_prompt": True,
+            "paper_evaluator_historical_agreement": results["historical_agreement"],
+            "calibration_results_sha256": file_sha256(paths["analysis"]),
+            "frozen_prompt_hash_count": frozen,
+            "pending_prompt_hash_count": pending,
+        }
+    )
+    matrix_path.write_text(
+        json.dumps(matrix, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
 
 
 def prepare(config_path: Path) -> dict[str, Any]:
@@ -410,6 +508,8 @@ def analyze(config_path: Path) -> dict[str, Any]:
         json.dumps(selected_payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+    if results["status"] == "COMPLETE":
+        _update_production_blueprint(paths=paths, dataset=dataset, results=results)
     _write_report(
         paths["reports"] / "PAPER_EVALUATOR_CALIBRATION.md",
         _calibration_report(results, paths["candidates"]),

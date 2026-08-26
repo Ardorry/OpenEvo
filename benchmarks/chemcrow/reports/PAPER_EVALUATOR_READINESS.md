@@ -11,9 +11,13 @@ PAPER_EVALUATOR_ROUTE_READY
 The production 42-call evaluation remains intentionally unstarted. Its blueprint is ready; its 28
 full-v4-dependent prompt/source hashes will be frozen after the authoritative run seals.
 
-## Frozen compatible protocol
+## Frozen historically calibrated compatible protocol
 
-- Label: `CHEMCROW_EVALUATORGPT_PROMPT_COMPATIBLE_V1`
+- Label: `CHEMCROW_EVALUATORGPT_PROMPT_CALIBRATED_V2`
+- Selected candidate: `PAPER_MINIMAL`
+- Instruction-template SHA256:
+  `aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767`
+- Historical agreement: `HIGH` under preregistered project diagnostic thresholds
 - Model: `openai/gpt-4`
 - Provider: first-party OpenAI only (`provider.only=["openai"]`)
 - Temperature: 0.1
@@ -26,6 +30,12 @@ full-v4-dependent prompt/source hashes will be frozen after the authoritative ru
 
 The exact historical evaluator prompt was not recovered, so this is not described as a verbatim
 reproduction. Human expert scoring remains a separate layer.
+
+The separate historical calibration ledger contains 42 primary and 6 repeatability calls, all
+with valid JSON/Pydantic assessments and first-party OpenAI receipts. Proven total cost was
+$2.30712. The production 42-call ledger remains absent and none of these calibration receipts is a
+production result. See `PAPER_EVALUATOR_CALIBRATION.md` for metrics, bootstrap intervals, LOO
+stability, and stochasticity evidence.
 
 ## Transport compatibility
 

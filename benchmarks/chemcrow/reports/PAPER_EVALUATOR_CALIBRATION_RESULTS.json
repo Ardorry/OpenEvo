@@ -1,0 +1,1937 @@
+{
+  "allow_fallbacks": false,
+  "bootstrap_by_candidate": {
+    "CURRENT_V1": {
+      "confidence_intervals_95": {
+        "delta_mae": {
+          "lower": 0.21428571428571427,
+          "upper": 1.5357142857142858
+        },
+        "pairwise_preference_agreement": {
+          "lower": 0.7857142857142857,
+          "upper": 1.0
+        },
+        "score_mae": {
+          "lower": 0.5713392857142857,
+          "upper": 1.2678571428571428
+        },
+        "score_spearman": {
+          "lower": 0.4167847222815155,
+          "upper": 0.9957810703537632
+        }
+      },
+      "samples": 10000,
+      "seed": 20260826,
+      "unit": "task_with_student_pair_preserved"
+    },
+    "PAPER_MINIMAL": {
+      "confidence_intervals_95": {
+        "delta_mae": {
+          "lower": 0.17857142857142858,
+          "upper": 1.5357142857142858
+        },
+        "pairwise_preference_agreement": {
+          "lower": 0.7857142857142857,
+          "upper": 1.0
+        },
+        "score_mae": {
+          "lower": 0.3392857142857143,
+          "upper": 1.1964285714285714
+        },
+        "score_spearman": {
+          "lower": 0.46756647958728786,
+          "upper": 0.9381497681095216
+        }
+      },
+      "samples": 10000,
+      "seed": 20260826,
+      "unit": "task_with_student_pair_preserved"
+    },
+    "PAPER_OUTPUT_FAITHFUL": {
+      "confidence_intervals_95": {
+        "delta_mae": {
+          "lower": 0.21428571428571427,
+          "upper": 1.6428571428571428
+        },
+        "pairwise_preference_agreement": {
+          "lower": 0.6428571428571429,
+          "upper": 1.0
+        },
+        "score_mae": {
+          "lower": 0.35714285714285715,
+          "upper": 1.2321428571428572
+        },
+        "score_spearman": {
+          "lower": 0.3783011166754423,
+          "upper": 0.9241708169058103
+        }
+      },
+      "samples": 10000,
+      "seed": 20260826,
+      "unit": "task_with_student_pair_preserved"
+    }
+  },
+  "calibration_budget_usd": 15.0,
+  "candidate_manifest_sha256": "4c9506b95e562d85a9cc7f9c52f99d325fb69814aa8963f7108844e54c0bba7d",
+  "dataset_sha256": "148ddc2bd38dc3c49a01d01cd9cc99035cb0d70c085c7c2f3e738b378c813de0",
+  "exact_prompt_recovered": false,
+  "final_label": "CALIBRATED_COMPATIBLE_HIGH",
+  "historical_agreement": "HIGH",
+  "historical_labeled_task_count": 14,
+  "historical_task_count": 14,
+  "initial_plan_sha256": "d63b91a0ddb8f4171506c5191efd301d709c362940385e71e53a82f7544b7098",
+  "leave_one_task_out": {
+    "fold_count": 14,
+    "folds": [
+      {
+        "held_out_delta_error": 1.0,
+        "held_out_pairwise_agreement": 1.0,
+        "held_out_score_mae": 0.5,
+        "held_out_task_id": "chemcrow-01",
+        "selected_candidate_id": "PAPER_MINIMAL"
+      },
+      {
+        "held_out_delta_error": 0.0,
+        "held_out_pairwise_agreement": 1.0,
+        "held_out_score_mae": 0.0,
+        "held_out_task_id": "chemcrow-02",
+        "selected_candidate_id": "PAPER_MINIMAL"
+      },
+      {
+        "held_out_delta_error": 0.0,
+        "held_out_pairwise_agreement": 1.0,
+        "held_out_score_mae": 1.0,
+        "held_out_task_id": "chemcrow-03",
+        "selected_candidate_id": "PAPER_MINIMAL"
+      },
+      {
+        "held_out_delta_error": 0.0,
+        "held_out_pairwise_agreement": 1.0,
+        "held_out_score_mae": 1.0,
+        "held_out_task_id": "chemcrow-04",
+        "selected_candidate_id": "PAPER_MINIMAL"
+      },
+      {
+        "held_out_delta_error": 0.0,
+        "held_out_pairwise_agreement": 1.0,
+        "held_out_score_mae": 0.0,
+        "held_out_task_id": "chemcrow-05",
+        "selected_candidate_id": "PAPER_MINIMAL"
+      },
+      {
+        "held_out_delta_error": 0.0,
+        "held_out_pairwise_agreement": 1.0,
+        "held_out_score_mae": 0.0,
+        "held_out_task_id": "chemcrow-06",
+        "selected_candidate_id": "PAPER_MINIMAL"
+      },
+      {
+        "held_out_delta_error": 3.0,
+        "held_out_pairwise_agreement": 0.0,
+        "held_out_score_mae": 1.5,
+        "held_out_task_id": "chemcrow-07",
+        "selected_candidate_id": "PAPER_OUTPUT_FAITHFUL"
+      },
+      {
+        "held_out_delta_error": 0.0,
+        "held_out_pairwise_agreement": 1.0,
+        "held_out_score_mae": 0.0,
+        "held_out_task_id": "chemcrow-08",
+        "selected_candidate_id": "PAPER_MINIMAL"
+      },
+      {
+        "held_out_delta_error": 0.5,
+        "held_out_pairwise_agreement": 1.0,
+        "held_out_score_mae": 0.25,
+        "held_out_task_id": "chemcrow-09",
+        "selected_candidate_id": "PAPER_MINIMAL"
+      },
+      {
+        "held_out_delta_error": 3.5,
+        "held_out_pairwise_agreement": 1.0,
+        "held_out_score_mae": 1.75,
+        "held_out_task_id": "chemcrow-10",
+        "selected_candidate_id": "CURRENT_V1"
+      },
+      {
+        "held_out_delta_error": 1.0,
+        "held_out_pairwise_agreement": 0.0,
+        "held_out_score_mae": 2.5,
+        "held_out_task_id": "chemcrow-12",
+        "selected_candidate_id": "PAPER_MINIMAL"
+      },
+      {
+        "held_out_delta_error": 0.0,
+        "held_out_pairwise_agreement": 1.0,
+        "held_out_score_mae": 1.0,
+        "held_out_task_id": "chemcrow-13",
+        "selected_candidate_id": "PAPER_MINIMAL"
+      },
+      {
+        "held_out_delta_error": 5.0,
+        "held_out_pairwise_agreement": 1.0,
+        "held_out_score_mae": 2.5,
+        "held_out_task_id": "chemcrow-14",
+        "selected_candidate_id": "PAPER_MINIMAL"
+      },
+      {
+        "held_out_delta_error": 0.0,
+        "held_out_pairwise_agreement": 1.0,
+        "held_out_score_mae": 0.0,
+        "held_out_task_id": "chemcrow-15",
+        "selected_candidate_id": "PAPER_MINIMAL"
+      }
+    ],
+    "folds_won_by_candidate": {
+      "CURRENT_V1": 1,
+      "PAPER_MINIMAL": 12,
+      "PAPER_OUTPUT_FAITHFUL": 1
+    },
+    "held_out_delta_error": 1.0,
+    "held_out_pairwise_agreement": 0.8571428571428571,
+    "held_out_score_error": 0.8571428571428571,
+    "independent_benchmark_claimed": false
+  },
+  "list_price_cost_usd": 2.30712,
+  "local_result_seal_recovery_count": 1,
+  "metrics_by_candidate": {
+    "CURRENT_V1": {
+      "delta_mae": 0.7999999999999999,
+      "delta_pearson": 0.6952822368848715,
+      "delta_rmse": 1.500952078801033,
+      "delta_sign_agreement": 0.9285714285714286,
+      "delta_spearman": 0.8727168013649189,
+      "evaluated_task_count": 14,
+      "expected_task_count": 14,
+      "json_parse_failure_rate": 0.0,
+      "json_parse_failures": 0,
+      "list_price_cost_usd": 0.71976,
+      "pairwise_preference_agreement": 0.9285714285714286,
+      "parse_schema_failure_rate": 0.0,
+      "preference_confusion": {
+        "a_wins": {
+          "a_wins": 0,
+          "b_wins": 0,
+          "tie": 1
+        },
+        "b_wins": {
+          "a_wins": 0,
+          "b_wins": 13,
+          "tie": 0
+        },
+        "tie": {
+          "a_wins": 0,
+          "b_wins": 0,
+          "tie": 0
+        }
+      },
+      "proven_openrouter_reported_cost_usd": 0.71976,
+      "provider_failure_rate": 0.0,
+      "provider_failures": 0,
+      "pydantic_schema_failure_rate": 0.0,
+      "pydantic_schema_failures": 0,
+      "score_bias": 0.42142857142857143,
+      "score_mae": 0.8857142857142858,
+      "score_median_absolute_error": 0.5,
+      "score_pearson": 0.7260542978972103,
+      "score_rmse": 1.251285053740468,
+      "score_spearman": 0.7836265053101787,
+      "score_within_0_5": 0.7857142857142857,
+      "score_within_1_0": 0.7857142857142857
+    },
+    "PAPER_MINIMAL": {
+      "delta_mae": 0.75,
+      "delta_pearson": 0.6913241752518332,
+      "delta_rmse": 1.5177520972054126,
+      "delta_sign_agreement": 0.9285714285714286,
+      "delta_spearman": 0.816923350270993,
+      "evaluated_task_count": 14,
+      "expected_task_count": 14,
+      "json_parse_failure_rate": 0.0,
+      "json_parse_failures": 0,
+      "list_price_cost_usd": 0.67224,
+      "pairwise_preference_agreement": 0.9285714285714286,
+      "parse_schema_failure_rate": 0.0,
+      "preference_confusion": {
+        "a_wins": {
+          "a_wins": 0,
+          "b_wins": 0,
+          "tie": 1
+        },
+        "b_wins": {
+          "a_wins": 0,
+          "b_wins": 13,
+          "tie": 0
+        },
+        "tie": {
+          "a_wins": 0,
+          "b_wins": 0,
+          "tie": 0
+        }
+      },
+      "proven_openrouter_reported_cost_usd": 0.67224,
+      "provider_failure_rate": 0.0,
+      "provider_failures": 0,
+      "pydantic_schema_failure_rate": 0.0,
+      "pydantic_schema_failures": 0,
+      "score_bias": 0.30357142857142855,
+      "score_mae": 0.7321428571428571,
+      "score_median_absolute_error": 0.25,
+      "score_pearson": 0.7380568779778792,
+      "score_rmse": 1.2283845372799884,
+      "score_spearman": 0.7584265701732498,
+      "score_within_0_5": 0.5357142857142857,
+      "score_within_1_0": 0.8571428571428571
+    },
+    "PAPER_OUTPUT_FAITHFUL": {
+      "delta_mae": 0.8214285714285714,
+      "delta_pearson": 0.598554658255887,
+      "delta_rmse": 1.6311696066670338,
+      "delta_sign_agreement": 0.8571428571428571,
+      "delta_spearman": 0.6490694410003496,
+      "evaluated_task_count": 14,
+      "expected_task_count": 14,
+      "json_parse_failure_rate": 0.0,
+      "json_parse_failures": 0,
+      "list_price_cost_usd": 0.6705,
+      "pairwise_preference_agreement": 0.8571428571428571,
+      "parse_schema_failure_rate": 0.0,
+      "preference_confusion": {
+        "a_wins": {
+          "a_wins": 0,
+          "b_wins": 0,
+          "tie": 1
+        },
+        "b_wins": {
+          "a_wins": 1,
+          "b_wins": 12,
+          "tie": 0
+        },
+        "tie": {
+          "a_wins": 0,
+          "b_wins": 0,
+          "tie": 0
+        }
+      },
+      "proven_openrouter_reported_cost_usd": 0.6705,
+      "provider_failure_rate": 0.0,
+      "provider_failures": 0,
+      "pydantic_schema_failure_rate": 0.0,
+      "pydantic_schema_failures": 0,
+      "score_bias": 0.3392857142857143,
+      "score_mae": 0.7678571428571429,
+      "score_median_absolute_error": 0.75,
+      "score_pearson": 0.7038552179780532,
+      "score_rmse": 1.242836617236094,
+      "score_spearman": 0.6964057057899233,
+      "score_within_0_5": 0.5,
+      "score_within_1_0": 0.8571428571428571
+    }
+  },
+  "model": "openai/gpt-4",
+  "official_grades_in_model_requests": false,
+  "paid_calls": 48,
+  "per_call_results": [
+    {
+      "absolute_error_a": 1.5,
+      "absolute_error_b": 0.5,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-01-current-v1",
+      "cost": {
+        "list_price_cost_usd": 0.05322,
+        "openrouter_reported_cost_usd": 0.05322
+      },
+      "current_delta": -1.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 7.5,
+      "current_student_b_grade": 8.5,
+      "delta_error": 1.0,
+      "input_sha256": "b4544f179bcf16e764a9a831084ed129df57280027ffa89578f173a3e9d06637",
+      "model": "openai/gpt-4",
+      "official_delta": -2.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 6.0,
+      "official_student_b_grade": 8.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "CURRENT_V1",
+      "prompt_candidate_sha256": "7b51dcfb3cb45dc1d3f2702e65ada7d260e5c76427dd06ef6743d44f4c63674a",
+      "prompt_sha256": "5129e1e2c7241fc685429c445e4e39d3be2c8bd4150761c2db2dbe3746d4a068",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": true,
+      "result_sha256": "a015f32230aa7345609bb7b6a051927e9e0283e1e379ec35b21414b23bee7ed2",
+      "schema_valid": true,
+      "task_id": "chemcrow-01",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 421,
+        "prompt_tokens": 932,
+        "total_tokens": 1353
+      }
+    },
+    {
+      "absolute_error_a": 1.0,
+      "absolute_error_b": 0.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-01-paper-minimal",
+      "cost": {
+        "list_price_cost_usd": 0.04299,
+        "openrouter_reported_cost_usd": 0.04299
+      },
+      "current_delta": -1.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 7.0,
+      "current_student_b_grade": 8.0,
+      "delta_error": 1.0,
+      "input_sha256": "b4544f179bcf16e764a9a831084ed129df57280027ffa89578f173a3e9d06637",
+      "model": "openai/gpt-4",
+      "official_delta": -2.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 6.0,
+      "official_student_b_grade": 8.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_MINIMAL",
+      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
+      "prompt_sha256": "8b9162069239ba06ef369c12574f3ea953708d9700fd51ff0a1fb80203a84254",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "778eeb362444fc52317c4b31517d63d6a3cf84f168323ea4fe9e197cd44c2fdb",
+      "schema_valid": true,
+      "task_id": "chemcrow-01",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 271,
+        "prompt_tokens": 891,
+        "total_tokens": 1162
+      }
+    },
+    {
+      "absolute_error_a": 1.0,
+      "absolute_error_b": 0.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-01-paper-output-faithful",
+      "cost": {
+        "list_price_cost_usd": 0.05385,
+        "openrouter_reported_cost_usd": 0.05385
+      },
+      "current_delta": -1.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 7.0,
+      "current_student_b_grade": 8.0,
+      "delta_error": 1.0,
+      "input_sha256": "b4544f179bcf16e764a9a831084ed129df57280027ffa89578f173a3e9d06637",
+      "model": "openai/gpt-4",
+      "official_delta": -2.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 6.0,
+      "official_student_b_grade": 8.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_OUTPUT_FAITHFUL",
+      "prompt_candidate_sha256": "927c9defcdb07bf68a7b8aeaf1f89830d6e620c1844404b1396b73e00f51b566",
+      "prompt_sha256": "4f33117e2d0a9df3dfaecf4e81766ee43edd6d93d57e7728ac4a65237d63f686",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "ea193c556d8c2bdc951f1473bc45e05ba96b383c0f982adf214c3b3ba4de899d",
+      "schema_valid": true,
+      "task_id": "chemcrow-01",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 427,
+        "prompt_tokens": 941,
+        "total_tokens": 1368
+      }
+    },
+    {
+      "absolute_error_a": 0.5,
+      "absolute_error_b": 0.5,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-02-current-v1",
+      "cost": {
+        "list_price_cost_usd": 0.04866,
+        "openrouter_reported_cost_usd": 0.04866
+      },
+      "current_delta": -2.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 7.5,
+      "current_student_b_grade": 9.5,
+      "delta_error": 0.0,
+      "input_sha256": "26bdd386b8f6c4b736bd534413af521d2cdaac9ffde23d2026f03aa11994cb39",
+      "model": "openai/gpt-4",
+      "official_delta": -2.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 7.0,
+      "official_student_b_grade": 9.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "CURRENT_V1",
+      "prompt_candidate_sha256": "7b51dcfb3cb45dc1d3f2702e65ada7d260e5c76427dd06ef6743d44f4c63674a",
+      "prompt_sha256": "9d74e019686a4981cfd2aa27d6c7e128a7301034f18d87b7a6f9d0cff33fcd7c",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "f076333291ec7876f8a2784bbdd1a0dd9f61d70b377a593651709dc11a8e9577",
+      "schema_valid": true,
+      "task_id": "chemcrow-02",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 438,
+        "prompt_tokens": 746,
+        "total_tokens": 1184
+      }
+    },
+    {
+      "absolute_error_a": 0.0,
+      "absolute_error_b": 0.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-02-paper-minimal",
+      "cost": {
+        "list_price_cost_usd": 0.04659,
+        "openrouter_reported_cost_usd": 0.04659
+      },
+      "current_delta": -2.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 7.0,
+      "current_student_b_grade": 9.0,
+      "delta_error": 0.0,
+      "input_sha256": "26bdd386b8f6c4b736bd534413af521d2cdaac9ffde23d2026f03aa11994cb39",
+      "model": "openai/gpt-4",
+      "official_delta": -2.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 7.0,
+      "official_student_b_grade": 9.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_MINIMAL",
+      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
+      "prompt_sha256": "32a4034ff4e0eb3725bd4cb84a6acbbd2414f7b9882bff1cb2947289003d48cc",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "d541b98f81c9e4c7e5437fd6148a5fb9669aaae2262193547bd03a93245233ba",
+      "schema_valid": true,
+      "task_id": "chemcrow-02",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 424,
+        "prompt_tokens": 705,
+        "total_tokens": 1129
+      }
+    },
+    {
+      "absolute_error_a": 0.0,
+      "absolute_error_b": 0.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-02-paper-output-faithful",
+      "cost": {
+        "list_price_cost_usd": 0.04455,
+        "openrouter_reported_cost_usd": 0.04455
+      },
+      "current_delta": -2.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 7.0,
+      "current_student_b_grade": 9.0,
+      "delta_error": 0.0,
+      "input_sha256": "26bdd386b8f6c4b736bd534413af521d2cdaac9ffde23d2026f03aa11994cb39",
+      "model": "openai/gpt-4",
+      "official_delta": -2.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 7.0,
+      "official_student_b_grade": 9.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_OUTPUT_FAITHFUL",
+      "prompt_candidate_sha256": "927c9defcdb07bf68a7b8aeaf1f89830d6e620c1844404b1396b73e00f51b566",
+      "prompt_sha256": "a4af28ddc5c6a9cfe2c8d786867109c3d42f57cc0a1367bd23d045a38023e201",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "665201237b4cccd5d4cf86694262c0abcfb73fc43bf01b4b086a9d6093051fd6",
+      "schema_valid": true,
+      "task_id": "chemcrow-02",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 365,
+        "prompt_tokens": 755,
+        "total_tokens": 1120
+      }
+    },
+    {
+      "absolute_error_a": 0.5,
+      "absolute_error_b": 0.5,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-03-current-v1",
+      "cost": {
+        "list_price_cost_usd": 0.04461,
+        "openrouter_reported_cost_usd": 0.04461
+      },
+      "current_delta": -1.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 8.5,
+      "current_student_b_grade": 9.5,
+      "delta_error": 0.0,
+      "input_sha256": "641bbcf874b7464d5b843e41b993cb49fbc7cb7247ae05b4bb645ef45ad52795",
+      "model": "openai/gpt-4",
+      "official_delta": -1.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 8.0,
+      "official_student_b_grade": 9.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "CURRENT_V1",
+      "prompt_candidate_sha256": "7b51dcfb3cb45dc1d3f2702e65ada7d260e5c76427dd06ef6743d44f4c63674a",
+      "prompt_sha256": "39995b36cdedb7d45c07db906b6943b9578a864a37cd1a41ac0369f87386da57",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "cb28bf934e05f0d11e7f0a57cc739cc4de154cd4036282ca10288c05e96c4d1c",
+      "schema_valid": true,
+      "task_id": "chemcrow-03",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 277,
+        "prompt_tokens": 933,
+        "total_tokens": 1210
+      }
+    },
+    {
+      "absolute_error_a": 1.0,
+      "absolute_error_b": 1.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-03-paper-minimal",
+      "cost": {
+        "list_price_cost_usd": 0.0417,
+        "openrouter_reported_cost_usd": 0.0417
+      },
+      "current_delta": -1.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 9.0,
+      "current_student_b_grade": 10.0,
+      "delta_error": 0.0,
+      "input_sha256": "641bbcf874b7464d5b843e41b993cb49fbc7cb7247ae05b4bb645ef45ad52795",
+      "model": "openai/gpt-4",
+      "official_delta": -1.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 8.0,
+      "official_student_b_grade": 9.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_MINIMAL",
+      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
+      "prompt_sha256": "a3794fa4c3661ddb0f8066a959e584dcb54e88c94113a8dc4aaafa07ec98a874",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "d2e91696be5fe87b1a2619a32411dfbc586773026d3c294fc5237b6fd4a89dd8",
+      "schema_valid": true,
+      "task_id": "chemcrow-03",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 249,
+        "prompt_tokens": 892,
+        "total_tokens": 1141
+      }
+    },
+    {
+      "absolute_error_a": 1.0,
+      "absolute_error_b": 1.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-03-paper-output-faithful",
+      "cost": {
+        "list_price_cost_usd": 0.04356,
+        "openrouter_reported_cost_usd": 0.04356
+      },
+      "current_delta": -1.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 9.0,
+      "current_student_b_grade": 10.0,
+      "delta_error": 0.0,
+      "input_sha256": "641bbcf874b7464d5b843e41b993cb49fbc7cb7247ae05b4bb645ef45ad52795",
+      "model": "openai/gpt-4",
+      "official_delta": -1.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 8.0,
+      "official_student_b_grade": 9.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_OUTPUT_FAITHFUL",
+      "prompt_candidate_sha256": "927c9defcdb07bf68a7b8aeaf1f89830d6e620c1844404b1396b73e00f51b566",
+      "prompt_sha256": "77f779c240432a7ba192118aef52d930190215ea95a2814acbd633cdfc13d8e5",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "d487569ca7d814b2c653bd7db441b1a052369327534306070f6ddb1545d9690d",
+      "schema_valid": true,
+      "task_id": "chemcrow-03",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 255,
+        "prompt_tokens": 942,
+        "total_tokens": 1197
+      }
+    },
+    {
+      "absolute_error_a": 0.5,
+      "absolute_error_b": 0.5,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-04-current-v1",
+      "cost": {
+        "list_price_cost_usd": 0.06585,
+        "openrouter_reported_cost_usd": 0.06585
+      },
+      "current_delta": -1.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 8.5,
+      "current_student_b_grade": 9.5,
+      "delta_error": 0.0,
+      "input_sha256": "963ac23ab7aec547592ff0cafc2b67aebe65ff6fd8f99358a802b4d8253f24a0",
+      "model": "openai/gpt-4",
+      "official_delta": -1.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 8.0,
+      "official_student_b_grade": 9.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "CURRENT_V1",
+      "prompt_candidate_sha256": "7b51dcfb3cb45dc1d3f2702e65ada7d260e5c76427dd06ef6743d44f4c63674a",
+      "prompt_sha256": "4ab33918defeb7fb5b7f5a8069a702a10941a635a50ea1b072915e716c2c9019",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "584a6fb5fb24d7ab99b761230fdc46812e3405989fe0a27be0a77db27bc29534",
+      "schema_valid": true,
+      "task_id": "chemcrow-04",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 462,
+        "prompt_tokens": 1271,
+        "total_tokens": 1733
+      }
+    },
+    {
+      "absolute_error_a": 1.0,
+      "absolute_error_b": 1.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-04-paper-minimal",
+      "cost": {
+        "list_price_cost_usd": 0.05922,
+        "openrouter_reported_cost_usd": 0.05922
+      },
+      "current_delta": -1.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 9.0,
+      "current_student_b_grade": 10.0,
+      "delta_error": 0.0,
+      "input_sha256": "963ac23ab7aec547592ff0cafc2b67aebe65ff6fd8f99358a802b4d8253f24a0",
+      "model": "openai/gpt-4",
+      "official_delta": -1.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 8.0,
+      "official_student_b_grade": 9.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_MINIMAL",
+      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
+      "prompt_sha256": "ee3f60839a74d86302f5f92ef6e91d3623e2e95184f695f88dd8f6c294959287",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "fe4d03360f4a9641198466f51bf8146dd4b5f13adb54b5a38c95f00f64fb3f1b",
+      "schema_valid": true,
+      "task_id": "chemcrow-04",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 372,
+        "prompt_tokens": 1230,
+        "total_tokens": 1602
+      }
+    },
+    {
+      "absolute_error_a": 1.0,
+      "absolute_error_b": 1.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-04-paper-output-faithful",
+      "cost": {
+        "list_price_cost_usd": 0.05214,
+        "openrouter_reported_cost_usd": 0.05214
+      },
+      "current_delta": -1.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 9.0,
+      "current_student_b_grade": 10.0,
+      "delta_error": 0.0,
+      "input_sha256": "963ac23ab7aec547592ff0cafc2b67aebe65ff6fd8f99358a802b4d8253f24a0",
+      "model": "openai/gpt-4",
+      "official_delta": -1.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 8.0,
+      "official_student_b_grade": 9.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_OUTPUT_FAITHFUL",
+      "prompt_candidate_sha256": "927c9defcdb07bf68a7b8aeaf1f89830d6e620c1844404b1396b73e00f51b566",
+      "prompt_sha256": "cdaa14e80476bc30741a3c197daedbcf5cb7729fb77aa88a0b6abe8fcd7e5c6b",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "b317181b0ba71ac48dd277cecc847e91ae41de4e5835c1ebfd58b2a4de331e26",
+      "schema_valid": true,
+      "task_id": "chemcrow-04",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 229,
+        "prompt_tokens": 1280,
+        "total_tokens": 1509
+      }
+    },
+    {
+      "absolute_error_a": 0.5,
+      "absolute_error_b": 0.5,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-05-current-v1",
+      "cost": {
+        "list_price_cost_usd": 0.05079,
+        "openrouter_reported_cost_usd": 0.05079
+      },
+      "current_delta": -1.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 7.5,
+      "current_student_b_grade": 8.5,
+      "delta_error": 0.0,
+      "input_sha256": "c13feb17f624a21a4b5edee97ac3b1fd066b02650475214f946fbf962644e653",
+      "model": "openai/gpt-4",
+      "official_delta": -1.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 7.0,
+      "official_student_b_grade": 8.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "CURRENT_V1",
+      "prompt_candidate_sha256": "7b51dcfb3cb45dc1d3f2702e65ada7d260e5c76427dd06ef6743d44f4c63674a",
+      "prompt_sha256": "fac7f04366868666589141418fc1253d4ba75effd65571f88b8588449c7e6df2",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "64f27b22cf7df3015eb8b1a217c6424422d5fb9a7bf7cc343ed3c4af126fbd12",
+      "schema_valid": true,
+      "task_id": "chemcrow-05",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 314,
+        "prompt_tokens": 1065,
+        "total_tokens": 1379
+      }
+    },
+    {
+      "absolute_error_a": 0.0,
+      "absolute_error_b": 0.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-05-paper-minimal",
+      "cost": {
+        "list_price_cost_usd": 0.04572,
+        "openrouter_reported_cost_usd": 0.04572
+      },
+      "current_delta": -1.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 7.0,
+      "current_student_b_grade": 8.0,
+      "delta_error": 0.0,
+      "input_sha256": "c13feb17f624a21a4b5edee97ac3b1fd066b02650475214f946fbf962644e653",
+      "model": "openai/gpt-4",
+      "official_delta": -1.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 7.0,
+      "official_student_b_grade": 8.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_MINIMAL",
+      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
+      "prompt_sha256": "72a5ffe8bda4f03c9050ede92733f8a99d52899baf3d899d9595a4902383f506",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "a30415a022d0473053002c1b025ae98a2a5b3928da5b33a55e30ece751ca7501",
+      "schema_valid": true,
+      "task_id": "chemcrow-05",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 250,
+        "prompt_tokens": 1024,
+        "total_tokens": 1274
+      }
+    },
+    {
+      "absolute_error_a": 0.0,
+      "absolute_error_b": 0.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-05-paper-output-faithful",
+      "cost": {
+        "list_price_cost_usd": 0.05232,
+        "openrouter_reported_cost_usd": 0.05232
+      },
+      "current_delta": -1.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 7.0,
+      "current_student_b_grade": 8.0,
+      "delta_error": 0.0,
+      "input_sha256": "c13feb17f624a21a4b5edee97ac3b1fd066b02650475214f946fbf962644e653",
+      "model": "openai/gpt-4",
+      "official_delta": -1.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 7.0,
+      "official_student_b_grade": 8.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_OUTPUT_FAITHFUL",
+      "prompt_candidate_sha256": "927c9defcdb07bf68a7b8aeaf1f89830d6e620c1844404b1396b73e00f51b566",
+      "prompt_sha256": "a5263d52955fb3117a4e4c2c54015565619558c8d03b5da6d758038af5f46758",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "a52a9c7f2d28f41bf027a73f47ec2d5b79e842cb1aebdf1dac947d385a5ecc08",
+      "schema_valid": true,
+      "task_id": "chemcrow-05",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 335,
+        "prompt_tokens": 1074,
+        "total_tokens": 1409
+      }
+    },
+    {
+      "absolute_error_a": 0.5,
+      "absolute_error_b": 0.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-06-current-v1",
+      "cost": {
+        "list_price_cost_usd": 0.04347,
+        "openrouter_reported_cost_usd": 0.04347
+      },
+      "current_delta": -0.5,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 9.5,
+      "current_student_b_grade": 10.0,
+      "delta_error": 0.5,
+      "input_sha256": "782fa3619189e706b8c739aeadcc6949ebd49f518d7cc4d8560a8860dc5167cf",
+      "model": "openai/gpt-4",
+      "official_delta": -1.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 9.0,
+      "official_student_b_grade": 10.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "CURRENT_V1",
+      "prompt_candidate_sha256": "7b51dcfb3cb45dc1d3f2702e65ada7d260e5c76427dd06ef6743d44f4c63674a",
+      "prompt_sha256": "4308e49f585eb4d04e8fdc3c66f0a3eb561871651b149b118afc4833c7245cdb",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "ccf220080e4aa6c5177f496dda5dd1a35d62d42a779b53c54043b1df92c33615",
+      "schema_valid": true,
+      "task_id": "chemcrow-06",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 280,
+        "prompt_tokens": 889,
+        "total_tokens": 1169
+      }
+    },
+    {
+      "absolute_error_a": 0.0,
+      "absolute_error_b": 0.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-06-paper-minimal",
+      "cost": {
+        "list_price_cost_usd": 0.04284,
+        "openrouter_reported_cost_usd": 0.04284
+      },
+      "current_delta": -1.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 9.0,
+      "current_student_b_grade": 10.0,
+      "delta_error": 0.0,
+      "input_sha256": "782fa3619189e706b8c739aeadcc6949ebd49f518d7cc4d8560a8860dc5167cf",
+      "model": "openai/gpt-4",
+      "official_delta": -1.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 9.0,
+      "official_student_b_grade": 10.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_MINIMAL",
+      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
+      "prompt_sha256": "7436eb184ff12f1a487832a7420bf2f169fe4c08af5f4a8ee860593ac08d1f03",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "127a5a1c7123901fd84d702785abf6682cd22b07cafed279df02c71e75bf224a",
+      "schema_valid": true,
+      "task_id": "chemcrow-06",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 290,
+        "prompt_tokens": 848,
+        "total_tokens": 1138
+      }
+    },
+    {
+      "absolute_error_a": 0.0,
+      "absolute_error_b": 0.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-06-paper-output-faithful",
+      "cost": {
+        "list_price_cost_usd": 0.0399,
+        "openrouter_reported_cost_usd": 0.0399
+      },
+      "current_delta": -1.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 9.0,
+      "current_student_b_grade": 10.0,
+      "delta_error": 0.0,
+      "input_sha256": "782fa3619189e706b8c739aeadcc6949ebd49f518d7cc4d8560a8860dc5167cf",
+      "model": "openai/gpt-4",
+      "official_delta": -1.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 9.0,
+      "official_student_b_grade": 10.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_OUTPUT_FAITHFUL",
+      "prompt_candidate_sha256": "927c9defcdb07bf68a7b8aeaf1f89830d6e620c1844404b1396b73e00f51b566",
+      "prompt_sha256": "e68faa7b6bb0e03cc21aafd66f5fd9b30a4436f722007600ac52d636814a839a",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "ba486338354d7d9410d9db4d963a387b2f14c9ccc4043a022c8c08d2df385f3b",
+      "schema_valid": true,
+      "task_id": "chemcrow-06",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 216,
+        "prompt_tokens": 898,
+        "total_tokens": 1114
+      }
+    },
+    {
+      "absolute_error_a": 1.5,
+      "absolute_error_b": 0.5,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-07-current-v1",
+      "cost": {
+        "list_price_cost_usd": 0.04938,
+        "openrouter_reported_cost_usd": 0.04938
+      },
+      "current_delta": -1.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 8.5,
+      "current_student_b_grade": 9.5,
+      "delta_error": 1.0,
+      "input_sha256": "9db5a7273f00da295857ffab0f262610209c41f0de93384bbf704adabbeae2c5",
+      "model": "openai/gpt-4",
+      "official_delta": -2.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 7.0,
+      "official_student_b_grade": 9.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "CURRENT_V1",
+      "prompt_candidate_sha256": "7b51dcfb3cb45dc1d3f2702e65ada7d260e5c76427dd06ef6743d44f4c63674a",
+      "prompt_sha256": "165a52bbff89a611f032e285a8ad30d848f88d3aa4bfeeabb4ce71fb0ac333bb",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "57d860c9a8ff90230519741b6973fe3a53ad449b8dfe043f58f268992f53c9ee",
+      "schema_valid": true,
+      "task_id": "chemcrow-07",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 395,
+        "prompt_tokens": 856,
+        "total_tokens": 1251
+      }
+    },
+    {
+      "absolute_error_a": 1.0,
+      "absolute_error_b": 0.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-07-paper-minimal",
+      "cost": {
+        "list_price_cost_usd": 0.04431,
+        "openrouter_reported_cost_usd": 0.04431
+      },
+      "current_delta": -1.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 8.0,
+      "current_student_b_grade": 9.0,
+      "delta_error": 1.0,
+      "input_sha256": "9db5a7273f00da295857ffab0f262610209c41f0de93384bbf704adabbeae2c5",
+      "model": "openai/gpt-4",
+      "official_delta": -2.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 7.0,
+      "official_student_b_grade": 9.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_MINIMAL",
+      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
+      "prompt_sha256": "b28bf483bea700b471f80c2bfc855fe302935d1a3b8a822d88033a0b787079dc",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "73d73a3ca159d9f09c0af70fe38bcfdedad0d4e7557efa1dda6372db97332673",
+      "schema_valid": true,
+      "task_id": "chemcrow-07",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 331,
+        "prompt_tokens": 815,
+        "total_tokens": 1146
+      }
+    },
+    {
+      "absolute_error_a": 2.0,
+      "absolute_error_b": 1.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-07-paper-output-faithful",
+      "cost": {
+        "list_price_cost_usd": 0.04281,
+        "openrouter_reported_cost_usd": 0.04281
+      },
+      "current_delta": 1.0,
+      "current_preference": "a_wins",
+      "current_student_a_grade": 9.0,
+      "current_student_b_grade": 8.0,
+      "delta_error": 3.0,
+      "input_sha256": "9db5a7273f00da295857ffab0f262610209c41f0de93384bbf704adabbeae2c5",
+      "model": "openai/gpt-4",
+      "official_delta": -2.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 7.0,
+      "official_student_b_grade": 9.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_OUTPUT_FAITHFUL",
+      "prompt_candidate_sha256": "927c9defcdb07bf68a7b8aeaf1f89830d6e620c1844404b1396b73e00f51b566",
+      "prompt_sha256": "60d88633b849b78bc2831706667e5539dc744614647c4d91be08e28eb02308ea",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "25798b186a9957ad1b090067e66d33d2a8777dfc3588e35df9a5701c0ad85e25",
+      "schema_valid": true,
+      "task_id": "chemcrow-07",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 281,
+        "prompt_tokens": 865,
+        "total_tokens": 1146
+      }
+    },
+    {
+      "absolute_error_a": 0.5,
+      "absolute_error_b": 0.5,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-08-current-v1",
+      "cost": {
+        "list_price_cost_usd": 0.05007,
+        "openrouter_reported_cost_usd": 0.05007
+      },
+      "current_delta": -2.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 7.5,
+      "current_student_b_grade": 9.5,
+      "delta_error": 0.0,
+      "input_sha256": "9aa35dbaa9cfa4d763a84dbeb8b9f61b6c122c5a968064528f7f9cc4004bf055",
+      "model": "openai/gpt-4",
+      "official_delta": -2.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 7.0,
+      "official_student_b_grade": 9.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "CURRENT_V1",
+      "prompt_candidate_sha256": "7b51dcfb3cb45dc1d3f2702e65ada7d260e5c76427dd06ef6743d44f4c63674a",
+      "prompt_sha256": "a9e56c6f0c014c8e65acd88216cd488b1d8c1bc53b9e1b7bf2dca25816d46d65",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "6523501a6def37c2d0d3d3fc10bf23233c567209e55c61342c2c7660080a42dd",
+      "schema_valid": true,
+      "task_id": "chemcrow-08",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 271,
+        "prompt_tokens": 1127,
+        "total_tokens": 1398
+      }
+    },
+    {
+      "absolute_error_a": 0.0,
+      "absolute_error_b": 0.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-08-paper-minimal",
+      "cost": {
+        "list_price_cost_usd": 0.04896,
+        "openrouter_reported_cost_usd": 0.04896
+      },
+      "current_delta": -2.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 7.0,
+      "current_student_b_grade": 9.0,
+      "delta_error": 0.0,
+      "input_sha256": "9aa35dbaa9cfa4d763a84dbeb8b9f61b6c122c5a968064528f7f9cc4004bf055",
+      "model": "openai/gpt-4",
+      "official_delta": -2.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 7.0,
+      "official_student_b_grade": 9.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_MINIMAL",
+      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
+      "prompt_sha256": "fffced0a4eb37d4fd76b3f11f1641dfc4070c149cfccb7fbccf4e19f54f24b97",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "d86610568ed8108c989488c733cf4a5d6332f8da6af4d2adbe07b3626a794225",
+      "schema_valid": true,
+      "task_id": "chemcrow-08",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 273,
+        "prompt_tokens": 1086,
+        "total_tokens": 1359
+      }
+    },
+    {
+      "absolute_error_a": 0.0,
+      "absolute_error_b": 0.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-08-paper-output-faithful",
+      "cost": {
+        "list_price_cost_usd": 0.04632,
+        "openrouter_reported_cost_usd": 0.04632
+      },
+      "current_delta": -2.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 7.0,
+      "current_student_b_grade": 9.0,
+      "delta_error": 0.0,
+      "input_sha256": "9aa35dbaa9cfa4d763a84dbeb8b9f61b6c122c5a968064528f7f9cc4004bf055",
+      "model": "openai/gpt-4",
+      "official_delta": -2.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 7.0,
+      "official_student_b_grade": 9.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_OUTPUT_FAITHFUL",
+      "prompt_candidate_sha256": "927c9defcdb07bf68a7b8aeaf1f89830d6e620c1844404b1396b73e00f51b566",
+      "prompt_sha256": "2d9ffd918086b1587d9f388c1e352d3aa75b0d87f5b46d8c915c0b19bc1db992",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "20f0c2d8c222a3e1bb8babb5502f0f01f5cfabfcac9d95220b14d27547186dde",
+      "schema_valid": true,
+      "task_id": "chemcrow-08",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 204,
+        "prompt_tokens": 1136,
+        "total_tokens": 1340
+      }
+    },
+    {
+      "absolute_error_a": 0.5,
+      "absolute_error_b": 0.3000000000000007,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-09-current-v1",
+      "cost": {
+        "list_price_cost_usd": 0.06078,
+        "openrouter_reported_cost_usd": 0.06078
+      },
+      "current_delta": -0.3000000000000007,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 9.5,
+      "current_student_b_grade": 9.8,
+      "delta_error": 0.1999999999999993,
+      "input_sha256": "b7c58310b4637cf51bf95b38a0fb5039e6e2c652cfa366b3f5db095ff1387fdc",
+      "model": "openai/gpt-4",
+      "official_delta": -0.5,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 9.0,
+      "official_student_b_grade": 9.5,
+      "parse_valid": true,
+      "prompt_candidate_id": "CURRENT_V1",
+      "prompt_candidate_sha256": "7b51dcfb3cb45dc1d3f2702e65ada7d260e5c76427dd06ef6743d44f4c63674a",
+      "prompt_sha256": "2833f59f6a5c745a7f2f971fbea4c30d816ecc67927a1e59db65163767620497",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "f6fe55405b0def273aa1411c654ffeaf617afe17bedc11519a6bbef6265ed094",
+      "schema_valid": true,
+      "task_id": "chemcrow-09",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 424,
+        "prompt_tokens": 1178,
+        "total_tokens": 1602
+      }
+    },
+    {
+      "absolute_error_a": 0.0,
+      "absolute_error_b": 0.5,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-09-paper-minimal",
+      "cost": {
+        "list_price_cost_usd": 0.05421,
+        "openrouter_reported_cost_usd": 0.05421
+      },
+      "current_delta": -1.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 9.0,
+      "current_student_b_grade": 10.0,
+      "delta_error": 0.5,
+      "input_sha256": "b7c58310b4637cf51bf95b38a0fb5039e6e2c652cfa366b3f5db095ff1387fdc",
+      "model": "openai/gpt-4",
+      "official_delta": -0.5,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 9.0,
+      "official_student_b_grade": 9.5,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_MINIMAL",
+      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
+      "prompt_sha256": "041485cc35c74d2df5c42d41702d74c8014e61b31f140306f7378b6b632f40a6",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "d6491288b543639d90795e0f56d357119670b32fd741961d56b54c3de9445d6b",
+      "schema_valid": true,
+      "task_id": "chemcrow-09",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 335,
+        "prompt_tokens": 1137,
+        "total_tokens": 1472
+      }
+    },
+    {
+      "absolute_error_a": 0.0,
+      "absolute_error_b": 0.5,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-09-paper-output-faithful",
+      "cost": {
+        "list_price_cost_usd": 0.05271,
+        "openrouter_reported_cost_usd": 0.05271
+      },
+      "current_delta": -1.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 9.0,
+      "current_student_b_grade": 10.0,
+      "delta_error": 0.5,
+      "input_sha256": "b7c58310b4637cf51bf95b38a0fb5039e6e2c652cfa366b3f5db095ff1387fdc",
+      "model": "openai/gpt-4",
+      "official_delta": -0.5,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 9.0,
+      "official_student_b_grade": 9.5,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_OUTPUT_FAITHFUL",
+      "prompt_candidate_sha256": "927c9defcdb07bf68a7b8aeaf1f89830d6e620c1844404b1396b73e00f51b566",
+      "prompt_sha256": "b49b22d408785ee511cefd2e9496e0a3175a89e745e93962bb884ea0075c403e",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "d03eb8e3cf64ceaca5c5b76267d37242f56525043b61f54b0aa5a201d3483eb5",
+      "schema_valid": true,
+      "task_id": "chemcrow-09",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 285,
+        "prompt_tokens": 1187,
+        "total_tokens": 1472
+      }
+    },
+    {
+      "absolute_error_a": 3.0,
+      "absolute_error_b": 0.5,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-10-current-v1",
+      "cost": {
+        "list_price_cost_usd": 0.04434,
+        "openrouter_reported_cost_usd": 0.04434
+      },
+      "current_delta": -5.5,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 4.0,
+      "current_student_b_grade": 9.5,
+      "delta_error": 3.5,
+      "input_sha256": "5ac4047e6e1afb049ee817f4f14dc851dfd49ac738c373c67a0532cfe6280f28",
+      "model": "openai/gpt-4",
+      "official_delta": -2.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 7.0,
+      "official_student_b_grade": 9.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "CURRENT_V1",
+      "prompt_candidate_sha256": "7b51dcfb3cb45dc1d3f2702e65ada7d260e5c76427dd06ef6743d44f4c63674a",
+      "prompt_sha256": "b68862ea4b6f8e09a9cfe3f3569a5916d0ab86c30849a79ff1c497ae7eb192da",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "b59945ea92039c9addda8f69f379483a25db210530defe9c4a90d312e085fd11",
+      "schema_valid": true,
+      "task_id": "chemcrow-10",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 395,
+        "prompt_tokens": 688,
+        "total_tokens": 1083
+      }
+    },
+    {
+      "absolute_error_a": 2.0,
+      "absolute_error_b": 0.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-10-paper-minimal",
+      "cost": {
+        "list_price_cost_usd": 0.04509,
+        "openrouter_reported_cost_usd": 0.04509
+      },
+      "current_delta": -4.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 5.0,
+      "current_student_b_grade": 9.0,
+      "delta_error": 2.0,
+      "input_sha256": "5ac4047e6e1afb049ee817f4f14dc851dfd49ac738c373c67a0532cfe6280f28",
+      "model": "openai/gpt-4",
+      "official_delta": -2.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 7.0,
+      "official_student_b_grade": 9.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_MINIMAL",
+      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
+      "prompt_sha256": "1fbff504af8a4680c9ea753bf2e7eccff18a5e3fe06450e7689fd4e076ec4cd4",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "4dffc9c8533fb6f3ed21cf048a31e9391a9dc5642868f554058495cb797233ba",
+      "schema_valid": true,
+      "task_id": "chemcrow-10",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 428,
+        "prompt_tokens": 647,
+        "total_tokens": 1075
+      }
+    },
+    {
+      "absolute_error_a": 1.0,
+      "absolute_error_b": 0.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-10-paper-output-faithful",
+      "cost": {
+        "list_price_cost_usd": 0.04221,
+        "openrouter_reported_cost_usd": 0.04221
+      },
+      "current_delta": -3.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 6.0,
+      "current_student_b_grade": 9.0,
+      "delta_error": 1.0,
+      "input_sha256": "5ac4047e6e1afb049ee817f4f14dc851dfd49ac738c373c67a0532cfe6280f28",
+      "model": "openai/gpt-4",
+      "official_delta": -2.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 7.0,
+      "official_student_b_grade": 9.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_OUTPUT_FAITHFUL",
+      "prompt_candidate_sha256": "927c9defcdb07bf68a7b8aeaf1f89830d6e620c1844404b1396b73e00f51b566",
+      "prompt_sha256": "5bedada5d319bd25532c44da535b562571e87265cda116dfd0116417d9b6bb21",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "11afcaf16444161d7059a6bede8cbee6367fcd8af1d04fec9d7a3c26879e68e6",
+      "schema_valid": true,
+      "task_id": "chemcrow-10",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 355,
+        "prompt_tokens": 697,
+        "total_tokens": 1052
+      }
+    },
+    {
+      "absolute_error_a": 2.0,
+      "absolute_error_b": 3.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-12-current-v1",
+      "cost": {
+        "list_price_cost_usd": 0.03282,
+        "openrouter_reported_cost_usd": 0.03282
+      },
+      "current_delta": 0.0,
+      "current_preference": "tie",
+      "current_student_a_grade": 10.0,
+      "current_student_b_grade": 10.0,
+      "delta_error": 1.0,
+      "input_sha256": "c3b595b60aea5ebf06dc79b1f6366dfa4d5b1084ee1b10e90fcde131e6d0f812",
+      "model": "openai/gpt-4",
+      "official_delta": 1.0,
+      "official_preference": "a_wins",
+      "official_student_a_grade": 8.0,
+      "official_student_b_grade": 7.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "CURRENT_V1",
+      "prompt_candidate_sha256": "7b51dcfb3cb45dc1d3f2702e65ada7d260e5c76427dd06ef6743d44f4c63674a",
+      "prompt_sha256": "d15e0bcd6909819099f222b26c08623d1ed7009c9c2f08c72651cde5485bf326",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "564538146b5a6722b2c5f18dfe1564cc172732d04eb67c71c43f5c18e9c92994",
+      "schema_valid": true,
+      "task_id": "chemcrow-12",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 254,
+        "prompt_tokens": 586,
+        "total_tokens": 840
+      }
+    },
+    {
+      "absolute_error_a": 2.0,
+      "absolute_error_b": 3.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-12-paper-minimal",
+      "cost": {
+        "list_price_cost_usd": 0.03687,
+        "openrouter_reported_cost_usd": 0.03687
+      },
+      "current_delta": 0.0,
+      "current_preference": "tie",
+      "current_student_a_grade": 10.0,
+      "current_student_b_grade": 10.0,
+      "delta_error": 1.0,
+      "input_sha256": "c3b595b60aea5ebf06dc79b1f6366dfa4d5b1084ee1b10e90fcde131e6d0f812",
+      "model": "openai/gpt-4",
+      "official_delta": 1.0,
+      "official_preference": "a_wins",
+      "official_student_a_grade": 8.0,
+      "official_student_b_grade": 7.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_MINIMAL",
+      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
+      "prompt_sha256": "6bed533ff95032f4ed544b26fcf2b97c71b5536107a40b93528a96f5c552baab",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "40d4fd81d2acc2fb518670816d80b833d980e46fd475bd58eb116babeae4bf7f",
+      "schema_valid": true,
+      "task_id": "chemcrow-12",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 342,
+        "prompt_tokens": 545,
+        "total_tokens": 887
+      }
+    },
+    {
+      "absolute_error_a": 2.0,
+      "absolute_error_b": 3.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-12-paper-output-faithful",
+      "cost": {
+        "list_price_cost_usd": 0.03027,
+        "openrouter_reported_cost_usd": 0.03027
+      },
+      "current_delta": 0.0,
+      "current_preference": "tie",
+      "current_student_a_grade": 10.0,
+      "current_student_b_grade": 10.0,
+      "delta_error": 1.0,
+      "input_sha256": "c3b595b60aea5ebf06dc79b1f6366dfa4d5b1084ee1b10e90fcde131e6d0f812",
+      "model": "openai/gpt-4",
+      "official_delta": 1.0,
+      "official_preference": "a_wins",
+      "official_student_a_grade": 8.0,
+      "official_student_b_grade": 7.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_OUTPUT_FAITHFUL",
+      "prompt_candidate_sha256": "927c9defcdb07bf68a7b8aeaf1f89830d6e620c1844404b1396b73e00f51b566",
+      "prompt_sha256": "d29de7dac21d60916fb633f266b7b80307ee690babe7111de2de81a2b53f0dea",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "9bb4ab4b234f26b6ff083299c1a035d3c5b14560e9b7a2fd9516365e0bbeec62",
+      "schema_valid": true,
+      "task_id": "chemcrow-12",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 207,
+        "prompt_tokens": 595,
+        "total_tokens": 802
+      }
+    },
+    {
+      "absolute_error_a": 0.5,
+      "absolute_error_b": 0.5,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-13-current-v1",
+      "cost": {
+        "list_price_cost_usd": 0.05958,
+        "openrouter_reported_cost_usd": 0.05958
+      },
+      "current_delta": -1.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 7.5,
+      "current_student_b_grade": 8.5,
+      "delta_error": 0.0,
+      "input_sha256": "ed2738a40bf559237080d11f171e3f66317e073e649d1fbf1368f435cb22de99",
+      "model": "openai/gpt-4",
+      "official_delta": -1.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 7.0,
+      "official_student_b_grade": 8.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "CURRENT_V1",
+      "prompt_candidate_sha256": "7b51dcfb3cb45dc1d3f2702e65ada7d260e5c76427dd06ef6743d44f4c63674a",
+      "prompt_sha256": "443569a6d00130a6440e91ca0c8eae79a01c223b93c6e9c7d7c7e35a73f182b9",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "bc7435d19682cfaacda9a3030c3e34eb9f56cf2d6dc20fc3a593289d9e65181d",
+      "schema_valid": true,
+      "task_id": "chemcrow-13",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 361,
+        "prompt_tokens": 1264,
+        "total_tokens": 1625
+      }
+    },
+    {
+      "absolute_error_a": 1.0,
+      "absolute_error_b": 1.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-13-paper-minimal",
+      "cost": {
+        "list_price_cost_usd": 0.05499,
+        "openrouter_reported_cost_usd": 0.05499
+      },
+      "current_delta": -1.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 8.0,
+      "current_student_b_grade": 9.0,
+      "delta_error": 0.0,
+      "input_sha256": "ed2738a40bf559237080d11f171e3f66317e073e649d1fbf1368f435cb22de99",
+      "model": "openai/gpt-4",
+      "official_delta": -1.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 7.0,
+      "official_student_b_grade": 8.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_MINIMAL",
+      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
+      "prompt_sha256": "f409e1a6c895688fc5d1bd7cfc3725a7a0265699ccca29f6a054a38dd4fee4ed",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "84e24241ba824e9109f6bb7e4136af4cc3cd6ce159e95c4b39033b2e87f04733",
+      "schema_valid": true,
+      "task_id": "chemcrow-13",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 305,
+        "prompt_tokens": 1223,
+        "total_tokens": 1528
+      }
+    },
+    {
+      "absolute_error_a": 1.0,
+      "absolute_error_b": 1.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-13-paper-output-faithful",
+      "cost": {
+        "list_price_cost_usd": 0.05763,
+        "openrouter_reported_cost_usd": 0.05763
+      },
+      "current_delta": -1.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 8.0,
+      "current_student_b_grade": 9.0,
+      "delta_error": 0.0,
+      "input_sha256": "ed2738a40bf559237080d11f171e3f66317e073e649d1fbf1368f435cb22de99",
+      "model": "openai/gpt-4",
+      "official_delta": -1.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 7.0,
+      "official_student_b_grade": 8.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_OUTPUT_FAITHFUL",
+      "prompt_candidate_sha256": "927c9defcdb07bf68a7b8aeaf1f89830d6e620c1844404b1396b73e00f51b566",
+      "prompt_sha256": "5b4172d2078a4515035820123831ac4d91a0a0049391be2b1c48197779271a95",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "006c90ae3c400373675bad92fcccc6cf9b086832de1510ed7dff50a0dc62e18d",
+      "schema_valid": true,
+      "task_id": "chemcrow-13",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 324,
+        "prompt_tokens": 1273,
+        "total_tokens": 1597
+      }
+    },
+    {
+      "absolute_error_a": 3.5,
+      "absolute_error_b": 0.5,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-14-current-v1",
+      "cost": {
+        "list_price_cost_usd": 0.0603,
+        "openrouter_reported_cost_usd": 0.0603
+      },
+      "current_delta": -7.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 2.5,
+      "current_student_b_grade": 9.5,
+      "delta_error": 4.0,
+      "input_sha256": "1489d4670a12a67fee4023ad5d065f7937d3b1f90709866446b43969e5675b5a",
+      "model": "openai/gpt-4",
+      "official_delta": -3.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 6.0,
+      "official_student_b_grade": 9.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "CURRENT_V1",
+      "prompt_candidate_sha256": "7b51dcfb3cb45dc1d3f2702e65ada7d260e5c76427dd06ef6743d44f4c63674a",
+      "prompt_sha256": "2fcc3e88337de57b7e30a5f7873caefdf70db3d1187b8a94313793eba5de1a34",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "fa3fe8e54a2664004e4ed880bf4405f49344931a8036506c7d86a09e98854fe8",
+      "schema_valid": true,
+      "task_id": "chemcrow-14",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 357,
+        "prompt_tokens": 1296,
+        "total_tokens": 1653
+      }
+    },
+    {
+      "absolute_error_a": 4.0,
+      "absolute_error_b": 1.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-14-paper-minimal",
+      "cost": {
+        "list_price_cost_usd": 0.04965,
+        "openrouter_reported_cost_usd": 0.04965
+      },
+      "current_delta": -8.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 2.0,
+      "current_student_b_grade": 10.0,
+      "delta_error": 5.0,
+      "input_sha256": "1489d4670a12a67fee4023ad5d065f7937d3b1f90709866446b43969e5675b5a",
+      "model": "openai/gpt-4",
+      "official_delta": -3.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 6.0,
+      "official_student_b_grade": 9.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_MINIMAL",
+      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
+      "prompt_sha256": "294a9cbb24d7ac599becf3c0f6c2ce42fc1db20aecf56329894e063abbb08745",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "5af00fec01d5aa3bd9d02c5914000674d9af8cf6e2a714e2c6e3d0cb798dd794",
+      "schema_valid": true,
+      "task_id": "chemcrow-14",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 200,
+        "prompt_tokens": 1255,
+        "total_tokens": 1455
+      }
+    },
+    {
+      "absolute_error_a": 4.0,
+      "absolute_error_b": 1.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-14-paper-output-faithful",
+      "cost": {
+        "list_price_cost_usd": 0.05529,
+        "openrouter_reported_cost_usd": 0.05529
+      },
+      "current_delta": -8.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 2.0,
+      "current_student_b_grade": 10.0,
+      "delta_error": 5.0,
+      "input_sha256": "1489d4670a12a67fee4023ad5d065f7937d3b1f90709866446b43969e5675b5a",
+      "model": "openai/gpt-4",
+      "official_delta": -3.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 6.0,
+      "official_student_b_grade": 9.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_OUTPUT_FAITHFUL",
+      "prompt_candidate_sha256": "927c9defcdb07bf68a7b8aeaf1f89830d6e620c1844404b1396b73e00f51b566",
+      "prompt_sha256": "2f8f1749c7e30005d8cacd63c5fdfa58812744a35884f4c93827aa619f19e6f3",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "4f0020c6c58d6642361e9a76b80d8bf78f6a4ddbbf76c94b5286b7467db7ee28",
+      "schema_valid": true,
+      "task_id": "chemcrow-14",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 269,
+        "prompt_tokens": 1305,
+        "total_tokens": 1574
+      }
+    },
+    {
+      "absolute_error_a": 0.5,
+      "absolute_error_b": 0.5,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-15-current-v1",
+      "cost": {
+        "list_price_cost_usd": 0.05589,
+        "openrouter_reported_cost_usd": 0.05589
+      },
+      "current_delta": -2.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 7.5,
+      "current_student_b_grade": 9.5,
+      "delta_error": 0.0,
+      "input_sha256": "15fb268a1d985d6d99de72f2b07c120dccd118e05b9274342ef10704057b93c8",
+      "model": "openai/gpt-4",
+      "official_delta": -2.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 7.0,
+      "official_student_b_grade": 9.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "CURRENT_V1",
+      "prompt_candidate_sha256": "7b51dcfb3cb45dc1d3f2702e65ada7d260e5c76427dd06ef6743d44f4c63674a",
+      "prompt_sha256": "c003daac2af9f1fa7caff3a77272c0886c1cd99bcce6c6803da08b25c7bc92d7",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "560031fe0a45d4b7dc7aba004ce83c7fbeb8c66cfc2eb4bdbf6a7d554259ab40",
+      "schema_valid": true,
+      "task_id": "chemcrow-15",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 283,
+        "prompt_tokens": 1297,
+        "total_tokens": 1580
+      }
+    },
+    {
+      "absolute_error_a": 0.0,
+      "absolute_error_b": 0.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-15-paper-minimal",
+      "cost": {
+        "list_price_cost_usd": 0.0591,
+        "openrouter_reported_cost_usd": 0.0591
+      },
+      "current_delta": -2.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 7.0,
+      "current_student_b_grade": 9.0,
+      "delta_error": 0.0,
+      "input_sha256": "15fb268a1d985d6d99de72f2b07c120dccd118e05b9274342ef10704057b93c8",
+      "model": "openai/gpt-4",
+      "official_delta": -2.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 7.0,
+      "official_student_b_grade": 9.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_MINIMAL",
+      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
+      "prompt_sha256": "9c23178865ecf53468b85b47ee66fddde9899602f3dff9674223e85833b200e8",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "fa916ce6ad6f65e067f606ee88ffd9a3b60b341e7c109bcdf41508088ff61b93",
+      "schema_valid": true,
+      "task_id": "chemcrow-15",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 357,
+        "prompt_tokens": 1256,
+        "total_tokens": 1613
+      }
+    },
+    {
+      "absolute_error_a": 0.0,
+      "absolute_error_b": 0.0,
+      "call_id": "paper-chemcrow-cal-v1-chemcrow-15-paper-output-faithful",
+      "cost": {
+        "list_price_cost_usd": 0.05694,
+        "openrouter_reported_cost_usd": 0.05694
+      },
+      "current_delta": -2.0,
+      "current_preference": "b_wins",
+      "current_student_a_grade": 7.0,
+      "current_student_b_grade": 9.0,
+      "delta_error": 0.0,
+      "input_sha256": "15fb268a1d985d6d99de72f2b07c120dccd118e05b9274342ef10704057b93c8",
+      "model": "openai/gpt-4",
+      "official_delta": -2.0,
+      "official_preference": "b_wins",
+      "official_student_a_grade": 7.0,
+      "official_student_b_grade": 9.0,
+      "parse_valid": true,
+      "prompt_candidate_id": "PAPER_OUTPUT_FAITHFUL",
+      "prompt_candidate_sha256": "927c9defcdb07bf68a7b8aeaf1f89830d6e620c1844404b1396b73e00f51b566",
+      "prompt_sha256": "f08db1e2cda570745e6fcf1f229e9782d14a83399ea23cd857640e9514b7b003",
+      "provider": "OpenAI",
+      "recovered_after_local_result_seal_failure": false,
+      "result_sha256": "0ca16c1eeedd0ec839e5812843a0241faf2243078b0cda82827e8f25fa282630",
+      "schema_valid": true,
+      "task_id": "chemcrow-15",
+      "temperature": 0.1,
+      "usage": {
+        "completion_tokens": 296,
+        "prompt_tokens": 1306,
+        "total_tokens": 1602
+      }
+    }
+  ],
+  "production_42_call_ledger_included": false,
+  "prompt_modified_after_results": false,
+  "proven_openrouter_reported_cost_usd": 2.30712,
+  "provider_only": [
+    "openai"
+  ],
+  "provider_redispatch_count": 0,
+  "repeatability": {
+    "all_preferences_stable": true,
+    "list_price_cost_usd": 0.24462,
+    "paid_calls": 6,
+    "proven_openrouter_reported_cost_usd": 0.24462,
+    "status": "COMPLETE",
+    "task_ids": [
+      "chemcrow-02",
+      "chemcrow-06",
+      "chemcrow-12"
+    ],
+    "tasks": [
+      {
+        "delta_range": [
+          -2.0,
+          -2.0
+        ],
+        "preference_stable": true,
+        "preferences": [
+          "b_wins",
+          "b_wins",
+          "b_wins"
+        ],
+        "student_a_grade_range": [
+          7.0,
+          7.0
+        ],
+        "student_b_grade_range": [
+          9.0,
+          9.0
+        ],
+        "task_id": "chemcrow-02"
+      },
+      {
+        "delta_range": [
+          -1.0,
+          -1.0
+        ],
+        "preference_stable": true,
+        "preferences": [
+          "b_wins",
+          "b_wins",
+          "b_wins"
+        ],
+        "student_a_grade_range": [
+          9.0,
+          9.0
+        ],
+        "student_b_grade_range": [
+          10.0,
+          10.0
+        ],
+        "task_id": "chemcrow-06"
+      },
+      {
+        "delta_range": [
+          0.0,
+          0.0
+        ],
+        "preference_stable": true,
+        "preferences": [
+          "tie",
+          "tie",
+          "tie"
+        ],
+        "student_a_grade_range": [
+          10.0,
+          10.0
+        ],
+        "student_b_grade_range": [
+          10.0,
+          10.0
+        ],
+        "task_id": "chemcrow-12"
+      }
+    ]
+  },
+  "schema_version": "chemcrow_paper_calibration_results_v1",
+  "selected_candidate_id": "PAPER_MINIMAL",
+  "selected_prompt_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
+  "selection": {
+    "ranking": [
+      "PAPER_MINIMAL",
+      "CURRENT_V1",
+      "PAPER_OUTPUT_FAITHFUL"
+    ],
+    "selected_candidate_id": "PAPER_MINIMAL",
+    "selection_keys": {
+      "CURRENT_V1": [
+        0.9285714285714286,
+        -0.7999999999999999,
+        -0.8857142857142858,
+        0.7836265053101787,
+        -0.0,
+        1.0
+      ],
+      "PAPER_MINIMAL": [
+        0.9285714285714286,
+        -0.75,
+        -0.7321428571428571,
+        0.7584265701732498,
+        -0.0,
+        3.0
+      ],
+      "PAPER_OUTPUT_FAITHFUL": [
+        0.8571428571428571,
+        -0.8214285714285714,
+        -0.7678571428571429,
+        0.6964057057899233,
+        -0.0,
+        2.0
+      ]
+    },
+    "selection_rule": [
+      "highest_pairwise_preference_agreement",
+      "lowest_delta_mae",
+      "lowest_absolute_score_mae",
+      "highest_spearman_correlation",
+      "lowest_parse_schema_failure_rate",
+      "simplest_closest_to_published_paper_semantics"
+    ]
+  },
+  "status": "COMPLETE",
+  "temperature": 0.1
+}

@@ -36,7 +36,7 @@ from .paper_evaluator import (
     PAPER_EVALUATOR_TEMPERATURE,
     DualStudentAssessment,
     estimate_chat_input_tokens,
-    render_compatible_prompt,
+    validate_assessment_text,
 )
 from .runtime import _message_content, _poll_rollout_until_terminal
 
@@ -373,18 +373,12 @@ def render_prompt_candidate(
 ) -> str:
     if candidate_id not in _CANDIDATE_TEMPLATES:
         raise ValueError(f"unknown calibration prompt candidate: {candidate_id}")
-    if candidate_id == "CURRENT_V1":
-        rendered = render_compatible_prompt(
-            task_prompt=task_prompt, student_a=student_a, student_b=student_b
-        )
-    else:
-        rendered = (
-            _CANDIDATE_TEMPLATES[candidate_id]
-            .replace("<<TASK>>", task_prompt)
-            .replace("<<STUDENT_A>>", student_a)
-            .replace("<<STUDENT_B>>", student_b)
-        )
-    return rendered
+    return (
+        _CANDIDATE_TEMPLATES[candidate_id]
+        .replace("<<TASK>>", task_prompt)
+        .replace("<<STUDENT_A>>", student_a)
+        .replace("<<STUDENT_B>>", student_b)
+    )
 
 
 def build_prompt_candidate_manifest(*, dataset_sha256: str) -> dict[str, Any]:
@@ -816,19 +810,39 @@ def run_calibration_plan(
                 raise ValueError("existing calibration result differs from frozen call")
             results.append(result)
             continue
+        recovered_after_local_seal_failure = False
         if claim_path.exists() or receipt_path.exists():
-            raise RuntimeError(
-                f"unsealed or ambiguous calibration call will not be retried: {call.call_id}"
+            if not claim_path.is_file() or not receipt_path.is_file():
+                raise RuntimeError(
+                    f"unsealed or ambiguous calibration call will not be retried: {call.call_id}"
+                )
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            if (
+                receipt.get("status") != "terminal_success"
+                or receipt.get("call_id") != call.call_id
+                or receipt.get("ledger_class") != "calibration"
+                or receipt.get("production_ledger_included") is not False
+            ):
+                raise RuntimeError(
+                    f"existing calibration receipt is not safely recoverable: {call.call_id}"
+                )
+            status = _fetch_calibration_status(rollout_base_url, call.call_id)
+            recovered_after_local_seal_failure = True
+        else:
+            status = _submit_calibration_once(
+                rollout_base_url,
+                build_calibration_task_request(call=call, runtime=runtime),
             )
-        status = _submit_calibration_once(
-            rollout_base_url,
-            build_calibration_task_request(call=call, runtime=runtime),
-        )
         assessment = _assessment_from_status(status)
         if not receipt_path.is_file():
             raise RuntimeError(f"calibration usage receipt is missing: {call.call_id}")
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-        if receipt.get("status") != "terminal_success" or receipt.get("call_id") != call.call_id:
+        if (
+            receipt.get("status") != "terminal_success"
+            or receipt.get("call_id") != call.call_id
+            or receipt.get("ledger_class") != "calibration"
+            or receipt.get("production_ledger_included") is not False
+        ):
             raise RuntimeError(f"calibration OpenRouter receipt is not successful: {call.call_id}")
         result = {
             "schema_version": "chemcrow_paper_calibration_call_result_v1",
@@ -863,6 +877,9 @@ def run_calibration_plan(
             "execution_route": CALIBRATION_CORE_ROUTE,
             "official_grades_in_model_request": False,
             "production_ledger_included": False,
+            "recovered_after_local_result_seal_failure": (
+                recovered_after_local_seal_failure
+            ),
         }
         _exclusive_json_write(result_path, result)
         results.append(result)
@@ -1083,6 +1100,11 @@ def analyze_calibration_results(
     rows = []
     total_reported_cost = 0.0
     total_list_cost = 0.0
+    local_result_seal_recovery_count = 0
+    candidate_costs = {
+        candidate_id: {"reported": 0.0, "list": 0.0}
+        for candidate_id in PROMPT_CANDIDATE_IDS
+    }
     for call in calls:
         path = initial_result_root / f"{call.call_id}.result.json"
         if not path.is_file():
@@ -1099,10 +1121,16 @@ def analyze_calibration_results(
         current_delta = current_a - current_b
         reported_cost = result["cost"].get("openrouter_reported_cost_usd")
         list_cost = result["cost"].get("list_price_cost_usd")
+        recovered_after_local_seal_failure = bool(
+            result.get("recovered_after_local_result_seal_failure", False)
+        )
+        local_result_seal_recovery_count += int(recovered_after_local_seal_failure)
         if isinstance(reported_cost, int | float):
             total_reported_cost += float(reported_cost)
+            candidate_costs[call.prompt_candidate_id]["reported"] += float(reported_cost)
         if isinstance(list_cost, int | float):
             total_list_cost += float(list_cost)
+            candidate_costs[call.prompt_candidate_id]["list"] += float(list_cost)
         rows.append(
             {
                 "call_id": call.call_id,
@@ -1130,6 +1158,9 @@ def analyze_calibration_results(
                 "usage": result["usage"],
                 "cost": result["cost"],
                 "result_sha256": file_sha256(path),
+                "recovered_after_local_result_seal_failure": (
+                    recovered_after_local_seal_failure
+                ),
             }
         )
         outputs_by_candidate[call.prompt_candidate_id].append(
@@ -1145,12 +1176,18 @@ def analyze_calibration_results(
                 ),
             )
         )
-    metrics = {
-        candidate_id: compute_candidate_metrics(
+    metrics = {}
+    for candidate_id in PROMPT_CANDIDATE_IDS:
+        metric = compute_candidate_metrics(
             dataset=dataset, outputs=outputs_by_candidate[candidate_id]
         )
-        for candidate_id in PROMPT_CANDIDATE_IDS
-    }
+        metric["proven_openrouter_reported_cost_usd"] = round(
+            candidate_costs[candidate_id]["reported"], 8
+        )
+        metric["list_price_cost_usd"] = round(
+            candidate_costs[candidate_id]["list"], 8
+        )
+        metrics[candidate_id] = metric
     bootstrap = {
         candidate_id: bootstrap_confidence_intervals(
             dataset=dataset, outputs=outputs_by_candidate[candidate_id]
@@ -1201,6 +1238,8 @@ def analyze_calibration_results(
         "repeatability": repeatability,
         "per_call_results": rows,
         "paid_calls": len(rows) + repeatability["paid_calls"],
+        "local_result_seal_recovery_count": local_result_seal_recovery_count,
+        "provider_redispatch_count": 0,
         "proven_openrouter_reported_cost_usd": round(total_reported_cost, 8),
         "list_price_cost_usd": round(total_list_cost, 8),
         "calibration_budget_usd": CALIBRATION_MAX_USD,
@@ -1573,19 +1612,35 @@ def _submit_calibration_once(base_url: str, payload: dict[str, Any]) -> dict[str
     return status
 
 
+def _fetch_calibration_status(base_url: str, task_id: str) -> dict[str, Any]:
+    with httpx.Client(timeout=30.0, trust_env=False) as client:
+        response = client.get(base_url.rstrip("/") + f"/rollout/task/{task_id}")
+        response.raise_for_status()
+        status = response.json()
+    if not isinstance(status, dict) or status.get("task_id") != task_id:
+        raise RuntimeError("calibration Core recovery status differs from claimed call")
+    return status
+
+
 def _assessment_from_status(status: dict[str, Any]) -> DualStudentAssessment:
-    if status.get("status") != "COMPLETED":
+    results = status.get("results")
+    if not isinstance(results, list) or len(results) != 1 or not isinstance(results[0], dict):
+        raise RuntimeError("calibration Core task did not return exactly one result")
+    result = results[0]
+    if str(result.get("status", "")).upper() != "COMPLETED":
         raise RuntimeError("calibration Core call did not complete")
-    result = status.get("result")
-    if not isinstance(result, dict):
-        raise TypeError("calibration Core result is missing")
-    samples = result.get("samples")
-    if not isinstance(samples, list) or len(samples) != 1 or not isinstance(samples[0], dict):
-        raise RuntimeError("calibration Core sample inventory differs")
-    content = _message_content(samples[0].get("response_messages"))
-    if not content:
-        raise RuntimeError("calibration response content is missing")
-    return DualStudentAssessment.model_validate_json(content)
+    trajectory = result.get("trajectory")
+    traces = trajectory.get("traces") if isinstance(trajectory, dict) else None
+    if not isinstance(traces, list) or len(traces) != 1 or not isinstance(traces[0], dict):
+        raise RuntimeError("calibration Core transcript trajectory is invalid")
+    answers = [
+        _message_content(message)
+        for message in traces[0].get("response_messages", [])
+        if isinstance(message, dict) and message.get("role") == "assistant"
+    ]
+    if len(answers) != 1:
+        raise RuntimeError("calibration Core transcript does not contain one answer")
+    return validate_assessment_text(answers[0])
 
 
 def _exclusive_json_write(path: Path, payload: dict[str, Any]) -> None:

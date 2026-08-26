@@ -100,6 +100,12 @@ paper-control/project-added status. The blueprint is READY. The 28 baseline/evol
 materialized only from the future sealed full-v4 output set; that is an expected prerequisite for
 production execution, not a readiness defect. The production ledger is empty.
 
+Historical judge calibration subsequently selected `PAPER_MINIMAL` and froze
+`CHEMCROW_EVALUATORGPT_PROMPT_CALIBRATED_V2` with template SHA256
+`aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767`. The 14 historical-control
+hashes were regenerated under this template; the 28 full-v4-dependent hashes remain correctly
+deferred. Exact prompt recovery remains false.
+
 ## Gate summary
 
 | Gate | Status | Evidence |

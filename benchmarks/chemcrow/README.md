@@ -41,8 +41,11 @@ uv run openevo-chemcrow preflight \
 The optional paper evaluator is a final-evaluation-only protocol. It reconstructs the publicly
 recoverable ChemCrow EvaluatorGPT semantics (two students, one 0--10 grade per student, task
 completion plus overall chemistry thought-process correctness, strengths, weaknesses,
-justification, and feedback). The original evaluator prompt was not published, so the protocol
-is labeled `CHEMCROW_EVALUATORGPT_PROMPT_COMPATIBLE_V1`, never a verbatim reproduction.
+justification, and feedback). The authoritative exact prompt was not recovered. Three
+paper-grounded variants were frozen and evaluated against all 14 released historical notebook
+judgments; `PAPER_MINIMAL` was selected under the preregistered rule. The production protocol is
+therefore labeled `CHEMCROW_EVALUATORGPT_PROMPT_CALIBRATED_V2`, meaning historically calibrated
+and compatible, never official or verbatim.
 
 Its route is independent from Candidate evolution:
 

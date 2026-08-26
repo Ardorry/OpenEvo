@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -13,6 +14,7 @@ from openevo_chemcrow.paper_calibration import (
     CalibrationCall,
     CandidateOutput,
     SelectedPrompt,
+    _assessment_from_status,
     assert_calibration_ledger_separation,
     bootstrap_confidence_intervals,
     build_calibration_plan,
@@ -28,7 +30,6 @@ from openevo_chemcrow.paper_calibration import (
 )
 from openevo_chemcrow.paper_evaluator import (
     PAPER_EVALUATOR_AUTHORIZATION,
-    render_compatible_prompt,
 )
 
 
@@ -110,6 +111,35 @@ Grade Justification: It does not finish the task.
     assert parse_historical_assessment("") is None
 
 
+def test_calibration_parses_rollout_terminal_result_envelope():
+    assessment = _assessment(8, 7)
+    status = {
+        "task_id": "paper-chemcrow-cal-v1-test",
+        "status": "completed",
+        "results": [
+            {
+                "status": "COMPLETED",
+                "trajectory": {
+                    "traces": [
+                        {
+                            "response_messages": [
+                                {
+                                    "role": "assistant",
+                                    "content": json.dumps(assessment),
+                                }
+                            ]
+                        }
+                    ]
+                },
+            }
+        ],
+    }
+
+    parsed = _assessment_from_status(status)
+    assert parsed.student_a.grade == 8
+    assert parsed.student_b.grade == 7
+
+
 def test_prompt_candidates_are_frozen_before_results(runs_root):
     dataset = extract_historical_calibration_dataset(runs_root=runs_root)
     manifest = build_prompt_candidate_manifest(dataset_sha256=canonical_sha256(dataset))
@@ -141,11 +171,8 @@ def test_prompt_candidates_are_frozen_before_results(runs_root):
         ),
     }
     current = manifest["candidates"][0]
-    rendered = current["rendered_example"]
-    assert rendered == render_compatible_prompt(
-        task_prompt=manifest["example_inputs"]["task"],
-        student_a=manifest["example_inputs"]["student_a"],
-        student_b=manifest["example_inputs"]["student_b"],
+    assert current["rendered_example_sha256"] == canonical_sha256(
+        current["rendered_example"]
     )
 
     mutated = json.loads(json.dumps(manifest))
@@ -282,3 +309,31 @@ def test_selected_prompt_hash_binding():
             prompt_sha256="0" * 64,
             exact_prompt_recovered=False,
         )
+
+
+def test_production_blueprint_binds_selected_prompt_and_defers_only_full_v4_outputs():
+    report = (
+        Path(__file__).resolve().parents[1]
+        / "reports"
+        / "PAPER_COMPARISON_MATRIX.json"
+    )
+    matrix = json.loads(report.read_text(encoding="utf-8"))
+
+    assert matrix["protocol"] == "CHEMCROW_EVALUATORGPT_PROMPT_CALIBRATED_V2"
+    assert matrix["prompt_candidate_id"] == "PAPER_MINIMAL"
+    assert matrix["prompt_candidate_sha256"] == (
+        "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767"
+    )
+    assert matrix["frozen_prompt_hash_count"] == 14
+    assert matrix["pending_prompt_hash_count"] == 28
+    assert matrix["production_ledger_clean"] is True
+    assert all(
+        call["prompt_sha256"]
+        for call in matrix["calls"]
+        if call["comparison"] == "historical_control"
+    )
+    assert {
+        call["prompt_template_sha256"]
+        for call in matrix["calls"]
+        if call["comparison"] != "historical_control"
+    } == {matrix["prompt_candidate_sha256"]}

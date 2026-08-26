@@ -16,8 +16,11 @@ from openevo_chemcrow.models import TaskItem, Trajectory
 from openevo_chemcrow.paper_core import PAPER_CORE_ROUTE, build_paper_task_request
 from openevo_chemcrow.paper_evaluator import (
     FROZEN_PAPER_TASK_IDS,
+    PAPER_EVALUATOR_CALIBRATION_RESULTS_SHA256,
     PAPER_EVALUATOR_CALL_COUNT,
     PAPER_EVALUATOR_MODEL,
+    PAPER_EVALUATOR_PROMPT_CANDIDATE,
+    PAPER_EVALUATOR_PROMPT_SHA256,
     PAPER_EVALUATOR_PROTOCOL,
     PaperEvaluationCall,
     assert_sealed_run_ready,
@@ -25,6 +28,7 @@ from openevo_chemcrow.paper_evaluator import (
     extract_historical_answers,
     extract_historical_evaluator_grades,
     paper_cost_ceiling,
+    render_compatible_prompt,
     validate_assessment_text,
 )
 from openevo_chemcrow.paper_harness import PaperEvaluatorHarness
@@ -88,6 +92,10 @@ def test_plan_has_exactly_three_fixed_comparisons_per_task(runs_root):
     )
 
     assert plan["protocol"] == PAPER_EVALUATOR_PROTOCOL
+    assert plan["prompt_candidate_id"] == PAPER_EVALUATOR_PROMPT_CANDIDATE
+    assert plan["prompt_candidate_sha256"] == PAPER_EVALUATOR_PROMPT_SHA256
+    assert plan["historically_calibrated_compatible_prompt"] is True
+    assert plan["historical_agreement"] == "HIGH"
     assert plan["call_count"] == PAPER_EVALUATOR_CALL_COUNT == 42
     assert plan["reflector_access"] is False
     assert plan["sealed_output_only"] is True
@@ -103,6 +111,24 @@ def test_plan_has_exactly_three_fixed_comparisons_per_task(runs_root):
     assert all(call["prompt_sha256"] for call in plan["calls"])
     assert all(call["source_output_id"] for call in plan["calls"])
     assert all(call["source_output_sha256"] for call in plan["calls"])
+
+
+def test_production_prompt_is_bound_to_selected_calibration_candidate():
+    template = render_compatible_prompt(
+        task_prompt="<<TASK>>",
+        student_a="<<STUDENT_A>>",
+        student_b="<<STUDENT_B>>",
+    )
+
+    assert PAPER_EVALUATOR_PROTOCOL == "CHEMCROW_EVALUATORGPT_PROMPT_CALIBRATED_V2"
+    assert PAPER_EVALUATOR_PROMPT_CANDIDATE == "PAPER_MINIMAL"
+    assert canonical_sha256(template) == PAPER_EVALUATOR_PROMPT_SHA256
+    calibration_results = (
+        Path(__file__).resolve().parents[1]
+        / "reports"
+        / "PAPER_EVALUATOR_CALIBRATION_RESULTS.json"
+    )
+    assert file_sha256(calibration_results) == PAPER_EVALUATOR_CALIBRATION_RESULTS_SHA256
 
 
 def test_paper_plan_rejects_legacy_single_artifact_pairs(runs_root):

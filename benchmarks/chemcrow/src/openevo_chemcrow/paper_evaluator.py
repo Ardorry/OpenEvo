@@ -20,7 +20,14 @@ from .hashing import canonical_sha256, file_sha256
 from .models import TaskItem
 from .three_artifact_models import ThreeArtifactPairResult
 
-PAPER_EVALUATOR_PROTOCOL = "CHEMCROW_EVALUATORGPT_PROMPT_COMPATIBLE_V1"
+PAPER_EVALUATOR_PROTOCOL = "CHEMCROW_EVALUATORGPT_PROMPT_CALIBRATED_V2"
+PAPER_EVALUATOR_PROMPT_CANDIDATE = "PAPER_MINIMAL"
+PAPER_EVALUATOR_PROMPT_SHA256 = (
+    "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767"
+)
+PAPER_EVALUATOR_CALIBRATION_RESULTS_SHA256 = (
+    "a901f03a5e5a58c7d64b7e5dea36c5f6c0d1634f0432f024f69d1394240983e2"
+)
 PAPER_EVALUATOR_MODEL = "openai/gpt-4"
 PAPER_EVALUATOR_TEMPERATURE = 0.1
 PAPER_EVALUATOR_PROVIDER = "openai"
@@ -351,8 +358,13 @@ def build_paper_evaluation_plan(
     return {
         "schema_version": "chemcrow_paper_evaluator_plan_v1",
         "protocol": PAPER_EVALUATOR_PROTOCOL,
+        "prompt_candidate_id": PAPER_EVALUATOR_PROMPT_CANDIDATE,
+        "prompt_candidate_sha256": PAPER_EVALUATOR_PROMPT_SHA256,
+        "historically_calibrated_compatible_prompt": True,
+        "historical_agreement": "HIGH",
+        "calibration_results_sha256": PAPER_EVALUATOR_CALIBRATION_RESULTS_SHA256,
         "verbatim_historical_prompt_reproduction": False,
-        "historical_prompt_availability": "not_published_in_public_source",
+        "historical_prompt_availability": "not_recovered_from_authoritative_public_source",
         "model": PAPER_EVALUATOR_MODEL,
         "temperature": PAPER_EVALUATOR_TEMPERATURE,
         "provider_only": [PAPER_EVALUATOR_PROVIDER],
@@ -371,10 +383,10 @@ def build_paper_evaluation_plan(
 
 
 def render_compatible_prompt(*, task_prompt: str, student_a: str, student_b: str) -> str:
-    """Render the recoverable ChemCrow evaluator semantics, not a claimed verbatim prompt."""
-    return f"""You are an expert chemistry teacher evaluating two students' answers.
+    """Render the historically calibrated compatible prompt, never an official-prompt claim."""
+    return f"""You are a teacher evaluating two students' answers to the same chemistry task.
 
-This is a compatibility reconstruction of ChemCrow EvaluatorGPT. Grade each student from 0 to 10, including decimals when useful. Base the grade only on: (1) whether the given task is addressed, and (2) whether the overall chemistry thought process is correct. Identify concise strengths and weaknesses, justify the grade, and give actionable feedback. Apply the same standard to both students. Do not infer a hidden reference answer and do not reward verbosity by itself.
+For each student, give a grade from 0 to 10 based only on whether the task is addressed and whether the overall thought process is correct. Report strengths, weaknesses, a grade justification, and improvement feedback. Apply the same standard to both students.
 
 Return one JSON object only, with exactly this structure:
 {{"student_a":{{"grade":0,"strengths":["..."],"weaknesses":["..."],"justification":"...","feedback":["..."]}},"student_b":{{"grade":0,"strengths":["..."],"weaknesses":["..."],"justification":"...","feedback":["..."]}}}}

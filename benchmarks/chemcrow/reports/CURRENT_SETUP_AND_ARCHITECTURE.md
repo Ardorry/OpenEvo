@@ -169,9 +169,9 @@ Only after all baseline/evolved pairs are sealed, the paper layer creates 42 fix
 3. current OpenEvo evolved vs the same historical GPT-4.
 
 The frozen configuration is `openai/gpt-4`, temperature `0.1`, one 0--10 overall grade per
-student, plus strengths, weaknesses, justification, and actionable feedback. The paper's public
-semantics are recovered, but the original Evaluator prompt is absent from public source, so the
-protocol is named `CHEMCROW_EVALUATORGPT_PROMPT_COMPATIBLE_V1`, not a verbatim reproduction.
+student, plus strengths, weaknesses, justification, and actionable feedback. The authoritative
+exact Evaluator prompt was not recovered. The historically selected `PAPER_MINIMAL` template is
+named `CHEMCROW_EVALUATORGPT_PROMPT_CALIBRATED_V2`, not an official or verbatim reproduction.
 
 The dedicated route is:
 

@@ -124,6 +124,15 @@ The blueprint is READY and the production ledger is empty. Fourteen historical-c
 frozen. The 28 G1/G2 hashes are expected deferred materialization from future authoritative sealed
 outputs and are not a readiness failure.
 
+The post-readiness historical calibration completed 48/48 distinct Core-managed GPT-4 calls
+(42 primary plus 6 preregistered repeatability calls) in the separate
+`paper-evaluator-calibration-v1` ledger. `PAPER_MINIMAL` was selected by the frozen rule and is now
+bound as `CHEMCROW_EVALUATORGPT_PROMPT_CALIBRATED_V2`, template SHA256
+`aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767`. Agreement with the released
+historical notebook evaluations is HIGH under the preregistered project diagnostic thresholds.
+This is a historically calibrated compatible prompt, not the official or verbatim historical
+prompt; prompt uncertainty and modern model/API drift remain.
+
 Scoring layers remain separate: OpenEvo internal three-dimensional 0-4 diagnostics, post-hoc GPT-4
 overall 0-10 grades, and four-expert human three-dimensional 0-10 review.
 
@@ -131,7 +140,7 @@ overall 0-10 grades, and four-expert human three-dimensional 0-10 review.
 
 ```text
 Core Gateway/runtime integration tests: 300 passed
-full ChemCrow pytest: 89 passed, 2 unchanged dependency warnings
+full ChemCrow pytest: 102 passed, 2 unchanged dependency warnings
 ChemCrow Ruff: PASS
 changed Core Ruff: PASS
 git diff --check: PASS
@@ -142,7 +151,8 @@ git diff --check: PASS
 - This is a public-source reduced-profile benchmark, not a paper-identical tool environment.
 - Local RXN and modern RDKit differ from paper-era services; price, literature, and configured web
   search are unavailable.
-- The evaluator prompt label remains `CHEMCROW_EVALUATORGPT_PROMPT_COMPATIBLE_V1`.
+- The evaluator uses historically calibrated compatible prompt V2; exact prompt recovery remains
+  false, so absolute cross-era scores require the historical-control drift analysis.
 - Four independent expert chemists must complete 42 blinded comparisons each (168 forms) for the
   formal human layer. A smaller panel must be labeled exploratory.
 
