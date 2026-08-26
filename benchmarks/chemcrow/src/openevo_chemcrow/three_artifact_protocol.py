@@ -213,9 +213,6 @@ class ThreeArtifactTaskLocalProtocolRunner:
                 "task": {
                     "task_id": task.task_id,
                     "prompt": task.prompt,
-                    "category": task.broad_category,
-                    "allowed_tool_metadata": task.allowed_tool_metadata,
-                    "safety_metadata": task.safety_metadata,
                     "sanitized_item_sha256": task.sanitized_item_sha256,
                 },
                 "baseline": baseline.model_dump(mode="json"),

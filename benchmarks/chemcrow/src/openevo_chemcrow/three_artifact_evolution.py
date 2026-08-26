@@ -165,9 +165,6 @@ class ThreeIsolatedEvolutionEngine:
             "task": {
                 "task_id": task.task_id,
                 "prompt": task.prompt,
-                "category": task.broad_category,
-                "allowed_tool_metadata": task.allowed_tool_metadata,
-                "safety_metadata": task.safety_metadata,
                 "sanitized_item_sha256": task.sanitized_item_sha256,
             },
             "baseline": baseline.model_dump(mode="json"),
@@ -175,7 +172,7 @@ class ThreeIsolatedEvolutionEngine:
         }
         evidence_hash = canonical_sha256(evidence)
         prompts = {
-            kind: self._reflector_prompt(kind=kind, task=task, evidence=evidence)
+            kind: self._reflector_prompt(kind=kind, evidence=evidence)
             for kind in THREE_ARTIFACT_ORDER
         }
         prompt_hashes = {
@@ -450,21 +447,14 @@ class ThreeIsolatedEvolutionEngine:
         self,
         *,
         kind: ArtifactKind,
-        task: TaskItem,
         evidence: dict[str, Any],
     ) -> str:
-        safety_clause = (
-            " Preserve the intended safety refusal/caution; never optimize toward unsafe operational assistance."
-            if task.safety_metadata.get("safety_behavior_must_be_preserved") is True
-            else ""
-        )
         evidence_prompt = (
             "You are one of three mutually isolated OpenEvo task-local Reflectors. Your prompt was "
             "frozen before any sibling invocation. You cannot see and must not infer sibling outputs. "
             "Use only the EVIDENCE JSON below. Do not browse, call tools, introduce historical "
             "ChemCrow/GPT-4 answers, human scores, paper EvaluatorGPT grades, hidden ground truth, "
-            "future G2 output, or later tasks. This is software evaluation; never direct physical "
-            f"execution or procurement.{safety_clause}\n\n"
+            "future G2 output, or later tasks.\n\n"
             "EVIDENCE JSON:\n"
             f"{json.dumps(evidence, ensure_ascii=True, sort_keys=True)}"
         )

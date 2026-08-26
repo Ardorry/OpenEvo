@@ -1,0 +1,31 @@
+{
+  "schema_version": "chemcrow_core_native_preflight_selection_v1",
+  "recorded_before_execution": true,
+  "recorded_at": "2026-08-27T04:22:04+08:00",
+  "experiment_id": "chemcrow-task-local-core-native-preflight-02-05-13-v1",
+  "task_ids_in_order": [
+    "chemcrow-02",
+    "chemcrow-05",
+    "chemcrow-13"
+  ],
+  "source_authoritative_config": "full.v5-core-native-three-pipeline.yaml",
+  "allowed_config_differences": [
+    "experiment_id",
+    "task_ids",
+    "run_root",
+    "cache_root",
+    "ledger_root"
+  ],
+  "artifact_protocol": "three_isolated_core_native_v2",
+  "artifact_types": [
+    "text_memory",
+    "skill_bundle",
+    "agent_system"
+  ],
+  "candidate_and_reflector_model": "gpt-5.5",
+  "mock_or_fixture_allowed": false,
+  "failed_pair_reuse_allowed": false,
+  "full_v5_pair_reuse_allowed": false,
+  "selection_reason": "tasks with clearest historical v4 over-correction",
+  "authorization_scope": "user-authorized real three-task Core-native preflight"
+}

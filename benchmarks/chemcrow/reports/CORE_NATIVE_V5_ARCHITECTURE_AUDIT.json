@@ -1,0 +1,60 @@
+{
+  "schema_version": "chemcrow_core_native_v5_architecture_audit_v1",
+  "status": "PASS",
+  "audited_at": "2026-08-27T04:22:04+08:00",
+  "branch": "chemcrow-task-local-evolution-v1",
+  "source_head_before_audit_repairs": "9930223028e3690c4340f067a85939b858d4791e",
+  "artifact_protocol": "three_isolated_core_native_v2",
+  "counts": {
+    "CHEMCROW_CUSTOM_ROLE_PROMPTS": 0,
+    "CHEMCROW_CUSTOM_ARTIFACT_JSON_WRAPPERS": 0,
+    "CHEMCROW_ROLE_KEYWORD_VALIDATION": 0,
+    "CHEMCROW_ROLE_MIN_LENGTH_VALIDATION": 0
+  },
+  "adapter_evidence_fields": {
+    "task": [
+      "prompt",
+      "sanitized_item_sha256",
+      "task_id"
+    ],
+    "top_level": [
+      "baseline",
+      "feedback",
+      "task"
+    ]
+  },
+  "adapter_semantic_safety_or_procurement_clause_present": false,
+  "adapter_sha256": "335a0ec51f98576d8f761a05b5c0fda8f619d2ea37c7d799e22cc0093d0a56d4",
+  "core_methods_sha256": "53d1958d481974ba57fb033009e0dd21ca10a002528cba7ad31256538c67119b",
+  "native_template_hashes": {
+    "agent_system_reflector": "b8a6505491057131d53c981c51bbd03a06adb8478912406ab207314b8c7797d2",
+    "skill_bundle_reflector": "b2af46079cfd2a44b033344e9b110d7aa302c63afe03cc5d83814f5c126cad1d",
+    "text_memory_reflector": "01b0ddc5fd34625e56ccc2160fd75830c087b527db40ce9495f77714dd3278ef"
+  },
+  "v5_config_sha256": "cdd494cf7b20a0e9cf82ead18a0d6c8348f59bef169c547fbc970093d27a4c9d",
+  "preflight_config_sha256": "60bc0c744c90d5e4d64e2b5ded240f9d1c3b7e1707458b41999374e3293d75be",
+  "zero_model_preflight_receipt_sha256": "cd3689fb4723548fa31869577da131dde70692cd0aaf2b861ae551e0c1a114e5",
+  "zero_model_preflight_status": "READY",
+  "historical_compatibility_only_fields": [
+    "minimum_tokens_for_responsibility_check",
+    "responsibility_policy_version",
+    "responsibility_violations"
+  ],
+  "historical_full_v4": {
+    "artifact_receipt_canonical_roundtrip_count": 14,
+    "file_count": 246,
+    "pair_count": 14,
+    "protocol": "chemcrow_three_isolated_artifacts_v1",
+    "relative_path_tree_sha256": "16c323b1b2e9027cfafcbe03fb975d3442de28f10c7e89629075f3393847e5ae",
+    "sha256sum_stream_before_and_after": "12d483a81f50447263c21a4a826c68f49fcb6ccee1ca0a7f61ca8baafe23b444",
+    "mutated": false
+  },
+  "engineering_checks": {
+    "focused_three_artifact_tests": "20 passed",
+    "full_chemcrow_tests": "113 passed, 2 unchanged warnings",
+    "relevant_core_worker_tests": "84 passed",
+    "ruff": "PASS",
+    "git_diff_check": "PASS"
+  },
+  "paid_calls": 0
+}

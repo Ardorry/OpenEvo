@@ -115,9 +115,6 @@ class FakeThreeEvolution:
                 "task": {
                     "task_id": task.task_id,
                     "prompt": task.prompt,
-                    "category": task.broad_category,
-                    "allowed_tool_metadata": task.allowed_tool_metadata,
-                    "safety_metadata": task.safety_metadata,
                     "sanitized_item_sha256": task.sanitized_item_sha256,
                 },
                 "baseline": baseline.model_dump(mode="json"),
@@ -464,6 +461,9 @@ def test_native_three_reflectors_are_independent_and_sibling_blind(tmp_path, tas
         assert "paper EvaluatorGPT grades" in port.prompts[0]
         assert "SYSTEM CONTRACT" not in port.prompts[0]
         assert "Explicitly label" not in port.prompts[0]
+        assert "direct physical execution" not in port.prompts[0]
+        assert "safety_metadata" not in port.prompts[0]
+        assert "allowed_tool_metadata" not in port.prompts[0]
     assert "Return only the Markdown memory.md file" in ports[
         ArtifactKind.TEXT_MEMORY
     ].prompts[0]
