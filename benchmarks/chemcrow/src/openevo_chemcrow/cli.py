@@ -51,6 +51,10 @@ from .paper_human_review import (
 )
 from .pre_candidate_recovery import reconcile_pre_candidate_no_effect_failure
 from .protocol import TaskLocalProtocolRunner
+from .reflector_recovery import (
+    load_reflector_boundary_checkpoint,
+    reconcile_reflector_no_effect_failure,
+)
 from .replacement_ledger import VerifiedReplacementPhaseLedger
 from .runtime import (
     CORE_MANAGED_CODEX_ROUTE,
@@ -769,6 +773,7 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
             continue
         claim_dir = ledger_root / pair_id
         allow_verified_baseline_replacement = False
+        allow_verified_reflector_replacements: frozenset[str] = frozenset()
         recovered_baseline_checkpoint = None
         if resume and claim_dir.is_dir() and any(claim_dir.glob("*.json")):
             ledger = (
@@ -784,8 +789,21 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
                     )
                 allow_verified_baseline_replacement = True
             elif three_artifact_protocol:
-                recovered_baseline_checkpoint = (
-                    load_completed_baseline_evaluator_checkpoint(
+                reflector_checkpoint = load_reflector_boundary_checkpoint(
+                    run_root=run_root,
+                    ledger_root=ledger_root,
+                    pair_id=pair_id,
+                    task=item,
+                    expected_candidate_config_sha256=candidate.config_sha256,
+                    expected_evaluator_id=runner.evolution_evaluator.evaluator_id,
+                )
+                if reflector_checkpoint is not None:
+                    baseline, evaluation, allow_verified_reflector_replacements = (
+                        reflector_checkpoint
+                    )
+                    recovered_baseline_checkpoint = (baseline, evaluation)
+                else:
+                    recovered_baseline_checkpoint = load_completed_baseline_evaluator_checkpoint(
                         run_root=run_root,
                         ledger_root=ledger_root,
                         pair_id=pair_id,
@@ -793,7 +811,6 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
                         expected_candidate_config_sha256=candidate.config_sha256,
                         expected_evaluator_id=runner.evolution_evaluator.evaluator_id,
                     )
-                )
                 if recovered_baseline_checkpoint is None:
                     ledger.audit_resume()
                     raise AmbiguousPhaseClaimError(
@@ -821,6 +838,9 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
                             allow_verified_baseline_replacement
                         ),
                         recovered_baseline_checkpoint=recovered_baseline_checkpoint,
+                        allow_verified_reflector_replacements=(
+                            allow_verified_reflector_replacements
+                        ),
                     )
                 )
             else:
@@ -928,6 +948,54 @@ def command_recover_completed_baseline_evaluator(args: argparse.Namespace) -> in
         json.dumps(
             {
                 "status": "VERIFIED_COMPLETED_CALLS_NO_REDISPATCH",
+                "checkpoint_path": str(checkpoint_path),
+                "recovery_path": str(recovery_path),
+                "model_calls": 0,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def command_recover_reflector_no_effect(args: argparse.Namespace) -> int:
+    if not args.no_model_calls:
+        raise PermissionError("Reflector recovery reconciliation requires --no-model-calls")
+    config_path = args.config.resolve()
+    config = _resolve_env(_load_yaml(config_path))
+    if config.get("artifact_protocol") != _CORE_NATIVE_THREE_ARTIFACT_PROTOCOL:
+        raise ValueError("Reflector recovery requires the Core-native three-pipeline protocol")
+    manifest_path = _path(config_path, str(config["task_manifest"]))
+    tasks = {item.task_id: item for item in _read_tasks(manifest_path)}
+    if args.task_id not in tasks:
+        raise ValueError("Reflector recovery task ID is outside the authoritative manifest")
+    evaluator_port = OpenEvoRolloutPort(
+        base_url=str(config["rollout_base_url"]),
+        candidate=config["evolution_evaluator"],
+    )
+    evaluator = CompatibleOpenEvoEvolutionEvaluator(evaluator_port)
+    store_config = config["evolution_store"]
+    run_root = _path(config_path, str(config["run_root"]))
+    checkpoint_path, recovery_path, receipt = reconcile_reflector_no_effect_failure(
+        config_path=config_path,
+        run_root=run_root,
+        ledger_root=_path(config_path, str(config["ledger_root"])),
+        experiment_id=str(config["experiment_id"]),
+        task=tasks[args.task_id],
+        expected_candidate_config_sha256=s0_config_hash(config["candidate"]),
+        expected_evaluator_id=evaluator.evaluator_id,
+        backend_url=str(store_config["backend_url"]),
+        evolution_db_path=_path(config_path, str(store_config["db_path"])),
+        failed_phase=args.phase,
+        failed_job_id=args.job_id,
+        core_completion_path=args.core_completion.resolve(),
+        evidence_event_path=args.evidence_event.resolve(),
+    )
+    print(
+        json.dumps(
+            {
+                "status": receipt["status"],
+                "pair_id": receipt["pair_id"],
                 "checkpoint_path": str(checkpoint_path),
                 "recovery_path": str(recovery_path),
                 "model_calls": 0,
@@ -1384,6 +1452,15 @@ def build_parser() -> argparse.ArgumentParser:
     checkpoint_recovery.set_defaults(
         function=command_recover_completed_baseline_evaluator
     )
+    reflector_recovery = commands.add_parser("recover-reflector-no-effect")
+    reflector_recovery.add_argument("--config", type=Path, required=True)
+    reflector_recovery.add_argument("--task-id", required=True)
+    reflector_recovery.add_argument("--phase", required=True)
+    reflector_recovery.add_argument("--job-id", required=True)
+    reflector_recovery.add_argument("--core-completion", type=Path, required=True)
+    reflector_recovery.add_argument("--evidence-event", type=Path, required=True)
+    reflector_recovery.add_argument("--no-model-calls", action="store_true", required=True)
+    reflector_recovery.set_defaults(function=command_recover_reflector_no_effect)
     for name, resume in (("run", False), ("resume", True)):
         command = commands.add_parser(name)
         command.add_argument("--config", type=Path, required=True)

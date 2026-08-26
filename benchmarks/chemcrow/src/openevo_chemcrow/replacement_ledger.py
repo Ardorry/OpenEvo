@@ -77,12 +77,18 @@ class VerifiedReplacementPhaseLedger(PhaseLedger):
         if not isinstance(predicates, dict) or not predicates or set(predicates.values()) != {True}:
             raise ValueError("no-effect recovery predicates are incomplete")
         receipt_sha256 = canonical_sha256(receipt)
+        schema_version = receipt.get("schema_version")
+        outcome = (
+            "terminal_pre_candidate_no_effect"
+            if schema_version == "chemcrow_pre_candidate_no_effect_recovery_v1"
+            else "terminal_reflector_no_effect"
+        )
         payload["schema_version"] = "chemcrow_phase_claim_v2"
         payload["status"] = "replacement_ready"
         payload["failed_attempts"] = [
             {
                 "attempt_ordinal": 1,
-                "outcome": "terminal_pre_candidate_no_effect",
+                "outcome": outcome,
                 "receipt": receipt,
                 "receipt_sha256": receipt_sha256,
             }
@@ -127,19 +133,35 @@ def verified_no_effect_attempt_count(
         if not isinstance(attempt, dict):
             raise TypeError("failed-attempt entry is invalid")
         receipt = attempt.get("receipt")
+        schema_version = receipt.get("schema_version") if isinstance(receipt, dict) else None
+        if schema_version == "chemcrow_pre_candidate_no_effect_recovery_v1":
+            expected_outcome = "terminal_pre_candidate_no_effect"
+            model_call_absent = receipt.get("candidate_model_call_proven_absent") is True
+            phase_valid = phase == "baseline_candidate"
+        elif schema_version == "chemcrow_reflector_no_effect_recovery_v1":
+            expected_outcome = "terminal_reflector_no_effect"
+            model_call_absent = receipt.get("reflector_model_call_proven_absent") is True
+            phase_valid = phase in {
+                "reflector_memory",
+                "reflector_skill_bundle",
+                "reflector_agent_system",
+            }
+        else:
+            expected_outcome = None
+            model_call_absent = False
+            phase_valid = False
         if (
             attempt.get("attempt_ordinal") != ordinal
-            or attempt.get("outcome") != "terminal_pre_candidate_no_effect"
+            or attempt.get("outcome") != expected_outcome
             or not isinstance(receipt, dict)
             or attempt.get("receipt_sha256") != canonical_sha256(receipt)
             or receipt.get("attempt_ordinal") != ordinal
-            or receipt.get("schema_version")
-            != "chemcrow_pre_candidate_no_effect_recovery_v1"
             or receipt.get("status") != "VERIFIED_NO_CANDIDATE_EFFECT_REPLACEMENT_READY"
             or receipt.get("pair_id") != pair_id
             or receipt.get("phase") != phase
             or receipt.get("authority_sha256") != payload.get("authority_sha256")
-            or receipt.get("candidate_model_call_proven_absent") is not True
+            or not model_call_absent
+            or not phase_valid
             or receipt.get("duplicate_scientific_call") is not False
             or receipt.get("recorded_before_replacement_dispatch") is not True
         ):

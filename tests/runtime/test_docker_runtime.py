@@ -262,6 +262,46 @@ def _credential_stat_output(authority: ManagedCredentialMount) -> str:
     )
 
 
+@pytest.mark.asyncio
+async def test_exec_carries_large_command_through_private_session_script(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    monkeypatch.setattr(docker_module.DockerEngineAuthority, "open", lambda: object())
+    runtime = DockerRuntime(
+        RuntimeSpec(image="runtime:latest", container_user="host"),
+        "large-exec-command",
+        session_dir,
+    )
+    runtime._container_id = "a" * 64
+    runtime._ownership_state = "verified"
+    marker = "reflector-evidence-" + ("x" * 70_000)
+    observed: dict[str, object] = {}
+
+    async def run_command(*args: str, **kwargs: object) -> tuple[int, str, str]:
+        observed["args"] = args
+        remote_script = Path(args[-1])
+        assert remote_script.parent == Path(runtime.runtime_session_dir)
+        local_script = session_dir / remote_script.name
+        observed["payload"] = local_script.read_text(encoding="utf-8")
+        return 0, "ok", ""
+
+    monkeypatch.setattr(runtime, "_run_local_command", run_command)
+
+    result = await runtime.exec(marker)
+
+    assert result.return_code == 0
+    assert result.stdout == "ok"
+    args = observed["args"]
+    assert isinstance(args, tuple)
+    assert args[-2] == "bash"
+    assert marker not in args
+    assert marker in str(observed["payload"])
+    assert not list(session_dir.glob(".openevo-exec-*.sh"))
+
+
 def _credential_mount_inspect_output(
     authority: ManagedCredentialMount,
     runtime: DockerRuntime,

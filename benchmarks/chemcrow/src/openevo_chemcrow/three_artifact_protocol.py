@@ -95,6 +95,7 @@ class ThreeArtifactTaskLocalProtocolRunner:
         mcp_url: str | None = None,
         allow_verified_baseline_replacement: bool = False,
         recovered_baseline_checkpoint: tuple[Trajectory, EvaluatorFeedback] | None = None,
+        allow_verified_reflector_replacements: frozenset[str] = frozenset(),
     ) -> ThreeArtifactPairResult:
         self._assert_bare_s0(task=task)
         ledger = (
@@ -233,6 +234,9 @@ class ThreeArtifactTaskLocalProtocolRunner:
                         "sibling_artifact_ids": [],
                         "paper_evaluator_feedback_included": False,
                     },
+                    allow_verified_replacement=(
+                        phase in allow_verified_reflector_replacements
+                    ),
                 )
         bundle = self.evolution.evolve_all(
             task=task,

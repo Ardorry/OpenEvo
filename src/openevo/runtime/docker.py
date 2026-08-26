@@ -47,6 +47,8 @@ _OWNERSHIP_RECORD_LIMIT: Final[int] = 1024
 _CREDENTIAL_VIEW_NAME: Final[str] = ".openevo-codex-home"
 _IMAGE_INSPECT_MAX_BYTES: Final[int] = 1024 * 1024
 _IMAGE_INSPECT_TIMEOUT_SECONDS: Final[float] = 10.0
+_DOCKER_EXEC_INLINE_COMMAND_MAX_BYTES: Final[int] = 64 * 1024
+_DOCKER_EXEC_SCRIPT_PREFIX: Final[str] = ".openevo-exec-"
 _SESSION_ADOPTION_MARKER_BYTES: Final[int] = 64
 MANAGED_SUBSCRIPTION_SANDBOX_PROFILE_ID: Final[str] = "codex_nested_bwrap_v1"
 _MANAGED_SUBSCRIPTION_SECURITY_OPTIONS: Final[tuple[str, ...]] = (
@@ -1791,10 +1793,79 @@ class DockerRuntime(BaseRuntime):
             if key in effective_env:
                 shell_exports.append(f"export {key}={shlex.quote(str(effective_env[key]))};")
         wrapped_command = " ".join([*shell_exports, command])
-        args.extend([self._container_ref, "bash", "-lc", wrapped_command])
-        rc, stdout, stderr = await self._run_local_command(
-            *args, timeout=timeout_sec, capture=True
-        )
+        script_name: str | None = None
+        session_fd = -1
+        if len(wrapped_command.encode("utf-8")) > _DOCKER_EXEC_INLINE_COMMAND_MAX_BYTES:
+            # Linux limits every individual argv entry (MAX_ARG_STRLEN), even
+            # when the aggregate ARG_MAX budget is larger. Agent instructions
+            # are embedded in a harness command and can legitimately cross that
+            # limit after a long tool trajectory is supplied to a Reflector.
+            # Keep the exact command bytes while carrying them through the
+            # already-private session bind instead of Docker's argv.
+            script_name = f"{_DOCKER_EXEC_SCRIPT_PREFIX}{secrets.token_hex(16)}.sh"
+            session_fd = os.open(self.session_dir, _DIRECTORY_FLAGS)
+            descriptor = -1
+            try:
+                descriptor = os.open(
+                    script_name,
+                    os.O_WRONLY
+                    | os.O_CREAT
+                    | os.O_EXCL
+                    | os.O_CLOEXEC
+                    | os.O_NOFOLLOW,
+                    0o400,
+                    dir_fd=session_fd,
+                )
+                remote_path = f"{self.runtime_session_dir}/{script_name}"
+                payload = (
+                    "#!/bin/bash\n"
+                    f"rm -f -- {shlex.quote(remote_path)}\n"
+                    f"{wrapped_command}\n"
+                ).encode()
+                view = memoryview(payload)
+                while view:
+                    written = os.write(descriptor, view)
+                    if written <= 0:
+                        raise OSError("short Docker exec script write")
+                    view = view[written:]
+                os.fsync(descriptor)
+                metadata = os.fstat(descriptor)
+                if (
+                    not stat.S_ISREG(metadata.st_mode)
+                    or metadata.st_uid != os.geteuid()
+                    or metadata.st_nlink != 1
+                    or stat.S_IMODE(metadata.st_mode) != 0o400
+                    or metadata.st_size != len(payload)
+                ):
+                    raise RuntimeError("Docker exec script authority is invalid")
+                os.fsync(session_fd)
+            except BaseException:
+                if descriptor >= 0:
+                    os.close(descriptor)
+                    descriptor = -1
+                try:
+                    os.unlink(script_name, dir_fd=session_fd)
+                except FileNotFoundError:
+                    pass
+                raise
+            finally:
+                if descriptor >= 0:
+                    os.close(descriptor)
+            args.extend([self._container_ref, "bash", remote_path])
+        else:
+            args.extend([self._container_ref, "bash", "-lc", wrapped_command])
+        try:
+            rc, stdout, stderr = await self._run_local_command(
+                *args, timeout=timeout_sec, capture=True
+            )
+        finally:
+            if script_name is not None:
+                try:
+                    os.unlink(script_name, dir_fd=session_fd)
+                except FileNotFoundError:
+                    pass
+                finally:
+                    os.close(session_fd)
         return ExecResult(stdout=stdout, stderr=stderr, return_code=rc)
 
     async def upload_file(self, local_path: str, remote_path: str) -> None:

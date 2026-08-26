@@ -69,3 +69,32 @@ def test_verified_no_effect_replacement_is_explicit_and_preserved(tmp_path):
         == 1
     )
     assert ledger.audit_resume() == {"baseline_candidate": "terminal"}
+
+
+def test_verified_reflector_no_effect_replacement_is_explicit_and_preserved(tmp_path):
+    ledger = VerifiedReplacementPhaseLedger(tmp_path, pair_id="pair")
+    phase = "reflector_memory"
+    authority = {"task_id": "task", "artifact_type": "text_memory"}
+    ledger.claim(phase, authority)
+    claim_path = tmp_path / "pair" / f"{phase}.json"
+    receipt = {
+        "schema_version": "chemcrow_reflector_no_effect_recovery_v1",
+        "status": "VERIFIED_NO_CANDIDATE_EFFECT_REPLACEMENT_READY",
+        "pair_id": "pair",
+        "phase": phase,
+        "attempt_ordinal": 1,
+        "authority_sha256": canonical_sha256(authority),
+        "original_claim_sha256": file_sha256(claim_path),
+        "no_effect_predicates": {"zero_trajectory": True},
+        "reflector_model_call_proven_absent": True,
+        "duplicate_scientific_call": False,
+        "recorded_before_replacement_dispatch": True,
+    }
+
+    ledger.reconcile_verified_no_effect_failure(phase, receipt)
+    ledger.claim(phase, authority, allow_verified_replacement=True)
+    ledger.terminal(phase, {"reflector_job_id": "job-replacement"})
+
+    payload = __import__("json").loads(claim_path.read_text())
+    assert payload["failed_attempts"][0]["outcome"] == "terminal_reflector_no_effect"
+    assert verified_no_effect_attempt_count(payload, pair_id="pair", phase=phase) == 1

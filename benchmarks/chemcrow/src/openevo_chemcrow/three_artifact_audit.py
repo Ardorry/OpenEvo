@@ -46,6 +46,7 @@ def audit_three_artifact_run(
     tool_calls = 0
     tool_errors = 0
     verified_pre_candidate_no_effect_attempts = 0
+    verified_reflector_no_effect_attempts = 0
     completed_call_checkpoint_count = 0
     confidence_transport_adaptation_count = 0
     bundle_protocols: set[str] = set()
@@ -144,9 +145,19 @@ def audit_three_artifact_run(
                 pair_id=pair_id,
                 phase=phase,
             )
-            if no_effect_attempts and phase != "baseline_candidate":
-                raise ValueError(f"no-effect replacement attached to wrong phase: {pair_id}/{phase}")
-            verified_pre_candidate_no_effect_attempts += no_effect_attempts
+            if no_effect_attempts:
+                if phase == "baseline_candidate":
+                    verified_pre_candidate_no_effect_attempts += no_effect_attempts
+                elif phase in {
+                    "reflector_memory",
+                    "reflector_skill_bundle",
+                    "reflector_agent_system",
+                }:
+                    verified_reflector_no_effect_attempts += no_effect_attempts
+                else:
+                    raise ValueError(
+                        f"no-effect replacement attached to wrong phase: {pair_id}/{phase}"
+                    )
             phase_receipt = claim.get("receipt")
             if not isinstance(phase_receipt, dict):
                 raise TypeError(f"phase receipt is not an object: {pair_id}/{phase}")
@@ -267,6 +278,9 @@ def audit_three_artifact_run(
         "mock_or_fixture_observations": 0,
         "verified_pre_candidate_no_effect_attempt_count": (
             verified_pre_candidate_no_effect_attempts
+        ),
+        "verified_reflector_no_effect_attempt_count": (
+            verified_reflector_no_effect_attempts
         ),
         "completed_call_checkpoint_count": completed_call_checkpoint_count,
         "confidence_transport_adaptation_count": (
