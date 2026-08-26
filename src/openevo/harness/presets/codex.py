@@ -344,16 +344,18 @@ class CodexHarness(BaseHarness):
 
         flags_str = " ".join(flags)
         executable = MANAGED_CODEX_BINARY if auth_mode == AUTH_MODE_SUBSCRIPTION else "codex"
-        codex_command = f"{executable} exec {flags_str} -- {escaped}"
+        codex_command = f"{executable} exec {flags_str} -- -"
         if auth_mode == AUTH_MODE_SUBSCRIPTION:
             codex_command = command_with_unset_proxy_env(codex_command)
+            codex_command = f"{{ printf '%s' {escaped} | {codex_command}; }}"
             pipeline = _codex_subscription_json_pipeline(
                 codex_command,
                 f"{RUNTIME_AGENT_LOG_DIR}/codex.txt",
             )
         else:
+            codex_command = f"{{ printf '%s' {escaped} | {codex_command}; }}"
             pipeline = (
-                f"{codex_command} 2>&1 </dev/null | "
+                f"{codex_command} 2>&1 | "
                 f"tee {RUNTIME_AGENT_LOG_DIR}/codex.txt"
             )
         command = f"/bin/bash -o pipefail -c {shlex.quote(pipeline)}"
@@ -423,7 +425,7 @@ def _codex_subscription_json_pipeline(codex_command: str, log_path: str) -> str:
     )
     return (
         "set +e; "
-        f"{codex_command} </dev/null | tee {quoted_log}; "
+        f"{codex_command} | tee {quoted_log}; "
         'pipeline_status=("${PIPESTATUS[@]}"); '
         'codex_rc="${pipeline_status[0]:-1}"; '
         'tee_rc="${pipeline_status[1]:-1}"; '

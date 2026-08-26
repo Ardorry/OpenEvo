@@ -91,6 +91,22 @@ def _core_reflector_contract_hash(kind: ArtifactKind) -> str:
     )
 
 
+def render_core_native_reflector_prompt(
+    kind: ArtifactKind,
+    evidence: dict[str, Any],
+) -> str:
+    evidence_prompt = (
+        "You are one of three mutually isolated OpenEvo task-local Reflectors. Your prompt was "
+        "frozen before any sibling invocation. You cannot see and must not infer sibling outputs. "
+        "Use only the EVIDENCE JSON below. Do not browse, call tools, introduce historical "
+        "ChemCrow/GPT-4 answers, human scores, paper EvaluatorGPT grades, hidden ground truth, "
+        "future G2 output, or later tasks.\n\n"
+        "EVIDENCE JSON:\n"
+        f"{json.dumps(evidence, ensure_ascii=True, sort_keys=True)}"
+    )
+    return render_codex_cli_reflector_prompt(_METHODS[kind], evidence_prompt)
+
+
 @dataclass
 class _PendingReflection:
     kind: ArtifactKind
@@ -449,16 +465,7 @@ class ThreeIsolatedEvolutionEngine:
         kind: ArtifactKind,
         evidence: dict[str, Any],
     ) -> str:
-        evidence_prompt = (
-            "You are one of three mutually isolated OpenEvo task-local Reflectors. Your prompt was "
-            "frozen before any sibling invocation. You cannot see and must not infer sibling outputs. "
-            "Use only the EVIDENCE JSON below. Do not browse, call tools, introduce historical "
-            "ChemCrow/GPT-4 answers, human scores, paper EvaluatorGPT grades, hidden ground truth, "
-            "future G2 output, or later tasks.\n\n"
-            "EVIDENCE JSON:\n"
-            f"{json.dumps(evidence, ensure_ascii=True, sort_keys=True)}"
-        )
-        return render_codex_cli_reflector_prompt(_METHODS[kind], evidence_prompt)
+        return render_core_native_reflector_prompt(kind, evidence)
 
     def _artifact_draft(
         self,

@@ -93,8 +93,17 @@ def test_verified_reflector_no_effect_replacement_is_explicit_and_preserved(tmp_
 
     ledger.reconcile_verified_no_effect_failure(phase, receipt)
     ledger.claim(phase, authority, allow_verified_replacement=True)
+    second_receipt = {
+        **receipt,
+        "attempt_ordinal": 2,
+        "original_claim_sha256": file_sha256(claim_path),
+        "no_effect_predicates": {"inner_argv_limit": True},
+    }
+    ledger.reconcile_verified_no_effect_failure(phase, second_receipt)
+    ledger.claim(phase, authority, allow_verified_replacement=True)
     ledger.terminal(phase, {"reflector_job_id": "job-replacement"})
 
     payload = __import__("json").loads(claim_path.read_text())
     assert payload["failed_attempts"][0]["outcome"] == "terminal_reflector_no_effect"
-    assert verified_no_effect_attempt_count(payload, pair_id="pair", phase=phase) == 1
+    assert payload["failed_attempts"][1]["outcome"] == "terminal_reflector_no_effect"
+    assert verified_no_effect_attempt_count(payload, pair_id="pair", phase=phase) == 2

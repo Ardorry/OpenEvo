@@ -8,6 +8,8 @@ from typing import Any
 from .hashing import canonical_sha256
 from .ledger import AmbiguousPhaseClaimError, PhaseLedger
 
+_MAX_VERIFIED_NO_EFFECT_ATTEMPTS = 3
+
 
 class VerifiedReplacementPhaseLedger(PhaseLedger):
     """Three-pipeline ledger extension for a proven pre-Candidate no-effect failure."""
@@ -60,14 +62,19 @@ class VerifiedReplacementPhaseLedger(PhaseLedger):
         payload = json.loads(path.read_text(encoding="utf-8"))
         if payload.get("status") != "claimed":
             raise ValueError(f"phase is not a claimed failed attempt: {phase}")
-        if payload.get("failed_attempts") is not None:
-            raise ValueError(f"phase already contains failed-attempt history: {phase}")
+        prior_attempt_count = verified_no_effect_attempt_count(
+            payload,
+            pair_id=self.pair_id,
+            phase=phase,
+        )
+        if prior_attempt_count >= _MAX_VERIFIED_NO_EFFECT_ATTEMPTS:
+            raise ValueError(f"phase exhausted verified no-effect replacements: {phase}")
         if receipt.get("status") != "VERIFIED_NO_CANDIDATE_EFFECT_REPLACEMENT_READY":
             raise ValueError("no-effect recovery receipt status is invalid")
         if receipt.get("pair_id") != self.pair_id or receipt.get("phase") != phase:
             raise ValueError("no-effect recovery receipt authority differs")
-        if receipt.get("attempt_ordinal") != 1:
-            raise ValueError("first no-effect recovery attempt ordinal must be one")
+        if receipt.get("attempt_ordinal") != prior_attempt_count + 1:
+            raise ValueError("no-effect recovery attempt ordinal is not contiguous")
         if receipt.get("authority_sha256") != payload.get("authority_sha256"):
             raise ValueError("no-effect recovery authority hash differs")
         original_bytes = path.read_bytes()
@@ -85,14 +92,16 @@ class VerifiedReplacementPhaseLedger(PhaseLedger):
         )
         payload["schema_version"] = "chemcrow_phase_claim_v2"
         payload["status"] = "replacement_ready"
-        payload["failed_attempts"] = [
+        failed_attempts = list(payload.get("failed_attempts") or [])
+        failed_attempts.append(
             {
-                "attempt_ordinal": 1,
+                "attempt_ordinal": prior_attempt_count + 1,
                 "outcome": outcome,
                 "receipt": receipt,
                 "receipt_sha256": receipt_sha256,
             }
-        ]
+        )
+        payload["failed_attempts"] = failed_attempts
         payload["active_attempt_ordinal"] = None
         payload["replacement_activated"] = False
         path.write_text(
@@ -170,8 +179,8 @@ def verified_no_effect_attempt_count(
         if not isinstance(predicates, dict) or not predicates or set(predicates.values()) != {True}:
             raise ValueError("failed-attempt no-effect proof is incomplete")
     count = len(attempts)
-    if count != 1:
-        raise ValueError("only one verified no-effect replacement is permitted")
+    if count > _MAX_VERIFIED_NO_EFFECT_ATTEMPTS:
+        raise ValueError("verified no-effect replacement limit exceeded")
     if payload.get("status") == "replacement_ready":
         if (
             payload.get("replacement_activated") is not False
@@ -181,7 +190,7 @@ def verified_no_effect_attempt_count(
     elif payload.get("status") in {"claimed", "terminal"}:
         if (
             payload.get("replacement_activated") is not True
-            or payload.get("active_attempt_ordinal") != 2
+            or payload.get("active_attempt_ordinal") != count + 1
         ):
             raise ValueError("replacement claim activation evidence is invalid")
     else:
@@ -208,7 +217,7 @@ def _validate_replacement_ready_claim(
         raise ValueError("replacement-ready claim is invalid")
     count = verified_no_effect_attempt_count(payload, pair_id=pair_id, phase=phase)
     receipt = payload["failed_attempts"][-1]["receipt"]
-    if receipt.get("pair_id") != pair_id or receipt.get("phase") != phase or count != 1:
+    if receipt.get("pair_id") != pair_id or receipt.get("phase") != phase or count < 1:
         raise ValueError("replacement-ready claim recovery authority differs")
 
 

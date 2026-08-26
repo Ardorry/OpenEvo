@@ -2,19 +2,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shlex
 import sqlite3
 from pathlib import Path
 from typing import Any
 
 import httpx
+from openevo.harness.presets.codex import _codex_subscription_json_pipeline
 
 from .hashing import canonical_sha256, file_sha256
-from .models import EvaluatorFeedback, TaskItem, Trajectory
+from .models import ArtifactKind, EvaluatorFeedback, TaskItem, Trajectory
 from .replacement_ledger import (
     VerifiedReplacementPhaseLedger,
     verified_no_effect_attempt_count,
 )
 from .runtime import CORE_MANAGED_CODEX_ROUTE
+from .three_artifact_evolution import render_core_native_reflector_prompt
 
 _CHECKPOINT_NAME = "reflector-boundary.checkpoint.json"
 _RECEIPT_NAME = "reflector-no-effect.recovery.json"
@@ -28,9 +31,8 @@ _PHASES = {
     "baseline_internal_evaluator",
     *_REFLECTOR_PHASE_METHODS,
 }
-_NO_EFFECT_JOB_ERROR = (
-    "verified pre-execution no-effect: Docker argv limit before Reflector process start"
-)
+_NO_EFFECT_JOB_ERROR_PREFIX = "verified pre-execution no-effect: "
+_LINUX_MAX_ARG_STRLEN_BYTES = 131_072
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -72,7 +74,9 @@ def _fail_no_effect_job(
     db_path: Path,
     job_id: str,
     lease_id: str,
+    failure_kind: str,
 ) -> None:
+    job_error = _NO_EFFECT_JOB_ERROR_PREFIX + failure_kind
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
         raw = conn.execute(
@@ -80,13 +84,13 @@ def _fail_no_effect_job(
         ).fetchone()
     if raw is None:
         raise ValueError("failed Reflector job is absent")
-    if raw["state"] == "failed" and raw["error"] == _NO_EFFECT_JOB_ERROR:
+    if raw["state"] == "failed" and raw["error"] == job_error:
         return
     if raw["state"] != "running" or raw["lease_id"] != lease_id:
         raise ValueError("failed Reflector job lease authority differs")
     response = httpx.post(
         f"{backend_url.rstrip('/')}/v1/jobs/{job_id}/fail",
-        json={"lease_id": lease_id, "error": _NO_EFFECT_JOB_ERROR, "retryable": False},
+        json={"lease_id": lease_id, "error": job_error, "retryable": False},
         timeout=10.0,
         trust_env=False,
     )
@@ -180,10 +184,33 @@ def reconcile_reflector_no_effect_failure(
     trajectory_metadata = trajectory.get("metadata") if isinstance(trajectory, dict) else None
     completion_metadata = completion.get("metadata")
     expected_prefix = f"{pair_id}-{failed_phase}-core-baseline-"
+    reflector_prompt = render_core_native_reflector_prompt(ArtifactKind.TEXT_MEMORY, evidence)
+    reflector_prompt_bytes = len(reflector_prompt.encode("utf-8"))
+    # The first carrier repair moved the exact old harness command into a
+    # session script, but that command still launched an inner ``bash -c``.
+    # This conservative lower bound omits the Codex executable and flags while
+    # retaining the quoted prompt and terminal validator, so crossing the Linux
+    # single-argv ceiling proves the inner shell could not start Codex.
+    legacy_inner_shell_argv_minimum_bytes = len(shlex.quote(reflector_prompt).encode()) + len(
+        _codex_subscription_json_pipeline(
+            "", "/openevo/session/logs/agent/codex.txt"
+        ).encode()
+    )
+    direct_docker_argv_error = completion.get("error") == (
+        "agent execution failed: [Errno 7] Argument list too long: '/usr/bin/docker'"
+    )
+    masked_codex_argv_error = completion.get("error") == (
+        "subscription finalization failed: subscription transcript could not be read safely"
+    ) and legacy_inner_shell_argv_minimum_bytes > _LINUX_MAX_ARG_STRLEN_BYTES
+    if direct_docker_argv_error:
+        failure_kind = "docker_argv_limit_before_reflector_process_start"
+    elif masked_codex_argv_error:
+        failure_kind = "codex_prompt_argv_limit_before_reflector_process_start"
+    else:
+        failure_kind = "unproven"
     no_effect_predicates = {
         "completion_status_error": completion.get("status") == "ERROR",
-        "pre_exec_argv_error": completion.get("error")
-        == "agent execution failed: [Errno 7] Argument list too long: '/usr/bin/docker'",
+        "pre_exec_argv_failure_proven": failure_kind != "unproven",
         "zero_trajectory_traces": isinstance(trajectory, dict)
         and trajectory.get("traces") == [],
         "zero_transcript_records": isinstance(trajectory_metadata, dict)
@@ -204,20 +231,31 @@ def reconcile_reflector_no_effect_failure(
         raise ValueError(f"Reflector no-effect predicates failed: {failed}")
 
     job_rows = _job_rows(evolution_db_path, evidence_hash=str(evidence_hash))
-    by_method = {str(row["method"]): row for row in job_rows}
+    failed_candidates = [row for row in job_rows if row["job_id"] == failed_job_id]
+    methods = {str(row["method"]) for row in job_rows}
     if (
-        set(by_method) != {"text_memory_reflector"}
-        or by_method["text_memory_reflector"]["job_id"] != failed_job_id
-        or not isinstance(by_method["text_memory_reflector"]["lease_id"], str)
+        methods != {"text_memory_reflector"}
+        or len(failed_candidates) != 1
+        or failed_candidates[0]["method"] != "text_memory_reflector"
+        or not isinstance(failed_candidates[0]["lease_id"], str)
+        or any(
+            row["job_id"] != failed_job_id
+            and (
+                row["state"] != "failed"
+                or not str(row["error"] or "").startswith(_NO_EFFECT_JOB_ERROR_PREFIX)
+            )
+            for row in job_rows
+        )
     ):
         raise ValueError("Reflector dispatch inventory differs from sequential no-effect proof")
-    failed_row = by_method["text_memory_reflector"]
+    failed_row = failed_candidates[0]
     lease_id = str(failed_row["lease_id"])
     _fail_no_effect_job(
         backend_url=backend_url,
         db_path=evolution_db_path,
         job_id=failed_job_id,
         lease_id=lease_id,
+        failure_kind=failure_kind,
     )
 
     checkpoint = {
@@ -237,6 +275,15 @@ def reconcile_reflector_no_effect_failure(
         raise ValueError("existing Reflector boundary checkpoint differs")
     checkpoint_path.write_bytes(checkpoint_bytes)
 
+    prior_attempt_counts = {
+        phase: verified_no_effect_attempt_count(
+            claims[phase], pair_id=pair_id, phase=phase
+        )
+        for phase in _REFLECTOR_PHASE_METHODS
+    }
+    if len(set(prior_attempt_counts.values())) != 1:
+        raise ValueError("Reflector replacement attempt ordinals diverged")
+    attempt_ordinal = next(iter(prior_attempt_counts.values())) + 1
     phase_receipts: dict[str, dict[str, Any]] = {}
     for phase, method in _REFLECTOR_PHASE_METHODS.items():
         original_claim_path = claims_root / f"{phase}.json"
@@ -246,7 +293,7 @@ def reconcile_reflector_no_effect_failure(
             if dispatched
             else {
                 "prior_sequential_phase_failed_before_return": True,
-                "matching_core_job_absent": method not in by_method,
+                "matching_core_job_absent": method not in methods,
                 "artifact_registration_absent": True,
                 "sibling_output_absent": True,
             }
@@ -257,7 +304,7 @@ def reconcile_reflector_no_effect_failure(
             "pair_id": pair_id,
             "task_id": task.task_id,
             "phase": phase,
-            "attempt_ordinal": 1,
+            "attempt_ordinal": attempt_ordinal,
             "authority_sha256": claims[phase]["authority_sha256"],
             "original_claim_sha256": hashlib.sha256(
                 original_claim_path.read_bytes()
@@ -267,6 +314,11 @@ def reconcile_reflector_no_effect_failure(
             "failed_job_id": failed_job_id if dispatched else None,
             "core_completion_sha256": (
                 file_sha256(core_completion_path) if dispatched else None
+            ),
+            "failure_kind": failure_kind if dispatched else "not_dispatched",
+            "reflector_prompt_bytes": reflector_prompt_bytes if dispatched else None,
+            "legacy_inner_shell_argv_minimum_bytes": (
+                legacy_inner_shell_argv_minimum_bytes if dispatched else None
             ),
             "no_effect_predicates": predicates,
             "reflector_model_call_proven_absent": True,
@@ -288,6 +340,7 @@ def reconcile_reflector_no_effect_failure(
         "core_completion_sha256": file_sha256(core_completion_path),
         "failed_job_id": failed_job_id,
         "failed_job_terminal_state": "failed",
+        "reflector_replacement_attempt_ordinal": attempt_ordinal,
         "baseline_redispatched": False,
         "baseline_evaluator_redispatched": False,
         "reflector_replacement_phases": list(_REFLECTOR_PHASE_METHODS),
@@ -297,7 +350,11 @@ def reconcile_reflector_no_effect_failure(
         },
         "model_calls_during_reconciliation": 0,
     }
-    recovery_path = recovery_root / _RECEIPT_NAME
+    recovery_path = recovery_root / (
+        _RECEIPT_NAME
+        if attempt_ordinal == 1
+        else f"reflector-no-effect.recovery.attempt-{attempt_ordinal}.json"
+    )
     recovery_bytes = (json.dumps(recovery_receipt, indent=2, sort_keys=True) + "\n").encode()
     if recovery_path.exists() and recovery_path.read_bytes() != recovery_bytes:
         raise ValueError("existing Reflector no-effect recovery receipt differs")

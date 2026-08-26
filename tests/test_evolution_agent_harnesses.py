@@ -439,6 +439,9 @@ def test_codex_run_steps_subscription_auth_mode_uses_existing_login_state():
     assert step.env is not None
     assert step.env["CODEX_HOME"] == "/openevo/credentials/codex"
     assert "--ephemeral" in step.command
+    pipeline = shlex.split(step.command)[-1]
+    assert "printf '%s'" in pipeline
+    assert " -- -" in pipeline
     assert "--dangerously-bypass-approvals-and-sandbox" not in step.command
     assert " --sandbox " not in step.command
     assert "-s " not in step.command
@@ -455,6 +458,26 @@ def test_codex_run_steps_subscription_auth_mode_uses_existing_login_state():
     assert "PIPESTATUS" in step.command
     assert "turn.completed" in step.command
     assert "turn.failed" in step.command
+
+
+def test_codex_run_steps_keeps_large_instruction_out_of_codex_argv():
+    harness = CodexHarness(
+        AgentSpec(
+            harness="codex",
+            model_name="gpt-5.5",
+            settings={"auth_mode": "subscription", "capture_mode": "transcript"},
+        )
+    )
+    instruction = "reflector evidence " + ("x" * 140_000)
+
+    command = harness.run_steps(instruction)[0].command
+    pipeline = shlex.split(command)[-1]
+
+    assert instruction in command
+    assert "printf '%s'" in pipeline
+    assert f"{MANAGED_CODEX_BINARY} exec " in pipeline
+    assert " -- -" in pipeline
+    assert f"-- {shlex.quote(instruction)}" not in pipeline
 
 
 @pytest.mark.parametrize(
@@ -978,7 +1001,7 @@ def test_codex_subscription_fixed_overrides_follow_optional_config() -> None:
     assert command.index("-c model_reasoning_effort=high") < command.index(
         'default_permissions="openevo_codex_subscription_v1"'
     )
-    assert command.rindex("features.plugins=false") < command.rindex("Do work.")
+    assert command.rindex("features.plugins=false") < command.rindex(" -- -")
 
 
 def test_codex_subscription_auth_mode_requires_transcript_capture_option():
