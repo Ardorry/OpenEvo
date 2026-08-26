@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
-from .three_artifact_models import ThreeArtifactPairResult
+from .three_artifact_models import ThreeArtifactPairResult, three_artifact_protocol_label
 
 
 def aggregate_three_artifact_results(
@@ -29,10 +29,14 @@ def aggregate_three_artifact_results(
         for observation in run.observations
     ]
     errors = [observation for observation in observations if observation.error]
+    bundle_protocols = {item.artifact_bundle.protocol for item in results}
+    if len(bundle_protocols) != 1:
+        raise ValueError("cannot aggregate mixed three-artifact protocol versions")
+    artifact_protocol = three_artifact_protocol_label(bundle_protocols.pop())
     return {
         "schema_version": "chemcrow_three_artifact_aggregate_v1",
         "status": "PROVISIONAL_LLM_JUDGED_RESULT",
-        "artifact_protocol": "chemcrow-three-isolated-artifacts-v1",
+        "artifact_protocol": artifact_protocol,
         "task_count": len(results),
         "artifact_count": 3 * len(results),
         "mean_baseline": {

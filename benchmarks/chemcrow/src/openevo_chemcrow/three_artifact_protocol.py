@@ -24,6 +24,7 @@ from .three_artifact_models import (
     THREE_ARTIFACT_ORDER,
     ThreeArtifactBundleReceipt,
     ThreeArtifactPairResult,
+    three_artifact_protocol_label,
 )
 from .three_artifact_runtime import ThreeArtifactRolloutPort
 
@@ -467,6 +468,7 @@ class ThreeArtifactTaskLocalProtocolRunner:
             baseline=baseline,
             evolved=evolved,
             mapping_seal=final.mapping_seal_sha256,
+            artifact_protocol=three_artifact_protocol_label(bundle.protocol),
         )
         return result
 
@@ -533,6 +535,7 @@ class ThreeArtifactTaskLocalProtocolRunner:
         baseline: Trajectory,
         evolved: Trajectory,
         mapping_seal: str,
+        artifact_protocol: str,
     ) -> None:
         rng = random.Random(f"{self.random_seed}:{pair_id}")
         baseline_is_a = bool(rng.getrandbits(1))
@@ -547,7 +550,7 @@ class ThreeArtifactTaskLocalProtocolRunner:
             "rubric": ["chemical correctness", "reasoning quality", "task completion"],
             "mapping_seal_sha256": mapping_seal,
             "historical_answers_included": False,
-            "artifact_protocol": "chemcrow-three-isolated-artifacts-v1",
+            "artifact_protocol": artifact_protocol,
         }
         review_dir = self.run_root / "human_review"
         review_dir.mkdir(parents=True, exist_ok=True)

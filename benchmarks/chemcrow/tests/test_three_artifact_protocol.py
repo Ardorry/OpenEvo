@@ -20,10 +20,12 @@ from openevo_chemcrow.protocol import BlindJudgeResult
 from openevo_chemcrow.three_artifact_evolution import (
     ThreeIsolatedEvolutionEngine,
     _find_forbidden_text,
-    _strict_reflector_content,
+    _strict_reflector_markdown,
     detect_artifact_duplicates,
 )
 from openevo_chemcrow.three_artifact_models import (
+    CORE_NATIVE_THREE_ARTIFACT_BUNDLE_PROTOCOL,
+    CORE_NATIVE_THREE_ARTIFACT_PROTOCOL_LABEL,
     THREE_ARTIFACT_ORDER,
     ArtifactSeparationPolicy,
     CoreInjectionReceiptSummary,
@@ -204,19 +206,12 @@ class FakeCoreReflector:
 
     def run_candidate(self, *, task, role, artifact_ids, pair_id, mcp_url):
         self.prompts.append(task.prompt)
-        key = {
-            ArtifactKind.TEXT_MEMORY: "memory",
-            ArtifactKind.SKILL_BUNDLE: "skill_markdown",
-            ArtifactKind.AGENT_SYSTEM: "agent_system_markdown",
-        }[self.kind]
         return Trajectory(
             run_id=f"{pair_id}-{self.kind.value}",
             task_id=task.task_id,
             role="baseline",
             status="COMPLETED",
-            answer=json.dumps(
-                {"artifact_type": self.kind.value, key: self.content}, sort_keys=True
-            ),
+            answer=self.content,
             candidate_config_sha256=self.config_sha256,
         )
 
@@ -279,6 +274,27 @@ def test_full_v4_config_is_fresh_and_three_pipeline(monkeypatch):
     assert "prior_run_root" not in config
     assert "duplicate_authorization_receipt" not in config
     assert config["run_root"].endswith("runs/full-v4-three-pipeline")
+
+
+def test_core_native_v2_config_has_fresh_identity_and_no_custom_responsibility_policy():
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "configs"
+        / "full.v5-core-native-three-pipeline.yaml"
+    )
+    config = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert config["experiment_id"] == "chemcrow-task-local-full-v5-core-native-three-pipeline"
+    assert config["artifact_protocol"] == "three_isolated_core_native_v2"
+    assert config["run_root"].endswith("runs/full-v5-core-native-three-pipeline")
+    assert config["cache_root"].endswith("caches/full-v5-core-native-three-pipeline")
+    assert "responsibility_policy_version" not in config["artifact_separation"]
+    assert "minimum_tokens_for_responsibility_check" not in config["artifact_separation"]
+
+
+def test_legacy_v1_and_core_native_v2_have_distinct_protocol_identity():
+    legacy = ThreeArtifactBundleReceipt.model_fields["protocol"].annotation
+    assert "chemcrow_three_isolated_artifacts_v1" in str(legacy)
+    assert "chemcrow_three_isolated_core_native_artifacts_v2" in str(legacy)
 
 
 def test_three_pipeline_protocol_reset_lineage_and_scoring_order(tmp_path, task_item):
@@ -440,11 +456,21 @@ def test_native_three_reflectors_are_independent_and_sibling_blind(tmp_path, tas
     assert len({item.prompt_hash for item in bundle.artifacts}) == 3
     assert {item.model for item in bundle.artifacts} == {"gpt-5.5"}
     assert {item.input_evidence_hash for item in bundle.artifacts} == {bundle.input_evidence_hash}
+    assert bundle.protocol == CORE_NATIVE_THREE_ARTIFACT_BUNDLE_PROTOCOL
     for kind, port in ports.items():
         assert len(port.prompts) == 1
         sibling_contents = [text for sibling, text in contents.items() if sibling != kind]
         assert all(content not in port.prompts[0] for content in sibling_contents)
         assert "paper EvaluatorGPT grades" in port.prompts[0]
+        assert "SYSTEM CONTRACT" not in port.prompts[0]
+        assert "Explicitly label" not in port.prompts[0]
+    assert "Return only the Markdown memory.md file" in ports[
+        ArtifactKind.TEXT_MEMORY
+    ].prompts[0]
+    assert "Return only SKILL.md content" in ports[ArtifactKind.SKILL_BUNDLE].prompts[0]
+    assert "Return only the Markdown agent-system instruction file" in ports[
+        ArtifactKind.AGENT_SYSTEM
+    ].prompts[0]
     manifests = list((tmp_path / "artifacts" / "artifacts").rglob("*.json"))
     assert len(manifests) >= 3
 
@@ -487,7 +513,7 @@ def test_duplicate_guards_fail_closed(artifacts, expected_key):
     assert findings[expected_key]
 
 
-def test_responsibility_policy_rejects_generic_or_swapped_artifacts():
+def test_duplicate_guard_does_not_impose_chemcrow_responsibility_keywords():
     findings = detect_artifact_duplicates(
         {
             ArtifactKind.TEXT_MEMORY: (
@@ -503,32 +529,6 @@ def test_responsibility_policy_rejects_generic_or_swapped_artifacts():
         baseline_answer="unrelated baseline answer",
         policy=ArtifactSeparationPolicy(),
     )
-    assert {item["artifact_type"] for item in findings["responsibility_violations"]} == {
-        "text_memory",
-        "skill_bundle",
-        "agent_system",
-    }
-
-
-def test_responsibility_policy_accepts_distinct_artifact_roles():
-    findings = detect_artifact_duplicates(
-        {
-            ArtifactKind.TEXT_MEMORY: (
-                "Observed fact: the baseline missed one tool result. Correction: retain its units "
-                "and remember the verified value for the same-task retry."
-            ),
-            ArtifactKind.SKILL_BUNDLE: (
-                "Procedure: select the declared chemistry tool, execute each step, and use a "
-                "verification checklist before composing the result."
-            ),
-            ArtifactKind.AGENT_SYSTEM: (
-                "Behavior policy: never invent evidence; suppress unsupported claims and apply "
-                "hallucination controls before writing the final answer."
-            ),
-        },
-        baseline_answer="unrelated baseline answer",
-        policy=ArtifactSeparationPolicy(),
-    )
     assert not any(findings.values())
 
 
@@ -538,24 +538,29 @@ def test_forbidden_paper_feedback_hidden_in_generic_text_is_detected():
     ) == {"paper evaluator", "paper grade"}
 
 
-def test_reflector_strict_type_specific_schemas():
-    assert (
-        _strict_reflector_content(
-            '{"artifact_type":"text_memory","memory":"remember this"}',
-            kind=ArtifactKind.TEXT_MEMORY,
-        )
-        == "remember this"
-    )
-    with pytest.raises(ValueError, match="schema"):
-        _strict_reflector_content(
-            '{"artifact_type":"text_memory","skill_markdown":"wrong"}',
-            kind=ArtifactKind.TEXT_MEMORY,
-        )
+def test_reflector_accepts_core_native_raw_markdown_only():
+    assert _strict_reflector_markdown("# Memory\nremember this\n") == "# Memory\nremember this"
     with pytest.raises(ValueError, match="Markdown fence"):
-        _strict_reflector_content(
-            '```json\n{"artifact_type":"text_memory","memory":"x"}\n```',
-            kind=ArtifactKind.TEXT_MEMORY,
-        )
+        _strict_reflector_markdown("```markdown\n# Memory\n```")
+    with pytest.raises(ValueError, match="empty"):
+        _strict_reflector_markdown("   ")
+
+
+def test_core_native_bundle_label_and_legacy_policy_fields_are_not_emitted():
+    assert CORE_NATIVE_THREE_ARTIFACT_PROTOCOL_LABEL.endswith("core-native-artifacts-v2")
+    assert "responsibility_policy_version" not in ArtifactSeparationPolicy().model_dump(
+        mode="json"
+    )
+    historical = ArtifactSeparationPolicy.model_validate(
+        {
+            "responsibility_policy_version": "chemcrow_artifact_responsibility_v1",
+            "minimum_tokens_for_responsibility_check": 8,
+        }
+    ).model_dump(mode="json")
+    assert historical["responsibility_policy_version"] == (
+        "chemcrow_artifact_responsibility_v1"
+    )
+    assert historical["minimum_tokens_for_responsibility_check"] == 8
 
 
 def test_core_injection_receipt_exact_type_mapping_and_no_fourth_artifact():

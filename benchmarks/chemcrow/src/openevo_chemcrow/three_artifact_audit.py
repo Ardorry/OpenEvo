@@ -8,7 +8,11 @@ from .hashing import canonical_sha256, file_sha256
 from .models import ArtifactKind
 from .replacement_ledger import verified_no_effect_attempt_count
 from .runtime import CORE_MANAGED_CODEX_ROUTE
-from .three_artifact_models import THREE_ARTIFACT_ORDER, ThreeArtifactPairResult
+from .three_artifact_models import (
+    THREE_ARTIFACT_ORDER,
+    ThreeArtifactPairResult,
+    three_artifact_protocol_label,
+)
 
 _PHASES = {
     "baseline_candidate",
@@ -44,12 +48,14 @@ def audit_three_artifact_run(
     verified_pre_candidate_no_effect_attempts = 0
     completed_call_checkpoint_count = 0
     confidence_transport_adaptation_count = 0
+    bundle_protocols: set[str] = set()
     for task_id in task_ids:
         pair_id = f"{experiment_id}--{task_id}"
         item_root = run_root / pair_id
         result = ThreeArtifactPairResult.model_validate_json(
             (item_root / "pair.result.json").read_text(encoding="utf-8")
         )
+        bundle_protocols.add(result.artifact_bundle.protocol)
         if (
             result.task_id != task_id
             or result.pair_id != pair_id
@@ -214,6 +220,9 @@ def audit_three_artifact_run(
                 tool_errors += int(observation.error is not None)
 
     aggregate_sha256: str | None = None
+    if len(bundle_protocols) != 1:
+        raise ValueError("run mixes three-artifact protocol versions")
+    artifact_protocol = three_artifact_protocol_label(bundle_protocols.pop())
     if require_aggregate:
         aggregate_path = run_root / "aggregate.json"
         aggregate = json.loads(aggregate_path.read_text(encoding="utf-8"))
@@ -222,13 +231,14 @@ def audit_three_artifact_run(
             or aggregate.get("task_count") != len(task_ids)
             or aggregate.get("artifact_count") != len(task_ids) * 3
             or aggregate.get("status") != "PROVISIONAL_LLM_JUDGED_RESULT"
+            or aggregate.get("artifact_protocol") != artifact_protocol
         ):
             raise ValueError("three-artifact aggregate authority differs")
         aggregate_sha256 = file_sha256(aggregate_path)
     return {
         "schema_version": "chemcrow_three_artifact_completed_run_audit_v1",
         "status": "PASS",
-        "artifact_protocol": "chemcrow-three-isolated-artifacts-v1",
+        "artifact_protocol": artifact_protocol,
         "experiment_id": experiment_id,
         "task_ids": task_ids,
         "task_count": len(task_ids),

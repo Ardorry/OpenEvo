@@ -25,8 +25,8 @@ from openevo.evolution.framework import canonical_digest
 from openevo.evolution.models import (
     ArtifactRegisterRequest,
     ArtifactType,
-    WorkerClaimInputArtifact,
     WorkerClaimedJob,
+    WorkerClaimInputArtifact,
 )
 
 EvolutionMethod = Callable[[WorkerClaimedJob, Path], list[ArtifactRegisterRequest]]
@@ -254,7 +254,9 @@ def text_memory_reflector(
             "You are a reflector for text memory. Read prior task trajectories and "
             "produce concise reusable Markdown memory. Return only memory.md content."
         ),
-        codex_prompt=_codex_cli_text_memory_reflector_prompt(reflection_prompt),
+        codex_prompt=render_codex_cli_reflector_prompt(
+            "text_memory_reflector", reflection_prompt
+        ),
         error_context="text_memory_reflector",
         temp_prefix="openevo-text-memory-reflector-",
     )
@@ -384,7 +386,9 @@ def text_memory_expel_reflector(
             "task trajectories and produce structured reusable Markdown memory. "
             "Return only memory.md content with the required sections."
         ),
-        codex_prompt=_codex_cli_text_memory_reflector_prompt(reflection_prompt),
+        codex_prompt=render_codex_cli_reflector_prompt(
+            "text_memory_reflector", reflection_prompt
+        ),
         error_context="text_memory_expel_reflector",
         temp_prefix="openevo-text-memory-expel-reflector-",
     )
@@ -535,7 +539,9 @@ def skill_bundle_reflector(
             "You are a reflector for a Codex skill bundle. Read prior task trajectories "
             "and produce the SKILL.md entrypoint. Return only SKILL.md content."
         ),
-        codex_prompt=_codex_cli_skill_bundle_reflector_prompt(reflection_prompt),
+        codex_prompt=render_codex_cli_reflector_prompt(
+            "skill_bundle_reflector", reflection_prompt
+        ),
         error_context="skill_bundle_reflector",
         temp_prefix="openevo-skill-bundle-reflector-",
     )
@@ -4070,7 +4076,7 @@ def _generate_agent_system_reflection(prompt: str, llm_config: dict[str, Any]) -
             "preserve useful existing instructions, and produce a concise Markdown "
             "agent-system instruction file. Return only the Markdown file content."
         ),
-        codex_prompt=_codex_cli_reflector_prompt(prompt),
+        codex_prompt=render_codex_cli_reflector_prompt("agent_system_reflector", prompt),
         error_context="agent_system_reflector",
         temp_prefix="openevo-agent-system-reflector-",
     )
@@ -4279,6 +4285,21 @@ def _codex_cli_skill_bundle_reflector_prompt(prompt: str) -> str:
         "not copy exact held-out literals or task answers.\n\n"
         f"{prompt}"
     )
+
+
+def render_codex_cli_reflector_prompt(method_id: str, prompt: str) -> str:
+    """Render the Core-owned Codex prompt contract for a built-in reflector method."""
+
+    renderers = {
+        "text_memory_reflector": _codex_cli_text_memory_reflector_prompt,
+        "skill_bundle_reflector": _codex_cli_skill_bundle_reflector_prompt,
+        "agent_system_reflector": _codex_cli_reflector_prompt,
+    }
+    try:
+        renderer = renderers[method_id]
+    except KeyError as exc:
+        raise ValueError(f"unsupported Core reflector method: {method_id}") from exc
+    return renderer(prompt)
 
 
 def _codex_cli_reflector_env(llm_config: dict[str, Any]) -> dict[str, str]:

@@ -2,17 +2,25 @@
 
 Generated: 2026-08-26 (Asia/Shanghai)
 
+> **2026-08-27 protocol correction:** the completed/readiness evidence below used the historical
+> ChemCrow-specific artifact-responsibility contract. That contract was benchmark-added rather
+> than an OpenEvo Core contract and has now been removed from the executable path. Historical
+> full-v4 evidence is preserved under `three_isolated_v1` and is read-only. A future Core-native
+> run must use `full.v5-core-native-three-pipeline.yaml` and fresh run/cache/ledger identities.
+> The prior READY verdict does not, by itself, validate a new paid v5 run; a Core-native live
+> preflight must be sealed before such a run is authorized.
+
 ## Final verdict
 
 ```text
-READY_FOR_FULL_CHEMCROW_TASK_LOCAL_RUN
-PAPER_EVALUATOR_ROUTE_READY
-THREE_ARTIFACT_LIVE_PREFLIGHT_READY
-READY_FOR_FULL_RUN
+HISTORICAL_FULL_V4_READINESS_EVIDENCE_PRESERVED
+CORE_NATIVE_V2_ENGINEERING_TESTS_REQUIRED
+CORE_NATIVE_V2_LIVE_PREFLIGHT_REQUIRED_BEFORE_NEW_PAID_RUN
 ```
 
-The readiness work is complete. The authoritative 14-task run, production 42-call GPT-4
-evaluation, and human review were not started.
+The readiness verdict below records the historical custom-contract protocol. It is not an active
+authorization for a Core-native v2 run. Production 42-call GPT-4 evaluation and human review remain
+separately gated.
 
 ## OpenRouter request-delta finding
 
@@ -97,13 +105,16 @@ sanitized category.
   OpenEvo Rollout/Gateway/Core, and the pinned managed runtime image.
 - G1 requires empty artifact inventory. G2 requires exactly one task-local `text_memory`, one
   `skill_bundle`, and one `agent_system`; no fourth artifact is accepted.
-- Byte, normalized-text, and frozen near-duplicate checks fail closed. Task/pair lineage,
-  responsibility separation, sibling isolation, model/tool/config parity, feedback leakage, pair
-  seal, destruction, and reset are enforced.
+- Byte, normalized-text, and frozen near-duplicate checks fail closed. Task/pair lineage, sibling
+  isolation, model/tool/config parity, feedback leakage, pair seal, destruction, and reset are
+  enforced. The former ChemCrow keyword-based responsibility separation was not Core-native and
+  is no longer part of the active protocol.
 - Paper GPT-4 and human scores remain post-hoc and never enter evolution.
 - Historical full-v3 contains 12 sealed single-memory pairs but zero typed Skill/AgentSystem jobs and
   zero three-artifact injections. It is `LEGACY_PROVISIONAL` and cannot be combined with new task
-  14/15 pairs. The authoritative next run is a fresh 14-task `full-v4-three-pipeline`.
+  14/15 pairs. The prior full-v4 run is historical custom-contract evidence; any new
+  authoritative run must be a fresh 14-task `full-v5-core-native-three-pipeline` after a live
+  Core-native preflight.
 
 ## Tools, scoring, and 42-call blueprint
 
@@ -174,7 +185,7 @@ export OPENEVO_ROLLOUT_BASE_URL=http://127.0.0.1:8080
 ```bash
 export CHEMCROW_FULL_RUN_AUTHORIZATION=I_UNDERSTAND_THIS_MAY_INCUR_COST
 uv run --project benchmarks/chemcrow openevo-chemcrow run \
-  --config benchmarks/chemcrow/configs/full.v4-three-pipeline.yaml \
+  --config benchmarks/chemcrow/configs/full.v5-core-native-three-pipeline.yaml \
   --allow-paid
 ```
 
@@ -184,7 +195,7 @@ Use `run`, not `resume`, initially. Never redispatch an ambiguous claimed phase.
 
 ```bash
 uv run --project benchmarks/chemcrow openevo-chemcrow aggregate-run \
-  --config benchmarks/chemcrow/configs/full.v4-three-pipeline.yaml \
+  --config benchmarks/chemcrow/configs/full.v5-core-native-three-pipeline.yaml \
   --no-model-calls
 ```
 
@@ -192,12 +203,16 @@ uv run --project benchmarks/chemcrow openevo-chemcrow aggregate-run \
 
 ```bash
 uv run --project benchmarks/chemcrow openevo-chemcrow audit-run \
-  --config benchmarks/chemcrow/configs/full.v4-three-pipeline.yaml \
+  --config benchmarks/chemcrow/configs/full.v5-core-native-three-pipeline.yaml \
   --core-completions /home/lhy-h/work/chemcrowrun/core-state/completions \
-  --output /home/lhy-h/work/chemcrowrun/runs/full-v4-three-pipeline/completed_run.audit.json
+  --output /home/lhy-h/work/chemcrowrun/runs/full-v5-core-native-three-pipeline/completed_run.audit.json
 ```
 
 ### 4. Production 42-call GPT-4 paper evaluation
+
+The commands below remain bound to historical full-v4 identities. They must not be used to score a
+future full-v5 Core-native run. After full-v5 is sealed, regenerate and audit a distinct v5 paper
+comparison blueprint before issuing any production evaluation authorization.
 
 First materialize and freeze the zero-model plan:
 

@@ -78,6 +78,16 @@ from .tools import TOOL_INVENTORY, ChemCrowToolRegistry, environment_presence
 _ENV_PATTERN = re.compile(r"^\$\{([A-Z][A-Z0-9_]*)\}$")
 _PAID_AUTHORIZATION = "I_UNDERSTAND_THIS_MAY_INCUR_COST"
 _AUTHORITATIVE_MODEL = "gpt-5.5"
+_LEGACY_CUSTOM_THREE_ARTIFACT_PROTOCOL = "three_isolated_v1"
+_CORE_NATIVE_THREE_ARTIFACT_PROTOCOL = "three_isolated_core_native_v2"
+_READABLE_THREE_ARTIFACT_PROTOCOLS = {
+    _LEGACY_CUSTOM_THREE_ARTIFACT_PROTOCOL,
+    _CORE_NATIVE_THREE_ARTIFACT_PROTOCOL,
+}
+
+
+def _uses_three_artifact_protocol(config: dict[str, Any]) -> bool:
+    return config.get("artifact_protocol") in _READABLE_THREE_ARTIFACT_PROTOCOLS
 
 
 def _read_tasks(path: Path) -> list[TaskItem]:
@@ -347,7 +357,7 @@ def command_preflight(args: argparse.Namespace) -> int:
     selected = ids if config.get("task_ids") == "all" else list(config.get("task_ids", []))
     unknown = sorted(set(selected) - set(ids))
     candidate = config["candidate"]
-    three_artifact_protocol = config.get("artifact_protocol") == "three_isolated_v1"
+    three_artifact_protocol = _uses_three_artifact_protocol(config)
     if three_artifact_protocol:
         reflectors = config.get("reflectors")
         if not isinstance(reflectors, dict) or set(reflectors) != {
@@ -355,7 +365,7 @@ def command_preflight(args: argparse.Namespace) -> int:
             "skill_bundle",
             "agent_system",
         }:
-            raise ValueError("three_isolated_v1 requires three explicit Reflector configs")
+            raise ValueError("three-artifact protocol requires three explicit Reflector configs")
         role_configs = {
             "candidate": config["candidate"],
             "reflector_memory": reflectors["memory"],
@@ -523,6 +533,8 @@ def command_preflight(args: argparse.Namespace) -> int:
         "candidate_pair_parity_receipt": parity_receipt,
         "artifact_protocol": config.get("artifact_protocol", "legacy_single_artifact_v1"),
         "three_isolated_reflector_configs": three_artifact_protocol,
+        "artifact_protocol_execution_allowed": config.get("artifact_protocol")
+        != _LEGACY_CUSTOM_THREE_ARTIFACT_PROTOCOL,
         "historical_answer_fields_absent": all(
             not {"answer", "trajectory", "evaluator_feedback", "reference_answer"}.intersection(
                 item.model_fields_set
@@ -567,6 +579,7 @@ def command_preflight(args: argparse.Namespace) -> int:
         and checks["runtime_config_resolved"]
         and checks["duplicate_authorization_valid"]
         and checks["execution_parity_valid"]
+        and checks["artifact_protocol_execution_allowed"]
         and core_health["reachable"]
         and core_health["healthy_nodes"] > 0
         and evolution_health["reachable"]
@@ -610,6 +623,11 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
     _authorize_paid(args)
     config_path = args.config.resolve()
     config = _resolve_env(_load_yaml(config_path))
+    if config.get("artifact_protocol") == _LEGACY_CUSTOM_THREE_ARTIFACT_PROTOCOL:
+        raise ValueError(
+            "three_isolated_v1 is historical and read-only because it used the "
+            "ChemCrow-specific responsibility contract; use three_isolated_core_native_v2"
+        )
     if "HUMAN_ACTION_REQUIRED" in json.dumps(config):
         raise ValueError("experiment config still contains HUMAN_ACTION_REQUIRED placeholders")
     if config.get("duplicate_authorization_receipt"):
@@ -642,7 +660,9 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
     cache_root = _path(config_path, str(config["cache_root"]))
     ledger_root = _path(config_path, str(config["ledger_root"]))
     controlled_csv = _path(config_path, str(config["controlled_chemicals_csv"]))
-    three_artifact_protocol = config.get("artifact_protocol") == "three_isolated_v1"
+    three_artifact_protocol = (
+        config.get("artifact_protocol") == _CORE_NATIVE_THREE_ARTIFACT_PROTOCOL
+    )
     candidate = (
         ThreeArtifactRolloutPort(
             base_url=str(config["rollout_base_url"]), candidate=config["candidate"]
@@ -661,7 +681,7 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
     if three_artifact_protocol:
         reflectors = config.get("reflectors")
         if not isinstance(reflectors, dict):
-            raise ValueError("three_isolated_v1 Reflector configs are absent")
+            raise ValueError("three_isolated_core_native_v2 Reflector configs are absent")
         _assert_authoritative_role_models(
             {
                 "candidate": config["candidate"],
@@ -843,8 +863,8 @@ def command_recover_pre_candidate_no_effect(args: argparse.Namespace) -> int:
         raise PermissionError("recovery reconciliation requires --no-model-calls")
     config_path = args.config.resolve()
     config = _resolve_env(_load_yaml(config_path))
-    if config.get("artifact_protocol") != "three_isolated_v1":
-        raise ValueError("pre-Candidate no-effect recovery requires three_isolated_v1")
+    if not _uses_three_artifact_protocol(config):
+        raise ValueError("pre-Candidate no-effect recovery requires a three-artifact protocol")
     manifest_path = _path(config_path, str(config["task_manifest"]))
     task_ids = [item.task_id for item in _read_tasks(manifest_path)]
     if args.task_id not in task_ids:
@@ -877,8 +897,8 @@ def command_recover_completed_baseline_evaluator(args: argparse.Namespace) -> in
         raise PermissionError("completed-call checkpoint recovery requires --no-model-calls")
     config_path = args.config.resolve()
     config = _resolve_env(_load_yaml(config_path))
-    if config.get("artifact_protocol") != "three_isolated_v1":
-        raise ValueError("completed-call checkpoint recovery requires three_isolated_v1")
+    if not _uses_three_artifact_protocol(config):
+        raise ValueError("completed-call checkpoint recovery requires a three-artifact protocol")
     manifest_path = _path(config_path, str(config["task_manifest"]))
     tasks = {item.task_id: item for item in _read_tasks(manifest_path)}
     if args.task_id not in tasks:
@@ -935,10 +955,10 @@ def command_audit_run(args: argparse.Namespace) -> int:
             stop_after_task_id=args.stop_after_task_id,
         )
     ]
-    if config.get("artifact_protocol") == "three_isolated_v1":
+    if _uses_three_artifact_protocol(config):
         reflectors = config.get("reflectors")
         if not isinstance(reflectors, dict):
-            raise ValueError("three_isolated_v1 Reflector configs are absent")
+            raise ValueError("three-artifact Reflector configs are absent")
         models = {str(value["agent"]["model_name"]) for value in reflectors.values()}
         if len(models) != 1:
             raise ValueError("three Reflector models differ")
@@ -970,8 +990,8 @@ def command_audit_run(args: argparse.Namespace) -> int:
 def command_aggregate_run(args: argparse.Namespace) -> int:
     config_path = args.config.resolve()
     config = _resolve_env(_load_yaml(config_path))
-    if config.get("artifact_protocol") != "three_isolated_v1":
-        raise ValueError("authoritative aggregate requires three_isolated_v1")
+    if not _uses_three_artifact_protocol(config):
+        raise ValueError("authoritative aggregate requires a three-artifact protocol")
     manifest_path = _path(config_path, str(config["task_manifest"]))
     items = _read_tasks(manifest_path)
     task_ids = (

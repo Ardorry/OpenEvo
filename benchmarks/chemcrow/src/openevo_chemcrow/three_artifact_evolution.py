@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from openevo.evolution.methods import render_codex_cli_reflector_prompt
 from openevo.evolution.models import (
     ArtifactRegisterRequest,
     ArtifactType,
@@ -29,6 +30,7 @@ from .hashing import canonical_sha256, file_sha256
 from .models import ArtifactKind, TaskItem, Trajectory
 from .runtime import CORE_MANAGED_CODEX_ROUTE, OpenEvoRolloutPort
 from .three_artifact_models import (
+    CORE_NATIVE_THREE_ARTIFACT_PROTOCOL_LABEL,
     THREE_ARTIFACT_ORDER,
     ArtifactSeparationPolicy,
     ThreeArtifactBundleReceipt,
@@ -45,35 +47,10 @@ _CORE_TYPES = {
     ArtifactKind.SKILL_BUNDLE: ArtifactType.SKILL_BUNDLE,
     ArtifactKind.AGENT_SYSTEM: ArtifactType.AGENT_SYSTEM,
 }
-_CONTENT_KEYS = {
-    ArtifactKind.TEXT_MEMORY: "memory",
-    ArtifactKind.SKILL_BUNDLE: "skill_markdown",
-    ArtifactKind.AGENT_SYSTEM: "agent_system_markdown",
-}
 _PHASE_NAMES = {
     ArtifactKind.TEXT_MEMORY: "reflector_memory",
     ArtifactKind.SKILL_BUNDLE: "reflector_skill_bundle",
     ArtifactKind.AGENT_SYSTEM: "reflector_agent_system",
-}
-_SYSTEM_CONTRACTS = {
-    ArtifactKind.TEXT_MEMORY: (
-        "You are Reflector-Memory. Produce short-lived same-task memory only: observed facts, "
-        "missed tool evidence, verified corrections, and baseline failure lessons. Do not copy the "
-        "complete baseline answer, prescribe a long procedure, or write system policy. Explicitly "
-        "label at least one observation, correction, lesson, or fact."
-    ),
-    ArtifactKind.SKILL_BUNDLE: (
-        "You are Reflector-Skill. Produce an executable same-task problem-solving workflow: tool "
-        "selection rules, reasoning procedure, verification checklist, and recovery steps. Focus "
-        "on how to solve and verify; do not write a fact memory or high-level agent policy. Explicitly "
-        "label at least one procedure, workflow, checklist, step, or tool-selection rule."
-    ),
-    ArtifactKind.AGENT_SYSTEM: (
-        "You are Reflector-AgentSystem. Produce same-task high-level behavioral rules for evidence "
-        "discipline, tool grounding, hallucination suppression, verification, and final answer "
-        "composition. Focus on agent behavior; do not write a factual notebook or detailed workflow. "
-        "Explicitly label at least one behavior, policy, discipline, hallucination control, or final-answer rule."
-    ),
 }
 _FORBIDDEN_FEEDBACK_KEYS = {
     "paper_evaluator",
@@ -103,37 +80,15 @@ _FORBIDDEN_FEEDBACK_TEXT_MARKERS = (
     "future g2",
     "evolved answer",
 )
-_RESPONSIBILITY_MARKERS = {
-    ArtifactKind.TEXT_MEMORY: (
-        "observed",
-        "observation",
-        "remember",
-        "baseline",
-        "correction",
-        "corrected",
-        "lesson",
-        "fact",
-    ),
-    ArtifactKind.SKILL_BUNDLE: (
-        "procedure",
-        "workflow",
-        "checklist",
-        "step",
-        "steps",
-        "tool selection",
-        "tool-selection",
-    ),
-    ArtifactKind.AGENT_SYSTEM: (
-        "behavior",
-        "policy",
-        "discipline",
-        "hallucination",
-        "unsupported",
-        "final answer",
-        "must",
-        "never",
-    ),
-}
+
+
+def _core_reflector_contract_hash(kind: ArtifactKind) -> str:
+    return canonical_sha256(
+        {
+            "core_method": _METHODS[kind],
+            "core_prompt_contract": render_codex_cli_reflector_prompt(_METHODS[kind], ""),
+        }
+    )
 
 
 @dataclass
@@ -272,7 +227,7 @@ class ThreeIsolatedEvolutionEngine:
                         lease_id=item.lease_id,
                         artifacts=[item.draft],
                         report={
-                            "protocol": "chemcrow-three-isolated-artifacts-v1",
+                            "protocol": CORE_NATIVE_THREE_ARTIFACT_PROTOCOL_LABEL,
                             "steps": 1,
                             "artifact_type": item.kind.value,
                             "sibling_outputs_visible": False,
@@ -417,9 +372,8 @@ class ThreeIsolatedEvolutionEngine:
                     "reflector_execution_route": CORE_MANAGED_CODEX_ROUTE,
                     "reflector_config_sha256": rollout.config_sha256,
                     "reflector_prompt_sha256": prompt_hash,
-                    "reflector_system_sha256": canonical_sha256(
-                        {"system_contract": _SYSTEM_CONTRACTS[kind]}
-                    ),
+                    "reflector_system_sha256": _core_reflector_contract_hash(kind),
+                    "reflector_prompt_authority": "openevo_core_builtin",
                     "input_evidence_sha256": evidence_hash,
                     "sibling_outputs_visible": False,
                     **({"target_path": "AGENTS.md"} if kind is ArtifactKind.AGENT_SYSTEM else {}),
@@ -459,7 +413,7 @@ class ThreeIsolatedEvolutionEngine:
         elapsed = time.monotonic() - started
         if reflected.status != "COMPLETED" or not reflected.answer.strip():
             raise RuntimeError(f"Core-managed {phase_name} returned no completed artifact")
-        content = _strict_reflector_content(reflected.answer, kind=kind)
+        content = _strict_reflector_markdown(reflected.answer)
         draft, content_path = self._artifact_draft(
             kind=kind,
             job_id=job.job_id,
@@ -472,7 +426,7 @@ class ThreeIsolatedEvolutionEngine:
             reflector_run_id=reflected.run_id,
             model=str(rollout.candidate["agent"]["model_name"]),
             prompt_hash=prompt_hash,
-            system_prompt_hash=canonical_sha256({"system_contract": _SYSTEM_CONTRACTS[kind]}),
+            system_prompt_hash=_core_reflector_contract_hash(kind),
             evidence_hash=evidence_hash,
         )
         return _PendingReflection(
@@ -484,7 +438,7 @@ class ThreeIsolatedEvolutionEngine:
             dataset_uri=claim.job.input_artifacts[0].uri,
             reflector_run_id=reflected.run_id,
             model=str(rollout.candidate["agent"]["model_name"]),
-            system_prompt_hash=canonical_sha256({"system_contract": _SYSTEM_CONTRACTS[kind]}),
+            system_prompt_hash=_core_reflector_contract_hash(kind),
             prompt_hash=prompt_hash,
             content=content,
             content_path=content_path,
@@ -499,26 +453,22 @@ class ThreeIsolatedEvolutionEngine:
         task: TaskItem,
         evidence: dict[str, Any],
     ) -> str:
-        content_key = _CONTENT_KEYS[kind]
         safety_clause = (
             " Preserve the intended safety refusal/caution; never optimize toward unsafe operational assistance."
             if task.safety_metadata.get("safety_behavior_must_be_preserved") is True
             else ""
         )
-        schema = {"artifact_type": kind.value, content_key: "non-empty Markdown string"}
-        return (
-            f"SYSTEM CONTRACT ({kind.value}):\n{_SYSTEM_CONTRACTS[kind]}\n\n"
+        evidence_prompt = (
             "You are one of three mutually isolated OpenEvo task-local Reflectors. Your prompt was "
             "frozen before any sibling invocation. You cannot see and must not infer sibling outputs. "
             "Use only the EVIDENCE JSON below. Do not browse, call tools, introduce historical "
             "ChemCrow/GPT-4 answers, human scores, paper EvaluatorGPT grades, hidden ground truth, "
             "future G2 output, or later tasks. This is software evaluation; never direct physical "
             f"execution or procurement.{safety_clause}\n\n"
-            "Return one strict JSON object only: no Markdown fence, preamble, or extra keys. "
-            f"Required schema: {json.dumps(schema, sort_keys=True)}\n\n"
             "EVIDENCE JSON:\n"
             f"{json.dumps(evidence, ensure_ascii=True, sort_keys=True)}"
         )
+        return render_codex_cli_reflector_prompt(_METHODS[kind], evidence_prompt)
 
     def _artifact_draft(
         self,
@@ -558,7 +508,7 @@ class ThreeIsolatedEvolutionEngine:
         if urlparse(uri_path.resolve().as_uri()).scheme != "file":
             raise RuntimeError("artifact payload must be a sealed local file URI")
         provenance = {
-            "protocol": "chemcrow-three-isolated-artifacts-v1",
+            "protocol": CORE_NATIVE_THREE_ARTIFACT_PROTOCOL_LABEL,
             "method": method,
             "task_id": task.task_id,
             "pair_id": pair_id,
@@ -601,22 +551,12 @@ class ThreeIsolatedEvolutionEngine:
         )
 
 
-def _strict_reflector_content(text: str, *, kind: ArtifactKind) -> str:
+def _strict_reflector_markdown(text: str) -> str:
     if "```" in text:
-        raise ValueError("Reflector returned a Markdown fence instead of strict JSON")
-    try:
-        value = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise ValueError("Reflector did not return strict JSON") from exc
-    content_key = _CONTENT_KEYS[kind]
-    if not isinstance(value, dict) or set(value) != {"artifact_type", content_key}:
-        raise ValueError(f"{kind.value} Reflector schema differs from authority")
-    if value.get("artifact_type") != kind.value:
-        raise ValueError("Reflector returned the wrong artifact type")
-    content = value.get(content_key)
-    if not isinstance(content, str) or not content.strip():
+        raise ValueError("Reflector returned a Markdown fence instead of raw Markdown")
+    if not isinstance(text, str) or not text.strip():
         raise ValueError("Reflector returned empty artifact content")
-    return content.strip()
+    return text.strip()
 
 
 def normalize_artifact_text(text: str) -> str:
@@ -684,16 +624,11 @@ def detect_artifact_duplicates(
             and ratio >= policy.baseline_answer_sequence_threshold
         ):
             baseline_copy.append({"artifact_type": kind.value, "sequence_ratio": round(ratio, 6)})
-    responsibility_violations = _artifact_responsibility_violations(
-        artifacts,
-        policy=policy,
-    )
     return {
         "byte_identical_pairs": byte_pairs,
         "normalized_identical_pairs": normalized_pairs,
         "near_duplicate_pairs": near_pairs,
         "baseline_answer_copy": baseline_copy,
-        "responsibility_violations": responsibility_violations,
     }
 
 
@@ -729,32 +664,3 @@ def _find_forbidden_text(value: Any) -> set[str]:
         normalized = unicodedata.normalize("NFKC", value).casefold()
         found.update(marker for marker in _FORBIDDEN_FEEDBACK_TEXT_MARKERS if marker in normalized)
     return found
-
-
-def _artifact_responsibility_violations(
-    artifacts: dict[ArtifactKind, str],
-    *,
-    policy: ArtifactSeparationPolicy,
-) -> list[dict[str, object]]:
-    violations: list[dict[str, object]] = []
-    for kind in THREE_ARTIFACT_ORDER:
-        normalized = normalize_artifact_text(artifacts[kind])
-        tokens = normalized.split()
-        markers = _RESPONSIBILITY_MARKERS[kind]
-        matched = sorted(marker for marker in markers if marker in normalized)
-        reasons: list[str] = []
-        if len(tokens) < policy.minimum_tokens_for_responsibility_check:
-            reasons.append("too_short")
-        if not matched:
-            reasons.append("missing_type_specific_responsibility_marker")
-        if reasons:
-            violations.append(
-                {
-                    "artifact_type": kind.value,
-                    "policy_version": policy.responsibility_policy_version,
-                    "reasons": reasons,
-                    "token_count": len(tokens),
-                    "matched_markers": matched,
-                }
-            )
-    return violations

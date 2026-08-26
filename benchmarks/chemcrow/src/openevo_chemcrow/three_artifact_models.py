@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 from .models import (
     ArtifactKind,
@@ -18,6 +18,23 @@ THREE_ARTIFACT_ORDER = (
     ArtifactKind.AGENT_SYSTEM,
 )
 
+LEGACY_THREE_ARTIFACT_BUNDLE_PROTOCOL = "chemcrow_three_isolated_artifacts_v1"
+CORE_NATIVE_THREE_ARTIFACT_BUNDLE_PROTOCOL = (
+    "chemcrow_three_isolated_core_native_artifacts_v2"
+)
+LEGACY_THREE_ARTIFACT_PROTOCOL_LABEL = "chemcrow-three-isolated-artifacts-v1"
+CORE_NATIVE_THREE_ARTIFACT_PROTOCOL_LABEL = (
+    "chemcrow-three-isolated-core-native-artifacts-v2"
+)
+
+
+def three_artifact_protocol_label(bundle_protocol: str) -> str:
+    if bundle_protocol == LEGACY_THREE_ARTIFACT_BUNDLE_PROTOCOL:
+        return LEGACY_THREE_ARTIFACT_PROTOCOL_LABEL
+    if bundle_protocol == CORE_NATIVE_THREE_ARTIFACT_BUNDLE_PROTOCOL:
+        return CORE_NATIVE_THREE_ARTIFACT_PROTOCOL_LABEL
+    raise ValueError(f"unsupported three-artifact bundle protocol: {bundle_protocol}")
+
 
 class ArtifactSeparationPolicy(BaseModel):
     """Frozen, deterministic guards applied before any artifact is registered."""
@@ -29,10 +46,21 @@ class ArtifactSeparationPolicy(BaseModel):
     near_duplicate_sequence_threshold: float = Field(default=0.95, ge=0.0, le=1.0)
     minimum_tokens_for_near_duplicate_check: int = Field(default=12, ge=1)
     baseline_answer_sequence_threshold: float = Field(default=0.98, ge=0.0, le=1.0)
-    responsibility_policy_version: Literal["chemcrow_artifact_responsibility_v1"] = (
-        "chemcrow_artifact_responsibility_v1"
+    # Read-only compatibility for historical v1 receipts. Core-native v2 neither
+    # emits nor enforces the ChemCrow-specific responsibility-marker policy.
+    responsibility_policy_version: Literal["chemcrow_artifact_responsibility_v1"] | None = Field(
+        default=None
     )
-    minimum_tokens_for_responsibility_check: int = Field(default=8, ge=1)
+    minimum_tokens_for_responsibility_check: int | None = Field(default=None, ge=1)
+
+    @model_serializer(mode="wrap")
+    def _serialize_without_unused_legacy_fields(self, serializer):
+        data = serializer(self)
+        if self.responsibility_policy_version is None:
+            data.pop("responsibility_policy_version", None)
+        if self.minimum_tokens_for_responsibility_check is None:
+            data.pop("minimum_tokens_for_responsibility_check", None)
+        return data
 
 
 class ThreeArtifactReceipt(BaseModel):
@@ -62,9 +90,10 @@ class ThreeArtifactReceipt(BaseModel):
 class ThreeArtifactBundleReceipt(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    protocol: Literal["chemcrow_three_isolated_artifacts_v1"] = (
-        "chemcrow_three_isolated_artifacts_v1"
-    )
+    protocol: Literal[
+        "chemcrow_three_isolated_artifacts_v1",
+        "chemcrow_three_isolated_core_native_artifacts_v2",
+    ] = CORE_NATIVE_THREE_ARTIFACT_BUNDLE_PROTOCOL
     task_id: str
     pair_id: str
     parent_run_id: str
@@ -75,7 +104,17 @@ class ThreeArtifactBundleReceipt(BaseModel):
     normalized_identical_pairs: list[list[str]] = Field(default_factory=list)
     near_duplicate_pairs: list[dict[str, object]] = Field(default_factory=list)
     baseline_answer_copy: list[dict[str, object]] = Field(default_factory=list)
-    responsibility_violations: list[dict[str, object]] = Field(default_factory=list)
+    # Historical v1 read compatibility only; v2 does not emit this field.
+    responsibility_violations: list[dict[str, object]] = Field(
+        default_factory=list
+    )
+
+    @model_serializer(mode="wrap")
+    def _serialize_protocol_fields(self, serializer):
+        data = serializer(self)
+        if self.protocol == CORE_NATIVE_THREE_ARTIFACT_BUNDLE_PROTOCOL:
+            data.pop("responsibility_violations", None)
+        return data
 
     @model_validator(mode="after")
     def _validate_bundle(self) -> ThreeArtifactBundleReceipt:
