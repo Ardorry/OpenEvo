@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -58,7 +59,13 @@ def create_openrouter_shim_app(
         raise ValueError("a frozen paper evaluator plan allowlist is required")
     if ledger_class not in {"production", "calibration"}:
         raise ValueError("paper evaluator ledger class is invalid")
-    if call_id_prefix not in {"paper-chemcrow-", "paper-chemcrow-cal-v1-"}:
+    if ledger_class == "calibration":
+        prefix_valid = call_id_prefix == "paper-chemcrow-cal-v1-"
+    else:
+        prefix_valid = re.fullmatch(
+            r"paper(?:-[a-z0-9]+)*-chemcrow-", call_id_prefix
+        ) is not None
+    if not prefix_valid:
         raise ValueError("paper evaluator call prefix is invalid")
     allowed_call_prompt_hashes = dict(allowed_call_prompt_hashes or {})
     receipt_root.mkdir(parents=True, exist_ok=True)

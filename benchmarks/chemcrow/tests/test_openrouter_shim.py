@@ -44,8 +44,9 @@ async def test_openrouter_shim_pins_route_and_writes_value_free_receipt(tmp_path
         receipt_root=receipt_root,
         transport=httpx.MockTransport(upstream),
         allowed_call_prompt_hashes={
-            "paper-chemcrow-01-baseline": canonical_sha256("PRIVATE PROMPT")
+            "paper-v5-chemcrow-01-baseline": canonical_sha256("PRIVATE PROMPT")
         },
+        call_id_prefix="paper-v5-chemcrow-",
     )
     transport = httpx.ASGITransport(app=app)
     request = {
@@ -53,7 +54,7 @@ async def test_openrouter_shim_pins_route_and_writes_value_free_receipt(tmp_path
         "temperature": 0.1,
         "max_tokens": 1200,
         "stream": False,
-        "user": "paper-chemcrow-01-baseline",
+        "user": "paper-v5-chemcrow-01-baseline",
         "response_format": {"type": "json_object"},
         "messages": [
             {
@@ -84,10 +85,10 @@ async def test_openrouter_shim_pins_route_and_writes_value_free_receipt(tmp_path
     assert "user" not in observed["payload"]
     assert "return_token_ids" not in observed["payload"]
     claim = json.loads(
-        (receipt_root / "paper-chemcrow-01-baseline.claim.json").read_text()
+        (receipt_root / "paper-v5-chemcrow-01-baseline.claim.json").read_text()
     )
     assert claim["request_sha256"] == canonical_sha256(request)
-    receipt_text = (receipt_root / "paper-chemcrow-01-baseline.receipt.json").read_text()
+    receipt_text = (receipt_root / "paper-v5-chemcrow-01-baseline.receipt.json").read_text()
     assert "DO_NOT_PERSIST_THIS_KEY" not in receipt_text
     assert "PRIVATE PROMPT" not in receipt_text
     receipt = json.loads(receipt_text)
