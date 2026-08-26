@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import re
 import shlex
 
 from openevo.harness.base import BaseHarness
 from openevo.runtime.models import ExecInput
 
 from .paper_evaluator import (
+    FROZEN_PAPER_TASK_IDS,
     PAPER_EVALUATOR_MAX_OUTPUT_TOKENS,
     PAPER_EVALUATOR_MODEL,
     PAPER_EVALUATOR_TEMPERATURE,
@@ -64,8 +66,15 @@ class PaperEvaluatorHarness(BaseHarness):
     runtime_gateway_base_url = PAPER_RUNTIME_GATEWAY_BASE_URL
 
     def _validate_call_id(self, call_id: str) -> None:
-        if not call_id.startswith("paper-chemcrow-") or call_id.startswith(
-            "paper-chemcrow-cal-v1-"
+        match = re.fullmatch(
+            r"(paper(?:-[a-z0-9]+)*)-(chemcrow-[0-9]{2})-"
+            r"(historical_control|baseline|evolved)",
+            call_id,
+        )
+        if (
+            match is None
+            or "-cal-" in match.group(1)
+            or match.group(2) not in FROZEN_PAPER_TASK_IDS
         ):
             raise ValueError("paper evaluator call ID is absent or invalid")
 

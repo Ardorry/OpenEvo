@@ -1,0 +1,29 @@
+schema_version: chemcrow_paper_evaluator_config_v2
+experiment_id: chemcrow-task-local-full-v5-core-native-three-pipeline
+source_pair_protocol: chemcrow-three-isolated-core-native-artifacts-v2
+call_id_prefix: paper-v5r1
+task_manifest: ../tasks.jsonl
+historical_runs_root: ../../../../vendor/chemcrow-runs
+run_root: ../../../../runs/full-v5-core-native-three-pipeline
+completed_run_audit: ../reports/FULL_V5_CORE_NATIVE_COMPLETED_RUN_AUDIT.json
+plan_path: ../../../../runs/paper-evaluator-full-v5-core-native-three-pipeline-r1/private/plan.json
+result_root: ../../../../runs/paper-evaluator-full-v5-core-native-three-pipeline-r1/results
+shim_receipt_root: ../../../../runs/paper-evaluator-full-v5-core-native-three-pipeline-r1/openrouter-receipts
+rollout_base_url: http://127.0.0.1:8180
+runtime: &paper_runtime
+  backend: docker
+  profile: managed_science
+  container_user: host
+  image: sha256:7a0079f9cb1bce5768cff5bce3d1181811c6a231ad800cac8fb503d66852c81b
+  prepare:
+    - type: exec
+      command: mkdir -p /openevo/session/workspace /openevo/session/logs/agent
+  env:
+    HOME: /openevo/session/home
+    PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  network: host
+  workdir: /openevo/session/workspace
+  gpus: 0
+  allow_internet: true
+  import_path: null
+  kwargs: {}

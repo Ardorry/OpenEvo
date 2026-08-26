@@ -261,7 +261,7 @@ def test_paper_harness_routes_only_through_core_gateway():
             "max_tokens": 1200,
             "runtime_gateway_base_url": "http://host.docker.internal:8110/v1",
         },
-        env={"PAPER_EVALUATOR_CALL_ID": "paper-chemcrow-01-baseline"},
+        env={"PAPER_EVALUATOR_CALL_ID": "paper-v5r1-chemcrow-01-baseline"},
     )
     step = PaperEvaluatorHarness(spec).run_steps("private sealed prompt")[0]
 
@@ -269,8 +269,30 @@ def test_paper_harness_routes_only_through_core_gateway():
     assert "OPENROUTER_API_KEY" not in step.command
     assert "OPENAI_BASE_URL" in step.command
     assert step.env is not None
+    assert step.env["PAPER_EVALUATOR_CALL_ID"] == "paper-v5r1-chemcrow-01-baseline"
     assert step.env["OPENAI_BASE_URL"] == "http://host.docker.internal:8110/v1"
     assert step.env["PAPER_EVALUATOR_PROMPT"] == "private sealed prompt"
+
+
+def test_paper_harness_rejects_calibration_namespace():
+    spec = AgentSpec(
+        import_path="openevo_chemcrow.paper_harness:PaperEvaluatorHarness",
+        model_name=PAPER_EVALUATOR_MODEL,
+        settings={
+            "capture_mode": "transcript",
+            "temperature": 0.1,
+            "max_tokens": 1200,
+            "runtime_gateway_base_url": "http://host.docker.internal:8110/v1",
+        },
+        env={
+            "PAPER_EVALUATOR_CALL_ID": (
+                "paper-chemcrow-cal-v1-chemcrow-01-baseline"
+            )
+        },
+    )
+
+    with pytest.raises(ValueError, match="call ID"):
+        PaperEvaluatorHarness(spec).run_steps("private sealed prompt")
 
 
 def test_paper_core_request_has_no_reflector_or_evolution_context():
