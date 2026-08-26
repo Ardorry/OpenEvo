@@ -322,7 +322,7 @@ class ThreeIsolatedEvolutionEngine:
                 source_event_id=source_event_id,
                 task_id=task.task_id,
                 session_id=baseline.run_id,
-                policy_version="chemcrow-task-local-three-isolated-v1",
+                policy_version="chemcrow-task-local-three-isolated-core-native-v2",
                 rollout_step=0,
                 agent={"harness": "chemcrow-adapter", "reflector_role": kind.value},
                 base_model=str(rollout.candidate["agent"]["model_name"]),
@@ -541,7 +541,7 @@ class ThreeIsolatedEvolutionEngine:
                 tags=[
                     "chemcrow",
                     "task-local",
-                    "three-isolated-v1",
+                    "three-isolated-core-native-v2",
                     task.task_id,
                     kind.value,
                 ],
