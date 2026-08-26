@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -299,6 +300,44 @@ async def test_exec_carries_large_command_through_private_session_script(
     assert args[-2] == "bash"
     assert marker not in args
     assert marker in str(observed["payload"])
+    assert not list(session_dir.glob(".openevo-exec-*.sh"))
+
+
+@pytest.mark.asyncio
+async def test_exec_unwraps_large_bash_c_payload_inside_private_script(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    monkeypatch.setattr(docker_module.DockerEngineAuthority, "open", lambda: object())
+    runtime = DockerRuntime(
+        RuntimeSpec(image="runtime:latest", container_user="host"),
+        "large-bash-c-command",
+        session_dir,
+    )
+    runtime._container_id = "b" * 64
+    runtime._ownership_state = "verified"
+    marker = "stdin-reflector-evidence-" + ("y" * 70_000)
+    inner = f"printf '%s' {shlex.quote(marker)} | tee /tmp/result"
+    command = f"/bin/bash -o pipefail -c {shlex.quote(inner)}"
+    observed: dict[str, str] = {}
+
+    async def run_command(*args: str, **kwargs: object) -> tuple[int, str, str]:
+        remote_script = Path(args[-1])
+        observed["payload"] = (session_dir / remote_script.name).read_text(
+            encoding="utf-8"
+        )
+        return 0, "ok", ""
+
+    monkeypatch.setattr(runtime, "_run_local_command", run_command)
+
+    result = await runtime.exec(command)
+
+    assert result.return_code == 0
+    assert "set -o pipefail" in observed["payload"]
+    assert inner in observed["payload"]
+    assert "/bin/bash -o pipefail -c" not in observed["payload"]
     assert not list(session_dir.glob(".openevo-exec-*.sh"))
 
 

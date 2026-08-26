@@ -1817,10 +1817,25 @@ class DockerRuntime(BaseRuntime):
                     dir_fd=session_fd,
                 )
                 remote_path = f"{self.runtime_session_dir}/{script_name}"
+                script_command = wrapped_command
+                parsed_command = shlex.split(command)
+                if (
+                    len(parsed_command) == 5
+                    and parsed_command[:4] == ["/bin/bash", "-o", "pipefail", "-c"]
+                ):
+                    # Harnesses conventionally return an explicit Bash wrapper.
+                    # Executing that wrapper verbatim would merely move the
+                    # oversized payload from Docker's argv to Bash's ``-c``
+                    # argv. The private script is already interpreted by Bash,
+                    # so carry the exact inner payload directly and preserve
+                    # the requested pipefail option.
+                    script_command = "\n".join(
+                        [*shell_exports, "set -o pipefail", parsed_command[4]]
+                    )
                 payload = (
                     "#!/bin/bash\n"
                     f"rm -f -- {shlex.quote(remote_path)}\n"
-                    f"{wrapped_command}\n"
+                    f"{script_command}\n"
                 ).encode()
                 view = memoryview(payload)
                 while view:
