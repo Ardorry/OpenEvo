@@ -405,7 +405,7 @@ def load_reflector_boundary_checkpoint(
     for phase in _REFLECTOR_PHASE_METHODS:
         if claims[phase].get("status") != "replacement_ready":
             raise ValueError("Reflector replacement is not ready")
-        if verified_no_effect_attempt_count(claims[phase], pair_id=pair_id, phase=phase) != 1:
+        if verified_no_effect_attempt_count(claims[phase], pair_id=pair_id, phase=phase) < 1:
             raise ValueError("Reflector replacement attempt evidence differs")
     baseline = Trajectory.model_validate(checkpoint.get("baseline"))
     evaluation = EvaluatorFeedback.model_validate(
