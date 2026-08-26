@@ -680,7 +680,10 @@ def main(argv: list[str] | None = None) -> None:
         if len(allowed) != PAPER_EVALUATOR_CALL_COUNT:
             raise SystemExit("paper evaluator plan allowlist is incomplete")
         configured_budget = float(os.environ.get("CHEMCROW_PAPER_EVALUATOR_MAX_USD", "0"))
-        call_id_prefix = "paper-chemcrow-"
+        plan_call_id_prefix = plan.get("call_id_prefix")
+        if not isinstance(plan_call_id_prefix, str):
+            raise SystemExit("paper evaluator call ID prefix is absent")
+        call_id_prefix = f"{plan_call_id_prefix}-chemcrow-"
         ledger_class = "production"
     required_budget = float(plan["cost_ceiling"]["list_price_ceiling_usd_total"])
     if configured_budget < required_budget:

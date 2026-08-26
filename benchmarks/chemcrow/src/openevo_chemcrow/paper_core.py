@@ -18,6 +18,7 @@ from .paper_evaluator import (
     PAPER_EVALUATOR_MODEL,
     PAPER_EVALUATOR_PROTOCOL,
     PAPER_EVALUATOR_TEMPERATURE,
+    SUPPORTED_PAPER_SOURCE_PAIR_PROTOCOLS,
     DualStudentAssessment,
     PaperEvaluationCall,
     extract_historical_evaluator_grades,
@@ -239,8 +240,14 @@ def _validate_plan_authority(plan: dict[str, Any]) -> None:
         or plan.get("call_count") != PAPER_EVALUATOR_CALL_COUNT
         or plan.get("reflector_access") is not False
         or plan.get("sealed_output_only") is not True
-        or plan.get("source_pair_protocol")
-        != "chemcrow-three-isolated-artifacts-v1"
+        or plan.get("source_pair_protocol") not in SUPPORTED_PAPER_SOURCE_PAIR_PROTOCOLS
+        or not isinstance(plan.get("call_id_prefix"), str)
+        or any(
+            not str(call.get("call_id", "")).startswith(
+                f"{plan['call_id_prefix']}-chemcrow-"
+            )
+            for call in plan.get("calls", [])
+        )
     ):
         raise ValueError("paper evaluator plan authority is invalid")
 

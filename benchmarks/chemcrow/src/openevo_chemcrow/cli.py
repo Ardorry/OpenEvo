@@ -1179,6 +1179,12 @@ def command_paper_evaluator_preflight(args: argparse.Namespace) -> int:
             tasks=tasks,
             pairs=pairs,
             historical=historical,
+            call_id_prefix=str(config.get("call_id_prefix", "paper")),
+            expected_source_pair_protocol=(
+                str(config["source_pair_protocol"])
+                if config.get("source_pair_protocol") is not None
+                else None
+            ),
         )
         plan_path = _path(config_path, str(config["plan_path"]))
         plan_path.parent.mkdir(parents=True, exist_ok=True)

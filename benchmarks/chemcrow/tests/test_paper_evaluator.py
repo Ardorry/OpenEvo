@@ -32,7 +32,13 @@ from openevo_chemcrow.paper_evaluator import (
     validate_assessment_text,
 )
 from openevo_chemcrow.paper_harness import PaperEvaluatorHarness
-from openevo_chemcrow.three_artifact_models import ThreeArtifactPairResult
+from openevo_chemcrow.three_artifact_models import (
+    CORE_NATIVE_THREE_ARTIFACT_BUNDLE_PROTOCOL,
+    CORE_NATIVE_THREE_ARTIFACT_PROTOCOL_LABEL,
+    LEGACY_THREE_ARTIFACT_BUNDLE_PROTOCOL,
+    ThreeArtifactBundleReceipt,
+    ThreeArtifactPairResult,
+)
 
 
 def _tasks() -> list[TaskItem]:
@@ -65,6 +71,9 @@ def test_plan_has_exactly_three_fixed_comparisons_per_task(runs_root):
         task.task_id: ThreeArtifactPairResult.model_construct(
             task_id=task.task_id,
             pair_id=f"test-full-v4--{task.task_id}",
+            artifact_bundle=ThreeArtifactBundleReceipt.model_construct(
+                protocol=LEGACY_THREE_ARTIFACT_BUNDLE_PROTOCOL
+            ),
             baseline=Trajectory(
                 run_id=f"baseline-{task.task_id}",
                 task_id=task.task_id,
@@ -100,6 +109,7 @@ def test_plan_has_exactly_three_fixed_comparisons_per_task(runs_root):
     assert plan["reflector_access"] is False
     assert plan["sealed_output_only"] is True
     assert plan["source_pair_protocol"] == "chemcrow-three-isolated-artifacts-v1"
+    assert plan["call_id_prefix"] == "paper"
     assert plan["provider_only"] == ["openai"]
     assert plan["data_collection"] == "allow"
     assert {call["comparison"] for call in plan["calls"]} == {
@@ -111,6 +121,49 @@ def test_plan_has_exactly_three_fixed_comparisons_per_task(runs_root):
     assert all(call["prompt_sha256"] for call in plan["calls"])
     assert all(call["source_output_id"] for call in plan["calls"])
     assert all(call["source_output_sha256"] for call in plan["calls"])
+
+
+def test_core_native_plan_uses_fresh_namespace_and_native_source_protocol(runs_root):
+    tasks = _tasks()
+    pairs = {
+        task.task_id: ThreeArtifactPairResult.model_construct(
+            task_id=task.task_id,
+            pair_id=f"test-full-v5--{task.task_id}",
+            artifact_bundle=ThreeArtifactBundleReceipt.model_construct(
+                protocol=CORE_NATIVE_THREE_ARTIFACT_BUNDLE_PROTOCOL
+            ),
+            baseline=Trajectory(
+                run_id=f"baseline-{task.task_id}",
+                task_id=task.task_id,
+                role="baseline",
+                status="COMPLETED",
+                answer=f"sealed baseline {task.task_id}",
+                candidate_config_sha256="s0",
+            ),
+            evolved=Trajectory(
+                run_id=f"evolved-{task.task_id}",
+                task_id=task.task_id,
+                role="evolved",
+                status="COMPLETED",
+                answer=f"sealed evolved {task.task_id}",
+                candidate_config_sha256="s0",
+                artifact_ids=["memory", "skill", "agent-system"],
+            ),
+        )
+        for task in tasks
+    }
+
+    plan = build_paper_evaluation_plan(
+        tasks=tasks,
+        pairs=pairs,
+        historical=extract_historical_answers(runs_root=runs_root),
+        call_id_prefix="paper-v5",
+        expected_source_pair_protocol=CORE_NATIVE_THREE_ARTIFACT_PROTOCOL_LABEL,
+    )
+
+    assert plan["source_pair_protocol"] == CORE_NATIVE_THREE_ARTIFACT_PROTOCOL_LABEL
+    assert plan["call_id_prefix"] == "paper-v5"
+    assert all(call["call_id"].startswith("paper-v5-chemcrow-") for call in plan["calls"])
 
 
 def test_production_prompt_is_bound_to_selected_calibration_candidate():

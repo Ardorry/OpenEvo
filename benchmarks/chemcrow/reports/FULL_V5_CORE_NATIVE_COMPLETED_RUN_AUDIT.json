@@ -1,0 +1,51 @@
+{
+  "agent_system_reflector_job_count": 14,
+  "aggregate_sha256": "b03248821c6909577d7a5b571f267a7a85084ae6cbf81c70c9ebe60b4fa636b2",
+  "answers_included": false,
+  "artifact_protocol": "chemcrow-three-isolated-core-native-artifacts-v2",
+  "artifact_registration_count": 42,
+  "artifact_type_counts": {
+    "agent_system": 14,
+    "skill_bundle": 14,
+    "text_memory": 14
+  },
+  "completed_call_checkpoint_count": 0,
+  "confidence_transport_adaptation_count": 0,
+  "core_evolved_injection_receipt_count": 14,
+  "experiment_id": "chemcrow-task-local-full-v5-core-native-three-pipeline",
+  "independent_reflector_job_count": 42,
+  "memory_reflector_job_count": 14,
+  "mock_or_fixture_observations": 0,
+  "observation_source_counts": {
+    "cache_replay": 127,
+    "live": 369
+  },
+  "reset_receipt_count": 14,
+  "s0_config_sha256": "bde582b39b69bb7afcc4c5f98ba782f34165d4d3288fdc8c75063a7e3df0348e",
+  "schema_version": "chemcrow_three_artifact_completed_run_audit_v1",
+  "sibling_isolation_evidence_count": 42,
+  "skill_reflector_job_count": 14,
+  "status": "PASS",
+  "task_count": 14,
+  "task_ids": [
+    "chemcrow-01",
+    "chemcrow-02",
+    "chemcrow-03",
+    "chemcrow-04",
+    "chemcrow-05",
+    "chemcrow-06",
+    "chemcrow-07",
+    "chemcrow-08",
+    "chemcrow-09",
+    "chemcrow-10",
+    "chemcrow-12",
+    "chemcrow-13",
+    "chemcrow-14",
+    "chemcrow-15"
+  ],
+  "tool_calls": 496,
+  "tool_errors": 113,
+  "unique_artifact_count": 42,
+  "verified_pre_candidate_no_effect_attempt_count": 0,
+  "verified_reflector_no_effect_attempt_count": 9
+}

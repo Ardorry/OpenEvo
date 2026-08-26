@@ -18,7 +18,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .hashing import canonical_sha256, file_sha256
 from .models import TaskItem
-from .three_artifact_models import ThreeArtifactPairResult
+from .three_artifact_models import (
+    CORE_NATIVE_THREE_ARTIFACT_PROTOCOL_LABEL,
+    LEGACY_THREE_ARTIFACT_PROTOCOL_LABEL,
+    ThreeArtifactPairResult,
+    three_artifact_protocol_label,
+)
 
 PAPER_EVALUATOR_PROTOCOL = "CHEMCROW_EVALUATORGPT_PROMPT_CALIBRATED_V2"
 PAPER_EVALUATOR_PROMPT_CANDIDATE = "PAPER_MINIMAL"
@@ -38,6 +43,12 @@ PAPER_EVALUATOR_INPUT_USD_PER_TOKEN = 0.00003
 PAPER_EVALUATOR_OUTPUT_USD_PER_TOKEN = 0.00006
 PAPER_EVALUATOR_CALL_COUNT = 42
 PAPER_EVALUATOR_AUTHORIZATION = "I_AUTHORIZE_42_SEALED_PAPER_EVALUATIONS"
+SUPPORTED_PAPER_SOURCE_PAIR_PROTOCOLS = frozenset(
+    {
+        LEGACY_THREE_ARTIFACT_PROTOCOL_LABEL,
+        CORE_NATIVE_THREE_ARTIFACT_PROTOCOL_LABEL,
+    }
+)
 
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 FROZEN_PAPER_TASK_IDS = tuple(
@@ -227,7 +238,7 @@ def assert_sealed_run_ready(
         or audit.get("experiment_id") != experiment_id
         or audit.get("task_ids") != task_ids
         or audit.get("task_count") != len(task_ids)
-        or audit.get("artifact_protocol") != "chemcrow-three-isolated-artifacts-v1"
+        or audit.get("artifact_protocol") not in SUPPORTED_PAPER_SOURCE_PAIR_PROTOCOLS
         or audit.get("unique_artifact_count") != len(task_ids) * 3
         or audit.get("independent_reflector_job_count") != len(task_ids) * 3
         or audit.get("core_evolved_injection_receipt_count") != len(task_ids)
@@ -262,6 +273,9 @@ def assert_sealed_run_ready(
         )
         if pair.task_id != task_id or pair.pair_id != f"{experiment_id}--{task_id}":
             raise ValueError(f"pair task authority mismatch: {task_id}")
+        pair_protocol = three_artifact_protocol_label(pair.artifact_bundle.protocol)
+        if pair_protocol != audit["artifact_protocol"]:
+            raise ValueError(f"pair artifact protocol differs from audit: {task_id}")
         pairs[task_id] = pair
     return pairs
 
@@ -271,9 +285,32 @@ def build_paper_evaluation_plan(
     tasks: list[TaskItem],
     pairs: dict[str, ThreeArtifactPairResult],
     historical: dict[str, HistoricalAnswers],
+    call_id_prefix: str = "paper",
+    expected_source_pair_protocol: str | None = None,
 ) -> dict[str, Any]:
     if [task.task_id for task in tasks] != list(FROZEN_PAPER_TASK_IDS):
         raise ValueError("sanitized task manifest differs from frozen paper order")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,47}", call_id_prefix):
+        raise ValueError("paper evaluator call ID prefix is invalid")
+    if any(not isinstance(pair, ThreeArtifactPairResult) for pair in pairs.values()):
+        raise TypeError(
+            "paper evaluation requires authoritative three-artifact pair results; "
+            "legacy single-artifact pairs are provisional only"
+        )
+    source_pair_protocols = {
+        three_artifact_protocol_label(pair.artifact_bundle.protocol)
+        for pair in pairs.values()
+    }
+    if len(source_pair_protocols) != 1:
+        raise ValueError("paper evaluation requires one homogeneous source pair protocol")
+    source_pair_protocol = source_pair_protocols.pop()
+    if source_pair_protocol not in SUPPORTED_PAPER_SOURCE_PAIR_PROTOCOLS:
+        raise ValueError("paper evaluation source pair protocol is unsupported")
+    if (
+        expected_source_pair_protocol is not None
+        and expected_source_pair_protocol != source_pair_protocol
+    ):
+        raise ValueError("paper evaluation source pair protocol differs from config")
     calls: list[PaperEvaluationCall] = []
     for task in tasks:
         pair = pairs[task.task_id]
@@ -322,7 +359,7 @@ def build_paper_evaluation_plan(
                 student_a=answer_a,
                 student_b=old.gpt4_answer,
             )
-            call_id = f"paper-{task.task_id}-{comparison}"
+            call_id = f"{call_id_prefix}-{task.task_id}-{comparison}"
             estimated = estimate_chat_input_tokens(prompt)
             if estimated > paper_cost_ceiling()["max_input_tokens_per_call"]:
                 raise ValueError(
@@ -374,7 +411,8 @@ def build_paper_evaluation_plan(
         "reflector_access": False,
         "evolution_feedback_access": False,
         "sealed_output_only": True,
-        "source_pair_protocol": "chemcrow-three-isolated-artifacts-v1",
+        "source_pair_protocol": source_pair_protocol,
+        "call_id_prefix": call_id_prefix,
         "contains_historical_student_answers": True,
         "call_count": len(calls),
         "cost_ceiling": ceiling,
