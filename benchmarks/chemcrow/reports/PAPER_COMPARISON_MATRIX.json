@@ -1,1316 +1,747 @@
 {
+  "all_prompt_hashes_frozen": true,
   "arithmetic": "14 tasks x 3 comparisons = 42 calls",
-  "blueprint_ready": true,
   "calibration_results_sha256": "a901f03a5e5a58c7d64b7e5dea36c5f6c0d1634f0432f024f69d1394240983e2",
   "call_count": 42,
   "calls": [
     {
-      "call_id": "paper-chemcrow-01-historical_control",
+      "call_id": "paper-v5r1-chemcrow-01-historical_control",
       "comparison": "historical_control",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "3db8794d24a7f1759b990df2d9a426c1feef7189b1d1e5146551454b24f08732",
+      "metric_classification": "paper_control_reconstruction",
       "paper_comparable": true,
-      "paper_comparable_or_project_added": "paper_control_reconstruction",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
       "prompt_sha256": "8b9162069239ba06ef369c12574f3ea953708d9700fd51ff0a1fb80203a84254",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-01:historical_chemcrow",
+      "source_output_sha256": "f6856568a4a0c4c3fb0ec3be8fd24c1978926fdcc2d341cd8fdaace602c55551",
       "source_pair_id": "historical-notebook:chemcrow-01",
       "source_pair_result_sha256": "1fadda01b0b848a8aaf0333ceafc4a4352f416d7ea5b1874e8840c5bc01fd2f9",
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "1fadda01b0b848a8aaf0333ceafc4a4352f416d7ea5b1874e8840c5bc01fd2f9",
-        "student_a": {
-          "output_id": "chemcrow-01:historical_chemcrow",
-          "sha256": "f6856568a4a0c4c3fb0ec3be8fd24c1978926fdcc2d341cd8fdaace602c55551"
-        },
-        "student_b": {
-          "output_id": "chemcrow-01:historical_gpt4",
-          "sha256": "3db8794d24a7f1759b990df2d9a426c1feef7189b1d1e5146551454b24f08732"
-        }
-      },
-      "state": "FROZEN",
       "student_a_system": "historical_chemcrow",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "f6856568a4a0c4c3fb0ec3be8fd24c1978926fdcc2d341cd8fdaace602c55551",
       "task_id": "chemcrow-01"
     },
     {
-      "call_id": "paper-chemcrow-01-baseline",
+      "call_id": "paper-v5r1-chemcrow-01-baseline",
       "comparison": "baseline",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "3db8794d24a7f1759b990df2d9a426c1feef7189b1d1e5146551454b24f08732",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-01",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "1fadda01b0b848a8aaf0333ceafc4a4352f416d7ea5b1874e8840c5bc01fd2f9",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-01:historical_gpt4",
-          "sha256": "3db8794d24a7f1759b990df2d9a426c1feef7189b1d1e5146551454b24f08732"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "e627ca8686f45ccbb9d277947de9fc533885b894702a6076b116045873eca1b7",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-01-baseline-1b06f538bf",
+      "source_output_sha256": "0663bdecab9b7ce14fd4e31512c462800c9c26b8b846795751c45cd8bfbf75c1",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-01",
+      "source_pair_result_sha256": "3d6e1f77e9c97ae8dc22901f041b6a8220fe28ca577cad91ca7fec27c3bd20a7",
       "student_a_system": "openevo_baseline",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "0663bdecab9b7ce14fd4e31512c462800c9c26b8b846795751c45cd8bfbf75c1",
       "task_id": "chemcrow-01"
     },
     {
-      "call_id": "paper-chemcrow-01-evolved",
+      "call_id": "paper-v5r1-chemcrow-01-evolved",
       "comparison": "evolved",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "3db8794d24a7f1759b990df2d9a426c1feef7189b1d1e5146551454b24f08732",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-01",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "1fadda01b0b848a8aaf0333ceafc4a4352f416d7ea5b1874e8840c5bc01fd2f9",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-01:historical_gpt4",
-          "sha256": "3db8794d24a7f1759b990df2d9a426c1feef7189b1d1e5146551454b24f08732"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "27eee8c9039f042265fcc798a80645dfe313a9eb1a69fbfa30fc39a6c7f82ff8",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-01-evolved-e167a19152",
+      "source_output_sha256": "6ab631aaa71294e5b4b7d84def45122c3a5fd670964f930c96e418150946c10f",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-01",
+      "source_pair_result_sha256": "3d6e1f77e9c97ae8dc22901f041b6a8220fe28ca577cad91ca7fec27c3bd20a7",
       "student_a_system": "openevo_evolved",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "6ab631aaa71294e5b4b7d84def45122c3a5fd670964f930c96e418150946c10f",
       "task_id": "chemcrow-01"
     },
     {
-      "call_id": "paper-chemcrow-02-historical_control",
+      "call_id": "paper-v5r1-chemcrow-02-historical_control",
       "comparison": "historical_control",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "d4e4571e4ac9647bd5ecc614b6a1dbe0e206569bc68913b62c81b527d020e359",
+      "metric_classification": "paper_control_reconstruction",
       "paper_comparable": true,
-      "paper_comparable_or_project_added": "paper_control_reconstruction",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
       "prompt_sha256": "32a4034ff4e0eb3725bd4cb84a6acbbd2414f7b9882bff1cb2947289003d48cc",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-02:historical_chemcrow",
+      "source_output_sha256": "734192e475c739f468201a0a867fd39dcc22a84ff7d8a5ef2648a455ce36fe28",
       "source_pair_id": "historical-notebook:chemcrow-02",
       "source_pair_result_sha256": "8b95bb2e68ff36198d7813da4fb74e8b547d4f40c4759d258ce15044d56c9fe3",
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "8b95bb2e68ff36198d7813da4fb74e8b547d4f40c4759d258ce15044d56c9fe3",
-        "student_a": {
-          "output_id": "chemcrow-02:historical_chemcrow",
-          "sha256": "734192e475c739f468201a0a867fd39dcc22a84ff7d8a5ef2648a455ce36fe28"
-        },
-        "student_b": {
-          "output_id": "chemcrow-02:historical_gpt4",
-          "sha256": "d4e4571e4ac9647bd5ecc614b6a1dbe0e206569bc68913b62c81b527d020e359"
-        }
-      },
-      "state": "FROZEN",
       "student_a_system": "historical_chemcrow",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "734192e475c739f468201a0a867fd39dcc22a84ff7d8a5ef2648a455ce36fe28",
       "task_id": "chemcrow-02"
     },
     {
-      "call_id": "paper-chemcrow-02-baseline",
+      "call_id": "paper-v5r1-chemcrow-02-baseline",
       "comparison": "baseline",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "d4e4571e4ac9647bd5ecc614b6a1dbe0e206569bc68913b62c81b527d020e359",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-02",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "8b95bb2e68ff36198d7813da4fb74e8b547d4f40c4759d258ce15044d56c9fe3",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-02:historical_gpt4",
-          "sha256": "d4e4571e4ac9647bd5ecc614b6a1dbe0e206569bc68913b62c81b527d020e359"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "93a546d758dea03d753c3a4df8a3166d635565caa51a0cc7e9685a01cc1608c1",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-02-baseline-36bbf91970",
+      "source_output_sha256": "d69181c5a7ec4f0e41bda5a4eee175988d5126ed745d58ca24c0f240c1ad8a4a",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-02",
+      "source_pair_result_sha256": "aa5718b77d61ff2f23914ed52e73114c8d2a40061c96a7a59f931aa12c50ac77",
       "student_a_system": "openevo_baseline",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "d69181c5a7ec4f0e41bda5a4eee175988d5126ed745d58ca24c0f240c1ad8a4a",
       "task_id": "chemcrow-02"
     },
     {
-      "call_id": "paper-chemcrow-02-evolved",
+      "call_id": "paper-v5r1-chemcrow-02-evolved",
       "comparison": "evolved",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "d4e4571e4ac9647bd5ecc614b6a1dbe0e206569bc68913b62c81b527d020e359",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-02",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "8b95bb2e68ff36198d7813da4fb74e8b547d4f40c4759d258ce15044d56c9fe3",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-02:historical_gpt4",
-          "sha256": "d4e4571e4ac9647bd5ecc614b6a1dbe0e206569bc68913b62c81b527d020e359"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "392be66f8cdb5c431f991d0fedd6f24cf97c8424790df6beb5ed75f8d8ab3fb2",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-02-evolved-674c185eec",
+      "source_output_sha256": "1ddf42d18fd6a4073f2d3b4bf1a8d482dbe2c25612312bf2b1119d1d5f36b59b",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-02",
+      "source_pair_result_sha256": "aa5718b77d61ff2f23914ed52e73114c8d2a40061c96a7a59f931aa12c50ac77",
       "student_a_system": "openevo_evolved",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "1ddf42d18fd6a4073f2d3b4bf1a8d482dbe2c25612312bf2b1119d1d5f36b59b",
       "task_id": "chemcrow-02"
     },
     {
-      "call_id": "paper-chemcrow-03-historical_control",
+      "call_id": "paper-v5r1-chemcrow-03-historical_control",
       "comparison": "historical_control",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "9f981f6d628c39ac039e1ee7d8733330e474466f6223fda4f017f521d63fc1e8",
+      "metric_classification": "paper_control_reconstruction",
       "paper_comparable": true,
-      "paper_comparable_or_project_added": "paper_control_reconstruction",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
       "prompt_sha256": "a3794fa4c3661ddb0f8066a959e584dcb54e88c94113a8dc4aaafa07ec98a874",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-03:historical_chemcrow",
+      "source_output_sha256": "38c643bbc252b7651e957d6b2f23e0fae88d11c18ddc8753fa3fc40392b66ebf",
       "source_pair_id": "historical-notebook:chemcrow-03",
       "source_pair_result_sha256": "fb2a1192d23d3885f0cd211b09377f8bc88d4843bdef20e6197bfa7c43a87aaa",
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "fb2a1192d23d3885f0cd211b09377f8bc88d4843bdef20e6197bfa7c43a87aaa",
-        "student_a": {
-          "output_id": "chemcrow-03:historical_chemcrow",
-          "sha256": "38c643bbc252b7651e957d6b2f23e0fae88d11c18ddc8753fa3fc40392b66ebf"
-        },
-        "student_b": {
-          "output_id": "chemcrow-03:historical_gpt4",
-          "sha256": "9f981f6d628c39ac039e1ee7d8733330e474466f6223fda4f017f521d63fc1e8"
-        }
-      },
-      "state": "FROZEN",
       "student_a_system": "historical_chemcrow",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "38c643bbc252b7651e957d6b2f23e0fae88d11c18ddc8753fa3fc40392b66ebf",
       "task_id": "chemcrow-03"
     },
     {
-      "call_id": "paper-chemcrow-03-baseline",
+      "call_id": "paper-v5r1-chemcrow-03-baseline",
       "comparison": "baseline",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "9f981f6d628c39ac039e1ee7d8733330e474466f6223fda4f017f521d63fc1e8",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-03",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "fb2a1192d23d3885f0cd211b09377f8bc88d4843bdef20e6197bfa7c43a87aaa",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-03:historical_gpt4",
-          "sha256": "9f981f6d628c39ac039e1ee7d8733330e474466f6223fda4f017f521d63fc1e8"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "42b82c84f47fc572952e41ae0b0899da6a71e745c5cf63087305db9250446580",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-03-baseline-5722852ab4",
+      "source_output_sha256": "0072b64ba5dc3914beab13efad60cce4c32bb2e0337c875b416d27fb89f4e6a5",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-03",
+      "source_pair_result_sha256": "d6888002f2b10917fab2055ae592e23e7ac216a5788c97b9e565920c169c1473",
       "student_a_system": "openevo_baseline",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "0072b64ba5dc3914beab13efad60cce4c32bb2e0337c875b416d27fb89f4e6a5",
       "task_id": "chemcrow-03"
     },
     {
-      "call_id": "paper-chemcrow-03-evolved",
+      "call_id": "paper-v5r1-chemcrow-03-evolved",
       "comparison": "evolved",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "9f981f6d628c39ac039e1ee7d8733330e474466f6223fda4f017f521d63fc1e8",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-03",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "fb2a1192d23d3885f0cd211b09377f8bc88d4843bdef20e6197bfa7c43a87aaa",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-03:historical_gpt4",
-          "sha256": "9f981f6d628c39ac039e1ee7d8733330e474466f6223fda4f017f521d63fc1e8"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "fd622824057486cb173c2b11b0890a11f227b4804dde621ca303452813e9687b",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-03-evolved-4ab05212e7",
+      "source_output_sha256": "05e3ba2029df3822ca36e91650f7074d41182a5a01bc43a737998b7a34a98188",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-03",
+      "source_pair_result_sha256": "d6888002f2b10917fab2055ae592e23e7ac216a5788c97b9e565920c169c1473",
       "student_a_system": "openevo_evolved",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "05e3ba2029df3822ca36e91650f7074d41182a5a01bc43a737998b7a34a98188",
       "task_id": "chemcrow-03"
     },
     {
-      "call_id": "paper-chemcrow-04-historical_control",
+      "call_id": "paper-v5r1-chemcrow-04-historical_control",
       "comparison": "historical_control",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "03d97d032f6515595bdc3ef7870ad8a01836e7d509b08974fd6047f20980c55d",
+      "metric_classification": "paper_control_reconstruction",
       "paper_comparable": true,
-      "paper_comparable_or_project_added": "paper_control_reconstruction",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
       "prompt_sha256": "ee3f60839a74d86302f5f92ef6e91d3623e2e95184f695f88dd8f6c294959287",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-04:historical_chemcrow",
+      "source_output_sha256": "55a00d41c3f2185c738195a6db8c9646ee83a0f43bee172e1d57a755dd736c60",
       "source_pair_id": "historical-notebook:chemcrow-04",
       "source_pair_result_sha256": "4c2f2e234231fc2d0019517be46f88d6b04e205e64400124b1cce742fc8cb101",
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "4c2f2e234231fc2d0019517be46f88d6b04e205e64400124b1cce742fc8cb101",
-        "student_a": {
-          "output_id": "chemcrow-04:historical_chemcrow",
-          "sha256": "55a00d41c3f2185c738195a6db8c9646ee83a0f43bee172e1d57a755dd736c60"
-        },
-        "student_b": {
-          "output_id": "chemcrow-04:historical_gpt4",
-          "sha256": "03d97d032f6515595bdc3ef7870ad8a01836e7d509b08974fd6047f20980c55d"
-        }
-      },
-      "state": "FROZEN",
       "student_a_system": "historical_chemcrow",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "55a00d41c3f2185c738195a6db8c9646ee83a0f43bee172e1d57a755dd736c60",
       "task_id": "chemcrow-04"
     },
     {
-      "call_id": "paper-chemcrow-04-baseline",
+      "call_id": "paper-v5r1-chemcrow-04-baseline",
       "comparison": "baseline",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "03d97d032f6515595bdc3ef7870ad8a01836e7d509b08974fd6047f20980c55d",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-04",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "4c2f2e234231fc2d0019517be46f88d6b04e205e64400124b1cce742fc8cb101",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-04:historical_gpt4",
-          "sha256": "03d97d032f6515595bdc3ef7870ad8a01836e7d509b08974fd6047f20980c55d"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "3c5e82b02bc90660afb0002d4cc1641db2c100167b9e070924ed8b7e8fe2c5a0",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-04-baseline-7017bf8c88",
+      "source_output_sha256": "dade2012f8bceb5b34648ce9516fd1c3fa21ec4f38ba0b8e3052c00e242cc058",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-04",
+      "source_pair_result_sha256": "6b1542627a86d0d3056f1bf64fe32b4163f7b0deca508da164bcfab58ba37ced",
       "student_a_system": "openevo_baseline",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "dade2012f8bceb5b34648ce9516fd1c3fa21ec4f38ba0b8e3052c00e242cc058",
       "task_id": "chemcrow-04"
     },
     {
-      "call_id": "paper-chemcrow-04-evolved",
+      "call_id": "paper-v5r1-chemcrow-04-evolved",
       "comparison": "evolved",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "03d97d032f6515595bdc3ef7870ad8a01836e7d509b08974fd6047f20980c55d",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-04",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "4c2f2e234231fc2d0019517be46f88d6b04e205e64400124b1cce742fc8cb101",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-04:historical_gpt4",
-          "sha256": "03d97d032f6515595bdc3ef7870ad8a01836e7d509b08974fd6047f20980c55d"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "dc183b06ac57445a42fbcfabe99b63fbba5ea19fee637d611ae14851515a119f",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-04-evolved-0ee52d2433",
+      "source_output_sha256": "35eadd62aaf4a7f8e4ff81e0ed57fb5a45f98f84cc6298380397839e49db1ba9",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-04",
+      "source_pair_result_sha256": "6b1542627a86d0d3056f1bf64fe32b4163f7b0deca508da164bcfab58ba37ced",
       "student_a_system": "openevo_evolved",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "35eadd62aaf4a7f8e4ff81e0ed57fb5a45f98f84cc6298380397839e49db1ba9",
       "task_id": "chemcrow-04"
     },
     {
-      "call_id": "paper-chemcrow-05-historical_control",
+      "call_id": "paper-v5r1-chemcrow-05-historical_control",
       "comparison": "historical_control",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "70004ed4383000e29e58602af85a7ea98d0b54ef75c488d9287a6c5ec5ddb176",
+      "metric_classification": "paper_control_reconstruction",
       "paper_comparable": true,
-      "paper_comparable_or_project_added": "paper_control_reconstruction",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
       "prompt_sha256": "72a5ffe8bda4f03c9050ede92733f8a99d52899baf3d899d9595a4902383f506",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-05:historical_chemcrow",
+      "source_output_sha256": "c00aac01d95431ec4207bb008ba28de69941b171fecd58008a88b2866d0cb9c7",
       "source_pair_id": "historical-notebook:chemcrow-05",
       "source_pair_result_sha256": "68e919972314d887173b30c04c68561a4882fee42851c044e45836b507302aef",
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "68e919972314d887173b30c04c68561a4882fee42851c044e45836b507302aef",
-        "student_a": {
-          "output_id": "chemcrow-05:historical_chemcrow",
-          "sha256": "c00aac01d95431ec4207bb008ba28de69941b171fecd58008a88b2866d0cb9c7"
-        },
-        "student_b": {
-          "output_id": "chemcrow-05:historical_gpt4",
-          "sha256": "70004ed4383000e29e58602af85a7ea98d0b54ef75c488d9287a6c5ec5ddb176"
-        }
-      },
-      "state": "FROZEN",
       "student_a_system": "historical_chemcrow",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "c00aac01d95431ec4207bb008ba28de69941b171fecd58008a88b2866d0cb9c7",
       "task_id": "chemcrow-05"
     },
     {
-      "call_id": "paper-chemcrow-05-baseline",
+      "call_id": "paper-v5r1-chemcrow-05-baseline",
       "comparison": "baseline",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "70004ed4383000e29e58602af85a7ea98d0b54ef75c488d9287a6c5ec5ddb176",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-05",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "68e919972314d887173b30c04c68561a4882fee42851c044e45836b507302aef",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-05:historical_gpt4",
-          "sha256": "70004ed4383000e29e58602af85a7ea98d0b54ef75c488d9287a6c5ec5ddb176"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "2b4bca788801268c33530bd71cc4bf7f43dda47df83977dab174869dfa02b1c3",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-05-baseline-faf66bf2da",
+      "source_output_sha256": "e29369c7d37434a187364db0e2fdd6b765ec41cb9017e775489c9a20b8e2141b",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-05",
+      "source_pair_result_sha256": "64a2c6b1c3868a6379b23358d5b2d7299eb6b8a3744974908164c0b4c0439d09",
       "student_a_system": "openevo_baseline",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "e29369c7d37434a187364db0e2fdd6b765ec41cb9017e775489c9a20b8e2141b",
       "task_id": "chemcrow-05"
     },
     {
-      "call_id": "paper-chemcrow-05-evolved",
+      "call_id": "paper-v5r1-chemcrow-05-evolved",
       "comparison": "evolved",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "70004ed4383000e29e58602af85a7ea98d0b54ef75c488d9287a6c5ec5ddb176",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-05",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "68e919972314d887173b30c04c68561a4882fee42851c044e45836b507302aef",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-05:historical_gpt4",
-          "sha256": "70004ed4383000e29e58602af85a7ea98d0b54ef75c488d9287a6c5ec5ddb176"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "ddd605d4ae4a076477d902e225a5f01765cec689432082d7c17eaef5bb8fd883",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-05-evolved-e7865fc260",
+      "source_output_sha256": "d9d2472e122ed33957f321ea6b52ee11368acafed736b25e7576fe9b7f73f76e",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-05",
+      "source_pair_result_sha256": "64a2c6b1c3868a6379b23358d5b2d7299eb6b8a3744974908164c0b4c0439d09",
       "student_a_system": "openevo_evolved",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "d9d2472e122ed33957f321ea6b52ee11368acafed736b25e7576fe9b7f73f76e",
       "task_id": "chemcrow-05"
     },
     {
-      "call_id": "paper-chemcrow-06-historical_control",
+      "call_id": "paper-v5r1-chemcrow-06-historical_control",
       "comparison": "historical_control",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "0491584c831bc5624af1cf5bdc6d3250bc662e04d50ccbbbc820d8bee78a304f",
+      "metric_classification": "paper_control_reconstruction",
       "paper_comparable": true,
-      "paper_comparable_or_project_added": "paper_control_reconstruction",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
       "prompt_sha256": "7436eb184ff12f1a487832a7420bf2f169fe4c08af5f4a8ee860593ac08d1f03",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-06:historical_chemcrow",
+      "source_output_sha256": "fe7b60ba1ae2be2a0fb7aae3271d266898d77a702c44b1394bace2f2faed89b8",
       "source_pair_id": "historical-notebook:chemcrow-06",
       "source_pair_result_sha256": "c87c6dad49b96f21f87574d22611c37f0853043861589130d4f113653f5f1b2b",
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "c87c6dad49b96f21f87574d22611c37f0853043861589130d4f113653f5f1b2b",
-        "student_a": {
-          "output_id": "chemcrow-06:historical_chemcrow",
-          "sha256": "fe7b60ba1ae2be2a0fb7aae3271d266898d77a702c44b1394bace2f2faed89b8"
-        },
-        "student_b": {
-          "output_id": "chemcrow-06:historical_gpt4",
-          "sha256": "0491584c831bc5624af1cf5bdc6d3250bc662e04d50ccbbbc820d8bee78a304f"
-        }
-      },
-      "state": "FROZEN",
       "student_a_system": "historical_chemcrow",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "fe7b60ba1ae2be2a0fb7aae3271d266898d77a702c44b1394bace2f2faed89b8",
       "task_id": "chemcrow-06"
     },
     {
-      "call_id": "paper-chemcrow-06-baseline",
+      "call_id": "paper-v5r1-chemcrow-06-baseline",
       "comparison": "baseline",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "0491584c831bc5624af1cf5bdc6d3250bc662e04d50ccbbbc820d8bee78a304f",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-06",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "c87c6dad49b96f21f87574d22611c37f0853043861589130d4f113653f5f1b2b",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-06:historical_gpt4",
-          "sha256": "0491584c831bc5624af1cf5bdc6d3250bc662e04d50ccbbbc820d8bee78a304f"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "51af6aafd8136bc6feae648531572e6c2c88d855a2c6db9fa0ba922a4e1ee666",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-06-baseline-96127eebbb",
+      "source_output_sha256": "6cf8d0c0fcdf70272377e4b04f29681f67d138a3014653952fcf0dcc8330072f",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-06",
+      "source_pair_result_sha256": "cf6a5bedc86b31649e423707c6e5bcf1b078254fd7a69f7f5e8c1c822222d567",
       "student_a_system": "openevo_baseline",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "6cf8d0c0fcdf70272377e4b04f29681f67d138a3014653952fcf0dcc8330072f",
       "task_id": "chemcrow-06"
     },
     {
-      "call_id": "paper-chemcrow-06-evolved",
+      "call_id": "paper-v5r1-chemcrow-06-evolved",
       "comparison": "evolved",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "0491584c831bc5624af1cf5bdc6d3250bc662e04d50ccbbbc820d8bee78a304f",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-06",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "c87c6dad49b96f21f87574d22611c37f0853043861589130d4f113653f5f1b2b",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-06:historical_gpt4",
-          "sha256": "0491584c831bc5624af1cf5bdc6d3250bc662e04d50ccbbbc820d8bee78a304f"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "dad86728da83375b54dfd183bd944fee8a61c6456ba2644991946a55bc2f9853",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-06-evolved-ec63461012",
+      "source_output_sha256": "5932f28acfa3a9effb0f27a582bbff66689c23b5e36b102a355fead2e043431e",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-06",
+      "source_pair_result_sha256": "cf6a5bedc86b31649e423707c6e5bcf1b078254fd7a69f7f5e8c1c822222d567",
       "student_a_system": "openevo_evolved",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "5932f28acfa3a9effb0f27a582bbff66689c23b5e36b102a355fead2e043431e",
       "task_id": "chemcrow-06"
     },
     {
-      "call_id": "paper-chemcrow-07-historical_control",
+      "call_id": "paper-v5r1-chemcrow-07-historical_control",
       "comparison": "historical_control",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "21f022f83147b9c49fa5b1181e9b18d65b72d7a8df181132c81d812209f18bde",
+      "metric_classification": "paper_control_reconstruction",
       "paper_comparable": true,
-      "paper_comparable_or_project_added": "paper_control_reconstruction",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
       "prompt_sha256": "b28bf483bea700b471f80c2bfc855fe302935d1a3b8a822d88033a0b787079dc",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-07:historical_chemcrow",
+      "source_output_sha256": "226fcfbc863e071a1bba36fcead22282cbcd9466818c74c45a6c42dad1b9fd9f",
       "source_pair_id": "historical-notebook:chemcrow-07",
       "source_pair_result_sha256": "1f764583f4e9ef842c051bc693a86c4a9309d6348884a8974d4c63ca887befdd",
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "1f764583f4e9ef842c051bc693a86c4a9309d6348884a8974d4c63ca887befdd",
-        "student_a": {
-          "output_id": "chemcrow-07:historical_chemcrow",
-          "sha256": "226fcfbc863e071a1bba36fcead22282cbcd9466818c74c45a6c42dad1b9fd9f"
-        },
-        "student_b": {
-          "output_id": "chemcrow-07:historical_gpt4",
-          "sha256": "21f022f83147b9c49fa5b1181e9b18d65b72d7a8df181132c81d812209f18bde"
-        }
-      },
-      "state": "FROZEN",
       "student_a_system": "historical_chemcrow",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "226fcfbc863e071a1bba36fcead22282cbcd9466818c74c45a6c42dad1b9fd9f",
       "task_id": "chemcrow-07"
     },
     {
-      "call_id": "paper-chemcrow-07-baseline",
+      "call_id": "paper-v5r1-chemcrow-07-baseline",
       "comparison": "baseline",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "21f022f83147b9c49fa5b1181e9b18d65b72d7a8df181132c81d812209f18bde",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-07",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "1f764583f4e9ef842c051bc693a86c4a9309d6348884a8974d4c63ca887befdd",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-07:historical_gpt4",
-          "sha256": "21f022f83147b9c49fa5b1181e9b18d65b72d7a8df181132c81d812209f18bde"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "be5f307f130d30e2111a2227a7fdd0ef182aab8d2630422d6a6578df21e30716",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-07-baseline-a0858e4423",
+      "source_output_sha256": "31be2f550ea2cbcc46d226f5c880b8d235c061b62b4174182f0d9b103ea3589a",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-07",
+      "source_pair_result_sha256": "929d6c8017c6b51904c75eb5991e07681d7f81e05ec3d2789217161962f17906",
       "student_a_system": "openevo_baseline",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "31be2f550ea2cbcc46d226f5c880b8d235c061b62b4174182f0d9b103ea3589a",
       "task_id": "chemcrow-07"
     },
     {
-      "call_id": "paper-chemcrow-07-evolved",
+      "call_id": "paper-v5r1-chemcrow-07-evolved",
       "comparison": "evolved",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "21f022f83147b9c49fa5b1181e9b18d65b72d7a8df181132c81d812209f18bde",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-07",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "1f764583f4e9ef842c051bc693a86c4a9309d6348884a8974d4c63ca887befdd",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-07:historical_gpt4",
-          "sha256": "21f022f83147b9c49fa5b1181e9b18d65b72d7a8df181132c81d812209f18bde"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "7d0ce8a1519acd8a32635c670aa1fb1d2c0cd02058e5510c96829431e46b0893",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-07-evolved-977effbe1a",
+      "source_output_sha256": "4ff1ab0a1477c771bb1e94a7919ee0c29505aeab0a34975dfbcc624cca2fd56b",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-07",
+      "source_pair_result_sha256": "929d6c8017c6b51904c75eb5991e07681d7f81e05ec3d2789217161962f17906",
       "student_a_system": "openevo_evolved",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "4ff1ab0a1477c771bb1e94a7919ee0c29505aeab0a34975dfbcc624cca2fd56b",
       "task_id": "chemcrow-07"
     },
     {
-      "call_id": "paper-chemcrow-08-historical_control",
+      "call_id": "paper-v5r1-chemcrow-08-historical_control",
       "comparison": "historical_control",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "52f86e7f4831ccfbbcb55038769c7d82520c3f06b3fffdb493ecd1c330b5e56a",
+      "metric_classification": "paper_control_reconstruction",
       "paper_comparable": true,
-      "paper_comparable_or_project_added": "paper_control_reconstruction",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
       "prompt_sha256": "fffced0a4eb37d4fd76b3f11f1641dfc4070c149cfccb7fbccf4e19f54f24b97",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-08:historical_chemcrow",
+      "source_output_sha256": "7dde57a719c97e24e9723a42c5e74ca28e4ff5be130a97d832d6a78bc39a7d5a",
       "source_pair_id": "historical-notebook:chemcrow-08",
       "source_pair_result_sha256": "a379646239d41bc46a009a50cff8185ca64fcad0092fc10cd9d4d1d9e115a357",
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "a379646239d41bc46a009a50cff8185ca64fcad0092fc10cd9d4d1d9e115a357",
-        "student_a": {
-          "output_id": "chemcrow-08:historical_chemcrow",
-          "sha256": "7dde57a719c97e24e9723a42c5e74ca28e4ff5be130a97d832d6a78bc39a7d5a"
-        },
-        "student_b": {
-          "output_id": "chemcrow-08:historical_gpt4",
-          "sha256": "52f86e7f4831ccfbbcb55038769c7d82520c3f06b3fffdb493ecd1c330b5e56a"
-        }
-      },
-      "state": "FROZEN",
       "student_a_system": "historical_chemcrow",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "7dde57a719c97e24e9723a42c5e74ca28e4ff5be130a97d832d6a78bc39a7d5a",
       "task_id": "chemcrow-08"
     },
     {
-      "call_id": "paper-chemcrow-08-baseline",
+      "call_id": "paper-v5r1-chemcrow-08-baseline",
       "comparison": "baseline",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "52f86e7f4831ccfbbcb55038769c7d82520c3f06b3fffdb493ecd1c330b5e56a",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-08",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "a379646239d41bc46a009a50cff8185ca64fcad0092fc10cd9d4d1d9e115a357",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-08:historical_gpt4",
-          "sha256": "52f86e7f4831ccfbbcb55038769c7d82520c3f06b3fffdb493ecd1c330b5e56a"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "f0c71ad565a648a631f2f7bd2e637c9a2c2b85d5b2172962a28b82e77b6dd585",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-08-baseline-39affe20f7",
+      "source_output_sha256": "6581c45e1370aea30c4835aaecb0d34e7ffd534ce76eba9e170e3d462b799d3f",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-08",
+      "source_pair_result_sha256": "578671165bd964f8f495fdf3d348714ad1df897faad1007c4fcc44912f4d25f5",
       "student_a_system": "openevo_baseline",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "6581c45e1370aea30c4835aaecb0d34e7ffd534ce76eba9e170e3d462b799d3f",
       "task_id": "chemcrow-08"
     },
     {
-      "call_id": "paper-chemcrow-08-evolved",
+      "call_id": "paper-v5r1-chemcrow-08-evolved",
       "comparison": "evolved",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "52f86e7f4831ccfbbcb55038769c7d82520c3f06b3fffdb493ecd1c330b5e56a",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-08",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "a379646239d41bc46a009a50cff8185ca64fcad0092fc10cd9d4d1d9e115a357",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-08:historical_gpt4",
-          "sha256": "52f86e7f4831ccfbbcb55038769c7d82520c3f06b3fffdb493ecd1c330b5e56a"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "24fc41bfabf6cf8b69d2f39e444b75483227396748757e0e8af570f20d317ef9",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-08-evolved-bac320e621",
+      "source_output_sha256": "6eca4ab67e0c7bdfc210e72c7398dfa23f6a6b96b3159ef1c630dd0bc2a7af94",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-08",
+      "source_pair_result_sha256": "578671165bd964f8f495fdf3d348714ad1df897faad1007c4fcc44912f4d25f5",
       "student_a_system": "openevo_evolved",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "6eca4ab67e0c7bdfc210e72c7398dfa23f6a6b96b3159ef1c630dd0bc2a7af94",
       "task_id": "chemcrow-08"
     },
     {
-      "call_id": "paper-chemcrow-09-historical_control",
+      "call_id": "paper-v5r1-chemcrow-09-historical_control",
       "comparison": "historical_control",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "3dde7011783504ee163ffe458280cc22606762f971163fd3a539f5b97cdcc746",
+      "metric_classification": "paper_control_reconstruction",
       "paper_comparable": true,
-      "paper_comparable_or_project_added": "paper_control_reconstruction",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
       "prompt_sha256": "041485cc35c74d2df5c42d41702d74c8014e61b31f140306f7378b6b632f40a6",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-09:historical_chemcrow",
+      "source_output_sha256": "c9debb90170deafb3635f4305c5401f137c80c660e499b4a9ce56c59d41c5c04",
       "source_pair_id": "historical-notebook:chemcrow-09",
       "source_pair_result_sha256": "0ca3bce448b57977c1408199ea2cd3bff74cf4d14bee5976b9321e28bb7dcbc3",
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "0ca3bce448b57977c1408199ea2cd3bff74cf4d14bee5976b9321e28bb7dcbc3",
-        "student_a": {
-          "output_id": "chemcrow-09:historical_chemcrow",
-          "sha256": "c9debb90170deafb3635f4305c5401f137c80c660e499b4a9ce56c59d41c5c04"
-        },
-        "student_b": {
-          "output_id": "chemcrow-09:historical_gpt4",
-          "sha256": "3dde7011783504ee163ffe458280cc22606762f971163fd3a539f5b97cdcc746"
-        }
-      },
-      "state": "FROZEN",
       "student_a_system": "historical_chemcrow",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "c9debb90170deafb3635f4305c5401f137c80c660e499b4a9ce56c59d41c5c04",
       "task_id": "chemcrow-09"
     },
     {
-      "call_id": "paper-chemcrow-09-baseline",
+      "call_id": "paper-v5r1-chemcrow-09-baseline",
       "comparison": "baseline",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "3dde7011783504ee163ffe458280cc22606762f971163fd3a539f5b97cdcc746",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-09",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "0ca3bce448b57977c1408199ea2cd3bff74cf4d14bee5976b9321e28bb7dcbc3",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-09:historical_gpt4",
-          "sha256": "3dde7011783504ee163ffe458280cc22606762f971163fd3a539f5b97cdcc746"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "3dba6babd2e49f4736c96a4ff28342df5756ca76c529d2bd52cd1d9b687c1c41",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-09-baseline-15bf5ed058",
+      "source_output_sha256": "c361182a34afc20e839ef27bcf544003dd6c933f1f340467f2130fb9b5ef9f5d",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-09",
+      "source_pair_result_sha256": "fa54f738550d97318ba8922ca22b87426bbd76b8f8f217d7348419963c3e9d78",
       "student_a_system": "openevo_baseline",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "c361182a34afc20e839ef27bcf544003dd6c933f1f340467f2130fb9b5ef9f5d",
       "task_id": "chemcrow-09"
     },
     {
-      "call_id": "paper-chemcrow-09-evolved",
+      "call_id": "paper-v5r1-chemcrow-09-evolved",
       "comparison": "evolved",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "3dde7011783504ee163ffe458280cc22606762f971163fd3a539f5b97cdcc746",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-09",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "0ca3bce448b57977c1408199ea2cd3bff74cf4d14bee5976b9321e28bb7dcbc3",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-09:historical_gpt4",
-          "sha256": "3dde7011783504ee163ffe458280cc22606762f971163fd3a539f5b97cdcc746"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "ad45c08c35f719263ca7fb2a1c4e2d1e8913bd9a554bb691c988d9784d0d7d4b",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-09-evolved-d3440d05eb",
+      "source_output_sha256": "697407ed540c3a727b21cab7ed26c7fcd4a1390c5a4fd5f2f7ceed6785c49692",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-09",
+      "source_pair_result_sha256": "fa54f738550d97318ba8922ca22b87426bbd76b8f8f217d7348419963c3e9d78",
       "student_a_system": "openevo_evolved",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "697407ed540c3a727b21cab7ed26c7fcd4a1390c5a4fd5f2f7ceed6785c49692",
       "task_id": "chemcrow-09"
     },
     {
-      "call_id": "paper-chemcrow-10-historical_control",
+      "call_id": "paper-v5r1-chemcrow-10-historical_control",
       "comparison": "historical_control",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "105bfc65ba37619d00de74a81c993adfb5f16c8b324fc79e6b02fb7961899497",
+      "metric_classification": "paper_control_reconstruction",
       "paper_comparable": true,
-      "paper_comparable_or_project_added": "paper_control_reconstruction",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
       "prompt_sha256": "1fbff504af8a4680c9ea753bf2e7eccff18a5e3fe06450e7689fd4e076ec4cd4",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-10:historical_chemcrow",
+      "source_output_sha256": "ec71a021893ec479872b9722c24949ad6fbd272ae5f042d2ed2d100433231166",
       "source_pair_id": "historical-notebook:chemcrow-10",
       "source_pair_result_sha256": "4f502c4b8bc6b92ebc9fc11df04f1a5f6f8fbae69681b4260181558be65f5032",
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "4f502c4b8bc6b92ebc9fc11df04f1a5f6f8fbae69681b4260181558be65f5032",
-        "student_a": {
-          "output_id": "chemcrow-10:historical_chemcrow",
-          "sha256": "ec71a021893ec479872b9722c24949ad6fbd272ae5f042d2ed2d100433231166"
-        },
-        "student_b": {
-          "output_id": "chemcrow-10:historical_gpt4",
-          "sha256": "105bfc65ba37619d00de74a81c993adfb5f16c8b324fc79e6b02fb7961899497"
-        }
-      },
-      "state": "FROZEN",
       "student_a_system": "historical_chemcrow",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "ec71a021893ec479872b9722c24949ad6fbd272ae5f042d2ed2d100433231166",
       "task_id": "chemcrow-10"
     },
     {
-      "call_id": "paper-chemcrow-10-baseline",
+      "call_id": "paper-v5r1-chemcrow-10-baseline",
       "comparison": "baseline",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "105bfc65ba37619d00de74a81c993adfb5f16c8b324fc79e6b02fb7961899497",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-10",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "4f502c4b8bc6b92ebc9fc11df04f1a5f6f8fbae69681b4260181558be65f5032",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-10:historical_gpt4",
-          "sha256": "105bfc65ba37619d00de74a81c993adfb5f16c8b324fc79e6b02fb7961899497"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "75da518d519552840348bc609a16bb9fba0f34462083bd7387a6c57cb8097364",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-10-baseline-e2785ebf9c",
+      "source_output_sha256": "41ca83701d20c9e665d77976f5d259e46f08e781625769db814448fdde76f744",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-10",
+      "source_pair_result_sha256": "92664731d8b4789afd4d3f19b9e3e0d63d357f0ebd761641eea45259e11d9180",
       "student_a_system": "openevo_baseline",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "41ca83701d20c9e665d77976f5d259e46f08e781625769db814448fdde76f744",
       "task_id": "chemcrow-10"
     },
     {
-      "call_id": "paper-chemcrow-10-evolved",
+      "call_id": "paper-v5r1-chemcrow-10-evolved",
       "comparison": "evolved",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "105bfc65ba37619d00de74a81c993adfb5f16c8b324fc79e6b02fb7961899497",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-10",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "4f502c4b8bc6b92ebc9fc11df04f1a5f6f8fbae69681b4260181558be65f5032",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-10:historical_gpt4",
-          "sha256": "105bfc65ba37619d00de74a81c993adfb5f16c8b324fc79e6b02fb7961899497"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "30a9b1365f08847c017a92251f207bd4c3ae15a9f80bed86e37622560322ad0a",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-10-evolved-9f5f3c392d",
+      "source_output_sha256": "0eeec97b61c031cd3aa365bc37e5c850ff6eef9e897e234e7b3c310ef30a446d",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-10",
+      "source_pair_result_sha256": "92664731d8b4789afd4d3f19b9e3e0d63d357f0ebd761641eea45259e11d9180",
       "student_a_system": "openevo_evolved",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "0eeec97b61c031cd3aa365bc37e5c850ff6eef9e897e234e7b3c310ef30a446d",
       "task_id": "chemcrow-10"
     },
     {
-      "call_id": "paper-chemcrow-12-historical_control",
+      "call_id": "paper-v5r1-chemcrow-12-historical_control",
       "comparison": "historical_control",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "53b40a6b0f6e087f52a8f8170f2facfaa6b0a69022a500be78a5511b46fd10a4",
+      "metric_classification": "paper_control_reconstruction",
       "paper_comparable": true,
-      "paper_comparable_or_project_added": "paper_control_reconstruction",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
       "prompt_sha256": "6bed533ff95032f4ed544b26fcf2b97c71b5536107a40b93528a96f5c552baab",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-12:historical_chemcrow",
+      "source_output_sha256": "0238129617734785085d0fc902f762d422d58997fa8a6cefd157a1739a65738c",
       "source_pair_id": "historical-notebook:chemcrow-12",
       "source_pair_result_sha256": "45a4f8e71181c57b3dd2e4ad77fe2f31a1ddd3186beb5a56ea24ca0ccf6d368e",
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "45a4f8e71181c57b3dd2e4ad77fe2f31a1ddd3186beb5a56ea24ca0ccf6d368e",
-        "student_a": {
-          "output_id": "chemcrow-12:historical_chemcrow",
-          "sha256": "0238129617734785085d0fc902f762d422d58997fa8a6cefd157a1739a65738c"
-        },
-        "student_b": {
-          "output_id": "chemcrow-12:historical_gpt4",
-          "sha256": "53b40a6b0f6e087f52a8f8170f2facfaa6b0a69022a500be78a5511b46fd10a4"
-        }
-      },
-      "state": "FROZEN",
       "student_a_system": "historical_chemcrow",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "0238129617734785085d0fc902f762d422d58997fa8a6cefd157a1739a65738c",
       "task_id": "chemcrow-12"
     },
     {
-      "call_id": "paper-chemcrow-12-baseline",
+      "call_id": "paper-v5r1-chemcrow-12-baseline",
       "comparison": "baseline",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "53b40a6b0f6e087f52a8f8170f2facfaa6b0a69022a500be78a5511b46fd10a4",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-12",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "45a4f8e71181c57b3dd2e4ad77fe2f31a1ddd3186beb5a56ea24ca0ccf6d368e",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-12:historical_gpt4",
-          "sha256": "53b40a6b0f6e087f52a8f8170f2facfaa6b0a69022a500be78a5511b46fd10a4"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "e09bedcafb034e4479b5c4e2b853039f383e18b82ca14f2a4ff03747857bf78b",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-12-baseline-734a686271",
+      "source_output_sha256": "8475352d054550846341252f776ed1cb7765a4579351cbef25f1307d9ca794ec",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-12",
+      "source_pair_result_sha256": "14c21886661ed45a385c761d592bbf907d580d825a79bd7a6b78b23e2fa739d2",
       "student_a_system": "openevo_baseline",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "8475352d054550846341252f776ed1cb7765a4579351cbef25f1307d9ca794ec",
       "task_id": "chemcrow-12"
     },
     {
-      "call_id": "paper-chemcrow-12-evolved",
+      "call_id": "paper-v5r1-chemcrow-12-evolved",
       "comparison": "evolved",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "53b40a6b0f6e087f52a8f8170f2facfaa6b0a69022a500be78a5511b46fd10a4",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-12",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "45a4f8e71181c57b3dd2e4ad77fe2f31a1ddd3186beb5a56ea24ca0ccf6d368e",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-12:historical_gpt4",
-          "sha256": "53b40a6b0f6e087f52a8f8170f2facfaa6b0a69022a500be78a5511b46fd10a4"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "d058f002481f9a7ee418db221fbb30f8b91ae5173930e1578f8c2a62fa9e35eb",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-12-evolved-31cbefc3f6",
+      "source_output_sha256": "a6c8a120d63349c28942dcecd6bdbe9011d12dfb0e60a016b73c4fe39a83b823",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-12",
+      "source_pair_result_sha256": "14c21886661ed45a385c761d592bbf907d580d825a79bd7a6b78b23e2fa739d2",
       "student_a_system": "openevo_evolved",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "a6c8a120d63349c28942dcecd6bdbe9011d12dfb0e60a016b73c4fe39a83b823",
       "task_id": "chemcrow-12"
     },
     {
-      "call_id": "paper-chemcrow-13-historical_control",
+      "call_id": "paper-v5r1-chemcrow-13-historical_control",
       "comparison": "historical_control",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "fe96b03e892e86214891239fa3545b732a4f44c8c8b733f2eff8608771a1de31",
+      "metric_classification": "paper_control_reconstruction",
       "paper_comparable": true,
-      "paper_comparable_or_project_added": "paper_control_reconstruction",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
       "prompt_sha256": "f409e1a6c895688fc5d1bd7cfc3725a7a0265699ccca29f6a054a38dd4fee4ed",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-13:historical_chemcrow",
+      "source_output_sha256": "680207ca554c26f626499829ea6bb1d1194388334d3acaac7e20185c638c31ee",
       "source_pair_id": "historical-notebook:chemcrow-13",
       "source_pair_result_sha256": "9ace8d011be293f1c3c14976f92b30bf3350cb8a9d4d99234b5907883f0546e0",
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "9ace8d011be293f1c3c14976f92b30bf3350cb8a9d4d99234b5907883f0546e0",
-        "student_a": {
-          "output_id": "chemcrow-13:historical_chemcrow",
-          "sha256": "680207ca554c26f626499829ea6bb1d1194388334d3acaac7e20185c638c31ee"
-        },
-        "student_b": {
-          "output_id": "chemcrow-13:historical_gpt4",
-          "sha256": "fe96b03e892e86214891239fa3545b732a4f44c8c8b733f2eff8608771a1de31"
-        }
-      },
-      "state": "FROZEN",
       "student_a_system": "historical_chemcrow",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "680207ca554c26f626499829ea6bb1d1194388334d3acaac7e20185c638c31ee",
       "task_id": "chemcrow-13"
     },
     {
-      "call_id": "paper-chemcrow-13-baseline",
+      "call_id": "paper-v5r1-chemcrow-13-baseline",
       "comparison": "baseline",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "fe96b03e892e86214891239fa3545b732a4f44c8c8b733f2eff8608771a1de31",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-13",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "9ace8d011be293f1c3c14976f92b30bf3350cb8a9d4d99234b5907883f0546e0",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-13:historical_gpt4",
-          "sha256": "fe96b03e892e86214891239fa3545b732a4f44c8c8b733f2eff8608771a1de31"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "0f3f85e71c4cf9130ee20f730573450049cc8037b60f94e7754dd26dc88d602a",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-13-baseline-8601bd12af",
+      "source_output_sha256": "da9f272f4b4a77886b1e8ca24a88233fd4212caa2602d50a1d7842a10659facd",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-13",
+      "source_pair_result_sha256": "b6645c7d7c67e3f843a5b94741d01878035b323ad4fa9d55dd7369368ea6cc93",
       "student_a_system": "openevo_baseline",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "da9f272f4b4a77886b1e8ca24a88233fd4212caa2602d50a1d7842a10659facd",
       "task_id": "chemcrow-13"
     },
     {
-      "call_id": "paper-chemcrow-13-evolved",
+      "call_id": "paper-v5r1-chemcrow-13-evolved",
       "comparison": "evolved",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "fe96b03e892e86214891239fa3545b732a4f44c8c8b733f2eff8608771a1de31",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-13",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "9ace8d011be293f1c3c14976f92b30bf3350cb8a9d4d99234b5907883f0546e0",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-13:historical_gpt4",
-          "sha256": "fe96b03e892e86214891239fa3545b732a4f44c8c8b733f2eff8608771a1de31"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "19697a60d2abbdd2c758be401212c28872765af3d8a629a5d299496179999341",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-13-evolved-d6c6f5de70",
+      "source_output_sha256": "14ef29528bd3d6e25dca7b9c9b8e914da5b94ca5ca199eebc8c8a106568a62ed",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-13",
+      "source_pair_result_sha256": "b6645c7d7c67e3f843a5b94741d01878035b323ad4fa9d55dd7369368ea6cc93",
       "student_a_system": "openevo_evolved",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "14ef29528bd3d6e25dca7b9c9b8e914da5b94ca5ca199eebc8c8a106568a62ed",
       "task_id": "chemcrow-13"
     },
     {
-      "call_id": "paper-chemcrow-14-historical_control",
+      "call_id": "paper-v5r1-chemcrow-14-historical_control",
       "comparison": "historical_control",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "a16a91d78cafea34803ef1a8404a55c6f348036c2e7af6e8dd3c82348f8886fb",
+      "metric_classification": "paper_control_reconstruction",
       "paper_comparable": true,
-      "paper_comparable_or_project_added": "paper_control_reconstruction",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
       "prompt_sha256": "294a9cbb24d7ac599becf3c0f6c2ce42fc1db20aecf56329894e063abbb08745",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-14:historical_chemcrow",
+      "source_output_sha256": "1c06840cd3eca222cf8030af83bd4a0ca83f9453f987dc07ead9aeca8cb6f091",
       "source_pair_id": "historical-notebook:chemcrow-14",
       "source_pair_result_sha256": "8943a3de06e8d9bf90e040140c09afb14288cf8acd81d67b8b7029f49ba26f8b",
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "8943a3de06e8d9bf90e040140c09afb14288cf8acd81d67b8b7029f49ba26f8b",
-        "student_a": {
-          "output_id": "chemcrow-14:historical_chemcrow",
-          "sha256": "1c06840cd3eca222cf8030af83bd4a0ca83f9453f987dc07ead9aeca8cb6f091"
-        },
-        "student_b": {
-          "output_id": "chemcrow-14:historical_gpt4",
-          "sha256": "a16a91d78cafea34803ef1a8404a55c6f348036c2e7af6e8dd3c82348f8886fb"
-        }
-      },
-      "state": "FROZEN",
       "student_a_system": "historical_chemcrow",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "1c06840cd3eca222cf8030af83bd4a0ca83f9453f987dc07ead9aeca8cb6f091",
       "task_id": "chemcrow-14"
     },
     {
-      "call_id": "paper-chemcrow-14-baseline",
+      "call_id": "paper-v5r1-chemcrow-14-baseline",
       "comparison": "baseline",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "a16a91d78cafea34803ef1a8404a55c6f348036c2e7af6e8dd3c82348f8886fb",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-14",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "8943a3de06e8d9bf90e040140c09afb14288cf8acd81d67b8b7029f49ba26f8b",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-14:historical_gpt4",
-          "sha256": "a16a91d78cafea34803ef1a8404a55c6f348036c2e7af6e8dd3c82348f8886fb"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "457f67f272926d391d0044be7592268b130f7944674baf246f893475727ffc08",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-14-baseline-b91028dc16",
+      "source_output_sha256": "6c3812365ae684af3506f679de02aa99ab0cb0c9cac7ce15d5725fc841121f1e",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-14",
+      "source_pair_result_sha256": "38c4a8f3b58fd74e9a29713a3264fb6b8ead8ecf0fa979f54cff89f2314a2c46",
       "student_a_system": "openevo_baseline",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "6c3812365ae684af3506f679de02aa99ab0cb0c9cac7ce15d5725fc841121f1e",
       "task_id": "chemcrow-14"
     },
     {
-      "call_id": "paper-chemcrow-14-evolved",
+      "call_id": "paper-v5r1-chemcrow-14-evolved",
       "comparison": "evolved",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "a16a91d78cafea34803ef1a8404a55c6f348036c2e7af6e8dd3c82348f8886fb",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-14",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "8943a3de06e8d9bf90e040140c09afb14288cf8acd81d67b8b7029f49ba26f8b",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-14:historical_gpt4",
-          "sha256": "a16a91d78cafea34803ef1a8404a55c6f348036c2e7af6e8dd3c82348f8886fb"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "9228a48527c220ac8e5f51caa400408cae030ca0c1fbd4b79bc0b1e62aaa88be",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-14-evolved-416e1774b0",
+      "source_output_sha256": "717c960281f90941be72781275e6370b57297e257396c9842e07dc04df9c71aa",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-14",
+      "source_pair_result_sha256": "38c4a8f3b58fd74e9a29713a3264fb6b8ead8ecf0fa979f54cff89f2314a2c46",
       "student_a_system": "openevo_evolved",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "717c960281f90941be72781275e6370b57297e257396c9842e07dc04df9c71aa",
       "task_id": "chemcrow-14"
     },
     {
-      "call_id": "paper-chemcrow-15-historical_control",
+      "call_id": "paper-v5r1-chemcrow-15-historical_control",
       "comparison": "historical_control",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "ff619c13f081e7affe916d872942a35766ca0a7d773f0095879f34905c14482c",
+      "metric_classification": "paper_control_reconstruction",
       "paper_comparable": true,
-      "paper_comparable_or_project_added": "paper_control_reconstruction",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
       "prompt_sha256": "9c23178865ecf53468b85b47ee66fddde9899602f3dff9674223e85833b200e8",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-15:historical_chemcrow",
+      "source_output_sha256": "a5286cba992c7bed3ddf5d0fcca3de3ccb28d8309edb0d32fc3eab0582cd485f",
       "source_pair_id": "historical-notebook:chemcrow-15",
       "source_pair_result_sha256": "255c29748aca13d090e9c5045ab9393c0f61895ba9589d040cf65e5a139e1293",
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "255c29748aca13d090e9c5045ab9393c0f61895ba9589d040cf65e5a139e1293",
-        "student_a": {
-          "output_id": "chemcrow-15:historical_chemcrow",
-          "sha256": "a5286cba992c7bed3ddf5d0fcca3de3ccb28d8309edb0d32fc3eab0582cd485f"
-        },
-        "student_b": {
-          "output_id": "chemcrow-15:historical_gpt4",
-          "sha256": "ff619c13f081e7affe916d872942a35766ca0a7d773f0095879f34905c14482c"
-        }
-      },
-      "state": "FROZEN",
       "student_a_system": "historical_chemcrow",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "a5286cba992c7bed3ddf5d0fcca3de3ccb28d8309edb0d32fc3eab0582cd485f",
       "task_id": "chemcrow-15"
     },
     {
-      "call_id": "paper-chemcrow-15-baseline",
+      "call_id": "paper-v5r1-chemcrow-15-baseline",
       "comparison": "baseline",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "ff619c13f081e7affe916d872942a35766ca0a7d773f0095879f34905c14482c",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-15",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "255c29748aca13d090e9c5045ab9393c0f61895ba9589d040cf65e5a139e1293",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-15:historical_gpt4",
-          "sha256": "ff619c13f081e7affe916d872942a35766ca0a7d773f0095879f34905c14482c"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "690f53f6f5e159f0c0a63205062b4cc827c49a10fd870ed7c4b68a3c7fafed47",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-15-baseline-dba207fbc3",
+      "source_output_sha256": "da50bd394cdde4b7bbbef38c60c04ae8776c121818fb9b7743021b07153282d1",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-15",
+      "source_pair_result_sha256": "ec34cd728e5533e8ca7bb38013d413769fc1233ba8d73a22b67ac84d83b7d01e",
       "student_a_system": "openevo_baseline",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "da50bd394cdde4b7bbbef38c60c04ae8776c121818fb9b7743021b07153282d1",
       "task_id": "chemcrow-15"
     },
     {
-      "call_id": "paper-chemcrow-15-evolved",
+      "call_id": "paper-v5r1-chemcrow-15-evolved",
       "comparison": "evolved",
-      "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "historically_calibrated_compatible_prompt": true,
+      "historical_gpt4_answer_sha256": "ff619c13f081e7affe916d872942a35766ca0a7d773f0095879f34905c14482c",
+      "metric_classification": "project_added_openevo_metric",
       "paper_comparable": false,
-      "paper_comparable_or_project_added": "project_added_openevo_metric",
-      "paper_compatible_but_not_verbatim": true,
-      "prompt_candidate_id": "PAPER_MINIMAL",
-      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "prompt_sha256": null,
-      "prompt_sha256_pending_reason": "actual prompt binds the not-yet-produced sealed full-v4 answer",
-      "prompt_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
-      "source_pair_id": "chemcrow-task-local-full-v4-three-pipeline--chemcrow-15",
-      "source_pair_result_sha256": null,
-      "source_sealed_outputs": {
-        "historical_notebook_sha256": "255c29748aca13d090e9c5045ab9393c0f61895ba9589d040cf65e5a139e1293",
-        "student_a": {
-          "output_id": null,
-          "sha256": null
-        },
-        "student_b": {
-          "output_id": "chemcrow-15:historical_gpt4",
-          "sha256": "ff619c13f081e7affe916d872942a35766ca0a7d773f0095879f34905c14482c"
-        }
-      },
-      "state": "PENDING_FULL_V4_SEALED_OUTPUT",
+      "prompt_sha256": "1698b79c5c758f35284d0d2502ac813f3bc4bc9f436a3c77dd2e676acfd57e30",
+      "sealed_result_present": true,
+      "source_output_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-15-evolved-df8171826b",
+      "source_output_sha256": "0ffde5e1fc3af3f536d86d633a3b1c947463add94928beaf201f5998d1dfcb1b",
+      "source_pair_id": "chemcrow-task-local-full-v5-core-native-three-pipeline--chemcrow-15",
+      "source_pair_result_sha256": "ec34cd728e5533e8ca7bb38013d413769fc1233ba8d73a22b67ac84d83b7d01e",
       "student_a_system": "openevo_evolved",
       "student_b_system": "historical_gpt4",
+      "target_answer_sha256": "0ffde5e1fc3af3f536d86d633a3b1c947463add94928beaf201f5998d1dfcb1b",
       "task_id": "chemcrow-15"
     }
   ],
-  "comparison_families": [
-    "historical_control",
-    "baseline",
-    "evolved"
-  ],
+  "comparison_families": {
+    "baseline": 14,
+    "evolved": 14,
+    "historical_control": 14
+  },
   "comparison_semantics": {
-    "baseline": "OpenEvo G1 vs historical GPT-4; project-added metric",
-    "evolved": "OpenEvo G2 vs historical GPT-4; project-added metric",
-    "historical_control": "historical ChemCrow vs historical GPT-4; closest public paper-style control, but current compatible prompt/model service is not a verbatim historical reproduction"
+    "baseline": "sealed full-v5 G1 versus historical GPT-4; project-added metric",
+    "evolved": "sealed full-v5 G2 versus historical GPT-4; project-added metric",
+    "historical_control": "current calibrated judge on official historical ChemCrow versus historical GPT-4; paper-style control reconstruction"
   },
   "comparisons_per_task": 3,
-  "deferred_materialization": [
-    "authoritative full-v4 sealed outputs will bind the 28 baseline/evolved source and prompt hashes",
-    "production preflight will replace template hashes with final hashes before any production call"
-  ],
-  "evaluator_instruction_template_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
   "exact_prompt_recovered": false,
-  "experiment_id": "chemcrow-task-local-full-v4-three-pipeline",
-  "formal_plan_blockers": [],
-  "formal_plan_ready": false,
-  "frozen_prompt_hash_count": 14,
-  "generated_at": "2026-08-26 Asia/Shanghai",
+  "experiment_id": "chemcrow-task-local-full-v5-core-native-three-pipeline",
   "historically_calibrated_compatible_prompt": true,
-  "paper_evaluator_historical_agreement": "HIGH",
-  "pending_prompt_hash_count": 28,
-  "production_ledger_clean": true,
+  "paper_audit_sha256": "a7756b6a31c45b00cfc56b3949b6d949a2614caf0cae7423902b2408e1f93b24",
+  "production_ledger_complete": true,
   "prompt_candidate_id": "PAPER_MINIMAL",
   "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
   "protocol": "CHEMCROW_EVALUATORGPT_PROMPT_CALIBRATED_V2",
-  "schema_version": "chemcrow_paper_comparison_matrix_v2",
-  "source_pair_protocol": "chemcrow-three-isolated-artifacts-v1",
-  "status": "READY_BLUEPRINT_DEFERRED_FULL_V4_BINDING",
+  "schema_version": "chemcrow_paper_comparison_matrix_v3",
+  "sealed_source_mapping_valid": true,
+  "source_pair_protocol": "chemcrow-three-isolated-core-native-artifacts-v2",
+  "status": "COMPLETE_FULL_V5_CORE_NATIVE",
   "task_count": 14,
   "task_ids": [
     "chemcrow-01",
@@ -1327,6 +758,5 @@
     "chemcrow-13",
     "chemcrow-14",
     "chemcrow-15"
-  ],
-  "task_manifest_sha256": "8c69883d4a2424ed66f4dea0b9d0a0496129556e998902f278ad36a72d132604"
+  ]
 }

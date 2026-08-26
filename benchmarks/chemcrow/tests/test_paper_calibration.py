@@ -311,7 +311,7 @@ def test_selected_prompt_hash_binding():
         )
 
 
-def test_production_blueprint_binds_selected_prompt_and_defers_only_full_v4_outputs():
+def test_completed_v5_production_matrix_binds_selected_prompt_and_sealed_outputs():
     report = (
         Path(__file__).resolve().parents[1]
         / "reports"
@@ -324,16 +324,14 @@ def test_production_blueprint_binds_selected_prompt_and_defers_only_full_v4_outp
     assert matrix["prompt_candidate_sha256"] == (
         "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767"
     )
-    assert matrix["frozen_prompt_hash_count"] == 14
-    assert matrix["pending_prompt_hash_count"] == 28
-    assert matrix["production_ledger_clean"] is True
-    assert all(
-        call["prompt_sha256"]
-        for call in matrix["calls"]
-        if call["comparison"] == "historical_control"
+    assert matrix["status"] == "COMPLETE_FULL_V5_CORE_NATIVE"
+    assert matrix["source_pair_protocol"] == (
+        "chemcrow-three-isolated-core-native-artifacts-v2"
     )
-    assert {
-        call["prompt_template_sha256"]
-        for call in matrix["calls"]
-        if call["comparison"] != "historical_control"
-    } == {matrix["prompt_candidate_sha256"]}
+    assert matrix["call_count"] == len(matrix["calls"]) == 42
+    assert len({call["call_id"] for call in matrix["calls"]}) == 42
+    assert all(call["prompt_sha256"] for call in matrix["calls"])
+    assert all(call["source_output_sha256"] for call in matrix["calls"])
+    assert all(call["sealed_result_present"] is True for call in matrix["calls"])
+    assert matrix["all_prompt_hashes_frozen"] is True
+    assert matrix["production_ledger_complete"] is True
