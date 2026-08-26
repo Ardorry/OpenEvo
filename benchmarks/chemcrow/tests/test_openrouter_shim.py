@@ -100,6 +100,72 @@ async def test_openrouter_shim_pins_route_and_writes_value_free_receipt(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_openrouter_shim_separates_calibration_call_namespace(tmp_path):
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "id": "generation-calibration-test",
+                "model": "openai/gpt-4",
+                "provider": "OpenAI",
+                "choices": [{"message": {"role": "assistant", "content": "{}"}}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 1},
+            },
+        )
+
+    call_id = "paper-chemcrow-cal-v1-chemcrow-01-current-v1"
+    prompt = "CALIBRATION PROMPT"
+    request = {
+        "model": "openai/gpt-4",
+        "temperature": 0.1,
+        "max_tokens": 1200,
+        "stream": False,
+        "user": call_id,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "system",
+                "content": "ChemCrow sealed-output paper evaluator. Return strict JSON only.",
+            },
+            {"role": "user", "content": prompt},
+        ],
+    }
+    production_app = create_openrouter_shim_app(
+        api_key="SECRET",
+        base_url="http://mock.invalid/v1",
+        receipt_root=tmp_path / "production",
+        transport=httpx.MockTransport(upstream),
+        allowed_call_prompt_hashes={call_id: canonical_sha256(prompt)},
+    )
+    calibration_receipts = tmp_path / "calibration"
+    calibration_app = create_openrouter_shim_app(
+        api_key="SECRET",
+        base_url="http://mock.invalid/v1",
+        receipt_root=calibration_receipts,
+        transport=httpx.MockTransport(upstream),
+        allowed_call_prompt_hashes={call_id: canonical_sha256(prompt)},
+        call_id_prefix="paper-chemcrow-cal-v1-",
+        ledger_class="calibration",
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=production_app), base_url="http://production"
+    ) as client:
+        rejected = await client.post("/v1/chat/completions", json=request)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=calibration_app), base_url="http://calibration"
+    ) as client:
+        accepted = await client.post("/v1/chat/completions", json=request)
+
+    assert rejected.status_code == 400
+    assert accepted.status_code == 200
+    claim = json.loads((calibration_receipts / f"{call_id}.claim.json").read_text())
+    receipt = json.loads((calibration_receipts / f"{call_id}.receipt.json").read_text())
+    assert claim["ledger_class"] == receipt["ledger_class"] == "calibration"
+    assert claim["production_ledger_included"] is False
+    assert receipt["production_ledger_included"] is False
+
+
+@pytest.mark.asyncio
 async def test_openrouter_shim_seals_sanitized_upstream_failure_metadata(tmp_path):
     sensitive_message = "No endpoints available under data policy; PRIVATE ROUTING DETAIL"
 

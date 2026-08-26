@@ -1,0 +1,90 @@
+{
+  "bootstrap_samples": 10000,
+  "bootstrap_seed": 20260826,
+  "candidate_count": 3,
+  "candidate_ids": [
+    "CURRENT_V1",
+    "PAPER_MINIMAL",
+    "PAPER_OUTPUT_FAITHFUL"
+  ],
+  "candidates": [
+    {
+      "candidate_id": "CURRENT_V1",
+      "future_g1_g2_identity_included": false,
+      "instruction_template": "You are an expert chemistry teacher evaluating two students' answers.\n\nThis is a compatibility reconstruction of ChemCrow EvaluatorGPT. Grade each student from 0 to 10, including decimals when useful. Base the grade only on: (1) whether the given task is addressed, and (2) whether the overall chemistry thought process is correct. Identify concise strengths and weaknesses, justify the grade, and give actionable feedback. Apply the same standard to both students. Do not infer a hidden reference answer and do not reward verbosity by itself.\n\nReturn one JSON object only, with exactly this structure:\n{\"student_a\":{\"grade\":0,\"strengths\":[\"...\"],\"weaknesses\":[\"...\"],\"justification\":\"...\",\"feedback\":[\"...\"]},\"student_b\":{\"grade\":0,\"strengths\":[\"...\"],\"weaknesses\":[\"...\"],\"justification\":\"...\",\"feedback\":[\"...\"]}}\n\nTASK:\n<<TASK>>\n\nSTUDENT A ANSWER:\n<<STUDENT_A>>\n\nSTUDENT B ANSWER:\n<<STUDENT_B>>\n",
+      "labels_or_historical_grades_included": false,
+      "paper_evidence": [
+        "existing CHEMCROW_EVALUATORGPT_PROMPT_COMPATIBLE_V1 unchanged"
+      ],
+      "prompt_candidate_sha256": "7b51dcfb3cb45dc1d3f2702e65ada7d260e5c76427dd06ef6743d44f4c63674a",
+      "rendered_example": "You are an expert chemistry teacher evaluating two students' answers.\n\nThis is a compatibility reconstruction of ChemCrow EvaluatorGPT. Grade each student from 0 to 10, including decimals when useful. Base the grade only on: (1) whether the given task is addressed, and (2) whether the overall chemistry thought process is correct. Identify concise strengths and weaknesses, justify the grade, and give actionable feedback. Apply the same standard to both students. Do not infer a hidden reference answer and do not reward verbosity by itself.\n\nReturn one JSON object only, with exactly this structure:\n{\"student_a\":{\"grade\":0,\"strengths\":[\"...\"],\"weaknesses\":[\"...\"],\"justification\":\"...\",\"feedback\":[\"...\"]},\"student_b\":{\"grade\":0,\"strengths\":[\"...\"],\"weaknesses\":[\"...\"],\"justification\":\"...\",\"feedback\":[\"...\"]}}\n\nTASK:\nExplain the chemistry task.\n\nSTUDENT A ANSWER:\nStudent A response.\n\nSTUDENT B ANSWER:\nStudent B response.\n",
+      "rendered_example_sha256": "59cbea4ce27a6e548d71cc603540117f87510f71d995d8af4a9a43038573ee45"
+    },
+    {
+      "candidate_id": "PAPER_MINIMAL",
+      "future_g1_g2_identity_included": false,
+      "instruction_template": "You are a teacher evaluating two students' answers to the same chemistry task.\n\nFor each student, give a grade from 0 to 10 based only on whether the task is addressed and whether the overall thought process is correct. Report strengths, weaknesses, a grade justification, and improvement feedback. Apply the same standard to both students.\n\nReturn one JSON object only, with exactly this structure:\n{\"student_a\":{\"grade\":0,\"strengths\":[\"...\"],\"weaknesses\":[\"...\"],\"justification\":\"...\",\"feedback\":[\"...\"]},\"student_b\":{\"grade\":0,\"strengths\":[\"...\"],\"weaknesses\":[\"...\"],\"justification\":\"...\",\"feedback\":[\"...\"]}}\n\nTASK:\n<<TASK>>\n\nSTUDENT A ANSWER:\n<<STUDENT_A>>\n\nSTUDENT B ANSWER:\n<<STUDENT_B>>\n",
+      "labels_or_historical_grades_included": false,
+      "paper_evidence": [
+        "Nature article: teacher, task addressed, overall thought process, strengths, weaknesses, improvement feedback"
+      ],
+      "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
+      "rendered_example": "You are a teacher evaluating two students' answers to the same chemistry task.\n\nFor each student, give a grade from 0 to 10 based only on whether the task is addressed and whether the overall thought process is correct. Report strengths, weaknesses, a grade justification, and improvement feedback. Apply the same standard to both students.\n\nReturn one JSON object only, with exactly this structure:\n{\"student_a\":{\"grade\":0,\"strengths\":[\"...\"],\"weaknesses\":[\"...\"],\"justification\":\"...\",\"feedback\":[\"...\"]},\"student_b\":{\"grade\":0,\"strengths\":[\"...\"],\"weaknesses\":[\"...\"],\"justification\":\"...\",\"feedback\":[\"...\"]}}\n\nTASK:\nExplain the chemistry task.\n\nSTUDENT A ANSWER:\nStudent A response.\n\nSTUDENT B ANSWER:\nStudent B response.\n",
+      "rendered_example_sha256": "c00934f9eca6d48c891dbd0744805f55f7c641bb4b03c40c53aeb5b516134009"
+    },
+    {
+      "candidate_id": "PAPER_OUTPUT_FAITHFUL",
+      "future_g1_g2_identity_included": false,
+      "instruction_template": "You are a teacher evaluating two students' answers to the same chemistry task.\n\nFor each student, give a grade from 0 to 10 based only on whether the task is addressed and whether the overall thought process is correct. Evaluate Student 1 (Student A) and then Student 2 (Student B). For each student report, in this order: grade, strengths, weaknesses, grade justification, and improvement feedback. Apply the same standard to both students.\n\nThe historical report headings are represented by the following strict JSON transport schema. Return one JSON object only, with exactly this structure:\n{\"student_a\":{\"grade\":0,\"strengths\":[\"...\"],\"weaknesses\":[\"...\"],\"justification\":\"...\",\"feedback\":[\"...\"]},\"student_b\":{\"grade\":0,\"strengths\":[\"...\"],\"weaknesses\":[\"...\"],\"justification\":\"...\",\"feedback\":[\"...\"]}}\n\nTASK:\n<<TASK>>\n\nSTUDENT A ANSWER (STUDENT 1):\n<<STUDENT_A>>\n\nSTUDENT B ANSWER (STUDENT 2):\n<<STUDENT_B>>\n",
+      "labels_or_historical_grades_included": false,
+      "paper_evidence": [
+        "same paper semantics plus official notebook Student 1/2 output ordering"
+      ],
+      "prompt_candidate_sha256": "927c9defcdb07bf68a7b8aeaf1f89830d6e620c1844404b1396b73e00f51b566",
+      "rendered_example": "You are a teacher evaluating two students' answers to the same chemistry task.\n\nFor each student, give a grade from 0 to 10 based only on whether the task is addressed and whether the overall thought process is correct. Evaluate Student 1 (Student A) and then Student 2 (Student B). For each student report, in this order: grade, strengths, weaknesses, grade justification, and improvement feedback. Apply the same standard to both students.\n\nThe historical report headings are represented by the following strict JSON transport schema. Return one JSON object only, with exactly this structure:\n{\"student_a\":{\"grade\":0,\"strengths\":[\"...\"],\"weaknesses\":[\"...\"],\"justification\":\"...\",\"feedback\":[\"...\"]},\"student_b\":{\"grade\":0,\"strengths\":[\"...\"],\"weaknesses\":[\"...\"],\"justification\":\"...\",\"feedback\":[\"...\"]}}\n\nTASK:\nExplain the chemistry task.\n\nSTUDENT A ANSWER (STUDENT 1):\nStudent A response.\n\nSTUDENT B ANSWER (STUDENT 2):\nStudent B response.\n",
+      "rendered_example_sha256": "c929b2e8bfb48e3ff440b6806dc5d94282798390575bdf64f93e7f9a4652f270"
+    }
+  ],
+  "dataset_sha256": "148ddc2bd38dc3c49a01d01cd9cc99035cb0d70c085c7c2f3e738b378c813de0",
+  "exact_prompt_recovered": false,
+  "example_inputs": {
+    "student_a": "Student A response.",
+    "student_b": "Student B response.",
+    "task": "Explain the chemistry task."
+  },
+  "historical_agreement_thresholds": {
+    "HIGH": {
+      "delta_mae_max": 1.0,
+      "pairwise_preference_agreement_min": 0.85,
+      "parse_schema_failures": 0,
+      "score_mae_max": 1.0
+    },
+    "MODERATE": {
+      "pairwise_preference_agreement_min": 0.7,
+      "parse_schema_failures": 0,
+      "score_mae_max": 1.5
+    }
+  },
+  "protocol": "CHEMCROW_EVALUATORGPT_HISTORICAL_CALIBRATION_V1",
+  "repeatability_additional_calls_per_task": 2,
+  "repeatability_task_ids": [
+    "chemcrow-02",
+    "chemcrow-06",
+    "chemcrow-12"
+  ],
+  "result_data_seen_when_frozen": false,
+  "schema_version": "chemcrow_paper_evaluator_prompt_candidates_v1",
+  "selection_rule": [
+    "highest_pairwise_preference_agreement",
+    "lowest_delta_mae",
+    "lowest_absolute_score_mae",
+    "highest_spearman_correlation",
+    "lowest_parse_schema_failure_rate",
+    "simplest_closest_to_published_paper_semantics"
+  ],
+  "simplicity_tie_order": [
+    "PAPER_MINIMAL",
+    "PAPER_OUTPUT_FAITHFUL",
+    "CURRENT_V1"
+  ]
+}

@@ -61,10 +61,17 @@ class PaperEvaluatorHarness(BaseHarness):
     the actual upstream credential.
     """
 
+    runtime_gateway_base_url = PAPER_RUNTIME_GATEWAY_BASE_URL
+
+    def _validate_call_id(self, call_id: str) -> None:
+        if not call_id.startswith("paper-chemcrow-") or call_id.startswith(
+            "paper-chemcrow-cal-v1-"
+        ):
+            raise ValueError("paper evaluator call ID is absent or invalid")
+
     def run_steps(self, instruction: str) -> list[ExecInput]:
         call_id = self.env.get("PAPER_EVALUATOR_CALL_ID", "")
-        if not call_id.startswith("paper-chemcrow-"):
-            raise ValueError("paper evaluator call ID is absent or invalid")
+        self._validate_call_id(call_id)
         if self.model_name != PAPER_EVALUATOR_MODEL:
             raise ValueError("paper evaluator model is not the frozen openai/gpt-4 model")
         if float(self.settings.get("temperature", -1)) != PAPER_EVALUATOR_TEMPERATURE:
@@ -72,7 +79,7 @@ class PaperEvaluatorHarness(BaseHarness):
         if int(self.settings.get("max_tokens", -1)) != PAPER_EVALUATOR_MAX_OUTPUT_TOKENS:
             raise ValueError("paper evaluator max_tokens differs from the frozen limit")
         runtime_gateway = str(self.settings.get("runtime_gateway_base_url") or "")
-        if runtime_gateway != PAPER_RUNTIME_GATEWAY_BASE_URL:
+        if runtime_gateway != self.runtime_gateway_base_url:
             raise ValueError("paper runtime Gateway address differs from the frozen Core route")
         if any(name.startswith("OPENEVO_") and "ARTIFACT" in name for name in self.env):
             raise ValueError("paper evaluator must not consume evolution artifacts")
@@ -83,7 +90,7 @@ class PaperEvaluatorHarness(BaseHarness):
                     # Docker Desktop's container loopback is not the WSL host.
                     # Only the address is adapted; OPENAI_API_KEY remains the
                     # Core-injected, session-scoped Gateway credential.
-                    "OPENAI_BASE_URL": PAPER_RUNTIME_GATEWAY_BASE_URL,
+                    "OPENAI_BASE_URL": self.runtime_gateway_base_url,
                     "PAPER_EVALUATOR_CALL_ID": call_id,
                     "PAPER_EVALUATOR_MODEL": PAPER_EVALUATOR_MODEL,
                     "PAPER_EVALUATOR_TEMPERATURE": str(PAPER_EVALUATOR_TEMPERATURE),
@@ -92,3 +99,15 @@ class PaperEvaluatorHarness(BaseHarness):
                 },
             )
         ]
+
+
+class PaperCalibrationHarness(PaperEvaluatorHarness):
+    """Calibration-only harness with a distinct call namespace and Core node."""
+
+    runtime_gateway_base_url = "http://host.docker.internal:8210/v1"
+
+    def _validate_call_id(self, call_id: str) -> None:
+        if not call_id.startswith("paper-chemcrow-cal-v1-") or not all(
+            character.isalnum() or character in "-_" for character in call_id
+        ):
+            raise ValueError("paper calibration call ID is absent or invalid")

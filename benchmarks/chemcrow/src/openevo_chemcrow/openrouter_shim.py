@@ -45,6 +45,8 @@ def create_openrouter_shim_app(
     receipt_root: Path,
     transport: httpx.AsyncBaseTransport | None = None,
     allowed_call_prompt_hashes: dict[str, str] | None = None,
+    call_id_prefix: str = "paper-chemcrow-",
+    ledger_class: str = "production",
     mock_mode: bool = False,
     use_environment_proxy: bool = False,
 ) -> FastAPI:
@@ -54,6 +56,10 @@ def create_openrouter_shim_app(
         raise ValueError("OPENROUTER_BASE_URL must use https")
     if allowed_call_prompt_hashes is None and not mock_mode:
         raise ValueError("a frozen paper evaluator plan allowlist is required")
+    if ledger_class not in {"production", "calibration"}:
+        raise ValueError("paper evaluator ledger class is invalid")
+    if call_id_prefix not in {"paper-chemcrow-", "paper-chemcrow-cal-v1-"}:
+        raise ValueError("paper evaluator call prefix is invalid")
     allowed_call_prompt_hashes = dict(allowed_call_prompt_hashes or {})
     receipt_root.mkdir(parents=True, exist_ok=True)
     proxy_descriptor = _environment_proxy_descriptor(use_environment_proxy)
@@ -103,6 +109,7 @@ def create_openrouter_shim_app(
         call_id = _validate_and_prepare(
             incoming,
             allowed_call_prompt_hashes=allowed_call_prompt_hashes,
+            call_id_prefix=call_id_prefix,
             mock_mode=mock_mode,
         )
         request_hash = canonical_sha256(incoming)
@@ -114,6 +121,8 @@ def create_openrouter_shim_app(
             "request_sha256": request_hash,
             "claimed_at": datetime.now(UTC).isoformat(),
             "prompt_or_response_included": False,
+            "ledger_class": ledger_class,
+            "production_ledger_included": ledger_class == "production",
         }
         try:
             descriptor = os.open(
@@ -176,6 +185,7 @@ def create_openrouter_shim_app(
                 request_hash=request_hash,
                 failure="ambiguous_upstream_transport_error",
                 upstream_metadata=transport_metadata,
+                ledger_class=ledger_class,
             )
             raise HTTPException(
                 status_code=502,
@@ -191,6 +201,7 @@ def create_openrouter_shim_app(
                     **transport_metadata,
                     **_safe_upstream_failure_metadata(response),
                 },
+                ledger_class=ledger_class,
             )
             raise HTTPException(
                 status_code=502,
@@ -205,6 +216,7 @@ def create_openrouter_shim_app(
                 request_hash=request_hash,
                 failure="invalid_upstream_json",
                 upstream_metadata=transport_metadata,
+                ledger_class=ledger_class,
             )
             raise HTTPException(
                 status_code=502, detail="OpenRouter returned invalid JSON"
@@ -217,6 +229,7 @@ def create_openrouter_shim_app(
                 upstream_http_status=response.status_code,
                 upstream_request_descriptor=request_descriptor,
                 environment_proxy=proxy_descriptor,
+                ledger_class=ledger_class,
             )
         except HTTPException:
             _write_failure_receipt(
@@ -225,6 +238,7 @@ def create_openrouter_shim_app(
                 request_hash=request_hash,
                 failure="invalid_or_unpinned_upstream_receipt",
                 upstream_metadata=transport_metadata,
+                ledger_class=ledger_class,
             )
             raise
         _exclusive_json_write(receipt_path, receipt)
@@ -237,6 +251,7 @@ def _validate_and_prepare(
     request: dict[str, Any],
     *,
     allowed_call_prompt_hashes: dict[str, str],
+    call_id_prefix: str,
     mock_mode: bool,
 ) -> str:
     if request.get("model") != PAPER_EVALUATOR_MODEL:
@@ -266,10 +281,14 @@ def _validate_and_prepare(
     }:
         raise HTTPException(status_code=400, detail="paper evaluator system message differs")
     call_id = str(request.get("user") or "")
-    if not call_id.startswith("paper-chemcrow-") or not all(
+    if not call_id.startswith(call_id_prefix) or not all(
         character.isalnum() or character in "-_" for character in call_id
     ):
         raise HTTPException(status_code=400, detail="invalid paper evaluator call ID")
+    if call_id_prefix == "paper-chemcrow-" and call_id.startswith(
+        "paper-chemcrow-cal-v1-"
+    ):
+        raise HTTPException(status_code=400, detail="calibration call ID is forbidden")
     user_message = messages[1]
     if not isinstance(user_message, dict) or user_message.get("role") != "user":
         raise HTTPException(status_code=400, detail="paper evaluator user message differs")
@@ -293,6 +312,7 @@ def _success_receipt(
     upstream_http_status: int,
     upstream_request_descriptor: dict[str, Any],
     environment_proxy: dict[str, Any],
+    ledger_class: str,
 ) -> dict[str, Any]:
     usage = payload.get("usage")
     if not isinstance(usage, dict):
@@ -332,6 +352,8 @@ def _success_receipt(
         "completed_at": datetime.now(UTC).isoformat(),
         "prompt_or_response_included": False,
         "credential_included": False,
+        "ledger_class": ledger_class,
+        "production_ledger_included": ledger_class == "production",
         "allow_fallbacks": False,
         "provider_only": [PAPER_EVALUATOR_PROVIDER],
         "require_parameters": True,
@@ -378,6 +400,7 @@ def _write_failure_receipt(
     request_hash: str,
     failure: str,
     upstream_metadata: dict[str, Any] | None = None,
+    ledger_class: str = "production",
 ) -> None:
     safe_metadata = dict(upstream_metadata or {})
     _exclusive_json_write(
@@ -391,6 +414,8 @@ def _write_failure_receipt(
             "completed_at": datetime.now(UTC).isoformat(),
             "prompt_or_response_included": False,
             "credential_included": False,
+            "ledger_class": ledger_class,
+            "production_ledger_included": ledger_class == "production",
             "internal_response_format_validated": True,
             "upstream_response_format_omitted": True,
             "internal_call_identity_validated": True,
@@ -598,6 +623,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=8400)
     parser.add_argument("--receipt-root", type=Path, required=True)
     parser.add_argument("--plan", type=Path, required=True)
+    parser.add_argument("--calibration", action="store_true")
     parser.add_argument("--use-environment-proxy", action="store_true")
     return parser
 
@@ -606,23 +632,56 @@ def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     api_key = os.environ.get("OPENROUTER_API_KEY", "")
     base_url = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-    if os.environ.get("CHEMCROW_PAPER_EVALUATOR_MODEL") != PAPER_EVALUATOR_MODEL:
-        raise SystemExit("CHEMCROW_PAPER_EVALUATOR_MODEL differs from frozen model")
-    if os.environ.get("CHEMCROW_PAPER_EVALUATOR_AUTHORIZATION") != PAPER_EVALUATOR_AUTHORIZATION:
-        raise SystemExit("paper evaluator paid authorization literal is absent")
     plan = json.loads(args.plan.resolve().read_text(encoding="utf-8"))
-    if (
-        plan.get("schema_version") != "chemcrow_paper_evaluator_plan_v1"
-        or plan.get("call_count") != PAPER_EVALUATOR_CALL_COUNT
-    ):
-        raise SystemExit("paper evaluator plan authority is invalid")
-    from .paper_evaluator import PaperEvaluationCall
+    if args.calibration:
+        from .paper_calibration import (
+            CALIBRATION_AUTHORIZATION,
+            CALIBRATION_CALL_PREFIX,
+            CALIBRATION_MAX_USD,
+            require_calibration_authorization,
+            validate_calibration_plan,
+        )
 
-    validated_calls = [PaperEvaluationCall.model_validate(call) for call in plan.get("calls", [])]
-    allowed = {call.call_id: call.prompt_sha256 for call in validated_calls}
-    if len(allowed) != PAPER_EVALUATOR_CALL_COUNT:
-        raise SystemExit("paper evaluator plan allowlist is incomplete")
-    configured_budget = float(os.environ.get("CHEMCROW_PAPER_EVALUATOR_MAX_USD", "0"))
+        require_calibration_authorization()
+        validated_calls = validate_calibration_plan(plan)
+        allowed = {call.call_id: call.prompt_sha256 for call in validated_calls}
+        configured_budget = float(os.environ.get("CHEMCROW_PAPER_CALIBRATION_MAX_USD", "0"))
+        if configured_budget > CALIBRATION_MAX_USD:
+            raise SystemExit("calibration budget exceeds the authorized maximum")
+        if (
+            os.environ.get("CHEMCROW_PAPER_CALIBRATION_AUTHORIZATION")
+            != CALIBRATION_AUTHORIZATION
+        ):
+            raise SystemExit("paper calibration paid authorization literal is absent")
+        call_id_prefix = CALIBRATION_CALL_PREFIX
+        ledger_class = "calibration"
+        resolved_receipts = args.receipt_root.resolve()
+        if "paper-evaluator-calibration-v1" not in resolved_receipts.parts:
+            raise SystemExit("calibration receipts are outside the dedicated ledger")
+    else:
+        if os.environ.get("CHEMCROW_PAPER_EVALUATOR_MODEL") != PAPER_EVALUATOR_MODEL:
+            raise SystemExit("CHEMCROW_PAPER_EVALUATOR_MODEL differs from frozen model")
+        if (
+            os.environ.get("CHEMCROW_PAPER_EVALUATOR_AUTHORIZATION")
+            != PAPER_EVALUATOR_AUTHORIZATION
+        ):
+            raise SystemExit("paper evaluator paid authorization literal is absent")
+        if (
+            plan.get("schema_version") != "chemcrow_paper_evaluator_plan_v1"
+            or plan.get("call_count") != PAPER_EVALUATOR_CALL_COUNT
+        ):
+            raise SystemExit("paper evaluator plan authority is invalid")
+        from .paper_evaluator import PaperEvaluationCall
+
+        validated_calls = [
+            PaperEvaluationCall.model_validate(call) for call in plan.get("calls", [])
+        ]
+        allowed = {call.call_id: call.prompt_sha256 for call in validated_calls}
+        if len(allowed) != PAPER_EVALUATOR_CALL_COUNT:
+            raise SystemExit("paper evaluator plan allowlist is incomplete")
+        configured_budget = float(os.environ.get("CHEMCROW_PAPER_EVALUATOR_MAX_USD", "0"))
+        call_id_prefix = "paper-chemcrow-"
+        ledger_class = "production"
     required_budget = float(plan["cost_ceiling"]["list_price_ceiling_usd_total"])
     if configured_budget < required_budget:
         raise SystemExit("paper evaluator budget is below the frozen plan ceiling")
@@ -631,6 +690,8 @@ def main(argv: list[str] | None = None) -> None:
         base_url=base_url,
         receipt_root=args.receipt_root.resolve(),
         allowed_call_prompt_hashes=allowed,
+        call_id_prefix=call_id_prefix,
+        ledger_class=ledger_class,
         use_environment_proxy=args.use_environment_proxy,
     )
     import uvicorn
