@@ -6,6 +6,7 @@ from typing import Any
 
 from .hashing import canonical_sha256, file_sha256
 from .models import ArtifactKind
+from .replacement_ledger import verified_no_effect_attempt_count
 from .runtime import CORE_MANAGED_CODEX_ROUTE
 from .three_artifact_models import THREE_ARTIFACT_ORDER, ThreeArtifactPairResult
 
@@ -40,6 +41,7 @@ def audit_three_artifact_run(
     reset_receipt_count = 0
     tool_calls = 0
     tool_errors = 0
+    verified_pre_candidate_no_effect_attempts = 0
     for task_id in task_ids:
         pair_id = f"{experiment_id}--{task_id}"
         item_root = run_root / pair_id
@@ -129,6 +131,14 @@ def audit_three_artifact_run(
                 raise ValueError(f"phase authority hash mismatch: {pair_id}/{phase}")
             if canonical_sha256(claim.get("receipt")) != claim.get("receipt_sha256"):
                 raise ValueError(f"phase receipt hash mismatch: {pair_id}/{phase}")
+            no_effect_attempts = verified_no_effect_attempt_count(
+                claim,
+                pair_id=pair_id,
+                phase=phase,
+            )
+            if no_effect_attempts and phase != "baseline_candidate":
+                raise ValueError(f"no-effect replacement attached to wrong phase: {pair_id}/{phase}")
+            verified_pre_candidate_no_effect_attempts += no_effect_attempts
             authority = claim.get("authority")
             if not isinstance(authority, dict) or authority.get("task_id") != task_id:
                 raise ValueError(f"phase task authority mismatch: {pair_id}/{phase}")
@@ -217,6 +227,9 @@ def audit_three_artifact_run(
         "aggregate_sha256": aggregate_sha256,
         "answers_included": False,
         "mock_or_fixture_observations": 0,
+        "verified_pre_candidate_no_effect_attempt_count": (
+            verified_pre_candidate_no_effect_attempts
+        ),
     }
 
 

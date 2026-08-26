@@ -8,7 +8,6 @@ from typing import Protocol
 from .cache import assert_real_metric_observations
 from .feedback import feedback_hash, reflector_feedback_payload, runtime_feedback
 from .hashing import canonical_sha256, file_sha256
-from .ledger import PhaseLedger
 from .models import (
     ArtifactKind,
     EvaluatorFeedback,
@@ -18,6 +17,7 @@ from .models import (
     Trajectory,
 )
 from .protocol import BlindJudgeResult, EvolutionEvaluatorPort, FinalEvaluatorPort
+from .replacement_ledger import VerifiedReplacementPhaseLedger
 from .three_artifact_evolution import ThreeIsolatedEvolutionEngine
 from .three_artifact_models import (
     THREE_ARTIFACT_ORDER,
@@ -91,9 +91,14 @@ class ThreeArtifactTaskLocalProtocolRunner:
         *,
         pair_id: str,
         mcp_url: str | None = None,
+        allow_verified_baseline_replacement: bool = False,
     ) -> ThreeArtifactPairResult:
         self._assert_bare_s0(task=task)
-        ledger = PhaseLedger(self.ledger_root, pair_id=pair_id) if self.ledger_root else None
+        ledger = (
+            VerifiedReplacementPhaseLedger(self.ledger_root, pair_id=pair_id)
+            if self.ledger_root
+            else None
+        )
         event_order = ["s0_asserted"]
         if ledger:
             ledger.claim(
@@ -104,6 +109,7 @@ class ThreeArtifactTaskLocalProtocolRunner:
                     "artifact_ids": [],
                     "artifact_inventory": {},
                 },
+                allow_verified_replacement=allow_verified_baseline_replacement,
             )
         baseline, baseline_injection = self.candidate.run_candidate_with_receipt(
             task=task,

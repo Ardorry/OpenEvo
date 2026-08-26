@@ -41,7 +41,9 @@ from .paper_human_review import (
     load_or_create_human_review_secret,
     write_paper_human_review_bundle,
 )
+from .pre_candidate_recovery import reconcile_pre_candidate_no_effect_failure
 from .protocol import TaskLocalProtocolRunner
+from .replacement_ledger import VerifiedReplacementPhaseLedger
 from .runtime import (
     CORE_MANAGED_CODEX_ROUTE,
     OpenEvoRolloutPort,
@@ -738,11 +740,25 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
             results.append(result)
             continue
         claim_dir = ledger_root / pair_id
+        allow_verified_baseline_replacement = False
         if resume and claim_dir.is_dir() and any(claim_dir.glob("*.json")):
-            PhaseLedger(ledger_root, pair_id=pair_id).audit_resume()
-            raise AmbiguousPhaseClaimError(
-                f"all claims for incomplete pair {pair_id} are terminal but reconstruction is not automatic; audit before replacement"
+            ledger = (
+                VerifiedReplacementPhaseLedger(ledger_root, pair_id=pair_id)
+                if three_artifact_protocol
+                else PhaseLedger(ledger_root, pair_id=pair_id)
             )
+            if three_artifact_protocol and ledger.replacement_ready("baseline_candidate"):
+                claim_names = {path.name for path in claim_dir.glob("*.json")}
+                if claim_names != {"baseline_candidate.json"}:
+                    raise AmbiguousPhaseClaimError(
+                        f"replacement-ready pair has unexpected phase claims: {pair_id}"
+                    )
+                allow_verified_baseline_replacement = True
+            else:
+                ledger.audit_resume()
+                raise AmbiguousPhaseClaimError(
+                    f"all claims for incomplete pair {pair_id} are terminal but reconstruction is not automatic; audit before replacement"
+                )
         with PairToolService(
             pair_id=pair_id,
             cache_root=cache_root,
@@ -750,7 +766,19 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
             log_path=run_root / pair_id / "tool_service.log",
             network_enabled=bool(config.get("network_enabled", True)),
         ) as mcp_url:
-            results.append(runner.run_item(item, pair_id=pair_id, mcp_url=mcp_url))
+            if three_artifact_protocol:
+                results.append(
+                    runner.run_item(
+                        item,
+                        pair_id=pair_id,
+                        mcp_url=mcp_url,
+                        allow_verified_baseline_replacement=(
+                            allow_verified_baseline_replacement
+                        ),
+                    )
+                )
+            else:
+                results.append(runner.run_item(item, pair_id=pair_id, mcp_url=mcp_url))
     aggregate = (
         aggregate_three_artifact_results(results)
         if three_artifact_protocol
@@ -779,6 +807,40 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
     print(
         json.dumps(
             {"status": aggregate["status"], "task_count": aggregate["task_count"]}, sort_keys=True
+        )
+    )
+    return 0
+
+
+def command_recover_pre_candidate_no_effect(args: argparse.Namespace) -> int:
+    if not args.no_model_calls:
+        raise PermissionError("recovery reconciliation requires --no-model-calls")
+    config_path = args.config.resolve()
+    config = _resolve_env(_load_yaml(config_path))
+    if config.get("artifact_protocol") != "three_isolated_v1":
+        raise ValueError("pre-Candidate no-effect recovery requires three_isolated_v1")
+    manifest_path = _path(config_path, str(config["task_manifest"]))
+    task_ids = [item.task_id for item in _read_tasks(manifest_path)]
+    if args.task_id not in task_ids:
+        raise ValueError("recovery task ID is outside the authoritative manifest")
+    run_root = _path(config_path, str(config["run_root"]))
+    receipt_path, receipt = reconcile_pre_candidate_no_effect_failure(
+        config_path=config_path,
+        run_root=run_root,
+        ledger_root=_path(config_path, str(config["ledger_root"])),
+        experiment_id=str(config["experiment_id"]),
+        task_id=args.task_id,
+        core_completion_path=args.core_completion.resolve(),
+    )
+    print(
+        json.dumps(
+            {
+                "status": receipt["status"],
+                "pair_id": receipt["pair_id"],
+                "receipt_path": str(receipt_path),
+                "model_calls": 0,
+            },
+            sort_keys=True,
         )
     )
     return 0
@@ -1215,6 +1277,12 @@ def build_parser() -> argparse.ArgumentParser:
     paper_run.add_argument("--config", type=Path, required=True)
     paper_run.add_argument("--allow-paid", action="store_true")
     paper_run.set_defaults(function=command_paper_evaluator_run)
+    recovery = commands.add_parser("recover-pre-candidate-no-effect")
+    recovery.add_argument("--config", type=Path, required=True)
+    recovery.add_argument("--task-id", required=True)
+    recovery.add_argument("--core-completion", type=Path, required=True)
+    recovery.add_argument("--no-model-calls", action="store_true", required=True)
+    recovery.set_defaults(function=command_recover_pre_candidate_no_effect)
     for name, resume in (("run", False), ("resume", True)):
         command = commands.add_parser(name)
         command.add_argument("--config", type=Path, required=True)
