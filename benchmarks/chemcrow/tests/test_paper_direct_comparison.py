@@ -12,6 +12,11 @@ from openevo_chemcrow.paper_direct_comparison import (
     DIRECT_AUTHORIZATION,
     DIRECT_CALL_COUNT,
     DIRECT_CALL_ID_PREFIX,
+    DIRECT_G1_AUTHORIZATION,
+    DIRECT_G1_CALL_ID_PREFIX,
+    DIRECT_G1_COMPARISON_PROTOCOL,
+    DIRECT_G1_COMPARISON_SCHEMA,
+    DIRECT_TARGET_G1,
     _exact_sign_test,
     aggregate_direct_comparison_results,
     build_direct_comparison_plan,
@@ -101,6 +106,45 @@ def test_direct_plan_is_exactly_14_frozen_same_call_comparisons(tmp_path, runs_r
     assert len({call.prompt_sha256 for call in calls}) == 14
 
 
+def test_direct_g1_plan_is_exactly_14_frozen_non_reversed_comparisons(
+    tmp_path, runs_root
+):
+    reference = tmp_path / "reference-42-aggregate.json"
+    reference.write_text('{"sealed":true}\n', encoding="utf-8")
+    tasks = _tasks()
+    pairs = _pairs(tasks)
+    plan = build_direct_comparison_plan(
+        tasks=tasks,
+        pairs=pairs,
+        historical=extract_historical_answers(runs_root=runs_root),
+        expected_source_pair_protocol=CORE_NATIVE_THREE_ARTIFACT_PROTOCOL_LABEL,
+        reference_42_call_aggregate=reference,
+        expected_reference_42_call_aggregate_sha256=file_sha256(reference),
+        student_b_system=DIRECT_TARGET_G1,
+    )
+    calls = validate_direct_comparison_plan(plan)
+
+    assert plan["schema_version"] == DIRECT_G1_COMPARISON_SCHEMA
+    assert plan["protocol"] == DIRECT_G1_COMPARISON_PROTOCOL
+    assert plan["student_a_system"] == "historical_chemcrow"
+    assert plan["student_b_system"] == "openevo_baseline"
+    assert tuple(call.task_id for call in calls) == FROZEN_PAPER_TASK_IDS
+    assert all(call.student_a_system == "historical_chemcrow" for call in calls)
+    assert all(call.student_b_system == "openevo_baseline" for call in calls)
+    assert all(call.baseline_output_id == f"baseline-{call.task_id}" for call in calls)
+    assert all(call.evolved_output_id is None for call in calls)
+    assert all(
+        call.call_id.startswith(f"{DIRECT_G1_CALL_ID_PREFIX}-chemcrow-")
+        for call in calls
+    )
+    assert {call.call_id for call in calls}.isdisjoint(
+        {
+            f"{DIRECT_CALL_ID_PREFIX}-{task_id}-direct"
+            for task_id in FROZEN_PAPER_TASK_IDS
+        }
+    )
+
+
 def test_direct_comparison_cost_ceiling_and_authorization_are_isolated(
     tmp_path, runs_root, monkeypatch
 ):
@@ -129,6 +173,7 @@ def test_direct_comparison_cost_ceiling_and_authorization_are_isolated(
             allow_paid=True,
         )
     assert DIRECT_AUTHORIZATION != "I_AUTHORIZE_42_SEALED_PAPER_EVALUATIONS"
+    assert DIRECT_G1_AUTHORIZATION != DIRECT_AUTHORIZATION
 
 
 def test_direct_harness_accepts_only_the_fresh_direct_call_namespace():

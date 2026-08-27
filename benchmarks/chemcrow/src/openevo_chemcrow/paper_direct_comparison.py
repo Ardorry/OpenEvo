@@ -1,4 +1,4 @@
-"""One-shot direct comparison of historical ChemCrow answers against full-v5 G2.
+"""One-shot direct comparison of historical ChemCrow answers against full-v5 G1/G2.
 
 This is a project-added analysis.  It deliberately uses its own plan schema,
 authorization literal, call namespace, receipts, results, and aggregate.  It
@@ -58,32 +58,55 @@ DIRECT_COMPARISON_PROTOCOL = (
     "historical_chemcrow_vs_full_v5_g2_direct_calibrated_paper_judge_v1"
 )
 DIRECT_COMPARISON = "g2_vs_historical_chemcrow"
+DIRECT_G1_COMPARISON_SCHEMA = "chemcrow_paper_direct_g1_comparison_plan_v1"
+DIRECT_G1_COMPARISON_RESULT_SCHEMA = (
+    "chemcrow_paper_direct_g1_comparison_result_v1"
+)
+DIRECT_G1_COMPARISON_AGGREGATE_SCHEMA = (
+    "chemcrow_paper_direct_g1_comparison_aggregate_v1"
+)
+DIRECT_G1_COMPARISON_PROTOCOL = (
+    "historical_chemcrow_vs_full_v5_g1_direct_calibrated_paper_judge_v1"
+)
+DIRECT_G1_COMPARISON = "g1_vs_historical_chemcrow"
 DIRECT_CALL_COUNT = len(FROZEN_PAPER_TASK_IDS)
 DIRECT_CALL_ID_PREFIX = "paper-direct-v1"
+DIRECT_G1_CALL_ID_PREFIX = "paper-direct-g1-v1"
 DIRECT_AUTHORIZATION = "I_AUTHORIZE_14_SEALED_DIRECT_PAPER_COMPARISONS"
+DIRECT_G1_AUTHORIZATION = (
+    "I_AUTHORIZE_14_SEALED_G1_VS_CHEMCROW_DIRECT_PAPER_COMPARISONS"
+)
 DIRECT_MAX_AUTHORIZED_USD = 5.0
 DIRECT_BOOTSTRAP_SEED = 20260827
 DIRECT_BOOTSTRAP_REPLICATES = 20_000
+DIRECT_TARGET_G1 = "openevo_baseline"
+DIRECT_TARGET_G2 = "openevo_evolved"
+_DIRECT_G2_LEDGER_ROOT = "paper-evaluator-direct-v5-g2-vs-historical-chemcrow-v1"
+_DIRECT_G1_LEDGER_ROOT = "paper-evaluator-direct-v5-g1-vs-historical-chemcrow-v1"
 
 
 class PaperDirectComparisonCall(BaseModel):
-    """One frozen historical-ChemCrow versus v5-G2 judge request."""
+    """One frozen historical-ChemCrow versus v5-G1/G2 judge request."""
 
     model_config = ConfigDict(extra="forbid")
 
     call_id: str
     task_id: str
-    comparison: Literal["g2_vs_historical_chemcrow"]
+    comparison: Literal[
+        "g2_vs_historical_chemcrow", "g1_vs_historical_chemcrow"
+    ]
     student_a_system: Literal["historical_chemcrow"]
-    student_b_system: Literal["openevo_evolved"]
+    student_b_system: Literal["openevo_evolved", "openevo_baseline"]
     prompt: str
     prompt_sha256: str
     source_pair_id: str
     source_pair_result_sha256: str
     historical_source_sha256: str
     historical_answer_sha256: str
-    evolved_output_id: str
-    evolved_answer_sha256: str
+    evolved_output_id: str | None = None
+    evolved_answer_sha256: str | None = None
+    baseline_output_id: str | None = None
+    baseline_answer_sha256: str | None = None
     estimated_input_tokens: int
     metric_classification: Literal["project_added_direct_comparison"]
     paper_comparable: Literal[False]
@@ -96,7 +119,78 @@ class PaperDirectComparisonCall(BaseModel):
             raise ValueError("direct-comparison pair is not bound to the task")
         if self.estimated_input_tokens <= 0:
             raise ValueError("direct-comparison token estimate must be positive")
+        expected = (
+            (
+                self.comparison == DIRECT_COMPARISON
+                and self.evolved_output_id is not None
+                and self.evolved_answer_sha256 is not None
+                and self.baseline_output_id is None
+                and self.baseline_answer_sha256 is None
+            )
+            if self.student_b_system == DIRECT_TARGET_G2
+            else (
+                self.comparison == DIRECT_G1_COMPARISON
+                and self.baseline_output_id is not None
+                and self.baseline_answer_sha256 is not None
+                and self.evolved_output_id is None
+                and self.evolved_answer_sha256 is None
+            )
+        )
+        if not expected:
+            raise ValueError("direct-comparison target fields are inconsistent")
         return self
+
+
+def _direct_variant(student_b_system: str) -> dict[str, str]:
+    if student_b_system == DIRECT_TARGET_G2:
+        return {
+            "schema_version": DIRECT_COMPARISON_SCHEMA,
+            "result_schema": DIRECT_COMPARISON_RESULT_SCHEMA,
+            "aggregate_schema": DIRECT_COMPARISON_AGGREGATE_SCHEMA,
+            "protocol": DIRECT_COMPARISON_PROTOCOL,
+            "comparison": DIRECT_COMPARISON,
+            "call_id_prefix": DIRECT_CALL_ID_PREFIX,
+            "authorization_env": "CHEMCROW_PAPER_DIRECT_COMPARISON_AUTHORIZATION",
+            "authorization": DIRECT_AUTHORIZATION,
+            "budget_env": "CHEMCROW_PAPER_DIRECT_COMPARISON_MAX_USD",
+            "ledger_root": _DIRECT_G2_LEDGER_ROOT,
+            "target_label": "v5_g2",
+            "display_label": "full-v5 G2",
+        }
+    if student_b_system == DIRECT_TARGET_G1:
+        return {
+            "schema_version": DIRECT_G1_COMPARISON_SCHEMA,
+            "result_schema": DIRECT_G1_COMPARISON_RESULT_SCHEMA,
+            "aggregate_schema": DIRECT_G1_COMPARISON_AGGREGATE_SCHEMA,
+            "protocol": DIRECT_G1_COMPARISON_PROTOCOL,
+            "comparison": DIRECT_G1_COMPARISON,
+            "call_id_prefix": DIRECT_G1_CALL_ID_PREFIX,
+            "authorization_env": "CHEMCROW_PAPER_DIRECT_G1_COMPARISON_AUTHORIZATION",
+            "authorization": DIRECT_G1_AUTHORIZATION,
+            "budget_env": "CHEMCROW_PAPER_DIRECT_G1_COMPARISON_MAX_USD",
+            "ledger_root": _DIRECT_G1_LEDGER_ROOT,
+            "target_label": "v5_g1",
+            "display_label": "full-v5 G1",
+        }
+    raise ValueError(f"unsupported direct-comparison target: {student_b_system}")
+
+
+def direct_plan_target_system(plan: dict[str, Any]) -> str:
+    """Resolve the frozen G1/G2 target from a direct-comparison plan."""
+    for target in (DIRECT_TARGET_G2, DIRECT_TARGET_G1):
+        variant = _direct_variant(target)
+        if (
+            plan.get("schema_version") == variant["schema_version"]
+            and plan.get("protocol") == variant["protocol"]
+            and plan.get("student_b_system") == target
+        ):
+            return target
+    raise ValueError("direct-comparison plan variant is invalid")
+
+
+def direct_plan_runtime_authority(plan: dict[str, Any]) -> dict[str, str]:
+    """Return the closed authorization and ledger namespace for a valid plan."""
+    return _direct_variant(direct_plan_target_system(plan))
 
 
 def direct_cost_ceiling() -> dict[str, Any]:
@@ -125,12 +219,16 @@ def build_direct_comparison_plan(
     expected_source_pair_protocol: str,
     reference_42_call_aggregate: Path,
     expected_reference_42_call_aggregate_sha256: str,
+    student_b_system: Literal["openevo_evolved", "openevo_baseline"] = (
+        DIRECT_TARGET_G2
+    ),
 ) -> dict[str, Any]:
     """Freeze 14 direct comparisons before any paid request is dispatched."""
     if [task.task_id for task in tasks] != list(FROZEN_PAPER_TASK_IDS):
         raise ValueError("direct comparison requires the frozen 14-task order")
     if file_sha256(reference_42_call_aggregate) != expected_reference_42_call_aggregate_sha256:
         raise ValueError("reference 42-call aggregate differs before direct comparison")
+    variant = _direct_variant(student_b_system)
     calls: list[PaperDirectComparisonCall] = []
     for task in tasks:
         pair = pairs[task.task_id]
@@ -138,40 +236,51 @@ def build_direct_comparison_plan(
         if source_protocol != expected_source_pair_protocol:
             raise ValueError(f"direct-comparison source protocol differs: {task.task_id}")
         old = historical[task.task_id]
+        target = pair.evolved if student_b_system == DIRECT_TARGET_G2 else pair.baseline
         prompt = render_compatible_prompt(
             task_prompt=task.prompt,
             student_a=old.chemcrow_answer,
-            student_b=pair.evolved.answer,
+            student_b=target.answer,
         )
-        call_id = f"{DIRECT_CALL_ID_PREFIX}-{task.task_id}-direct"
+        call_id = f"{variant['call_id_prefix']}-{task.task_id}-direct"
         estimated = estimate_chat_input_tokens(prompt)
         if estimated > direct_cost_ceiling()["max_input_tokens_per_call"]:
             raise ValueError(f"direct-comparison prompt exceeds input budget: {call_id}")
+        target_fields = (
+            {
+                "evolved_output_id": target.run_id,
+                "evolved_answer_sha256": canonical_sha256(target.answer),
+            }
+            if student_b_system == DIRECT_TARGET_G2
+            else {
+                "baseline_output_id": target.run_id,
+                "baseline_answer_sha256": canonical_sha256(target.answer),
+            }
+        )
         calls.append(
             PaperDirectComparisonCall(
                 call_id=call_id,
                 task_id=task.task_id,
-                comparison=DIRECT_COMPARISON,
+                comparison=variant["comparison"],
                 student_a_system="historical_chemcrow",
-                student_b_system="openevo_evolved",
+                student_b_system=student_b_system,
                 prompt=prompt,
                 prompt_sha256=canonical_sha256(prompt),
                 source_pair_id=pair.pair_id,
                 source_pair_result_sha256=canonical_sha256(pair.model_dump(mode="json")),
                 historical_source_sha256=old.notebook_sha256,
                 historical_answer_sha256=canonical_sha256(old.chemcrow_answer),
-                evolved_output_id=pair.evolved.run_id,
-                evolved_answer_sha256=canonical_sha256(pair.evolved.answer),
                 estimated_input_tokens=estimated,
                 metric_classification="project_added_direct_comparison",
                 paper_comparable=False,
+                **target_fields,
             )
         )
     if len(calls) != DIRECT_CALL_COUNT or len({call.call_id for call in calls}) != len(calls):
         raise AssertionError("direct comparison requires 14 unique calls")
     return {
-        "schema_version": DIRECT_COMPARISON_SCHEMA,
-        "protocol": DIRECT_COMPARISON_PROTOCOL,
+        "schema_version": variant["schema_version"],
+        "protocol": variant["protocol"],
         "judge_protocol": PAPER_EVALUATOR_PROTOCOL,
         "prompt_candidate_id": PAPER_EVALUATOR_PROMPT_CANDIDATE,
         "prompt_candidate_sha256": PAPER_EVALUATOR_PROMPT_SHA256,
@@ -183,7 +292,7 @@ def build_direct_comparison_plan(
         "require_parameters": True,
         "data_collection": PAPER_EVALUATOR_DATA_COLLECTION,
         "student_a_system": "historical_chemcrow",
-        "student_b_system": "openevo_evolved",
+        "student_b_system": student_b_system,
         "answer_order_frozen": True,
         "reflector_access": False,
         "evolution_feedback_access": False,
@@ -191,19 +300,21 @@ def build_direct_comparison_plan(
         "paper_comparable": False,
         "project_added_metric": True,
         "source_pair_protocol": expected_source_pair_protocol,
-        "call_id_prefix": DIRECT_CALL_ID_PREFIX,
+        "call_id_prefix": variant["call_id_prefix"],
         "call_count": len(calls),
         "cost_ceiling": direct_cost_ceiling(),
         "reference_42_call_aggregate_sha256": expected_reference_42_call_aggregate_sha256,
-        "calls": [call.model_dump(mode="json") for call in calls],
+        "calls": [call.model_dump(mode="json", exclude_none=True) for call in calls],
     }
 
 
 def validate_direct_comparison_plan(plan: dict[str, Any]) -> list[PaperDirectComparisonCall]:
     """Validate the complete direct plan and return its closed call inventory."""
+    student_b_system = direct_plan_target_system(plan)
+    variant = _direct_variant(student_b_system)
     if (
-        plan.get("schema_version") != DIRECT_COMPARISON_SCHEMA
-        or plan.get("protocol") != DIRECT_COMPARISON_PROTOCOL
+        plan.get("schema_version") != variant["schema_version"]
+        or plan.get("protocol") != variant["protocol"]
         or plan.get("judge_protocol") != PAPER_EVALUATOR_PROTOCOL
         or plan.get("prompt_candidate_sha256") != PAPER_EVALUATOR_PROMPT_SHA256
         or plan.get("model") != PAPER_EVALUATOR_MODEL
@@ -211,9 +322,9 @@ def validate_direct_comparison_plan(plan: dict[str, Any]) -> list[PaperDirectCom
         or plan.get("provider_only") != [PAPER_EVALUATOR_PROVIDER]
         or plan.get("allow_fallbacks") is not False
         or plan.get("call_count") != DIRECT_CALL_COUNT
-        or plan.get("call_id_prefix") != DIRECT_CALL_ID_PREFIX
+        or plan.get("call_id_prefix") != variant["call_id_prefix"]
         or plan.get("student_a_system") != "historical_chemcrow"
-        or plan.get("student_b_system") != "openevo_evolved"
+        or plan.get("student_b_system") != student_b_system
         or plan.get("answer_order_frozen") is not True
         or plan.get("paper_comparable") is not False
         or plan.get("project_added_metric") is not True
@@ -225,9 +336,11 @@ def validate_direct_comparison_plan(plan: dict[str, Any]) -> list[PaperDirectCom
         or tuple(call.task_id for call in calls) != FROZEN_PAPER_TASK_IDS
         or len({call.call_id for call in calls}) != DIRECT_CALL_COUNT
         or any(
-            call.call_id != f"{DIRECT_CALL_ID_PREFIX}-{call.task_id}-direct"
+            call.call_id != f"{variant['call_id_prefix']}-{call.task_id}-direct"
             for call in calls
         )
+        or any(call.student_b_system != student_b_system for call in calls)
+        or any(call.comparison != variant["comparison"] for call in calls)
     ):
         raise ValueError("direct-comparison call inventory is invalid")
     return calls
@@ -246,13 +359,17 @@ def run_direct_comparison_plan(
     """Execute each frozen direct comparison at most once through OpenEvo Core."""
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
     calls = validate_direct_comparison_plan(plan)
+    runtime_authority = direct_plan_runtime_authority(plan)
     if not allow_paid:
         raise PermissionError("direct paper comparison requires --allow-paid")
-    if os.environ.get("CHEMCROW_PAPER_DIRECT_COMPARISON_AUTHORIZATION") != DIRECT_AUTHORIZATION:
+    if (
+        os.environ.get(runtime_authority["authorization_env"])
+        != runtime_authority["authorization"]
+    ):
         raise PermissionError("direct-comparison authorization literal is absent")
     if os.environ.get("CHEMCROW_PAPER_EVALUATOR_MODEL") != PAPER_EVALUATOR_MODEL:
         raise ValueError("direct-comparison model differs from frozen openai/gpt-4")
-    budget = float(os.environ.get("CHEMCROW_PAPER_DIRECT_COMPARISON_MAX_USD", "0"))
+    budget = float(os.environ.get(runtime_authority["budget_env"], "0"))
     ceiling = float(plan["cost_ceiling"]["list_price_ceiling_usd_total"])
     if budget < ceiling or budget > DIRECT_MAX_AUTHORIZED_USD:
         raise PermissionError("direct-comparison budget is outside the frozen authorized range")
@@ -290,7 +407,7 @@ def run_direct_comparison_plan(
         ):
             raise RuntimeError(f"direct-comparison receipt is invalid: {call.call_id}")
         result = {
-            "schema_version": DIRECT_COMPARISON_RESULT_SCHEMA,
+            "schema_version": runtime_authority["result_schema"],
             "call_id": call.call_id,
             "task_id": call.task_id,
             "comparison": call.comparison,
@@ -314,6 +431,9 @@ def run_direct_comparison_plan(
         plan_sha256=file_sha256(plan_path),
         reference_42_call_aggregate=reference_42_call_aggregate,
         expected_reference_sha256=plan["reference_42_call_aggregate_sha256"],
+        student_b_system=direct_plan_target_system(plan),
+        protocol=str(plan["protocol"]),
+        aggregate_schema=runtime_authority["aggregate_schema"],
     )
     aggregate_path = result_root / "aggregate.json"
     serialized = json.dumps(aggregate, indent=2, sort_keys=True) + "\n"
@@ -332,18 +452,30 @@ def aggregate_direct_comparison_results(
     plan_sha256: str,
     reference_42_call_aggregate: Path,
     expected_reference_sha256: str,
+    student_b_system: Literal["openevo_evolved", "openevo_baseline"] = (
+        DIRECT_TARGET_G2
+    ),
+    protocol: str = DIRECT_COMPARISON_PROTOCOL,
+    aggregate_schema: str = DIRECT_COMPARISON_AGGREGATE_SCHEMA,
 ) -> dict[str, Any]:
-    """Aggregate same-call historical-ChemCrow versus v5-G2 grades."""
+    """Aggregate same-call historical-ChemCrow versus v5-G1/G2 grades."""
     if len(results) != DIRECT_CALL_COUNT:
         raise ValueError("direct comparison requires exactly 14 sealed results")
+    variant = _direct_variant(student_b_system)
+    if protocol != variant["protocol"] or aggregate_schema != variant["aggregate_schema"]:
+        raise ValueError("direct-comparison aggregate variant is inconsistent")
+    target_label = variant["target_label"]
+    grade_key = f"{target_label}_grade"
+    delta_key = f"{target_label}_minus_historical_chemcrow"
+    wins_key = f"{target_label}_wins"
     per_task: list[dict[str, Any]] = []
     costs: list[float] = []
     prompt_tokens = completion_tokens = 0
     for result in sorted(results, key=lambda item: str(item["task_id"])):
         assessment = DualStudentAssessment.model_validate(result["assessment"])
         historical_grade = assessment.student_a.grade
-        g2_grade = assessment.student_b.grade
-        delta = g2_grade - historical_grade
+        target_grade = assessment.student_b.grade
+        delta = target_grade - historical_grade
         call_id = str(result["call_id"])
         receipt_path = receipt_root / f"{call_id}.receipt.json"
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
@@ -376,21 +508,27 @@ def aggregate_direct_comparison_results(
                 "task_id": result["task_id"],
                 "call_id": call_id,
                 "historical_chemcrow_grade": historical_grade,
-                "v5_g2_grade": g2_grade,
-                "v5_g2_minus_historical_chemcrow": delta,
-                "winner": "v5_g2" if delta > 0 else "historical_chemcrow" if delta < 0 else "tie",
+                grade_key: target_grade,
+                delta_key: delta,
+                "winner": (
+                    target_label
+                    if delta > 0
+                    else "historical_chemcrow"
+                    if delta < 0
+                    else "tie"
+                ),
                 "assessment_sha256": result["assessment_sha256"],
                 "receipt_sha256": file_sha256(receipt_path),
             }
         )
-    deltas = [float(row["v5_g2_minus_historical_chemcrow"]) for row in per_task]
+    deltas = [float(row[delta_key]) for row in per_task]
     historical = [float(row["historical_chemcrow_grade"]) for row in per_task]
-    evolved = [float(row["v5_g2_grade"]) for row in per_task]
+    target_grades = [float(row[grade_key]) for row in per_task]
     ci = _bootstrap_mean_ci(deltas)
     return {
-        "schema_version": DIRECT_COMPARISON_AGGREGATE_SCHEMA,
+        "schema_version": aggregate_schema,
         "status": "PROVISIONAL_LLM_JUDGED_DIRECT_COMPARISON_COMPLETE",
-        "protocol": DIRECT_COMPARISON_PROTOCOL,
+        "protocol": protocol,
         "judge_protocol": PAPER_EVALUATOR_PROTOCOL,
         "model": PAPER_EVALUATOR_MODEL,
         "temperature": PAPER_EVALUATOR_TEMPERATURE,
@@ -399,13 +537,13 @@ def aggregate_direct_comparison_results(
         "paper_comparable": False,
         "project_added_metric": True,
         "student_a_system": "historical_chemcrow",
-        "student_b_system": "openevo_evolved",
+        "student_b_system": student_b_system,
         "call_count": DIRECT_CALL_COUNT,
         "mean_historical_chemcrow_grade": statistics.mean(historical),
-        "mean_v5_g2_grade": statistics.mean(evolved),
-        "mean_v5_g2_minus_historical_chemcrow": statistics.mean(deltas),
-        "median_v5_g2_minus_historical_chemcrow": statistics.median(deltas),
-        "v5_g2_wins": sum(delta > 0 for delta in deltas),
+        f"mean_{grade_key}": statistics.mean(target_grades),
+        f"mean_{delta_key}": statistics.mean(deltas),
+        f"median_{delta_key}": statistics.median(deltas),
+        wins_key: sum(delta > 0 for delta in deltas),
         "ties": sum(delta == 0 for delta in deltas),
         "historical_chemcrow_wins": sum(delta < 0 for delta in deltas),
         "paired_bootstrap_95_ci_mean_delta": ci,
@@ -426,7 +564,8 @@ def aggregate_direct_comparison_results(
         "per_task": per_task,
         "limitations": (
             "One GPT-4 call per task with fixed answer order (historical ChemCrow as "
-            "Student A, v5 G2 as Student B); N=14, discrete grades, stochastic judge, "
+            f"Student A, {variant['display_label']} as Student B); N=14, discrete "
+            "grades, stochastic judge, "
             "and no answer-order reversal replicate."
         ),
     }
@@ -442,6 +581,8 @@ def audit_direct_comparison(
     receipt_root = _path(config_path, config["shim_receipt_root"])
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
     calls = validate_direct_comparison_plan(plan)
+    student_b_system = direct_plan_target_system(plan)
+    variant = _direct_variant(student_b_system)
     results = [
         _validate_existing_direct_result(
             result_root / f"{call.call_id}.result.json", call
@@ -456,6 +597,9 @@ def audit_direct_comparison(
             config_path, config["reference_42_call_aggregate"]
         ),
         expected_reference_sha256=str(config["reference_42_call_aggregate_sha256"]),
+        student_b_system=student_b_system,
+        protocol=str(plan["protocol"]),
+        aggregate_schema=variant["aggregate_schema"],
     )
     claims = sorted(receipt_root.glob("*.claim.json"))
     receipts = sorted(receipt_root.glob("*.receipt.json"))
@@ -476,7 +620,7 @@ def audit_direct_comparison(
         observed_claim_ids.add(str(call_id))
     if observed_claim_ids != expected_call_ids:
         raise ValueError("direct-comparison claim IDs differ from the frozen plan")
-    wins = int(aggregate["v5_g2_wins"])
+    wins = int(aggregate[f"{variant['target_label']}_wins"])
     losses = int(aggregate["historical_chemcrow_wins"])
     audit = {
         **aggregate,
@@ -501,6 +645,10 @@ def audit_direct_comparison(
 def preflight_direct_comparison(*, config_path: Path, output: Path) -> dict[str, Any]:
     """Build and seal the zero-paid direct-comparison plan."""
     config = _load_config(config_path)
+    student_b_system = str(config.get("student_b_system", DIRECT_TARGET_G2))
+    if student_b_system not in {DIRECT_TARGET_G1, DIRECT_TARGET_G2}:
+        raise ValueError("direct-comparison config has an invalid student B system")
+    variant = _direct_variant(student_b_system)
     tasks = _read_tasks(_path(config_path, config["task_manifest"]))
     task_ids = [task.task_id for task in tasks]
     pairs = assert_sealed_run_ready(
@@ -523,6 +671,7 @@ def preflight_direct_comparison(*, config_path: Path, output: Path) -> dict[str,
         expected_reference_42_call_aggregate_sha256=str(
             config["reference_42_call_aggregate_sha256"]
         ),
+        student_b_system=student_b_system,  # type: ignore[arg-type]
     )
     plan_path = _path(config_path, config["plan_path"])
     plan_path.parent.mkdir(parents=True, exist_ok=True)
@@ -535,7 +684,7 @@ def preflight_direct_comparison(*, config_path: Path, output: Path) -> dict[str,
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             handle.write(serialized)
     report = {
-        "schema_version": "chemcrow_paper_direct_comparison_preflight_v1",
+        "schema_version": f"{variant['schema_version']}_preflight",
         "status": "READY_FOR_EXPLICIT_PAID_DIRECT_COMPARISON",
         "model_calls": 0,
         "paid_operations": 0,
@@ -548,7 +697,7 @@ def preflight_direct_comparison(*, config_path: Path, output: Path) -> dict[str,
         "judge_protocol": PAPER_EVALUATOR_PROTOCOL,
         "prompt_candidate_sha256": PAPER_EVALUATOR_PROMPT_SHA256,
         "student_a_system": "historical_chemcrow",
-        "student_b_system": "openevo_evolved",
+        "student_b_system": student_b_system,
         "reference_42_call_ledger_unchanged": True,
         "production_42_call_ledger_included": False,
         "secret_values_included": False,
@@ -561,14 +710,16 @@ def _validate_existing_direct_result(
     path: Path, call: PaperDirectComparisonCall
 ) -> dict[str, Any]:
     result = json.loads(path.read_text(encoding="utf-8"))
+    variant = _direct_variant(call.student_b_system)
     if (
-        result.get("schema_version") != DIRECT_COMPARISON_RESULT_SCHEMA
+        result.get("schema_version") != variant["result_schema"]
         or result.get("call_id") != call.call_id
         or result.get("task_id") != call.task_id
         or result.get("prompt_sha256") != call.prompt_sha256
         or result.get("execution_route") != PAPER_CORE_ROUTE
-        or result.get("student_a_system") != "historical_chemcrow"
-        or result.get("student_b_system") != "openevo_evolved"
+        or result.get("comparison") != call.comparison
+        or result.get("student_a_system") != call.student_a_system
+        or result.get("student_b_system") != call.student_b_system
     ):
         raise ValueError(f"existing direct result authority mismatch: {call.call_id}")
     DualStudentAssessment.model_validate(result.get("assessment"))
@@ -599,8 +750,15 @@ def _exact_sign_test(*, wins: int, losses: int) -> float:
 
 
 def _render_markdown(audit: dict[str, Any]) -> str:
+    variant = _direct_variant(str(audit["student_b_system"]))
+    target_label = variant["target_label"]
+    display_label = variant["display_label"]
+    grade_key = f"{target_label}_grade"
+    delta_key = f"{target_label}_minus_historical_chemcrow"
+    wins_key = f"{target_label}_wins"
+    short_label = "G1" if target_label == "v5_g1" else "G2"
     rows = [
-        "# Direct GPT-4 Comparison: Historical ChemCrow vs full-v5 G2",
+        f"# Direct GPT-4 Comparison: Historical ChemCrow vs {display_label}",
         "",
         (
             "This is a project-added, same-call comparison using the frozen calibrated "
@@ -610,26 +768,36 @@ def _render_markdown(audit: dict[str, Any]) -> str:
         f"- status: `{audit['status']}`",
         f"- calls: `{audit['call_count']}/14`",
         f"- historical ChemCrow mean: `{audit['mean_historical_chemcrow_grade']:.3f}`",
-        f"- full-v5 G2 mean: `{audit['mean_v5_g2_grade']:.3f}`",
-        f"- G2 minus historical ChemCrow: `{audit['mean_v5_g2_minus_historical_chemcrow']:+.3f}`",
-        f"- G2 wins/ties/historical wins: `{audit['v5_g2_wins']}/{audit['ties']}/{audit['historical_chemcrow_wins']}`",
+        f"- {display_label} mean: `{audit[f'mean_{grade_key}']:.3f}`",
+        (
+            f"- {short_label} minus historical ChemCrow: "
+            f"`{audit[f'mean_{delta_key}']:+.3f}`"
+        ),
+        (
+            f"- {short_label} wins/ties/historical wins: "
+            f"`{audit[wins_key]}/{audit['ties']}/"
+            f"{audit['historical_chemcrow_wins']}`"
+        ),
         f"- paired bootstrap 95% CI: `{audit['paired_bootstrap_95_ci_mean_delta']}`",
         f"- exact sign-test p: `{audit['exact_sign_test_two_sided_p']:.6f}`",
         f"- proven cost: `${audit['actual_openrouter_reported_cost_usd']:.5f}`",
-        "- answer order: historical ChemCrow = Student A; full-v5 G2 = Student B",
+        f"- answer order: historical ChemCrow = Student A; {display_label} = Student B",
         (
             "- original 42-call ledger unchanged: "
             f"`{audit['reference_42_call_ledger_unchanged']}`"
         ),
         "",
-        "| task | historical ChemCrow | full-v5 G2 | G2 - historical | winner |",
+        (
+            f"| task | historical ChemCrow | {display_label} | "
+            f"{short_label} - historical | winner |"
+        ),
         "|---|---:|---:|---:|---|",
     ]
     for row in audit["per_task"]:
         rows.append(
             f"| {row['task_id']} | {row['historical_chemcrow_grade']:.1f} | "
-            f"{row['v5_g2_grade']:.1f} | "
-            f"{row['v5_g2_minus_historical_chemcrow']:+.1f} | {row['winner']} |"
+            f"{row[grade_key]:.1f} | "
+            f"{row[delta_key]:+.1f} | {row['winner']} |"
         )
     rows.extend(["", f"Limitation: {audit['limitations']}", ""])
     return "\n".join(rows)

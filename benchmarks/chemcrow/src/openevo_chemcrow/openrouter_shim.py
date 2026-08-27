@@ -675,18 +675,18 @@ def main(argv: list[str] | None = None) -> None:
             raise SystemExit("calibration receipts are outside the dedicated ledger")
     elif args.direct_comparison:
         from .paper_direct_comparison import (
-            DIRECT_AUTHORIZATION,
             DIRECT_CALL_COUNT,
-            DIRECT_CALL_ID_PREFIX,
             DIRECT_MAX_AUTHORIZED_USD,
+            direct_plan_runtime_authority,
             validate_direct_comparison_plan,
         )
 
+        runtime_authority = direct_plan_runtime_authority(plan)
         if os.environ.get("CHEMCROW_PAPER_EVALUATOR_MODEL") != PAPER_EVALUATOR_MODEL:
             raise SystemExit("CHEMCROW_PAPER_EVALUATOR_MODEL differs from frozen model")
         if (
-            os.environ.get("CHEMCROW_PAPER_DIRECT_COMPARISON_AUTHORIZATION")
-            != DIRECT_AUTHORIZATION
+            os.environ.get(runtime_authority["authorization_env"])
+            != runtime_authority["authorization"]
         ):
             raise SystemExit("direct-comparison paid authorization literal is absent")
         validated_calls = validate_direct_comparison_plan(plan)
@@ -694,16 +694,14 @@ def main(argv: list[str] | None = None) -> None:
         if len(allowed) != DIRECT_CALL_COUNT:
             raise SystemExit("direct-comparison plan allowlist is incomplete")
         configured_budget = float(
-            os.environ.get("CHEMCROW_PAPER_DIRECT_COMPARISON_MAX_USD", "0")
+            os.environ.get(runtime_authority["budget_env"], "0")
         )
         if configured_budget > DIRECT_MAX_AUTHORIZED_USD:
             raise SystemExit("direct-comparison budget exceeds the authorized maximum")
-        call_id_prefix = f"{DIRECT_CALL_ID_PREFIX}-chemcrow-"
+        call_id_prefix = f"{runtime_authority['call_id_prefix']}-chemcrow-"
         ledger_class = "direct_comparison"
         resolved_receipts = args.receipt_root.resolve()
-        if "paper-evaluator-direct-v5-g2-vs-historical-chemcrow-v1" not in (
-            resolved_receipts.parts
-        ):
+        if runtime_authority["ledger_root"] not in resolved_receipts.parts:
             raise SystemExit("direct-comparison receipts are outside the dedicated ledger")
     elif args.blind_g1_g2:
         from .paper_blind_g1_g2 import (
