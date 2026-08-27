@@ -11,12 +11,17 @@ from openevo_chemcrow.models import TaskItem, Trajectory
 from openevo_chemcrow.paper_blind_g1_g2 import (
     BLIND_AUTHORIZATION,
     BLIND_CALL_COUNT,
+    BLIND_ORDER_REVERSED,
     BLIND_RANDOMIZATION_SEED,
+    BLIND_REVERSED_AUTHORIZATION,
+    BLIND_REVERSED_CALL_ID_PREFIX,
     _position_diagnostics,
     aggregate_blind_g1_g2_results,
     balanced_answer_order,
     blind_cost_ceiling,
+    blind_plan_runtime_authority,
     build_blind_g1_g2_plan,
+    reversed_answer_order,
     run_blind_g1_g2_plan,
     validate_blind_g1_g2_plan,
 )
@@ -69,12 +74,19 @@ def _pairs(tasks: list[TaskItem]) -> dict[str, ThreeArtifactPairResult]:
     }
 
 
-def _references(tmp_path: Path) -> dict[str, tuple[Path, str]]:
+def _references(
+    tmp_path: Path, *, include_original_round: bool = False
+) -> dict[str, tuple[Path, str]]:
     refs = {}
     for label in ("production_42_call_aggregate", "historical_vs_g2_direct_aggregate"):
         path = tmp_path / f"{label}.json"
         path.write_text(json.dumps({"label": label}) + "\n", encoding="utf-8")
         refs[label] = (path, file_sha256(path))
+    if include_original_round:
+        for label in ("original_blind_plan", "original_blind_aggregate"):
+            path = tmp_path / f"{label}.json"
+            path.write_text(json.dumps({"label": label}) + "\n", encoding="utf-8")
+            refs[label] = (path, file_sha256(path))
     return refs
 
 
@@ -101,6 +113,53 @@ def test_balanced_order_is_seeded_deterministic_and_exactly_seven_seven():
     assert list(first.values()).count("openevo_baseline") == 7
     assert list(first.values()).count("openevo_evolved") == 7
     assert BLIND_RANDOMIZATION_SEED == 20260827
+
+
+def test_reversed_order_is_the_exact_per_task_inverse():
+    original = balanced_answer_order()
+    reversed_order = reversed_answer_order()
+
+    assert tuple(reversed_order) == FROZEN_PAPER_TASK_IDS
+    assert all(original[task_id] != reversed_order[task_id] for task_id in original)
+    assert list(reversed_order.values()).count("openevo_baseline") == 7
+    assert list(reversed_order.values()).count("openevo_evolved") == 7
+
+
+def test_reversed_plan_has_fresh_namespace_and_binds_original_round(tmp_path):
+    tasks = _tasks()
+    refs = _references(tmp_path, include_original_round=True)
+    plan = build_blind_g1_g2_plan(
+        tasks=tasks,
+        pairs=_pairs(tasks),
+        expected_source_pair_protocol=CORE_NATIVE_THREE_ARTIFACT_PROTOCOL_LABEL,
+        immutable_reference_hashes=refs,
+        answer_order_variant=BLIND_ORDER_REVERSED,
+    )
+    calls = validate_blind_g1_g2_plan(plan)
+    authority = blind_plan_runtime_authority(plan)
+
+    assert plan["answer_order_variant"] == BLIND_ORDER_REVERSED
+    assert plan["reversed_from_plan_sha256"] == refs["original_blind_plan"][1]
+    assert plan["reversed_from_aggregate_sha256"] == refs["original_blind_aggregate"][1]
+    assert authority["authorization"] == BLIND_REVERSED_AUTHORIZATION
+    assert authority["authorization"] != BLIND_AUTHORIZATION
+    assert authority["call_id_prefix"] == BLIND_REVERSED_CALL_ID_PREFIX
+    assert all(call.call_id.startswith(f"{BLIND_REVERSED_CALL_ID_PREFIX}-") for call in calls)
+    assert all(
+        call.student_a_system == reversed_answer_order()[call.task_id] for call in calls
+    )
+
+
+def test_reversed_plan_requires_original_round_hash_bindings(tmp_path):
+    tasks = _tasks()
+    with pytest.raises(ValueError, match="not bound to the original round"):
+        build_blind_g1_g2_plan(
+            tasks=tasks,
+            pairs=_pairs(tasks),
+            expected_source_pair_protocol=CORE_NATIVE_THREE_ARTIFACT_PROTOCOL_LABEL,
+            immutable_reference_hashes=_references(tmp_path),
+            answer_order_variant=BLIND_ORDER_REVERSED,
+        )
 
 
 def test_blind_plan_freezes_mapping_without_identity_labels(tmp_path):

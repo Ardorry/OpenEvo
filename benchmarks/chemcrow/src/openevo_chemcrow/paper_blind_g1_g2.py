@@ -55,12 +55,24 @@ BLIND_PLAN_SCHEMA = "chemcrow_paper_blind_g1_g2_plan_v1"
 BLIND_RESULT_SCHEMA = "chemcrow_paper_blind_g1_g2_result_v1"
 BLIND_AGGREGATE_SCHEMA = "chemcrow_paper_blind_g1_g2_aggregate_v1"
 BLIND_PROTOCOL = "full_v5_g1_vs_g2_balanced_blind_calibrated_paper_judge_v1"
+BLIND_REVERSED_PLAN_SCHEMA = "chemcrow_paper_blind_g1_g2_reversed_plan_v1"
+BLIND_REVERSED_PROTOCOL = (
+    "full_v5_g1_vs_g2_reversed_blind_calibrated_paper_judge_v1"
+)
 BLIND_COMPARISON = "blind_g1_vs_g2"
 BLIND_CALL_COUNT = len(FROZEN_PAPER_TASK_IDS)
 BLIND_CALL_ID_PREFIX = "paper-blind-v1"
+BLIND_REVERSED_CALL_ID_PREFIX = "paper-blind-reversed-v1"
 BLIND_RANDOMIZATION_SEED = 20260827
 BLIND_AUTHORIZATION = "I_AUTHORIZE_14_SEALED_BLIND_G1_G2_PAPER_COMPARISONS"
+BLIND_REVERSED_AUTHORIZATION = (
+    "I_AUTHORIZE_14_SEALED_REVERSED_BLIND_G1_G2_PAPER_COMPARISONS"
+)
 BLIND_MAX_AUTHORIZED_USD = 5.0
+BLIND_ORDER_ORIGINAL = "deterministic_seeded_balanced_v1"
+BLIND_ORDER_REVERSED = "exact_per_task_inverse_of_deterministic_seeded_balanced_v1"
+_ORIGINAL_LEDGER_ROOT = "paper-evaluator-blind-v5-g1-vs-g2-balanced-v1"
+_REVERSED_LEDGER_ROOT = "paper-evaluator-blind-v5-g1-vs-g2-reversed-v1"
 _IDENTITY_LABELS = (
     "openevo",
     "reflector",
@@ -145,12 +157,76 @@ def balanced_answer_order() -> dict[str, str]:
     return assignment
 
 
+def reversed_answer_order() -> dict[str, str]:
+    """Return the exact per-task inverse of the first frozen blind round."""
+    inverse = {
+        task_id: (
+            "openevo_evolved"
+            if student_a_system == "openevo_baseline"
+            else "openevo_baseline"
+        )
+        for task_id, student_a_system in balanced_answer_order().items()
+    }
+    if any(
+        inverse[task_id] == student_a_system
+        for task_id, student_a_system in balanced_answer_order().items()
+    ):
+        raise AssertionError("reversed blind assignment did not invert every task")
+    return inverse
+
+
+def _blind_variant(order_variant: str) -> dict[str, str]:
+    if order_variant == BLIND_ORDER_ORIGINAL:
+        return {
+            "schema_version": BLIND_PLAN_SCHEMA,
+            "protocol": BLIND_PROTOCOL,
+            "call_id_prefix": BLIND_CALL_ID_PREFIX,
+            "authorization_env": "CHEMCROW_PAPER_BLIND_G1_G2_AUTHORIZATION",
+            "authorization": BLIND_AUTHORIZATION,
+            "budget_env": "CHEMCROW_PAPER_BLIND_G1_G2_MAX_USD",
+            "ledger_root": _ORIGINAL_LEDGER_ROOT,
+        }
+    if order_variant == BLIND_ORDER_REVERSED:
+        return {
+            "schema_version": BLIND_REVERSED_PLAN_SCHEMA,
+            "protocol": BLIND_REVERSED_PROTOCOL,
+            "call_id_prefix": BLIND_REVERSED_CALL_ID_PREFIX,
+            "authorization_env": "CHEMCROW_PAPER_BLIND_G1_G2_REVERSED_AUTHORIZATION",
+            "authorization": BLIND_REVERSED_AUTHORIZATION,
+            "budget_env": "CHEMCROW_PAPER_BLIND_G1_G2_REVERSED_MAX_USD",
+            "ledger_root": _REVERSED_LEDGER_ROOT,
+        }
+    raise ValueError(f"unsupported blind answer-order variant: {order_variant}")
+
+
+def blind_plan_order_variant(plan: dict[str, Any]) -> str:
+    """Resolve old round-one plans and the explicit reversed-round plan."""
+    if (
+        plan.get("schema_version") == BLIND_PLAN_SCHEMA
+        and plan.get("protocol") == BLIND_PROTOCOL
+    ):
+        return BLIND_ORDER_ORIGINAL
+    if (
+        plan.get("schema_version") == BLIND_REVERSED_PLAN_SCHEMA
+        and plan.get("protocol") == BLIND_REVERSED_PROTOCOL
+        and plan.get("answer_order_variant") == BLIND_ORDER_REVERSED
+    ):
+        return BLIND_ORDER_REVERSED
+    raise ValueError("blind G1/G2 plan variant is invalid")
+
+
+def blind_plan_runtime_authority(plan: dict[str, Any]) -> dict[str, str]:
+    """Return the closed authorization and ledger namespace for a valid plan."""
+    return _blind_variant(blind_plan_order_variant(plan))
+
+
 def build_blind_g1_g2_plan(
     *,
     tasks: list[TaskItem],
     pairs: dict[str, ThreeArtifactPairResult],
     expected_source_pair_protocol: str,
     immutable_reference_hashes: dict[str, tuple[Path, str]],
+    answer_order_variant: str = BLIND_ORDER_ORIGINAL,
 ) -> dict[str, Any]:
     """Freeze balanced answer order and all prompt/source hashes before calls."""
     if [task.task_id for task in tasks] != list(FROZEN_PAPER_TASK_IDS):
@@ -158,7 +234,14 @@ def build_blind_g1_g2_plan(
     for label, (path, expected_sha256) in immutable_reference_hashes.items():
         if file_sha256(path) != expected_sha256:
             raise ValueError(f"immutable reference differs before blind comparison: {label}")
-    assignment = balanced_answer_order()
+    variant = _blind_variant(answer_order_variant)
+    if answer_order_variant == BLIND_ORDER_REVERSED:
+        required = {"original_blind_plan", "original_blind_aggregate"}
+        if not required.issubset(immutable_reference_hashes):
+            raise ValueError("reversed blind plan is not bound to the original round")
+        assignment = reversed_answer_order()
+    else:
+        assignment = balanced_answer_order()
     calls: list[PaperBlindG1G2Call] = []
     for task in tasks:
         pair = pairs[task.task_id]
@@ -180,7 +263,7 @@ def build_blind_g1_g2_plan(
         if any(label in prompt_framing for label in _IDENTITY_LABELS):
             raise ValueError(f"blind prompt exposes an experiment identity: {task.task_id}")
         estimated = estimate_chat_input_tokens(prompt)
-        call_id = f"{BLIND_CALL_ID_PREFIX}-{task.task_id}-blind"
+        call_id = f"{variant['call_id_prefix']}-{task.task_id}-blind"
         if estimated > blind_cost_ceiling()["max_input_tokens_per_call"]:
             raise ValueError(f"blind-comparison prompt exceeds input budget: {call_id}")
         calls.append(
@@ -210,9 +293,9 @@ def build_blind_g1_g2_plan(
         {"task_id": call.task_id, "student_a_system": call.student_a_system}
         for call in calls
     ]
-    return {
-        "schema_version": BLIND_PLAN_SCHEMA,
-        "protocol": BLIND_PROTOCOL,
+    plan = {
+        "schema_version": variant["schema_version"],
+        "protocol": variant["protocol"],
         "judge_protocol": PAPER_EVALUATOR_PROTOCOL,
         "prompt_candidate_id": PAPER_EVALUATOR_PROMPT_CANDIDATE,
         "prompt_candidate_sha256": PAPER_EVALUATOR_PROMPT_SHA256,
@@ -240,7 +323,7 @@ def build_blind_g1_g2_plan(
         "paper_comparable": False,
         "project_added_metric": True,
         "source_pair_protocol": expected_source_pair_protocol,
-        "call_id_prefix": BLIND_CALL_ID_PREFIX,
+        "call_id_prefix": variant["call_id_prefix"],
         "call_count": len(calls),
         "cost_ceiling": blind_cost_ceiling(),
         "immutable_reference_sha256": {
@@ -248,12 +331,33 @@ def build_blind_g1_g2_plan(
         },
         "calls": [call.model_dump(mode="json") for call in calls],
     }
+    if answer_order_variant == BLIND_ORDER_REVERSED:
+        plan.update(
+            {
+                "answer_order_variant": BLIND_ORDER_REVERSED,
+                "answer_order_method": "exact_per_task_inverse_of_round_one",
+                "reversed_from_plan_sha256": immutable_reference_hashes[
+                    "original_blind_plan"
+                ][1],
+                "reversed_from_aggregate_sha256": immutable_reference_hashes[
+                    "original_blind_aggregate"
+                ][1],
+            }
+        )
+    return plan
 
 
 def validate_blind_g1_g2_plan(plan: dict[str, Any]) -> list[PaperBlindG1G2Call]:
+    order_variant = blind_plan_order_variant(plan)
+    variant = _blind_variant(order_variant)
+    expected_order = (
+        reversed_answer_order()
+        if order_variant == BLIND_ORDER_REVERSED
+        else balanced_answer_order()
+    )
     if (
-        plan.get("schema_version") != BLIND_PLAN_SCHEMA
-        or plan.get("protocol") != BLIND_PROTOCOL
+        plan.get("schema_version") != variant["schema_version"]
+        or plan.get("protocol") != variant["protocol"]
         or plan.get("judge_protocol") != PAPER_EVALUATOR_PROTOCOL
         or plan.get("prompt_candidate_sha256") != PAPER_EVALUATOR_PROMPT_SHA256
         or plan.get("model") != PAPER_EVALUATOR_MODEL
@@ -261,7 +365,7 @@ def validate_blind_g1_g2_plan(plan: dict[str, Any]) -> list[PaperBlindG1G2Call]:
         or plan.get("provider_only") != [PAPER_EVALUATOR_PROVIDER]
         or plan.get("allow_fallbacks") is not False
         or plan.get("call_count") != BLIND_CALL_COUNT
-        or plan.get("call_id_prefix") != BLIND_CALL_ID_PREFIX
+        or plan.get("call_id_prefix") != variant["call_id_prefix"]
         or plan.get("blind_to_g1_g2_identity") is not True
         or plan.get("answer_order_seed") != BLIND_RANDOMIZATION_SEED
         or plan.get("g1_as_student_a_count") != 7
@@ -280,7 +384,7 @@ def validate_blind_g1_g2_plan(plan: dict[str, Any]) -> list[PaperBlindG1G2Call]:
         or tuple(call.task_id for call in calls) != FROZEN_PAPER_TASK_IDS
         or len({call.call_id for call in calls}) != BLIND_CALL_COUNT
         or any(
-            call.call_id != f"{BLIND_CALL_ID_PREFIX}-{call.task_id}-blind"
+            call.call_id != f"{variant['call_id_prefix']}-{call.task_id}-blind"
             for call in calls
         )
         or plan.get("answer_order_manifest") != order_manifest
@@ -288,10 +392,18 @@ def validate_blind_g1_g2_plan(plan: dict[str, Any]) -> list[PaperBlindG1G2Call]:
         or order_manifest
         != [
             {"task_id": task_id, "student_a_system": student_a_system}
-            for task_id, student_a_system in balanced_answer_order().items()
+            for task_id, student_a_system in expected_order.items()
         ]
     ):
         raise ValueError("blind G1/G2 call/order inventory is invalid")
+    if order_variant == BLIND_ORDER_REVERSED and (
+        plan.get("answer_order_method") != "exact_per_task_inverse_of_round_one"
+        or plan.get("reversed_from_plan_sha256")
+        != plan.get("immutable_reference_sha256", {}).get("original_blind_plan")
+        or plan.get("reversed_from_aggregate_sha256")
+        != plan.get("immutable_reference_sha256", {}).get("original_blind_aggregate")
+    ):
+        raise ValueError("reversed blind G1/G2 lineage is invalid")
     return calls
 
 
@@ -307,13 +419,17 @@ def run_blind_g1_g2_plan(
 ) -> dict[str, Any]:
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
     calls = validate_blind_g1_g2_plan(plan)
+    runtime_authority = blind_plan_runtime_authority(plan)
     if not allow_paid:
         raise PermissionError("blind G1/G2 comparison requires --allow-paid")
-    if os.environ.get("CHEMCROW_PAPER_BLIND_G1_G2_AUTHORIZATION") != BLIND_AUTHORIZATION:
+    if (
+        os.environ.get(runtime_authority["authorization_env"])
+        != runtime_authority["authorization"]
+    ):
         raise PermissionError("blind G1/G2 authorization literal is absent")
     if os.environ.get("CHEMCROW_PAPER_EVALUATOR_MODEL") != PAPER_EVALUATOR_MODEL:
         raise ValueError("blind G1/G2 model differs from frozen openai/gpt-4")
-    budget = float(os.environ.get("CHEMCROW_PAPER_BLIND_G1_G2_MAX_USD", "0"))
+    budget = float(os.environ.get(runtime_authority["budget_env"], "0"))
     ceiling = float(plan["cost_ceiling"]["list_price_ceiling_usd_total"])
     if budget < ceiling or budget > BLIND_MAX_AUTHORIZED_USD:
         raise PermissionError("blind G1/G2 budget is outside the authorized range")
@@ -369,6 +485,8 @@ def run_blind_g1_g2_plan(
         plan_sha256=file_sha256(plan_path),
         immutable_reference_paths=immutable_reference_paths,
         expected_reference_hashes=plan["immutable_reference_sha256"],
+        protocol=str(plan["protocol"]),
+        answer_order_variant=blind_plan_order_variant(plan),
     )
     aggregate_path = result_root / "aggregate.json"
     serialized = json.dumps(aggregate, indent=2, sort_keys=True) + "\n"
@@ -388,6 +506,8 @@ def aggregate_blind_g1_g2_results(
     plan_sha256: str,
     immutable_reference_paths: dict[str, Path],
     expected_reference_hashes: dict[str, str],
+    protocol: str = BLIND_PROTOCOL,
+    answer_order_variant: str = BLIND_ORDER_ORIGINAL,
 ) -> dict[str, Any]:
     if len(results) != BLIND_CALL_COUNT or len(calls) != BLIND_CALL_COUNT:
         raise ValueError("blind G1/G2 aggregate requires exactly 14 calls")
@@ -439,7 +559,7 @@ def aggregate_blind_g1_g2_results(
     return {
         "schema_version": BLIND_AGGREGATE_SCHEMA,
         "status": "PROVISIONAL_LLM_JUDGED_BLIND_G1_G2_COMPLETE",
-        "protocol": BLIND_PROTOCOL,
+        "protocol": protocol,
         "judge_protocol": PAPER_EVALUATOR_PROTOCOL,
         "model": PAPER_EVALUATOR_MODEL,
         "temperature": PAPER_EVALUATOR_TEMPERATURE,
@@ -449,6 +569,7 @@ def aggregate_blind_g1_g2_results(
         "project_added_metric": True,
         "blind_to_g1_g2_identity": True,
         "answer_order_seed": BLIND_RANDOMIZATION_SEED,
+        "answer_order_variant": answer_order_variant,
         "g1_as_student_a_count": sum(row["g1_position"] == "A" for row in per_task),
         "g2_as_student_a_count": sum(row["g2_position"] == "A" for row in per_task),
         "call_count": BLIND_CALL_COUNT,
@@ -470,12 +591,22 @@ def aggregate_blind_g1_g2_results(
         "immutable_reference_sha256_after": references_after,
         "immutable_references_unchanged": references_after == expected_reference_hashes,
         "per_task": per_task,
-        "limitations": (
-            "One call per task and one answer order per task. Order is randomized and exactly "
-            "balanced across tasks, but no within-task A/B reversal replicate was run; N=14 and "
-            "the GPT-4 judge is stochastic with discrete grades."
-        ),
+        "limitations": _round_limitations(answer_order_variant),
     }
+
+
+def _round_limitations(answer_order_variant: str) -> str:
+    if answer_order_variant == BLIND_ORDER_REVERSED:
+        return (
+            "This is the exact A/B-reversed replicate of round one. Each round remains one "
+            "stochastic GPT-4 call per task; order effects should be interpreted from the "
+            "paired two-round analysis rather than either round alone."
+        )
+    return (
+        "One call per task and one answer order per task. Order is randomized and exactly "
+        "balanced across tasks, but this round alone has no within-task A/B reversal; N=14 "
+        "and the GPT-4 judge is stochastic with discrete grades."
+    )
 
 
 def preflight_blind_g1_g2(*, config_path: Path, output: Path) -> dict[str, Any]:
@@ -493,6 +624,9 @@ def preflight_blind_g1_g2(*, config_path: Path, output: Path) -> dict[str, Any]:
         pairs=pairs,
         expected_source_pair_protocol=str(config["source_pair_protocol"]),
         immutable_reference_hashes=references,
+        answer_order_variant=str(
+            config.get("answer_order_variant", BLIND_ORDER_ORIGINAL)
+        ),
     )
     plan_path = _path(config_path, config["plan_path"])
     plan_path.parent.mkdir(parents=True, exist_ok=True)
@@ -515,6 +649,8 @@ def preflight_blind_g1_g2(*, config_path: Path, output: Path) -> dict[str, Any]:
         "plan_sha256": file_sha256(plan_path),
         "prompt_candidate_sha256": PAPER_EVALUATOR_PROMPT_SHA256,
         "answer_order_seed": BLIND_RANDOMIZATION_SEED,
+        "answer_order_variant": blind_plan_order_variant(plan),
+        "protocol": plan["protocol"],
         "answer_order_manifest_sha256": plan["answer_order_manifest_sha256"],
         "g1_as_student_a_count": plan["g1_as_student_a_count"],
         "g2_as_student_a_count": plan["g2_as_student_a_count"],
@@ -552,6 +688,8 @@ def audit_blind_g1_g2(
         plan_sha256=file_sha256(plan_path),
         immutable_reference_paths=reference_paths,
         expected_reference_hashes=plan["immutable_reference_sha256"],
+        protocol=str(plan["protocol"]),
+        answer_order_variant=blind_plan_order_variant(plan),
     )
     claims = sorted(receipt_root.glob("*.claim.json"))
     receipts = sorted(receipt_root.glob("*.receipt.json"))
@@ -664,16 +802,21 @@ def _position_diagnostics(per_task: list[dict[str, Any]]) -> dict[str, Any]:
         "g2_when_student_a": summarize(by_g2_position["A"]),
         "g2_when_student_b": summarize(by_g2_position["B"]),
         "interpretation": (
-            "Order was balanced across tasks, but Student A won 4 of the 5 non-ties; "
-            "with N=14 and no within-task reversal, residual position/context effects cannot "
-            "be separated from task composition."
+            f"Student A won {student_a_wins} of {student_a_wins + student_b_wins} non-ties "
+            "in this round. Use the exact reversed round and the paired two-round analysis "
+            "to distinguish position sensitivity from task composition."
         ),
     }
 
 
 def _render_markdown(audit: dict[str, Any]) -> str:
+    reversed_round = audit["answer_order_variant"] == BLIND_ORDER_REVERSED
     rows = [
-        "# Balanced Blind GPT-4 Comparison: full-v5 G1 vs G2",
+        (
+            "# Reversed Blind GPT-4 Comparison: full-v5 G1 vs G2"
+            if reversed_round
+            else "# Balanced Blind GPT-4 Comparison: full-v5 G1 vs G2"
+        ),
         "",
         (
             "This project-added comparison uses the frozen calibrated ChemCrow-compatible "
@@ -726,7 +869,7 @@ def _render_markdown(audit: dict[str, Any]) -> str:
 def _reference_bindings(
     config_path: Path, config: dict[str, Any]
 ) -> dict[str, tuple[Path, str]]:
-    return {
+    bindings = {
         "production_42_call_aggregate": (
             _path(config_path, config["reference_42_call_aggregate"]),
             str(config["reference_42_call_aggregate_sha256"]),
@@ -736,6 +879,20 @@ def _reference_bindings(
             str(config["reference_historical_direct_aggregate_sha256"]),
         ),
     }
+    optional = (
+        ("original_blind_plan", "reference_original_blind_plan"),
+        ("original_blind_aggregate", "reference_original_blind_aggregate"),
+    )
+    for label, config_key in optional:
+        hash_key = f"{config_key}_sha256"
+        if config_key in config or hash_key in config:
+            if config_key not in config or hash_key not in config:
+                raise ValueError(f"incomplete immutable reference binding: {label}")
+            bindings[label] = (
+                _path(config_path, config[config_key]),
+                str(config[hash_key]),
+            )
+    return bindings
 
 
 def _load_config(path: Path) -> dict[str, Any]:

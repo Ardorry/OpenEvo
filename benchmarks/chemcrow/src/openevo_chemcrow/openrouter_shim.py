@@ -707,18 +707,18 @@ def main(argv: list[str] | None = None) -> None:
             raise SystemExit("direct-comparison receipts are outside the dedicated ledger")
     elif args.blind_g1_g2:
         from .paper_blind_g1_g2 import (
-            BLIND_AUTHORIZATION,
             BLIND_CALL_COUNT,
-            BLIND_CALL_ID_PREFIX,
             BLIND_MAX_AUTHORIZED_USD,
+            blind_plan_runtime_authority,
             validate_blind_g1_g2_plan,
         )
 
+        runtime_authority = blind_plan_runtime_authority(plan)
         if os.environ.get("CHEMCROW_PAPER_EVALUATOR_MODEL") != PAPER_EVALUATOR_MODEL:
             raise SystemExit("CHEMCROW_PAPER_EVALUATOR_MODEL differs from frozen model")
         if (
-            os.environ.get("CHEMCROW_PAPER_BLIND_G1_G2_AUTHORIZATION")
-            != BLIND_AUTHORIZATION
+            os.environ.get(runtime_authority["authorization_env"])
+            != runtime_authority["authorization"]
         ):
             raise SystemExit("blind G1/G2 paid authorization literal is absent")
         validated_calls = validate_blind_g1_g2_plan(plan)
@@ -726,16 +726,14 @@ def main(argv: list[str] | None = None) -> None:
         if len(allowed) != BLIND_CALL_COUNT:
             raise SystemExit("blind G1/G2 plan allowlist is incomplete")
         configured_budget = float(
-            os.environ.get("CHEMCROW_PAPER_BLIND_G1_G2_MAX_USD", "0")
+            os.environ.get(runtime_authority["budget_env"], "0")
         )
         if configured_budget > BLIND_MAX_AUTHORIZED_USD:
             raise SystemExit("blind G1/G2 budget exceeds the authorized maximum")
-        call_id_prefix = f"{BLIND_CALL_ID_PREFIX}-chemcrow-"
+        call_id_prefix = f"{runtime_authority['call_id_prefix']}-chemcrow-"
         ledger_class = "blind_g1_g2"
         resolved_receipts = args.receipt_root.resolve()
-        if "paper-evaluator-blind-v5-g1-vs-g2-balanced-v1" not in (
-            resolved_receipts.parts
-        ):
+        if runtime_authority["ledger_root"] not in resolved_receipts.parts:
             raise SystemExit("blind G1/G2 receipts are outside the dedicated ledger")
     else:
         if os.environ.get("CHEMCROW_PAPER_EVALUATOR_MODEL") != PAPER_EVALUATOR_MODEL:
