@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import statistics
 from pathlib import Path
@@ -350,8 +351,16 @@ def aggregate_direct_comparison_results(
             receipt.get("status") != "terminal_success"
             or receipt.get("model") != PAPER_EVALUATOR_MODEL
             or str(receipt.get("provider", "")).lower() != "openai"
+            or receipt.get("upstream_http_status") != 200
+            or receipt.get("temperature") != PAPER_EVALUATOR_TEMPERATURE
             or receipt.get("allow_fallbacks") is not False
+            or receipt.get("provider_only") != [PAPER_EVALUATOR_PROVIDER]
+            or receipt.get("require_parameters") is not True
+            or receipt.get("data_collection") != PAPER_EVALUATOR_DATA_COLLECTION
+            or receipt.get("internal_response_format_validated") is not True
+            or receipt.get("upstream_response_format_omitted") is not True
             or receipt.get("ledger_class") != "direct_comparison"
+            or receipt.get("production_ledger_included") is not False
             or receipt.get("prompt_or_response_included") is not False
             or receipt.get("credential_included") is not False
         ):
@@ -452,6 +461,23 @@ def audit_direct_comparison(
     receipts = sorted(receipt_root.glob("*.receipt.json"))
     if len(claims) != DIRECT_CALL_COUNT or len(receipts) != DIRECT_CALL_COUNT:
         raise ValueError("direct-comparison claim/receipt inventory is incomplete")
+    expected_call_ids = {call.call_id for call in calls}
+    observed_claim_ids: set[str] = set()
+    for path in claims:
+        claim = json.loads(path.read_text(encoding="utf-8"))
+        call_id = claim.get("call_id")
+        if (
+            call_id not in expected_call_ids
+            or claim.get("ledger_class") != "direct_comparison"
+            or claim.get("production_ledger_included") is not False
+            or claim.get("prompt_or_response_included") is not False
+        ):
+            raise ValueError(f"invalid direct-comparison claim: {path.name}")
+        observed_claim_ids.add(str(call_id))
+    if observed_claim_ids != expected_call_ids:
+        raise ValueError("direct-comparison claim IDs differ from the frozen plan")
+    wins = int(aggregate["v5_g2_wins"])
+    losses = int(aggregate["historical_chemcrow_wins"])
     audit = {
         **aggregate,
         "status": "PASS",
@@ -460,6 +486,10 @@ def audit_direct_comparison(
         "result_count": len(results),
         "json_valid_count": len(results),
         "pydantic_valid_count": len(results),
+        "http_200_count": len(results),
+        "openai_provider_count": len(results),
+        "no_fallback_count": len(results),
+        "exact_sign_test_two_sided_p": _exact_sign_test(wins=wins, losses=losses),
         "credential_persisted_count": 0,
         "prompt_or_response_persisted_in_receipt_count": 0,
     }
@@ -559,6 +589,15 @@ def _bootstrap_mean_ci(values: list[float]) -> list[float]:
     return [lower, upper]
 
 
+def _exact_sign_test(*, wins: int, losses: int) -> float:
+    non_ties = wins + losses
+    if non_ties == 0:
+        return 1.0
+    smaller = min(wins, losses)
+    tail = sum(math.comb(non_ties, index) for index in range(smaller + 1))
+    return min(1.0, 2.0 * tail / (2**non_ties))
+
+
 def _render_markdown(audit: dict[str, Any]) -> str:
     rows = [
         "# Direct GPT-4 Comparison: Historical ChemCrow vs full-v5 G2",
@@ -575,6 +614,7 @@ def _render_markdown(audit: dict[str, Any]) -> str:
         f"- G2 minus historical ChemCrow: `{audit['mean_v5_g2_minus_historical_chemcrow']:+.3f}`",
         f"- G2 wins/ties/historical wins: `{audit['v5_g2_wins']}/{audit['ties']}/{audit['historical_chemcrow_wins']}`",
         f"- paired bootstrap 95% CI: `{audit['paired_bootstrap_95_ci_mean_delta']}`",
+        f"- exact sign-test p: `{audit['exact_sign_test_two_sided_p']:.6f}`",
         f"- proven cost: `${audit['actual_openrouter_reported_cost_usd']:.5f}`",
         "- answer order: historical ChemCrow = Student A; full-v5 G2 = Student B",
         (

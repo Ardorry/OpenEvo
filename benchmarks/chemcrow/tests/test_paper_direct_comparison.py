@@ -12,6 +12,7 @@ from openevo_chemcrow.paper_direct_comparison import (
     DIRECT_AUTHORIZATION,
     DIRECT_CALL_COUNT,
     DIRECT_CALL_ID_PREFIX,
+    _exact_sign_test,
     aggregate_direct_comparison_results,
     build_direct_comparison_plan,
     direct_cost_ceiling,
@@ -177,8 +178,16 @@ def test_direct_aggregate_uses_same_call_student_a_and_b_grades(tmp_path):
             "call_id": call_id,
             "model": "openai/gpt-4",
             "provider": "OpenAI",
+            "upstream_http_status": 200,
+            "temperature": 0.1,
             "allow_fallbacks": False,
+            "provider_only": ["openai"],
+            "require_parameters": True,
+            "data_collection": "allow",
+            "internal_response_format_validated": True,
+            "upstream_response_format_omitted": True,
             "ledger_class": "direct_comparison",
+            "production_ledger_included": False,
             "prompt_or_response_included": False,
             "credential_included": False,
             "openrouter_reported_cost_usd": 0.01,
@@ -214,3 +223,8 @@ def test_direct_aggregate_uses_same_call_student_a_and_b_grades(tmp_path):
     assert aggregate["ties"] == aggregate["historical_chemcrow_wins"] == 0
     assert aggregate["actual_openrouter_reported_cost_usd"] == 0.14
     assert aggregate["reference_42_call_ledger_unchanged"] is True
+
+
+def test_direct_exact_sign_test_ignores_ties():
+    assert _exact_sign_test(wins=9, losses=4) == pytest.approx(0.266845703125)
+    assert _exact_sign_test(wins=0, losses=0) == 1.0
