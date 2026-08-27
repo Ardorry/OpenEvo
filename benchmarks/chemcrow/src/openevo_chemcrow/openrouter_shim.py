@@ -57,7 +57,7 @@ def create_openrouter_shim_app(
         raise ValueError("OPENROUTER_BASE_URL must use https")
     if allowed_call_prompt_hashes is None and not mock_mode:
         raise ValueError("a frozen paper evaluator plan allowlist is required")
-    if ledger_class not in {"production", "calibration"}:
+    if ledger_class not in {"production", "calibration", "direct_comparison"}:
         raise ValueError("paper evaluator ledger class is invalid")
     if ledger_class == "calibration":
         prefix_valid = call_id_prefix == "paper-chemcrow-cal-v1-"
@@ -630,7 +630,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=8400)
     parser.add_argument("--receipt-root", type=Path, required=True)
     parser.add_argument("--plan", type=Path, required=True)
-    parser.add_argument("--calibration", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--calibration", action="store_true")
+    mode.add_argument("--direct-comparison", action="store_true")
     parser.add_argument("--use-environment-proxy", action="store_true")
     return parser
 
@@ -665,6 +667,38 @@ def main(argv: list[str] | None = None) -> None:
         resolved_receipts = args.receipt_root.resolve()
         if "paper-evaluator-calibration-v1" not in resolved_receipts.parts:
             raise SystemExit("calibration receipts are outside the dedicated ledger")
+    elif args.direct_comparison:
+        from .paper_direct_comparison import (
+            DIRECT_AUTHORIZATION,
+            DIRECT_CALL_COUNT,
+            DIRECT_CALL_ID_PREFIX,
+            DIRECT_MAX_AUTHORIZED_USD,
+            validate_direct_comparison_plan,
+        )
+
+        if os.environ.get("CHEMCROW_PAPER_EVALUATOR_MODEL") != PAPER_EVALUATOR_MODEL:
+            raise SystemExit("CHEMCROW_PAPER_EVALUATOR_MODEL differs from frozen model")
+        if (
+            os.environ.get("CHEMCROW_PAPER_DIRECT_COMPARISON_AUTHORIZATION")
+            != DIRECT_AUTHORIZATION
+        ):
+            raise SystemExit("direct-comparison paid authorization literal is absent")
+        validated_calls = validate_direct_comparison_plan(plan)
+        allowed = {call.call_id: call.prompt_sha256 for call in validated_calls}
+        if len(allowed) != DIRECT_CALL_COUNT:
+            raise SystemExit("direct-comparison plan allowlist is incomplete")
+        configured_budget = float(
+            os.environ.get("CHEMCROW_PAPER_DIRECT_COMPARISON_MAX_USD", "0")
+        )
+        if configured_budget > DIRECT_MAX_AUTHORIZED_USD:
+            raise SystemExit("direct-comparison budget exceeds the authorized maximum")
+        call_id_prefix = f"{DIRECT_CALL_ID_PREFIX}-chemcrow-"
+        ledger_class = "direct_comparison"
+        resolved_receipts = args.receipt_root.resolve()
+        if "paper-evaluator-direct-v5-g2-vs-historical-chemcrow-v1" not in (
+            resolved_receipts.parts
+        ):
+            raise SystemExit("direct-comparison receipts are outside the dedicated ledger")
     else:
         if os.environ.get("CHEMCROW_PAPER_EVALUATOR_MODEL") != PAPER_EVALUATOR_MODEL:
             raise SystemExit("CHEMCROW_PAPER_EVALUATOR_MODEL differs from frozen model")
