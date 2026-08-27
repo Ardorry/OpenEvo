@@ -57,7 +57,12 @@ def create_openrouter_shim_app(
         raise ValueError("OPENROUTER_BASE_URL must use https")
     if allowed_call_prompt_hashes is None and not mock_mode:
         raise ValueError("a frozen paper evaluator plan allowlist is required")
-    if ledger_class not in {"production", "calibration", "direct_comparison"}:
+    if ledger_class not in {
+        "production",
+        "calibration",
+        "direct_comparison",
+        "blind_g1_g2",
+    }:
         raise ValueError("paper evaluator ledger class is invalid")
     if ledger_class == "calibration":
         prefix_valid = call_id_prefix == "paper-chemcrow-cal-v1-"
@@ -633,6 +638,7 @@ def build_parser() -> argparse.ArgumentParser:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--calibration", action="store_true")
     mode.add_argument("--direct-comparison", action="store_true")
+    mode.add_argument("--blind-g1-g2", action="store_true")
     parser.add_argument("--use-environment-proxy", action="store_true")
     return parser
 
@@ -699,6 +705,38 @@ def main(argv: list[str] | None = None) -> None:
             resolved_receipts.parts
         ):
             raise SystemExit("direct-comparison receipts are outside the dedicated ledger")
+    elif args.blind_g1_g2:
+        from .paper_blind_g1_g2 import (
+            BLIND_AUTHORIZATION,
+            BLIND_CALL_COUNT,
+            BLIND_CALL_ID_PREFIX,
+            BLIND_MAX_AUTHORIZED_USD,
+            validate_blind_g1_g2_plan,
+        )
+
+        if os.environ.get("CHEMCROW_PAPER_EVALUATOR_MODEL") != PAPER_EVALUATOR_MODEL:
+            raise SystemExit("CHEMCROW_PAPER_EVALUATOR_MODEL differs from frozen model")
+        if (
+            os.environ.get("CHEMCROW_PAPER_BLIND_G1_G2_AUTHORIZATION")
+            != BLIND_AUTHORIZATION
+        ):
+            raise SystemExit("blind G1/G2 paid authorization literal is absent")
+        validated_calls = validate_blind_g1_g2_plan(plan)
+        allowed = {call.call_id: call.prompt_sha256 for call in validated_calls}
+        if len(allowed) != BLIND_CALL_COUNT:
+            raise SystemExit("blind G1/G2 plan allowlist is incomplete")
+        configured_budget = float(
+            os.environ.get("CHEMCROW_PAPER_BLIND_G1_G2_MAX_USD", "0")
+        )
+        if configured_budget > BLIND_MAX_AUTHORIZED_USD:
+            raise SystemExit("blind G1/G2 budget exceeds the authorized maximum")
+        call_id_prefix = f"{BLIND_CALL_ID_PREFIX}-chemcrow-"
+        ledger_class = "blind_g1_g2"
+        resolved_receipts = args.receipt_root.resolve()
+        if "paper-evaluator-blind-v5-g1-vs-g2-balanced-v1" not in (
+            resolved_receipts.parts
+        ):
+            raise SystemExit("blind G1/G2 receipts are outside the dedicated ledger")
     else:
         if os.environ.get("CHEMCROW_PAPER_EVALUATOR_MODEL") != PAPER_EVALUATOR_MODEL:
             raise SystemExit("CHEMCROW_PAPER_EVALUATOR_MODEL differs from frozen model")

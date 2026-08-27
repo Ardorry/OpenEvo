@@ -222,6 +222,61 @@ async def test_openrouter_shim_separates_direct_comparison_ledger(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_openrouter_shim_separates_blind_g1_g2_ledger(tmp_path):
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "id": "generation-blind-test",
+                "model": "openai/gpt-4",
+                "provider": "OpenAI",
+                "choices": [{"message": {"role": "assistant", "content": "{}"}}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 1},
+            },
+        )
+
+    call_id = "paper-blind-v1-chemcrow-01-blind"
+    prompt = "BLIND STUDENT A AND STUDENT B PROMPT"
+    receipt_root = tmp_path / "blind"
+    app = create_openrouter_shim_app(
+        api_key="SECRET",
+        base_url="http://mock.invalid/v1",
+        receipt_root=receipt_root,
+        transport=httpx.MockTransport(upstream),
+        allowed_call_prompt_hashes={call_id: canonical_sha256(prompt)},
+        call_id_prefix="paper-blind-v1-chemcrow-",
+        ledger_class="blind_g1_g2",
+    )
+    request = {
+        "model": "openai/gpt-4",
+        "temperature": 0.1,
+        "max_tokens": 1200,
+        "stream": False,
+        "user": call_id,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "system",
+                "content": "ChemCrow sealed-output paper evaluator. Return strict JSON only.",
+            },
+            {"role": "user", "content": prompt},
+        ],
+    }
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://blind"
+    ) as client:
+        response = await client.post("/v1/chat/completions", json=request)
+
+    assert response.status_code == 200
+    claim = json.loads((receipt_root / f"{call_id}.claim.json").read_text())
+    receipt = json.loads((receipt_root / f"{call_id}.receipt.json").read_text())
+    assert claim["ledger_class"] == receipt["ledger_class"] == "blind_g1_g2"
+    assert claim["production_ledger_included"] is False
+    assert receipt["production_ledger_included"] is False
+
+
+@pytest.mark.asyncio
 async def test_openrouter_shim_seals_sanitized_upstream_failure_metadata(tmp_path):
     sensitive_message = "No endpoints available under data policy; PRIVATE ROUTING DETAIL"
 

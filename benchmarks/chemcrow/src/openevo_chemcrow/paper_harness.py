@@ -68,7 +68,7 @@ class PaperEvaluatorHarness(BaseHarness):
     def _validate_call_id(self, call_id: str) -> None:
         match = re.fullmatch(
             r"(paper(?:-[a-z0-9]+)*)-(chemcrow-[0-9]{2})-"
-            r"(historical_control|baseline|evolved|direct)",
+            r"(historical_control|baseline|evolved|direct|blind)",
             call_id,
         )
         if (
