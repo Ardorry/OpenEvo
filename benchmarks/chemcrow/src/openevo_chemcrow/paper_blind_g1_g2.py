@@ -866,6 +866,208 @@ def _render_markdown(audit: dict[str, Any]) -> str:
     return "\n".join(rows)
 
 
+def combine_blind_g1_g2_rounds(
+    *,
+    round_one_path: Path,
+    reversed_round_path: Path,
+    output_json: Path,
+    output_markdown: Path,
+) -> dict[str, Any]:
+    """Combine the frozen balanced round and its exact per-task A/B inverse."""
+    round_one = json.loads(round_one_path.read_text(encoding="utf-8"))
+    reversed_round = json.loads(reversed_round_path.read_text(encoding="utf-8"))
+    for label, payload, protocol in (
+        ("round one", round_one, BLIND_PROTOCOL),
+        ("reversed round", reversed_round, BLIND_REVERSED_PROTOCOL),
+    ):
+        if (
+            payload.get("status") != "PASS"
+            or payload.get("protocol") != protocol
+            or payload.get("judge_protocol") != PAPER_EVALUATOR_PROTOCOL
+            or payload.get("model") != PAPER_EVALUATOR_MODEL
+            or payload.get("temperature") != PAPER_EVALUATOR_TEMPERATURE
+            or payload.get("provider") != "OpenAI"
+            or payload.get("allow_fallbacks") is not False
+            or payload.get("call_count") != BLIND_CALL_COUNT
+        ):
+            raise ValueError(f"invalid {label} blind aggregate")
+
+    first_by_task = {row["task_id"]: row for row in round_one["per_task"]}
+    second_by_task = {row["task_id"]: row for row in reversed_round["per_task"]}
+    if tuple(first_by_task) != FROZEN_PAPER_TASK_IDS or tuple(second_by_task) != (
+        FROZEN_PAPER_TASK_IDS
+    ):
+        raise ValueError("two-round blind task inventory differs")
+
+    per_task: list[dict[str, Any]] = []
+    student_a_scores: list[float] = []
+    student_b_scores: list[float] = []
+    position_a_wins = position_b_wins = position_ties = 0
+    preference_agreements = 0
+    for task_id in FROZEN_PAPER_TASK_IDS:
+        first = first_by_task[task_id]
+        second = second_by_task[task_id]
+        if (
+            first["g1_position"] == second["g1_position"]
+            or first["g2_position"] == second["g2_position"]
+        ):
+            raise ValueError(f"A/B order was not reversed for {task_id}")
+        for row in (first, second):
+            if row["g1_position"] == "A":
+                score_a, score_b = float(row["g1_grade"]), float(row["g2_grade"])
+            else:
+                score_a, score_b = float(row["g2_grade"]), float(row["g1_grade"])
+            student_a_scores.append(score_a)
+            student_b_scores.append(score_b)
+            if score_a > score_b:
+                position_a_wins += 1
+            elif score_a < score_b:
+                position_b_wins += 1
+            else:
+                position_ties += 1
+        first_delta = float(first["g2_minus_g1"])
+        second_delta = float(second["g2_minus_g1"])
+        preference_agreements += _delta_sign(first_delta) == _delta_sign(second_delta)
+        mean_g1 = statistics.mean(
+            [float(first["g1_grade"]), float(second["g1_grade"])]
+        )
+        mean_g2 = statistics.mean(
+            [float(first["g2_grade"]), float(second["g2_grade"])]
+        )
+        mean_delta = mean_g2 - mean_g1
+        per_task.append(
+            {
+                "task_id": task_id,
+                "round_one_g1_position": first["g1_position"],
+                "round_one_g1_grade": first["g1_grade"],
+                "round_one_g2_grade": first["g2_grade"],
+                "round_one_delta": first_delta,
+                "reversed_g1_position": second["g1_position"],
+                "reversed_g1_grade": second["g1_grade"],
+                "reversed_g2_grade": second["g2_grade"],
+                "reversed_delta": second_delta,
+                "two_order_mean_g1": mean_g1,
+                "two_order_mean_g2": mean_g2,
+                "two_order_mean_delta": mean_delta,
+                "two_order_winner": _delta_sign(mean_delta),
+                "preference_agrees_across_orders": _delta_sign(first_delta)
+                == _delta_sign(second_delta),
+            }
+        )
+
+    deltas = [float(row["two_order_mean_delta"]) for row in per_task]
+    wins = sum(delta > 0 for delta in deltas)
+    losses = sum(delta < 0 for delta in deltas)
+    combined = {
+        "schema_version": "chemcrow_paper_blind_g1_g2_two_order_aggregate_v1",
+        "status": "PASS",
+        "judge_protocol": PAPER_EVALUATOR_PROTOCOL,
+        "prompt_candidate_sha256": PAPER_EVALUATOR_PROMPT_SHA256,
+        "model": PAPER_EVALUATOR_MODEL,
+        "temperature": PAPER_EVALUATOR_TEMPERATURE,
+        "provider": "OpenAI",
+        "allow_fallbacks": False,
+        "task_count": BLIND_CALL_COUNT,
+        "call_count": BLIND_CALL_COUNT * 2,
+        "exact_per_task_order_reversal": True,
+        "round_one_report_sha256": file_sha256(round_one_path),
+        "reversed_round_report_sha256": file_sha256(reversed_round_path),
+        "round_one_mean_delta": round_one["mean_g2_minus_g1"],
+        "reversed_round_mean_delta": reversed_round["mean_g2_minus_g1"],
+        "two_order_mean_g1": statistics.mean(
+            float(row["two_order_mean_g1"]) for row in per_task
+        ),
+        "two_order_mean_g2": statistics.mean(
+            float(row["two_order_mean_g2"]) for row in per_task
+        ),
+        "two_order_mean_delta": statistics.mean(deltas),
+        "two_order_median_delta": statistics.median(deltas),
+        "two_order_g2_wins": wins,
+        "two_order_ties": sum(delta == 0 for delta in deltas),
+        "two_order_g1_wins": losses,
+        "paired_bootstrap_95_ci_mean_delta": _bootstrap_mean_ci(deltas),
+        "exact_sign_test_two_sided_p": _exact_sign_test(wins=wins, losses=losses),
+        "preference_agreement_across_orders": preference_agreements
+        / BLIND_CALL_COUNT,
+        "preference_agreement_task_count": preference_agreements,
+        "student_a_mean_grade": statistics.mean(student_a_scores),
+        "student_b_mean_grade": statistics.mean(student_b_scores),
+        "student_a_minus_b_mean_grade": statistics.mean(student_a_scores)
+        - statistics.mean(student_b_scores),
+        "student_a_wins": position_a_wins,
+        "position_ties": position_ties,
+        "student_b_wins": position_b_wins,
+        "actual_openrouter_reported_cost_usd": round(
+            float(round_one["actual_openrouter_reported_cost_usd"])
+            + float(reversed_round["actual_openrouter_reported_cost_usd"]),
+            8,
+        ),
+        "per_task": per_task,
+        "interpretation": (
+            "Averaging the two exact opposite answer orders gives the order-balanced descriptive "
+            "G2-G1 estimate. Strong Student-A preference and only partial cross-order preference "
+            "agreement show that position/context sensitivity is material; N=14 and one call per "
+            "order remain too small for a definitive effect claim."
+        ),
+    }
+    output_json.write_text(
+        json.dumps(combined, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    output_markdown.write_text(_render_two_order_markdown(combined), encoding="utf-8")
+    return combined
+
+
+def _delta_sign(delta: float) -> str:
+    return "g2" if delta > 0 else "g1" if delta < 0 else "tie"
+
+
+def _render_two_order_markdown(combined: dict[str, Any]) -> str:
+    rows = [
+        "# Two-Order Blind GPT-4 Comparison: full-v5 G1 vs G2",
+        "",
+        "Each task was judged twice with Student A/B exactly reversed in the second round.",
+        "",
+        f"- calls: `{combined['call_count']}/28`",
+        f"- two-order mean G1: `{combined['two_order_mean_g1']:.3f}`",
+        f"- two-order mean G2: `{combined['two_order_mean_g2']:.3f}`",
+        f"- two-order mean G2 - G1: `{combined['two_order_mean_delta']:+.3f}`",
+        (
+            f"- G2 wins/ties/G1 wins after per-task order averaging: `"
+            f"{combined['two_order_g2_wins']}/{combined['two_order_ties']}/"
+            f"{combined['two_order_g1_wins']}`"
+        ),
+        f"- bootstrap 95% CI: `{combined['paired_bootstrap_95_ci_mean_delta']}`",
+        f"- exact sign-test p: `{combined['exact_sign_test_two_sided_p']:.6f}`",
+        (
+            f"- cross-order preference agreement: `"
+            f"{combined['preference_agreement_task_count']}/14`"
+        ),
+        (
+            f"- Student A wins/ties/Student B wins across 28 calls: `"
+            f"{combined['student_a_wins']}/{combined['position_ties']}/"
+            f"{combined['student_b_wins']}`"
+        ),
+        f"- Student A - B mean grade: `{combined['student_a_minus_b_mean_grade']:+.3f}`",
+        f"- proven two-round cost: `${combined['actual_openrouter_reported_cost_usd']:.5f}`",
+        "",
+        (
+            "| task | R1 G1 pos | R1 delta | R2 G1 pos | R2 delta | "
+            "two-order G1 | two-order G2 | mean delta | result |"
+        ),
+        "|---|---|---:|---|---:|---:|---:|---:|---|",
+    ]
+    for row in combined["per_task"]:
+        rows.append(
+            f"| {row['task_id']} | {row['round_one_g1_position']} | "
+            f"{row['round_one_delta']:+.1f} | {row['reversed_g1_position']} | "
+            f"{row['reversed_delta']:+.1f} | {row['two_order_mean_g1']:.2f} | "
+            f"{row['two_order_mean_g2']:.2f} | {row['two_order_mean_delta']:+.2f} | "
+            f"{row['two_order_winner']} |"
+        )
+    rows.extend(["", f"Interpretation: {combined['interpretation']}", ""])
+    return "\n".join(rows)
+
+
 def _reference_bindings(
     config_path: Path, config: dict[str, Any]
 ) -> dict[str, tuple[Path, str]]:
@@ -944,11 +1146,25 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--config", type=Path, required=True)
     audit.add_argument("--output-json", type=Path, required=True)
     audit.add_argument("--output-markdown", type=Path, required=True)
+    combine = commands.add_parser("combine")
+    combine.add_argument("--round-one", type=Path, required=True)
+    combine.add_argument("--reversed-round", type=Path, required=True)
+    combine.add_argument("--output-json", type=Path, required=True)
+    combine.add_argument("--output-markdown", type=Path, required=True)
     return parser
 
 
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
+    if args.command == "combine":
+        combined = combine_blind_g1_g2_rounds(
+            round_one_path=args.round_one.resolve(),
+            reversed_round_path=args.reversed_round.resolve(),
+            output_json=args.output_json.resolve(),
+            output_markdown=args.output_markdown.resolve(),
+        )
+        print(json.dumps({"status": combined["status"], "call_count": 28}))
+        return
     config_path = args.config.resolve()
     if args.command == "preflight":
         report = preflight_blind_g1_g2(

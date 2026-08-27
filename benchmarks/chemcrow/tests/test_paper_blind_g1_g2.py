@@ -21,6 +21,7 @@ from openevo_chemcrow.paper_blind_g1_g2 import (
     blind_cost_ceiling,
     blind_plan_runtime_authority,
     build_blind_g1_g2_plan,
+    combine_blind_g1_g2_rounds,
     reversed_answer_order,
     run_blind_g1_g2_plan,
     validate_blind_g1_g2_plan,
@@ -314,3 +315,63 @@ def test_position_diagnostic_separates_system_mapping_from_a_b_order():
     assert diagnostic["ties"] == 1
     assert diagnostic["g2_when_student_a"]["g2_wins"] == 1
     assert diagnostic["g2_when_student_b"]["g1_wins"] == 1
+
+
+def test_two_order_combination_requires_inverse_positions_and_averages(tmp_path):
+    def aggregate(*, reversed_round: bool) -> dict:
+        rows = []
+        original_order = balanced_answer_order()
+        for task_id in FROZEN_PAPER_TASK_IDS:
+            g1_position = (
+                "A"
+                if original_order[task_id] == "openevo_baseline"
+                else "B"
+            )
+            if reversed_round:
+                g1_position = "B" if g1_position == "A" else "A"
+            rows.append(
+                {
+                    "task_id": task_id,
+                    "g1_position": g1_position,
+                    "g2_position": "B" if g1_position == "A" else "A",
+                    "g1_grade": 7 if not reversed_round else 8,
+                    "g2_grade": 9 if not reversed_round else 8,
+                    "g2_minus_g1": 2 if not reversed_round else 0,
+                }
+            )
+        return {
+            "status": "PASS",
+            "protocol": (
+                "full_v5_g1_vs_g2_reversed_blind_calibrated_paper_judge_v1"
+                if reversed_round
+                else "full_v5_g1_vs_g2_balanced_blind_calibrated_paper_judge_v1"
+            ),
+            "judge_protocol": "CHEMCROW_EVALUATORGPT_PROMPT_CALIBRATED_V2",
+            "model": "openai/gpt-4",
+            "temperature": 0.1,
+            "provider": "OpenAI",
+            "allow_fallbacks": False,
+            "call_count": 14,
+            "mean_g2_minus_g1": 0 if reversed_round else 2,
+            "actual_openrouter_reported_cost_usd": 1,
+            "per_task": rows,
+        }
+
+    first_path = tmp_path / "first.json"
+    second_path = tmp_path / "second.json"
+    first_path.write_text(json.dumps(aggregate(reversed_round=False)), encoding="utf-8")
+    second_path.write_text(json.dumps(aggregate(reversed_round=True)), encoding="utf-8")
+    combined = combine_blind_g1_g2_rounds(
+        round_one_path=first_path,
+        reversed_round_path=second_path,
+        output_json=tmp_path / "combined.json",
+        output_markdown=tmp_path / "combined.md",
+    )
+
+    assert combined["exact_per_task_order_reversal"] is True
+    assert combined["two_order_mean_g1"] == 7.5
+    assert combined["two_order_mean_g2"] == 8.5
+    assert combined["two_order_mean_delta"] == 1
+    assert combined["two_order_g2_wins"] == 14
+    assert combined["preference_agreement_across_orders"] == 0
+    assert combined["actual_openrouter_reported_cost_usd"] == 2
