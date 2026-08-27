@@ -12,6 +12,7 @@ from openevo_chemcrow.paper_blind_g1_g2 import (
     BLIND_AUTHORIZATION,
     BLIND_CALL_COUNT,
     BLIND_RANDOMIZATION_SEED,
+    _position_diagnostics,
     aggregate_blind_g1_g2_results,
     balanced_answer_order,
     blind_cost_ceiling,
@@ -237,3 +238,20 @@ def test_blind_aggregate_remaps_a_b_back_to_g1_g2(tmp_path):
     assert aggregate["mean_g2_minus_g1"] == 1
     assert aggregate["g2_wins"] == 14
     assert aggregate["immutable_references_unchanged"] is True
+
+
+def test_position_diagnostic_separates_system_mapping_from_a_b_order():
+    diagnostic = _position_diagnostics(
+        [
+            {"g2_position": "A", "g2_minus_g1": 1.0},
+            {"g2_position": "B", "g2_minus_g1": -1.0},
+            {"g2_position": "B", "g2_minus_g1": 1.0},
+            {"g2_position": "A", "g2_minus_g1": 0.0},
+        ]
+    )
+
+    assert diagnostic["student_a_wins"] == 2
+    assert diagnostic["student_b_wins"] == 1
+    assert diagnostic["ties"] == 1
+    assert diagnostic["g2_when_student_a"]["g2_wins"] == 1
+    assert diagnostic["g2_when_student_b"]["g1_wins"] == 1

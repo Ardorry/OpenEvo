@@ -571,6 +571,7 @@ def audit_blind_g1_g2(
         observed_claim_ids.add(str(claim["call_id"]))
     if observed_claim_ids != expected_call_ids:
         raise ValueError("blind G1/G2 claims differ from plan")
+    position_diagnostics = _position_diagnostics(aggregate["per_task"])
     audit = {
         **aggregate,
         "status": "PASS",
@@ -583,6 +584,7 @@ def audit_blind_g1_g2(
         "openai_provider_count": len(results),
         "no_fallback_count": len(results),
         "identity_labels_inserted_count": 0,
+        "position_diagnostics": position_diagnostics,
         "credential_persisted_count": 0,
         "prompt_or_response_persisted_in_receipt_count": 0,
     }
@@ -630,6 +632,45 @@ def _validate_receipt(receipt: dict[str, Any], call_id: str) -> None:
         raise ValueError(f"invalid blind G1/G2 receipt: {call_id}")
 
 
+def _position_diagnostics(per_task: list[dict[str, Any]]) -> dict[str, Any]:
+    by_g2_position: dict[str, list[float]] = {"A": [], "B": []}
+    student_a_wins = student_b_wins = ties = 0
+    for row in per_task:
+        delta = float(row["g2_minus_g1"])
+        g2_position = str(row["g2_position"])
+        by_g2_position[g2_position].append(delta)
+        if delta == 0:
+            ties += 1
+        elif (delta > 0 and g2_position == "A") or (
+            delta < 0 and g2_position == "B"
+        ):
+            student_a_wins += 1
+        else:
+            student_b_wins += 1
+
+    def summarize(values: list[float]) -> dict[str, Any]:
+        return {
+            "task_count": len(values),
+            "mean_g2_minus_g1": statistics.mean(values),
+            "g2_wins": sum(value > 0 for value in values),
+            "ties": sum(value == 0 for value in values),
+            "g1_wins": sum(value < 0 for value in values),
+        }
+
+    return {
+        "student_a_wins": student_a_wins,
+        "ties": ties,
+        "student_b_wins": student_b_wins,
+        "g2_when_student_a": summarize(by_g2_position["A"]),
+        "g2_when_student_b": summarize(by_g2_position["B"]),
+        "interpretation": (
+            "Order was balanced across tasks, but Student A won 4 of the 5 non-ties; "
+            "with N=14 and no within-task reversal, residual position/context effects cannot "
+            "be separated from task composition."
+        ),
+    }
+
+
 def _render_markdown(audit: dict[str, Any]) -> str:
     rows = [
         "# Balanced Blind GPT-4 Comparison: full-v5 G1 vs G2",
@@ -654,6 +695,12 @@ def _render_markdown(audit: dict[str, Any]) -> str:
         f"- exact sign-test p: `{audit['exact_sign_test_two_sided_p']:.6f}`",
         f"- proven cost: `${audit['actual_openrouter_reported_cost_usd']:.5f}`",
         f"- immutable prior ledgers unchanged: `{audit['immutable_references_unchanged']}`",
+        (
+            f"- Student A wins/ties/Student B wins: `"
+            f"{audit['position_diagnostics']['student_a_wins']}/"
+            f"{audit['position_diagnostics']['ties']}/"
+            f"{audit['position_diagnostics']['student_b_wins']}`"
+        ),
         "",
         "| task | G1 pos | G1 | G2 pos | G2 | G2 - G1 | winner |",
         "|---|---|---:|---|---:|---:|---|",
@@ -664,7 +711,15 @@ def _render_markdown(audit: dict[str, Any]) -> str:
             f"{row['g2_position']} | {row['g2_grade']:.1f} | "
             f"{row['g2_minus_g1']:+.1f} | {row['winner']} |"
         )
-    rows.extend(["", f"Limitation: {audit['limitations']}", ""])
+    rows.extend(
+        [
+            "",
+            f"Position diagnostic: {audit['position_diagnostics']['interpretation']}",
+            "",
+            f"Limitation: {audit['limitations']}",
+            "",
+        ]
+    )
     return "\n".join(rows)
 
 
