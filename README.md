@@ -1,3 +1,21 @@
+# Ardorry / OpenEvo · 实验分支导航
+
+此 fork 按 benchmark 分支保存研究代码、复现说明与结果。
+
+| 实验 | 分支入口 | 当前归档 |
+| --- | --- | --- |
+| ChemCrow | [chemcrow](https://github.com/Ardorry/OpenEvo/tree/chemcrow) | full-v8：14 个任务，核心代码与公开汇总 |
+| ChemBench | [chembench](https://github.com/Ardorry/OpenEvo/tree/chembench) | 历史 STV3：450 对 Test；本地 readiness-v4 原件待恢复 |
+| CompChemBench | 待恢复原件 | 当前工作区只有空目录，尚无可发布代码/结果分支 |
+| ResearchClaw | [researchclaw](https://github.com/Ardorry/OpenEvo/tree/researchclaw) | 历史代码与报告导航 |
+
+详细入口、成绩口径和缺失材料见 [BENCHMARKS.md](BENCHMARKS.md)。
+这些记录是 fork 的研究实验归档，不代表官方榜单接收或人类评审确认。
+
+以下保留 OpenEvo 产品说明。
+
+---
+
 <p align="center">
   <img src="assets/openevo-logo.svg" alt="OpenEvo" width="520">
 </p>
