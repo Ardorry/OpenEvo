@@ -8,10 +8,16 @@ import uuid
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
-from openevo.evolution.methods import render_codex_cli_reflector_prompt
+from openevo.evolution.methods import (
+    CoreReflectorPromptPlan,
+    build_core_reflector_prompt_plan,
+    core_reflector_max_repair_attempts,
+    render_codex_cli_reflector_prompt,
+    review_core_reflector_output,
+)
 from openevo.evolution.models import (
     ArtifactRegisterRequest,
     ArtifactType,
@@ -19,6 +25,7 @@ from openevo.evolution.models import (
     DatasetQuery,
     EventIngestRequest,
     JobCreateRequest,
+    WorkerClaimedJob,
     WorkerClaimRequest,
     WorkerCompleteRequest,
     WorkerFailRequest,
@@ -30,12 +37,17 @@ from .hashing import canonical_sha256, file_sha256
 from .models import ArtifactKind, TaskItem, Trajectory
 from .runtime import CORE_MANAGED_CODEX_ROUTE, OpenEvoRolloutPort
 from .three_artifact_models import (
+    CORE_FULL_WORKER_PROMPT_PROFILE,
     CORE_NATIVE_THREE_ARTIFACT_PROTOCOL_LABEL,
+    CORE_ROLE_WRAPPER_PROMPT_PROFILE,
     THREE_ARTIFACT_ORDER,
     ArtifactSeparationPolicy,
+    RecoveredReflectorOutput,
     ThreeArtifactBundleReceipt,
     ThreeArtifactReceipt,
 )
+
+ReflectorPromptProfile = Literal["core_role_wrapper_v1", "core_full_worker_v1"]
 
 _METHODS = {
     ArtifactKind.TEXT_MEMORY: "text_memory_reflector",
@@ -80,13 +92,32 @@ _FORBIDDEN_FEEDBACK_TEXT_MARKERS = (
     "future g2",
     "evolved answer",
 )
+_REFLECTOR_ISOLATION_PREAMBLE = (
+    "You are one of three mutually isolated OpenEvo task-local Reflectors. Your prompt was "
+    "frozen before any sibling invocation. You cannot see and must not infer sibling outputs. "
+    "Use only the supplied Core reflection context. Do not browse, call tools, introduce "
+    "historical ChemCrow/GPT-4 answers, human scores, paper EvaluatorGPT grades, hidden ground "
+    "truth, future G2 output, or later tasks."
+)
 
 
-def _core_reflector_contract_hash(kind: ArtifactKind) -> str:
+def _core_reflector_contract_hash(
+    kind: ArtifactKind,
+    prompt_profile: ReflectorPromptProfile = CORE_ROLE_WRAPPER_PROMPT_PROFILE,
+) -> str:
+    if prompt_profile == CORE_ROLE_WRAPPER_PROMPT_PROFILE:
+        return canonical_sha256(
+            {
+                "core_method": _METHODS[kind],
+                "core_prompt_contract": render_codex_cli_reflector_prompt(_METHODS[kind], ""),
+            }
+        )
     return canonical_sha256(
         {
             "core_method": _METHODS[kind],
             "core_prompt_contract": render_codex_cli_reflector_prompt(_METHODS[kind], ""),
+            "prompt_profile": prompt_profile,
+            "full_context_builder": "build_core_reflector_prompt_plan",
         }
     )
 
@@ -96,15 +127,55 @@ def render_core_native_reflector_prompt(
     evidence: dict[str, Any],
 ) -> str:
     evidence_prompt = (
-        "You are one of three mutually isolated OpenEvo task-local Reflectors. Your prompt was "
-        "frozen before any sibling invocation. You cannot see and must not infer sibling outputs. "
-        "Use only the EVIDENCE JSON below. Do not browse, call tools, introduce historical "
-        "ChemCrow/GPT-4 answers, human scores, paper EvaluatorGPT grades, hidden ground truth, "
-        "future G2 output, or later tasks.\n\n"
+        f"{_REFLECTOR_ISOLATION_PREAMBLE}\n\n"
         "EVIDENCE JSON:\n"
         f"{json.dumps(evidence, ensure_ascii=True, sort_keys=True)}"
     )
     return render_codex_cli_reflector_prompt(_METHODS[kind], evidence_prompt)
+
+
+def project_core_native_evolution_feedback(
+    feedback_payload: dict[str, Any],
+) -> tuple[dict[str, Any], float | None]:
+    """Project ChemCrow evaluator fields into Core's native feedback vocabulary.
+
+    This is a field-for-field transport adapter: it neither summarizes nor rewrites
+    the evaluator text.  Core needs the availability marker to admit stateful
+    evolution feedback; rubric scores are separately exposed through its native
+    trajectory reward field.
+    """
+
+    evaluator = feedback_payload.get("evaluator_feedback")
+    if not isinstance(evaluator, dict):
+        return {"mode": str(feedback_payload.get("mode", "F0"))}, None
+
+    def exact_string_list(field: str) -> list[str]:
+        value = evaluator.get(field)
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            raise TypeError(f"evaluator feedback field {field!r} must be a string list")
+        return list(value)
+
+    projected: dict[str, Any] = {
+        "status": "available_for_evolution",
+        "feedback_id": str(evaluator.get("evaluator_run_id") or "internal-evaluator"),
+        "decision": "evaluator-summary",
+        "strengths": exact_string_list("strengths"),
+        "observed_issues": exact_string_list("weaknesses"),
+        "suggested_changes": exact_string_list("actionable_critique"),
+    }
+    scores = evaluator.get("scores")
+    if not isinstance(scores, dict):
+        raise TypeError("evaluator feedback scores must be an object")
+    score_values: list[float] = []
+    for field in ("chemical_correctness", "reasoning_quality", "task_completion"):
+        value = scores.get(field)
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise TypeError(f"evaluator score {field!r} must be numeric")
+        numeric = float(value)
+        if not 0.0 <= numeric <= 4.0:
+            raise ValueError(f"evaluator score {field!r} is outside [0, 4]")
+        score_values.append(numeric)
+    return projected, sum(score_values) / 12.0
 
 
 @dataclass
@@ -123,6 +194,17 @@ class _PendingReflection:
     content_path: Path
     draft: ArtifactRegisterRequest
     generation_time_seconds: float
+    reflector_attempt_run_ids: list[str]
+    output_audit: dict[str, object]
+
+
+@dataclass
+class _PreparedReflection:
+    kind: ArtifactKind
+    phase_name: str
+    job: WorkerClaimedJob
+    dataset_artifact_id: str
+    dataset_uri: str
 
 
 class ThreeIsolatedEvolutionEngine:
@@ -136,6 +218,7 @@ class ThreeIsolatedEvolutionEngine:
         evolution_db_path: Path,
         evolution_artifact_root: Path,
         separation_policy: ArtifactSeparationPolicy,
+        prompt_profile: ReflectorPromptProfile = CORE_ROLE_WRAPPER_PROMPT_PROFILE,
     ) -> None:
         if set(reflector_rollouts) != set(THREE_ARTIFACT_ORDER):
             raise ValueError("three independent Reflector rollout configs are required")
@@ -149,6 +232,12 @@ class ThreeIsolatedEvolutionEngine:
         self.evolution_db_path = evolution_db_path
         self.evolution_artifact_root = evolution_artifact_root
         self.separation_policy = separation_policy
+        if prompt_profile not in {
+            CORE_ROLE_WRAPPER_PROMPT_PROFILE,
+            CORE_FULL_WORKER_PROMPT_PROFILE,
+        }:
+            raise ValueError(f"unsupported Reflector prompt profile: {prompt_profile}")
+        self.prompt_profile = prompt_profile
 
     @property
     def model(self) -> str:
@@ -162,6 +251,7 @@ class ThreeIsolatedEvolutionEngine:
         baseline: Trajectory,
         feedback_payload: dict[str, Any],
         pair_id: str,
+        recovered_outputs: dict[ArtifactKind, RecoveredReflectorOutput] | None = None,
     ) -> ThreeArtifactBundleReceipt:
         if baseline.role != "baseline" or baseline.artifact_ids:
             raise ValueError("Reflectors require a bare-S0 baseline parent")
@@ -177,6 +267,9 @@ class ThreeIsolatedEvolutionEngine:
                 "Reflector feedback contains forbidden scoring/leakage text: "
                 + ", ".join(forbidden_text)
             )
+        recovered_outputs = dict(recovered_outputs or {})
+        if any(kind not in THREE_ARTIFACT_ORDER for kind in recovered_outputs):
+            raise ValueError("recovered Reflector output type is invalid")
         evidence = {
             "task": {
                 "task_id": task.task_id,
@@ -187,40 +280,122 @@ class ThreeIsolatedEvolutionEngine:
             "feedback": feedback_payload,
         }
         evidence_hash = canonical_sha256(evidence)
-        prompts = {
-            kind: self._reflector_prompt(kind=kind, evidence=evidence)
-            for kind in THREE_ARTIFACT_ORDER
-        }
-        prompt_hashes = {
-            kind: canonical_sha256({"prompt": prompt}) for kind, prompt in prompts.items()
-        }
-        if len(set(prompt_hashes.values())) != 3:
-            raise ValueError("three Reflector prompts are not independent")
-
         store = EvolutionStore(
             db_path=self.evolution_db_path,
             artifact_root=self.evolution_artifact_root,
         )
         store.initialize()
+        prepared: list[_PreparedReflection] = []
         pending: list[_PendingReflection] = []
         completed_job_ids: set[str] = set()
         try:
-            # Each job is claimed and invoked independently. Prompts were frozen
-            # before the first invocation, so no sibling output can enter another.
-            for kind in THREE_ARTIFACT_ORDER:
-                pending.append(
-                    self._run_reflector_subjob(
+            if self.prompt_profile == CORE_ROLE_WRAPPER_PROMPT_PROFILE:
+                prompts = {
+                    kind: self._reflector_prompt(kind=kind, evidence=evidence)
+                    for kind in THREE_ARTIFACT_ORDER
+                }
+                prompt_plans: dict[ArtifactKind, CoreReflectorPromptPlan | None] = {
+                    kind: None for kind in THREE_ARTIFACT_ORDER
+                }
+                prompt_hashes = {
+                    kind: canonical_sha256({"prompt": prompt})
+                    for kind, prompt in prompts.items()
+                }
+                if len(set(prompt_hashes.values())) != 3:
+                    raise ValueError("three Reflector prompts are not independent")
+                # All prompts are frozen before the first sibling invocation.
+                for kind in THREE_ARTIFACT_ORDER:
+                    item = self._prepare_reflector_subjob(
                         store=store,
                         kind=kind,
                         task=task,
                         baseline=baseline,
                         evidence=evidence,
                         evidence_hash=evidence_hash,
-                        prompt=prompts[kind],
                         prompt_hash=prompt_hashes[kind],
                         pair_id=pair_id,
+                        include_core_feedback=False,
                     )
-                )
+                    prepared.append(item)
+                    pending.append(
+                        self._invoke_prepared_reflector(
+                            prepared=item,
+                            task=task,
+                            baseline=baseline,
+                            evidence_hash=evidence_hash,
+                            prompt=prompts[kind],
+                            prompt_hash=prompt_hashes[kind],
+                            prompt_plan=prompt_plans[kind],
+                            pair_id=pair_id,
+                        )
+                    )
+            else:
+                # Full Core contexts depend on the actual dataset snapshots and
+                # claimed job IDs. Prepare and claim all three jobs first, then
+                # freeze all prompts before any model invocation.
+                for kind in THREE_ARTIFACT_ORDER:
+                    prepared.append(
+                        self._prepare_reflector_subjob(
+                            store=store,
+                            kind=kind,
+                            task=task,
+                            baseline=baseline,
+                            evidence=evidence,
+                            evidence_hash=evidence_hash,
+                            prompt_hash=None,
+                            pair_id=pair_id,
+                            include_core_feedback=True,
+                        )
+                    )
+                full_plans = {
+                    item.kind: build_core_reflector_prompt_plan(
+                        item.job,
+                        isolation_preamble=_REFLECTOR_ISOLATION_PREAMBLE,
+                    )
+                    for item in prepared
+                }
+                frozen = self._load_frozen_prompts(pair_id=pair_id)
+                if frozen is None:
+                    prompts = {kind: plan.codex_prompt for kind, plan in full_plans.items()}
+                    prompt_hashes = {
+                        kind: canonical_sha256({"prompt": prompt})
+                        for kind, prompt in prompts.items()
+                    }
+                else:
+                    prompts, prompt_hashes = frozen
+                if len(set(prompt_hashes.values())) != 3:
+                    raise ValueError("three full Core Reflector prompts are not independent")
+                if frozen is None:
+                    self._persist_frozen_prompts(
+                        pair_id=pair_id,
+                        plans=full_plans,
+                        prompt_hashes=prompt_hashes,
+                    )
+                for item in prepared:
+                    recovered = recovered_outputs.get(item.kind)
+                    pending.append(
+                        self._rehydrate_prepared_reflector(
+                            prepared=item,
+                            recovered=recovered,
+                            task=task,
+                            baseline=baseline,
+                            evidence_hash=evidence_hash,
+                            prompt_hash=prompt_hashes[item.kind],
+                            prompt_plan=full_plans[item.kind],
+                            pair_id=pair_id,
+                        )
+                        if recovered is not None
+                        else self._invoke_prepared_reflector(
+                            prepared=item,
+                            task=task,
+                            baseline=baseline,
+                            evidence_hash=evidence_hash,
+                            prompt=prompts[item.kind],
+                            prompt_hash=prompt_hashes[item.kind],
+                            prompt_plan=full_plans[item.kind],
+                            pair_id=pair_id,
+                        )
+                    )
             duplicate_findings = detect_artifact_duplicates(
                 {item.kind: item.content for item in pending},
                 baseline_answer=baseline.answer,
@@ -241,8 +416,10 @@ class ThreeIsolatedEvolutionEngine:
                         artifacts=[item.draft],
                         report={
                             "protocol": CORE_NATIVE_THREE_ARTIFACT_PROTOCOL_LABEL,
-                            "steps": 1,
+                            "steps": len(item.reflector_attempt_run_ids) or 1,
                             "artifact_type": item.kind.value,
+                            "prompt_profile": self.prompt_profile,
+                            "output_audit": item.output_audit,
                             "sibling_outputs_visible": False,
                         },
                     ),
@@ -272,6 +449,8 @@ class ThreeIsolatedEvolutionEngine:
                         size_bytes=item.content_path.stat().st_size,
                         generation_time_seconds=item.generation_time_seconds,
                         registration_receipt_sha256=canonical_sha256(completed),
+                        reflector_attempt_run_ids=item.reflector_attempt_run_ids,
+                        output_audit=item.output_audit,
                     )
                 )
             return ThreeArtifactBundleReceipt(
@@ -279,28 +458,109 @@ class ThreeIsolatedEvolutionEngine:
                 pair_id=pair_id,
                 parent_run_id=baseline.run_id,
                 input_evidence_hash=evidence_hash,
+                prompt_profile=self.prompt_profile,
                 separation_policy=self.separation_policy,
                 artifacts=receipts,
                 **duplicate_findings,
             )
         except Exception as exc:
-            for item in pending:
-                if item.job_id in completed_job_ids:
+            for item in prepared:
+                if item.job.job_id in completed_job_ids:
                     continue
                 try:
                     store.fail_job(
-                        item.job_id,
+                        item.job.job_id,
                         WorkerFailRequest(
-                            lease_id=item.lease_id,
+                            lease_id=item.job.lease_id,
                             error=str(exc),
                             retryable=False,
                         ),
                     )
                 except Exception as cleanup_exc:  # noqa: BLE001
-                    exc.add_note(f"Core fail_job cleanup failed for {item.job_id}: {cleanup_exc}")
+                    exc.add_note(
+                        f"Core fail_job cleanup failed for {item.job.job_id}: {cleanup_exc}"
+                    )
             raise
 
-    def _run_reflector_subjob(
+    def _rehydrate_prepared_reflector(
+        self,
+        *,
+        prepared: _PreparedReflection,
+        recovered: RecoveredReflectorOutput,
+        task: TaskItem,
+        baseline: Trajectory,
+        evidence_hash: str,
+        prompt_hash: str,
+        prompt_plan: CoreReflectorPromptPlan,
+        pair_id: str,
+    ) -> _PendingReflection:
+        kind = prepared.kind
+        rollout = self.reflector_rollouts[kind]
+        if (
+            recovered.artifact_type is not kind
+            or recovered.input_evidence_hash != evidence_hash
+            or recovered.prompt_hash != prompt_hash
+            or recovered.system_prompt_hash
+            != _core_reflector_contract_hash(kind, self.prompt_profile)
+            or recovered.model != str(rollout.candidate["agent"]["model_name"])
+            or canonical_sha256({"content": recovered.content})
+            != recovered.content_hash
+        ):
+            raise ValueError("recovered Reflector output authority differs")
+        raw_content = _strict_reflector_markdown(recovered.content)
+        review = review_core_reflector_output(
+            prepared.job,
+            prompt_plan=prompt_plan,
+            markdown=raw_content,
+        )
+        if review.repair_prompt is not None or _strict_reflector_markdown(
+            review.content
+        ) != raw_content:
+            raise ValueError("recovered Reflector output no longer passes Core review")
+        output_audit = {
+            **review.audit_report,
+            "repair_count": 0,
+            "raw_output_sha256": recovered.content_hash,
+            "recovered_completed_model_call": True,
+            "original_reflector_job_id": recovered.original_job_id,
+        }
+        draft, content_path = self._artifact_draft(
+            kind=kind,
+            job_id=prepared.job.job_id,
+            dataset_artifact_id=prepared.dataset_artifact_id,
+            dataset_uri=prepared.dataset_uri,
+            content=raw_content,
+            task=task,
+            pair_id=pair_id,
+            parent_run_id=baseline.run_id,
+            reflector_run_id=recovered.reflector_run_id,
+            model=recovered.model,
+            prompt_hash=prompt_hash,
+            system_prompt_hash=recovered.system_prompt_hash,
+            evidence_hash=evidence_hash,
+            reflector_attempt_run_ids=recovered.reflector_attempt_run_ids,
+            output_audit=output_audit,
+        )
+        return _PendingReflection(
+            kind=kind,
+            phase_name=prepared.phase_name,
+            job_id=prepared.job.job_id,
+            lease_id=prepared.job.lease_id,
+            dataset_artifact_id=prepared.dataset_artifact_id,
+            dataset_uri=prepared.dataset_uri,
+            reflector_run_id=recovered.reflector_run_id,
+            model=recovered.model,
+            system_prompt_hash=recovered.system_prompt_hash,
+            prompt_hash=prompt_hash,
+            content=raw_content,
+            content_path=content_path,
+            draft=draft,
+            generation_time_seconds=recovered.generation_time_seconds,
+            reflector_attempt_run_ids=recovered.reflector_attempt_run_ids,
+            output_audit=output_audit,
+        )
+
+    def _prepare_reflector_subjob(
         self,
         *,
         store: EvolutionStore,
@@ -309,18 +569,21 @@ class ThreeIsolatedEvolutionEngine:
         baseline: Trajectory,
         evidence: dict[str, Any],
         evidence_hash: str,
-        prompt: str,
-        prompt_hash: str,
+        prompt_hash: str | None,
         pair_id: str,
-    ) -> _PendingReflection:
+        include_core_feedback: bool,
+    ) -> _PreparedReflection:
         phase_name = _PHASE_NAMES[kind]
         source_event_id = f"{pair_id}-{kind.value}-baseline-feedback"
+        core_feedback, normalized_reward = project_core_native_evolution_feedback(
+            evidence["feedback"]
+        )
         trace = {
             "prompt_messages": [{"role": "user", "content": task.prompt}],
             "response_messages": [{"role": "assistant", "content": baseline.answer}],
             "tools": None,
             "finish_reason": baseline.status,
-            "reward": None,
+            "reward": normalized_reward,
             "metadata": {
                 "observable_trajectory": baseline.model_dump(mode="json"),
                 "input_evidence_sha256": evidence_hash,
@@ -340,6 +603,7 @@ class ThreeIsolatedEvolutionEngine:
                 agent={"harness": "chemcrow-adapter", "reflector_role": kind.value},
                 base_model=str(rollout.candidate["agent"]["model_name"]),
                 status=baseline.status,
+                reward=normalized_reward,
                 payload={
                     "session_result": {
                         "session_id": baseline.run_id,
@@ -353,6 +617,11 @@ class ThreeIsolatedEvolutionEngine:
                         "metadata": {
                             "input_evidence": evidence,
                             "input_evidence_sha256": evidence_hash,
+                            **(
+                                {"evolution_feedback": core_feedback}
+                                if include_core_feedback
+                                else {}
+                            ),
                         },
                     },
                 },
@@ -384,9 +653,16 @@ class ThreeIsolatedEvolutionEngine:
                     "compatibility": {"task_tags": [task.task_id]},
                     "reflector_execution_route": CORE_MANAGED_CODEX_ROUTE,
                     "reflector_config_sha256": rollout.config_sha256,
-                    "reflector_prompt_sha256": prompt_hash,
-                    "reflector_system_sha256": _core_reflector_contract_hash(kind),
+                    **(
+                        {"reflector_prompt_sha256": prompt_hash}
+                        if prompt_hash is not None
+                        else {}
+                    ),
+                    "reflector_system_sha256": _core_reflector_contract_hash(
+                        kind, self.prompt_profile
+                    ),
                     "reflector_prompt_authority": "openevo_core_builtin",
+                    "reflector_prompt_profile": self.prompt_profile,
                     "input_evidence_sha256": evidence_hash,
                     "sibling_outputs_visible": False,
                     **({"target_path": "AGENTS.md"} if kind is ArtifactKind.AGENT_SYSTEM else {}),
@@ -397,9 +673,14 @@ class ThreeIsolatedEvolutionEngine:
             WorkerClaimRequest(
                 worker_id=f"chemcrow-{kind.value}-{uuid.uuid4().hex[:10]}",
                 # Registration is intentionally delayed until all three outputs
-                # pass the duplicate guard. Cover the three sequential 900-second
-                # Core rollout ceilings without expiring an earlier sibling job.
-                lease_seconds=3600,
+                # pass the duplicate guard. The full Core agent-system audit may
+                # add two managed repair invocations, so keep every sibling lease
+                # valid across the complete frozen batch.
+                lease_seconds=(
+                    10_800
+                    if self.prompt_profile == CORE_FULL_WORKER_PROMPT_PROFILE
+                    else 3_600
+                ),
             )
         )
         if claim.job is None or claim.job.job_id != job.job_id:
@@ -408,56 +689,190 @@ class ThreeIsolatedEvolutionEngine:
             job.job_id,
             WorkerHeartbeatRequest(lease_id=claim.job.lease_id, progress=0.0, message="claimed"),
         )
-        reflected_task = task.model_copy(
-            update={
-                "task_id": f"{task.task_id}-{phase_name}",
-                "prompt": prompt,
-                "sanitized_item_sha256": canonical_sha256({"prompt": prompt}),
-            }
-        )
-        started = time.monotonic()
-        reflected = rollout.run_candidate(
-            task=reflected_task,
-            role="baseline",
-            artifact_ids=[],
-            pair_id=f"{pair_id}-{phase_name}-core",
-            mcp_url=None,
-        )
-        elapsed = time.monotonic() - started
-        if reflected.status != "COMPLETED" or not reflected.answer.strip():
-            raise RuntimeError(f"Core-managed {phase_name} returned no completed artifact")
-        content = _strict_reflector_markdown(reflected.answer)
-        draft, content_path = self._artifact_draft(
+        return _PreparedReflection(
             kind=kind,
-            job_id=job.job_id,
+            phase_name=phase_name,
+            job=claim.job,
             dataset_artifact_id=dataset.artifact_id,
             dataset_uri=claim.job.input_artifacts[0].uri,
+        )
+
+    def _invoke_prepared_reflector(
+        self,
+        *,
+        prepared: _PreparedReflection,
+        task: TaskItem,
+        baseline: Trajectory,
+        evidence_hash: str,
+        prompt: str,
+        prompt_hash: str,
+        prompt_plan: CoreReflectorPromptPlan | None,
+        pair_id: str,
+    ) -> _PendingReflection:
+        kind = prepared.kind
+        phase_name = prepared.phase_name
+        rollout = self.reflector_rollouts[kind]
+        current_prompt = prompt
+        max_repairs = (
+            core_reflector_max_repair_attempts(prepared.job)
+            if prompt_plan is not None
+            else 0
+        )
+        attempt_run_ids: list[str] = []
+        output_audit: dict[str, object] = {}
+        started = time.monotonic()
+        content = ""
+        for attempt in range(max_repairs + 1):
+            attempt_suffix = "" if attempt == 0 else f"-repair-{attempt}"
+            reflected_task = task.model_copy(
+                update={
+                    "task_id": f"{task.task_id}-{phase_name}{attempt_suffix}",
+                    "prompt": current_prompt,
+                    "sanitized_item_sha256": canonical_sha256({"prompt": current_prompt}),
+                }
+            )
+            reflected = rollout.run_candidate(
+                task=reflected_task,
+                role="baseline",
+                artifact_ids=[],
+                pair_id=f"{pair_id}-{phase_name}-core{attempt_suffix}",
+                mcp_url=None,
+            )
+            attempt_run_ids.append(reflected.run_id)
+            if reflected.status != "COMPLETED" or not reflected.answer.strip():
+                raise RuntimeError(f"Core-managed {phase_name} returned no completed artifact")
+            raw_content = _strict_reflector_markdown(reflected.answer)
+            if prompt_plan is None:
+                content = raw_content
+                break
+            review = review_core_reflector_output(
+                prepared.job,
+                prompt_plan=prompt_plan,
+                markdown=raw_content,
+            )
+            output_audit = {
+                **review.audit_report,
+                "repair_count": attempt,
+                "raw_output_sha256": canonical_sha256({"content": raw_content}),
+            }
+            if review.repair_prompt is None:
+                content = _strict_reflector_markdown(review.content)
+                break
+            if attempt >= max_repairs:
+                raise ValueError(
+                    f"{phase_name} output failed Core audit after {max_repairs} repairs"
+                )
+            current_prompt = review.repair_prompt
+        elapsed = time.monotonic() - started
+        reflector_run_id = attempt_run_ids[-1]
+        draft, content_path = self._artifact_draft(
+            kind=kind,
+            job_id=prepared.job.job_id,
+            dataset_artifact_id=prepared.dataset_artifact_id,
+            dataset_uri=prepared.dataset_uri,
             content=content,
             task=task,
             pair_id=pair_id,
             parent_run_id=baseline.run_id,
-            reflector_run_id=reflected.run_id,
+            reflector_run_id=reflector_run_id,
             model=str(rollout.candidate["agent"]["model_name"]),
             prompt_hash=prompt_hash,
-            system_prompt_hash=_core_reflector_contract_hash(kind),
+            system_prompt_hash=_core_reflector_contract_hash(kind, self.prompt_profile),
             evidence_hash=evidence_hash,
+            reflector_attempt_run_ids=attempt_run_ids,
+            output_audit=output_audit,
         )
         return _PendingReflection(
             kind=kind,
             phase_name=phase_name,
-            job_id=job.job_id,
-            lease_id=claim.job.lease_id,
-            dataset_artifact_id=dataset.artifact_id,
-            dataset_uri=claim.job.input_artifacts[0].uri,
-            reflector_run_id=reflected.run_id,
+            job_id=prepared.job.job_id,
+            lease_id=prepared.job.lease_id,
+            dataset_artifact_id=prepared.dataset_artifact_id,
+            dataset_uri=prepared.dataset_uri,
+            reflector_run_id=reflector_run_id,
             model=str(rollout.candidate["agent"]["model_name"]),
-            system_prompt_hash=_core_reflector_contract_hash(kind),
+            system_prompt_hash=_core_reflector_contract_hash(kind, self.prompt_profile),
             prompt_hash=prompt_hash,
             content=content,
             content_path=content_path,
             draft=draft,
             generation_time_seconds=elapsed,
+            reflector_attempt_run_ids=(
+                attempt_run_ids
+                if self.prompt_profile == CORE_FULL_WORKER_PROMPT_PROFILE
+                else []
+            ),
+            output_audit=output_audit,
         )
+
+    def _persist_frozen_prompts(
+        self,
+        *,
+        pair_id: str,
+        plans: dict[ArtifactKind, CoreReflectorPromptPlan],
+        prompt_hashes: dict[ArtifactKind, str],
+    ) -> None:
+        prompt_root = self.run_root / pair_id / "reflector_prompts"
+        prompt_root.mkdir(parents=True, exist_ok=True)
+        for kind in THREE_ARTIFACT_ORDER:
+            path = prompt_root / f"{kind.value}.md"
+            content = plans[kind].codex_prompt.rstrip() + "\n"
+            if path.exists() and path.read_text(encoding="utf-8") != content:
+                raise ValueError(f"frozen Reflector prompt drift: {kind.value}")
+            path.write_text(content, encoding="utf-8")
+        receipt = {
+            "schema_version": "chemcrow_core_full_worker_prompt_freeze_v1",
+            "prompt_profile": self.prompt_profile,
+            "sibling_outputs_visible": False,
+            "prompts_frozen_before_first_invocation": True,
+            "prompt_sha256_by_type": {
+                kind.value: prompt_hashes[kind] for kind in THREE_ARTIFACT_ORDER
+            },
+        }
+        (prompt_root / "freeze.receipt.json").write_text(
+            json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    def _load_frozen_prompts(
+        self,
+        *,
+        pair_id: str,
+    ) -> tuple[dict[ArtifactKind, str], dict[ArtifactKind, str]] | None:
+        prompt_root = self.run_root / pair_id / "reflector_prompts"
+        receipt_path = prompt_root / "freeze.receipt.json"
+        prompt_paths = {
+            kind: prompt_root / f"{kind.value}.md" for kind in THREE_ARTIFACT_ORDER
+        }
+        existing = [receipt_path.exists(), *(path.exists() for path in prompt_paths.values())]
+        if not any(existing):
+            return None
+        if not all(existing):
+            raise ValueError("frozen Reflector prompt inventory is incomplete")
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        if (
+            receipt.get("schema_version") != "chemcrow_core_full_worker_prompt_freeze_v1"
+            or receipt.get("prompt_profile") != self.prompt_profile
+            or receipt.get("sibling_outputs_visible") is not False
+            or receipt.get("prompts_frozen_before_first_invocation") is not True
+        ):
+            raise ValueError("frozen Reflector prompt receipt authority differs")
+        raw_hashes = receipt.get("prompt_sha256_by_type")
+        if not isinstance(raw_hashes, dict) or set(raw_hashes) != {
+            kind.value for kind in THREE_ARTIFACT_ORDER
+        }:
+            raise ValueError("frozen Reflector prompt hash inventory differs")
+        prompts = {
+            kind: prompt_paths[kind].read_text(encoding="utf-8")
+            for kind in THREE_ARTIFACT_ORDER
+        }
+        hashes = {kind: str(raw_hashes[kind.value]) for kind in THREE_ARTIFACT_ORDER}
+        if any(
+            canonical_sha256({"prompt": prompts[kind]}) != hashes[kind]
+            for kind in THREE_ARTIFACT_ORDER
+        ):
+            raise ValueError("frozen Reflector prompt content hash differs")
+        return prompts, hashes
 
     def _reflector_prompt(
         self,
@@ -483,6 +898,8 @@ class ThreeIsolatedEvolutionEngine:
         prompt_hash: str,
         system_prompt_hash: str,
         evidence_hash: str,
+        reflector_attempt_run_ids: list[str],
+        output_audit: dict[str, object],
     ) -> tuple[ArtifactRegisterRequest, Path]:
         if len(content.encode("utf-8")) > 256 * 1024:
             raise RuntimeError("Core-managed Reflector output exceeds the artifact limit")
@@ -517,6 +934,9 @@ class ThreeIsolatedEvolutionEngine:
             "reflector_model": model,
             "reflector_prompt_sha256": prompt_hash,
             "reflector_system_sha256": system_prompt_hash,
+            "reflector_prompt_profile": self.prompt_profile,
+            "reflector_attempt_run_ids": reflector_attempt_run_ids,
+            "reflector_output_audit": output_audit,
             "input_evidence_sha256": evidence_hash,
             "execution_route": CORE_MANAGED_CODEX_ROUTE,
             "sibling_outputs_visible": False,

@@ -1,0 +1,153 @@
+{
+  "experiment_id": "chemcrow-task-local-full-v8-core-full-worker-g1-artifacts-20260830T121136Z",
+  "projection": {
+    "hash_limit": "Hashes identify the original inputs; absent raw evidence prevents independent reconstruction of complete per-task and provider-call integrity.",
+    "historical_repository_scope": "This export makes no assertion that older branch history never contained raw benchmark material.",
+    "independent_full_audit_possible_from_public_package_alone": false,
+    "omitted_from_new_result_package": [
+      "task_ids arrays",
+      "per-task scores and outcome rows",
+      "task prompts and answers",
+      "raw trajectories and tool observations",
+      "artifact bodies and semantic-unit inventories",
+      "per-item manual annotations",
+      "private judge plan contents and requests",
+      "raw provider responses, receipts and ledgers"
+    ],
+    "raw_details_published_in_this_package": false,
+    "raw_source_availability": "Not bundled; continued local availability is not guaranteed.",
+    "summary": "Explicit allowlists for generation audit, continuation audit, internal aggregate and paper evaluator aggregate; existing aggregate statistics and summary comparison rows retained.",
+    "summary_comparisons.csv": "Byte-for-byte copy of the existing aggregate-only table."
+  },
+  "public_files": [
+    {
+      "relative_path": "README.md",
+      "sha256": "093ce4118f2fdf35bf567592dc509ff579268050929adc56804892d72fcb98a4",
+      "size_bytes": 4691
+    },
+    {
+      "relative_path": "summary.json",
+      "sha256": "35ef8d5793e5dbe0709ba56b5e451e88933743d9ae1a6a6da5461d5e37bcbac3",
+      "size_bytes": 12840
+    },
+    {
+      "relative_path": "summary_comparisons.csv",
+      "sha256": "31de80960c1c31707d19568f78e46d071b2ad91ad2392e64c9337076b0a3176a",
+      "size_bytes": 1130
+    }
+  ],
+  "publication_date": "2026-09-10",
+  "runs": {
+    "g1_generation": {
+      "execution_scope": "g1_and_artifact_generation_only",
+      "run_id": "full-v8-core-full-worker-g1-artifacts-20260830T121136Z",
+      "source_relative_path": "runs/full-v8-core-full-worker-g1-artifacts-20260830T121136Z"
+    },
+    "g2_continuation": {
+      "execution_scope": "g2_from_sealed_generation_v1",
+      "run_id": "full-v8-core-full-worker-g2-continuation-20260831T052113Z",
+      "source_relative_path": "runs/full-v8-core-full-worker-g2-continuation-20260831T052113Z"
+    },
+    "paper_evaluator": {
+      "frozen_prompt_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
+      "plan_file_sha256": "4abf9286433df1ac51f565f56a54f2252fbe2376a46debd1d5d9cbb51540bf4c",
+      "protocol": "CHEMCROW_EVALUATORGPT_PROMPT_CALIBRATED_V2",
+      "run_id": "paper-evaluator-full-v8-core-full-worker-20260831-r2",
+      "source_relative_path": "runs/paper-evaluator-full-v8-core-full-worker-20260831-r2"
+    }
+  },
+  "schema_version": "chemcrow_full_v8_public_provenance_v1",
+  "source_code_commit": "845eb3228378e08d02a9233eaa38dc5da3574fef",
+  "source_files": [
+    {
+      "hash_method": "sha256_of_original_file_bytes",
+      "role": "analysis",
+      "sha256": "0f2d2c8292db504bee31b3930087ff8c67a41d2cba619e607095a01d20f3f0cf",
+      "size_bytes": 17473,
+      "source_relative_path": "openevo/benchmarks/chemcrow/reports/full_v8_core_full_worker_g2_gpt4_20260831/analysis.json"
+    },
+    {
+      "hash_method": "sha256_of_original_file_bytes",
+      "role": "summary_comparisons",
+      "sha256": "31de80960c1c31707d19568f78e46d071b2ad91ad2392e64c9337076b0a3176a",
+      "size_bytes": 1130,
+      "source_relative_path": "openevo/benchmarks/chemcrow/reports/full_v8_core_full_worker_g2_gpt4_20260831/summary_comparisons.csv"
+    },
+    {
+      "hash_method": "sha256_of_original_file_bytes",
+      "role": "generation_audit",
+      "sha256": "624445bef2aafeb48d05f74e6bdbc0319f68e868181e9344947fca63cb90c859",
+      "size_bytes": 1964,
+      "source_relative_path": "openevo/benchmarks/chemcrow/reports/full_v8_core_full_worker_g1_artifacts_20260830/completed-run-audit.json"
+    },
+    {
+      "hash_method": "sha256_of_original_file_bytes",
+      "role": "generation_aggregate",
+      "sha256": "657a1df63c02829f6ccf16b396795e48a7534969e5609c2d9ba3f08f77c0f5da",
+      "size_bytes": 1033,
+      "source_relative_path": "runs/full-v8-core-full-worker-g1-artifacts-20260830T121136Z/aggregate.json"
+    },
+    {
+      "hash_method": "sha256_of_original_file_bytes",
+      "role": "continuation_audit",
+      "sha256": "1c1a88bc0fa9ebbdcac3b7bb4ce8aa38d2de6a10186e15b3917b695eed2a907e",
+      "size_bytes": 1806,
+      "source_relative_path": "runs/full-v8-core-full-worker-g2-continuation-20260831T052113Z/completed-run.audit.json"
+    },
+    {
+      "hash_method": "sha256_of_original_file_bytes",
+      "role": "internal_aggregate",
+      "sha256": "c9b8c38965628ada8eb6a88c8cc2ca20e92b22b72a99c55aa37ce9a03e4a0e1c",
+      "size_bytes": 987,
+      "source_relative_path": "runs/full-v8-core-full-worker-g2-continuation-20260831T052113Z/aggregate.json"
+    },
+    {
+      "hash_method": "sha256_of_original_file_bytes",
+      "role": "paper_aggregate",
+      "sha256": "4083f46e86570243e07407fb1bf0a5891683e30753a12c5edd03172b46d4536b",
+      "size_bytes": 2105,
+      "source_relative_path": "runs/paper-evaluator-full-v8-core-full-worker-20260831-r2/results/aggregate.json"
+    },
+    {
+      "hash_method": "sha256_of_original_file_bytes",
+      "role": "paper_plan",
+      "sha256": "4abf9286433df1ac51f565f56a54f2252fbe2376a46debd1d5d9cbb51540bf4c",
+      "size_bytes": 276011,
+      "source_relative_path": "runs/paper-evaluator-full-v8-core-full-worker-20260831-r2/private/plan.json"
+    },
+    {
+      "hash_method": "sha256_of_original_file_bytes",
+      "role": "generation_config",
+      "sha256": "adcbfc7e72b0cae0c4cffb50077bf9a1402a784f72015dac6e25f999e2adccf7",
+      "size_bytes": 4342,
+      "source_relative_path": "openevo/benchmarks/chemcrow/configs/full.v8-core-full-worker-g1-artifacts-20260830T121136Z.yaml"
+    },
+    {
+      "hash_method": "sha256_of_original_file_bytes",
+      "role": "continuation_config",
+      "sha256": "7398e168580b75e11a01b1cf679ae917f6e1eba421c7c6630f4c99638a7bb945",
+      "size_bytes": 5069,
+      "source_relative_path": "openevo/benchmarks/chemcrow/configs/full.v8-core-full-worker-g2-continuation-20260831T052113Z.yaml"
+    },
+    {
+      "hash_method": "sha256_of_original_file_bytes",
+      "role": "paper_config",
+      "sha256": "e42122880943a92efe0e696a1bbb10fb2f1d73f3351308d49dc6043210522397",
+      "size_bytes": 1403,
+      "source_relative_path": "openevo/benchmarks/chemcrow/configs/paper_evaluator.full-v8-core-full-worker-g2-continuation-20260831T052113Z-r2.yaml"
+    }
+  ],
+  "source_path_base": "original chemcrowrun workspace root; paths are provenance identifiers, not public download locations",
+  "verification": {
+    "continuation_audit_to_internal_aggregate_hash_match": true,
+    "full_run_audit_reexecuted_for_publication": false,
+    "generation_audit_to_generation_aggregate_hash_match": true,
+    "new_scientific_or_judge_calls_for_publication": 0,
+    "original_analysis_to_continuation_audit_hash_match": true,
+    "original_analysis_to_internal_aggregate_hash_match": true,
+    "original_analysis_to_paper_aggregate_hash_match": true,
+    "original_analysis_to_paper_plan_hash_match": true,
+    "source_commit_verified": true,
+    "task_count_consistent": 14
+  }
+}

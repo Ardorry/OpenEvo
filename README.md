@@ -1,3 +1,19 @@
+# OpenEvo fork · ChemCrow
+
+本分支收录 ChemCrow 的任务内演化适配、复现配置、测试和已核验的汇总结果。
+
+[实验与代码导航](benchmarks/chemcrow/PUBLICATION.md) ·
+[最新 full-v8 结果](benchmarks/chemcrow/reports/full_v8_public_20260831/README.md) ·
+[全部实验分支](https://github.com/Ardorry/OpenEvo/blob/stable/BENCHMARKS.md)
+
+最新实验包含 14 个任务、42 个独立 Reflector 产物。校准 GPT-4 Judge 的
+G1 / G2 均分为 **9.357 / 9.214（满分 10）**，G2 胜/平/负为 **1 / 10 / 3**。
+这些是项目研究结果，状态为 `PROVISIONAL_LLM_JUDGED_RESULT`；尚未获得人类评审确认。
+
+以下保留 OpenEvo 产品说明。
+
+---
+
 <p align="center">
   <img src="assets/openevo-logo.svg" alt="OpenEvo" width="520">
 </p>

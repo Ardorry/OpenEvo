@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 import uuid
 from typing import Any
@@ -30,13 +31,23 @@ class ThreeArtifactRolloutPort(OpenEvoRolloutPort):
         artifact_ids_by_type: dict[ArtifactKind, str],
         pair_id: str,
         mcp_url: str | None,
+        run_id: str | None = None,
     ) -> tuple[Trajectory, CoreInjectionReceiptSummary | None]:
         artifact_ids = _ordered_candidate_artifact_ids(
             role=role,
             artifact_ids_by_type=artifact_ids_by_type,
         )
 
-        run_id = f"{pair_id}-{role}-{uuid.uuid4().hex[:10]}"
+        if run_id is None:
+            run_id = f"{pair_id}-{role}-{uuid.uuid4().hex[:10]}"
+        elif (
+            re.fullmatch(
+                rf"{re.escape(pair_id)}-{re.escape(role)}-[0-9a-f]{{10}}",
+                run_id,
+            )
+            is None
+        ):
+            raise ValueError("Candidate preallocated run ID differs from pair/role authority")
         # Reuse the audited bare-S0 builder for all runtime/agent/tool settings.
         # Evolution authority is added only after the bare request is constructed.
         payload = build_task_request(

@@ -1,0 +1,10 @@
+comparison,source,former_mean,latter_mean,delta,wins,ties,losses,count,wtl
+Historical ChemCrow - GPT-4,Official notebook EvaluatorGPT,7.357142857142857,8.75,-1.3928571428571428,1,0,13,14,1 / 0 / 13
+Re-evaluated ChemCrow - GPT-4,Calibrated GPT-4 Judge,7.5,9.357142857142858,-1.8571428571428572,0,1,13,14,0 / 1 / 13
+G1 - GPT-4,Calibrated GPT-4 Judge,9.357142857142858,7.928571428571429,1.4285714285714286,12,1,1,14,12 / 1 / 1
+G2 - GPT-4,Calibrated GPT-4 Judge,9.214285714285714,7.928571428571429,1.2857142857142858,10,1,3,14,10 / 1 / 3
+G1 - historical ChemCrow,"Same judge, independent calls",9.357142857142858,7.5,1.8571428571428572,11,3,0,14,11 / 3 / 0
+G2 - historical ChemCrow,"Same judge, independent calls",9.214285714285714,7.5,1.7142857142857142,10,3,1,14,10 / 3 / 1
+G2 - G1,"Same calibrated judge, independent calls",9.214285714285714,9.357142857142858,-0.14285714285714285,1,10,3,14,1 / 10 / 3
+G2 - G1,Internal blind evaluator /12,10.285714285714286,9.928571428571429,0.35714285714285715,9,1,4,14,9 / 1 / 4
+G2 - G1,Internal evolution evaluator /12,9.928571428571429,9.785714285714286,0.14285714285714285,5,7,2,14,5 / 7 / 2

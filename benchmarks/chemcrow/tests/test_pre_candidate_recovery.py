@@ -9,6 +9,7 @@ from openevo_chemcrow.ledger import PhaseLedger
 from openevo_chemcrow.pre_candidate_recovery import (
     reconcile_pre_candidate_no_effect_failure,
 )
+from openevo_chemcrow.replacement_ledger import VerifiedReplacementPhaseLedger
 from openevo_chemcrow.runtime import CORE_MANAGED_CODEX_ROUTE
 
 
@@ -93,3 +94,56 @@ def test_reconcile_rejects_any_nonzero_trajectory(tmp_path):
             task_id=task_id,
             core_completion_path=completion,
         )
+
+
+def test_reconcile_accepts_distinct_second_no_effect_attempt(tmp_path):
+    experiment_id = "experiment"
+    task_id = "chemcrow-12"
+    pair_id = f"{experiment_id}--{task_id}"
+    run_root = tmp_path / "run"
+    ledger_root = run_root / "claims"
+    authority = {
+        "task_id": task_id,
+        "s0_hash": "s0",
+        "artifact_ids": [],
+        "artifact_inventory": {},
+    }
+    PhaseLedger(ledger_root, pair_id=pair_id).claim("baseline_candidate", authority)
+    config = tmp_path / "config.yaml"
+    config.write_text("experiment: test\n")
+    first_completion = tmp_path / "completion-1.json"
+    first_completion.write_text(json.dumps(_completion(pair_id)))
+    reconcile_pre_candidate_no_effect_failure(
+        config_path=config,
+        run_root=run_root,
+        ledger_root=ledger_root,
+        experiment_id=experiment_id,
+        task_id=task_id,
+        core_completion_path=first_completion,
+    )
+    ledger = VerifiedReplacementPhaseLedger(ledger_root, pair_id=pair_id)
+    expectation = ledger.replacement_expectation("baseline_candidate")
+    ledger.claim(
+        "baseline_candidate",
+        authority,
+        allow_verified_replacement=True,
+        expected_replacement=expectation,
+    )
+    second_payload = _completion(pair_id)
+    second_payload["task_id"] = f"{pair_id}-baseline-abcdef0123"
+    second_payload["session_id"] = "second-opaque-session-id"
+    second_completion = tmp_path / "completion-2.json"
+    second_completion.write_text(json.dumps(second_payload))
+    receipt_path, receipt = reconcile_pre_candidate_no_effect_failure(
+        config_path=config,
+        run_root=run_root,
+        ledger_root=ledger_root,
+        experiment_id=experiment_id,
+        task_id=task_id,
+        core_completion_path=second_completion,
+    )
+    assert receipt_path.name == "baseline_candidate.attempt-2.no-effect.json"
+    assert receipt["attempt_ordinal"] == 2
+    claim = json.loads((ledger_root / pair_id / "baseline_candidate.json").read_text())
+    assert claim["status"] == "replacement_ready"
+    assert len(claim["failed_attempts"]) == 2

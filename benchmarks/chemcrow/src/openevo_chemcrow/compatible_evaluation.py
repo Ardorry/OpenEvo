@@ -17,6 +17,18 @@ from .protocol import BlindJudgeResult
 CONFIDENCE_PARSER_POLICY_ID = "chemcrow_internal_confidence_transport_v1"
 
 
+def _string_list(value: Any, *, field: str) -> list[str]:
+    """Normalize a JSON string-or-array field without iterating scalar text."""
+
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if not isinstance(value, list):
+        raise TypeError(f"evaluator {field} must be a string or array")
+    return [str(item) for item in value]
+
+
 def normalize_internal_confidence(value: Any) -> tuple[float | None, dict[str, Any]]:
     """Adapt an underspecified 0-4 confidence value without changing rubric scores."""
 
@@ -93,9 +105,11 @@ def parse_evolution_feedback_result(
             evaluator_role="evolution_evaluator",
             evaluator_run_id=result.run_id,
             scores=_scores(value.get("scores")),
-            strengths=[str(x) for x in value.get("strengths", [])],
-            weaknesses=[str(x) for x in value.get("weaknesses", [])],
-            actionable_critique=[str(x) for x in value.get("actionable_critique", [])],
+            strengths=_string_list(value.get("strengths"), field="strengths"),
+            weaknesses=_string_list(value.get("weaknesses"), field="weaknesses"),
+            actionable_critique=_string_list(
+                value.get("actionable_critique"), field="actionable_critique"
+            ),
             confidence=confidence,
         ),
         parse_receipt,
@@ -116,6 +130,10 @@ class CompatibleOpenEvoEvolutionEvaluator(OpenEvoEvolutionEvaluator):
             pair_id=f"{trajectory.run_id}-evolution-eval",
             mcp_url=None,
         )
+        if result.status != "COMPLETED" or not result.answer.strip():
+            raise RuntimeError(
+                "Core-managed baseline_internal_evaluator did not complete with an answer"
+            )
         feedback, receipt = parse_evolution_feedback_result(result)
         self.last_confidence_parse_receipt = receipt
         return feedback

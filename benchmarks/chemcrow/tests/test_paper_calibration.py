@@ -34,13 +34,15 @@ from openevo_chemcrow.paper_evaluator import (
 
 
 def _assessment(a: float, b: float) -> dict[str, object]:
-    student = lambda grade: {
-        "grade": grade,
-        "strengths": ["strength"],
-        "weaknesses": ["weakness"],
-        "justification": "justification",
-        "feedback": ["feedback"],
-    }
+    def student(grade: float) -> dict[str, object]:
+        return {
+            "grade": grade,
+            "strengths": ["strength"],
+            "weaknesses": ["weakness"],
+            "justification": "justification",
+            "feedback": ["feedback"],
+        }
+
     return {"student_a": student(a), "student_b": student(b)}
 
 

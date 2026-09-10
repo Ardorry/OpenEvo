@@ -17,8 +17,14 @@ from openevo_chemcrow.models import Trajectory
 class _Rollout:
     config_sha256 = "config"
 
-    def __init__(self, confidence: float) -> None:
+    def __init__(
+        self,
+        confidence: float,
+        *,
+        actionable_critique: str | list[str] | None = None,
+    ) -> None:
         self.confidence = confidence
+        self.actionable_critique = [] if actionable_critique is None else actionable_critique
         self.tasks = []
 
     def run_candidate(self, *, task, role, artifact_ids, pair_id, mcp_url):
@@ -37,7 +43,7 @@ class _Rollout:
                     },
                     "strengths": ["grounded"],
                     "weaknesses": [],
-                    "actionable_critique": [],
+                    "actionable_critique": self.actionable_critique,
                     "confidence": self.confidence,
                 }
             ),
@@ -128,6 +134,48 @@ def test_compatible_evaluator_preserves_original_prompt_for_valid_output(task_it
         "rubric_scores_changed": False,
         "prompt_changed": False,
     }
+
+
+def test_compatible_evaluator_treats_scalar_critique_as_one_item(task_item):
+    baseline = Trajectory(
+        run_id="baseline-run",
+        task_id=task_item.task_id,
+        role="baseline",
+        status="COMPLETED",
+        answer="observable answer",
+        candidate_config_sha256="s0",
+    )
+    critique = "Verify the missing evidence."
+    compatible = CompatibleOpenEvoEvolutionEvaluator(_Rollout(0.8, actionable_critique=critique))
+
+    assert compatible.evaluate(task=task_item, trajectory=baseline).actionable_critique == [
+        critique
+    ]
+
+
+def test_compatible_evaluator_reports_incomplete_core_call_before_json_parse(task_item):
+    baseline = Trajectory(
+        run_id="baseline-run",
+        task_id=task_item.task_id,
+        role="baseline",
+        status="COMPLETED",
+        answer="observable answer",
+        candidate_config_sha256="s0",
+    )
+    rollout = _Rollout(0.8)
+    rollout.run_candidate = lambda **_: Trajectory(
+        run_id="failed-evaluator",
+        task_id=task_item.task_id,
+        role="baseline",
+        status="ERROR",
+        answer="",
+        candidate_config_sha256="config",
+    )
+
+    with pytest.raises(RuntimeError, match="did not complete"):
+        CompatibleOpenEvoEvolutionEvaluator(rollout).evaluate(
+            task=task_item, trajectory=baseline
+        )
 
 
 def test_compatible_final_evaluator_preserves_original_prompt(task_item):

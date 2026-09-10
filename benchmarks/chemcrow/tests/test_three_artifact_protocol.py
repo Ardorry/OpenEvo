@@ -7,7 +7,9 @@ import pytest
 import yaml
 
 from openevo_chemcrow.cli import _assert_authoritative_role_models, _bounded_task_prefix
-from openevo_chemcrow.hashing import canonical_sha256
+from openevo_chemcrow.feedback import reflector_feedback_payload, runtime_feedback
+from openevo_chemcrow.hashing import canonical_sha256, file_sha256
+from openevo_chemcrow.ledger import PhaseLedger
 from openevo_chemcrow.models import (
     ArtifactKind,
     EvaluatorFeedback,
@@ -17,19 +19,23 @@ from openevo_chemcrow.models import (
     Trajectory,
 )
 from openevo_chemcrow.protocol import BlindJudgeResult
+from openevo_chemcrow.replacement_ledger import VerifiedReplacementPhaseLedger
 from openevo_chemcrow.three_artifact_evolution import (
     ThreeIsolatedEvolutionEngine,
     _find_forbidden_text,
     _strict_reflector_markdown,
     detect_artifact_duplicates,
+    project_core_native_evolution_feedback,
 )
 from openevo_chemcrow.three_artifact_models import (
+    CORE_FULL_WORKER_PROMPT_PROFILE,
     CORE_NATIVE_THREE_ARTIFACT_BUNDLE_PROTOCOL,
     CORE_NATIVE_THREE_ARTIFACT_PROTOCOL_LABEL,
     THREE_ARTIFACT_ORDER,
     ArtifactSeparationPolicy,
     CoreInjectionReceiptSummary,
     ThreeArtifactBundleReceipt,
+    ThreeArtifactGenerationResult,
     ThreeArtifactPairResult,
     ThreeArtifactReceipt,
 )
@@ -49,12 +55,21 @@ class FakeThreeCandidate:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, dict[ArtifactKind, str]]] = []
 
-    def run_candidate_with_receipt(self, *, task, role, artifact_ids_by_type, pair_id, mcp_url):
+    def run_candidate_with_receipt(
+        self,
+        *,
+        task,
+        role,
+        artifact_ids_by_type,
+        pair_id,
+        mcp_url,
+        run_id=None,
+    ):
         mapping = dict(artifact_ids_by_type)
         self.calls.append((task.task_id, role, mapping))
         ids = [mapping[kind] for kind in THREE_ARTIFACT_ORDER] if mapping else []
         trajectory = Trajectory(
-            run_id=f"{pair_id}-{role}",
+            run_id=run_id or f"{pair_id}-{role}",
             task_id=task.task_id,
             role=role,
             status="COMPLETED",
@@ -89,9 +104,11 @@ def test_real_candidate_port_requires_exact_distinct_evolved_inventory():
         ArtifactKind.SKILL_BUNDLE: "skill",
         ArtifactKind.AGENT_SYSTEM: "agent-system",
     }
-    assert _ordered_candidate_artifact_ids(
-        role="evolved", artifact_ids_by_type=mapping
-    ) == ["memory", "skill", "agent-system"]
+    assert _ordered_candidate_artifact_ids(role="evolved", artifact_ids_by_type=mapping) == [
+        "memory",
+        "skill",
+        "agent-system",
+    ]
     with pytest.raises(ValueError, match="exactly memory"):
         _ordered_candidate_artifact_ids(
             role="evolved",
@@ -151,6 +168,88 @@ class FakeThreeEvolution:
             separation_policy=ArtifactSeparationPolicy(),
             artifacts=artifacts,
         )
+
+
+def _authorize_recovered_g2(*, ledger_root, task, pair_id, bundle):
+    authority = {
+        "task_id": task.task_id,
+        "s0_hash": "s0",
+        "artifact_ids_by_type": bundle.artifact_id_by_type(),
+        "artifact_count": 3,
+    }
+    PhaseLedger(ledger_root, pair_id=pair_id).claim("evolved_candidate", authority)
+    claim_path = ledger_root / pair_id / "evolved_candidate.json"
+    artifact_ids = bundle.artifact_ids()
+    replacement_run_id = f"{pair_id}-evolved-2222222222"
+    receipt = {
+        "schema_version": "chemcrow_evolved_candidate_no_effect_recovery_v1",
+        "status": "VERIFIED_NO_EVOLVED_CANDIDATE_EFFECT_REPLACEMENT_READY",
+        "pair_id": pair_id,
+        "task_id": task.task_id,
+        "task_authority_sha256": canonical_sha256(task.model_dump(mode="json")),
+        "phase": "evolved_candidate",
+        "attempt_ordinal": 1,
+        "authority_sha256": canonical_sha256(authority),
+        "original_claim_sha256": file_sha256(claim_path),
+        "config_sha256": "2" * 64,
+        "checkpoint_sha256": "3" * 64,
+        "active_attempt_run_id": f"{pair_id}-evolved-1111111111",
+        "replacement_run_id": replacement_run_id,
+        "core_task_id": f"{pair_id}-evolved-1111111111",
+        "core_session_id_sha256": "4" * 64,
+        "core_completion_sha256": "5" * 64,
+        "core_completion_status": "ERROR",
+        "error_category": "credential_isolation_validation_failed",
+        "input_evidence_sha256": bundle.input_evidence_hash,
+        "artifact_ids_by_type": bundle.artifact_id_by_type(),
+        "reflector_job_ids": [item.reflector_job_id for item in bundle.artifacts],
+        "reflector_run_ids": [item.reflector_run_id for item in bundle.artifacts],
+        "reflector_prompt_hashes": [item.prompt_hash for item in bundle.artifacts],
+        "injection_authority": {
+            "evolved_claim_authority_sha256": canonical_sha256(authority),
+            "context_id": "context",
+            "context_artifact_ids": artifact_ids,
+            "context_injected": True,
+            "revision_id": "chemcrow-task-local-three:" + canonical_sha256(artifact_ids),
+            "runtime_injection_receipt_published": False,
+            "credential_readiness_receipt_published": False,
+        },
+        "no_effect_predicates": {
+            "core_status_error": True,
+            "exact_setup_canary_validation_error": True,
+            "trajectory_has_zero_records": True,
+            "trajectory_has_zero_traces": True,
+            "workspace_result_absent": True,
+            "core_route_bound": True,
+            "host_codex_exec_forbidden": True,
+            "context_injected_before_setup": True,
+            "exact_three_context_artifact_ids": True,
+            "context_identity_present": True,
+            "runtime_injection_receipt_not_published": True,
+            "credential_contract_present": True,
+            "credential_readiness_receipt_not_published": True,
+            "revision_authority_exact": True,
+            "session_identity_present": True,
+        },
+        "infrastructure_canary_model_call_may_have_occurred": True,
+        "evolved_candidate_model_call_proven_absent": True,
+        "prior_scientific_calls_preserved": [
+            "baseline_candidate",
+            "baseline_internal_evaluator",
+            "reflector_memory",
+            "reflector_skill_bundle",
+            "reflector_agent_system",
+        ],
+        "prior_scientific_calls_redispatched": False,
+        "replacement_scope": ["evolved_candidate"],
+        "duplicate_scientific_call": False,
+        "recorded_before_replacement_dispatch": True,
+    }
+    VerifiedReplacementPhaseLedger(
+        ledger_root,
+        pair_id=pair_id,
+    ).reconcile_verified_no_effect_failure("evolved_candidate", receipt)
+    return replacement_run_id
 
 
 class FakeInternalEvaluator:
@@ -258,11 +357,7 @@ def test_full_v4_config_is_fresh_and_three_pipeline(monkeypatch):
         "OPENEVO_FINAL_EVALUATOR_MODEL",
     ):
         monkeypatch.setenv(name, "gpt-5.5")
-    path = (
-        Path(__file__).resolve().parents[1]
-        / "configs"
-        / "full.v4-three-pipeline.yaml"
-    )
+    path = Path(__file__).resolve().parents[1] / "configs" / "full.v4-three-pipeline.yaml"
     config = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert config["experiment_id"] == "chemcrow-task-local-full-v4-three-pipeline"
     assert config["task_ids"] == "all"
@@ -275,9 +370,7 @@ def test_full_v4_config_is_fresh_and_three_pipeline(monkeypatch):
 
 def test_core_native_v2_config_has_fresh_identity_and_no_custom_responsibility_policy():
     path = (
-        Path(__file__).resolve().parents[1]
-        / "configs"
-        / "full.v5-core-native-three-pipeline.yaml"
+        Path(__file__).resolve().parents[1] / "configs" / "full.v5-core-native-three-pipeline.yaml"
     )
     config = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert config["experiment_id"] == "chemcrow-task-local-full-v5-core-native-three-pipeline"
@@ -346,11 +439,106 @@ def test_three_pipeline_protocol_reset_lineage_and_scoring_order(tmp_path, task_
         ThreeArtifactPairResult.model_validate(wrong_pair)
 
     reused_internal_call = json.loads(first.model_dump_json())
-    reused_internal_call["evolved_internal_evaluation"]["evaluator_run_id"] = (
-        reused_internal_call["baseline_internal_evaluation"]["evaluator_run_id"]
-    )
+    reused_internal_call["evolved_internal_evaluation"]["evaluator_run_id"] = reused_internal_call[
+        "baseline_internal_evaluation"
+    ]["evaluator_run_id"]
     with pytest.raises(ValueError, match="independent calls"):
         ThreeArtifactPairResult.model_validate(reused_internal_call)
+
+
+def test_generation_only_scope_seals_g1_and_artifacts_without_g2(tmp_path, task_item):
+    candidate = FakeThreeCandidate()
+    internal = FakeInternalEvaluator()
+    runner = ThreeArtifactTaskLocalProtocolRunner(
+        run_root=tmp_path / "runs",
+        candidate=candidate,
+        evolution=FakeThreeEvolution(),
+        evolution_evaluator=internal,
+        final_evaluator=FakeFinalEvaluator(),
+        feedback_mode=FeedbackMode.F2,
+        s0_hash="s0",
+        real_mode=False,
+        ledger_root=tmp_path / "claims",
+        stop_after_artifact_generation=True,
+    )
+
+    result = runner.run_item(task_item, pair_id="generation-only")
+
+    assert isinstance(result, ThreeArtifactGenerationResult)
+    assert [call[1] for call in candidate.calls] == ["baseline"]
+    assert internal.roles == ["baseline"]
+    assert result.event_order[-2:] == ["sealed", "reset"]
+    assert all(
+        item.consumed_by_evolved_run_id is None for item in result.artifact_bundle.artifacts
+    )
+    root = tmp_path / "runs" / "generation-only"
+    boundary = json.loads((root / "generation.boundary.receipt.json").read_text())
+    assert boundary["g2_dispatched"] is False
+    assert boundary["final_evaluator_dispatched"] is False
+    assert (root / "artifact.study.result.json").is_file()
+
+
+def test_sealed_generation_continuation_runs_only_g2_and_evaluators(
+    tmp_path, task_item
+):
+    source_evolution = FakeThreeEvolution()
+    source_internal = FakeInternalEvaluator()
+    source_runner = ThreeArtifactTaskLocalProtocolRunner(
+        run_root=tmp_path / "source-runs",
+        candidate=FakeThreeCandidate(),
+        evolution=source_evolution,
+        evolution_evaluator=source_internal,
+        final_evaluator=FakeFinalEvaluator(),
+        feedback_mode=FeedbackMode.F2,
+        s0_hash="s0",
+        real_mode=False,
+        ledger_root=tmp_path / "source-claims",
+        stop_after_artifact_generation=True,
+    )
+    source_result = source_runner.run_item(task_item, pair_id="sealed-generation")
+    assert isinstance(source_result, ThreeArtifactGenerationResult)
+
+    candidate = FakeThreeCandidate()
+    continuation_evolution = FakeThreeEvolution()
+    continuation_internal = FakeInternalEvaluator()
+    continuation_runner = ThreeArtifactTaskLocalProtocolRunner(
+        run_root=tmp_path / "continuation-runs",
+        candidate=candidate,
+        evolution=continuation_evolution,
+        evolution_evaluator=continuation_internal,
+        final_evaluator=FakeFinalEvaluator(),
+        feedback_mode=FeedbackMode.F2,
+        s0_hash="s0",
+        real_mode=False,
+        ledger_root=tmp_path / "continuation-claims",
+    )
+
+    result = continuation_runner.run_item(
+        task_item,
+        pair_id="sealed-generation",
+        recovered_baseline_checkpoint=(
+            source_result.baseline,
+            source_result.baseline_internal_evaluation,
+        ),
+        recovered_artifact_checkpoint=source_result.artifact_bundle,
+        continue_from_sealed_generation=True,
+    )
+
+    assert isinstance(result, ThreeArtifactPairResult)
+    assert continuation_evolution.inputs == []
+    assert [call[1] for call in candidate.calls] == ["evolved"]
+    assert continuation_internal.roles == ["evolved"]
+    claim_names = {
+        path.name
+        for path in (tmp_path / "continuation-claims" / "sealed-generation").glob(
+            "*.json"
+        )
+    }
+    assert claim_names == {
+        "evolved_candidate.json",
+        "evolved_internal_evaluator.json",
+        "final_evaluator.json",
+    }
 
 
 def test_three_pipeline_resumes_from_completed_baseline_checkpoint(tmp_path, task_item):
@@ -405,6 +593,230 @@ def test_three_pipeline_resumes_from_completed_baseline_checkpoint(tmp_path, tas
     ]
     assert result.baseline.run_id == "recovered-baseline"
     assert result.baseline_internal_evaluation.evaluator_run_id == "recovered-evaluator"
+
+
+def test_generation_only_replaces_only_failed_baseline_evaluator(tmp_path, task_item):
+    candidate = FakeThreeCandidate()
+    internal = FakeInternalEvaluator()
+    ledger_root = tmp_path / "claims"
+    pair_id = "pair-evaluator-replacement"
+    baseline = Trajectory(
+        run_id="preserved-baseline",
+        task_id=task_item.task_id,
+        role="baseline",
+        status="COMPLETED",
+        answer="preserved baseline answer",
+        candidate_config_sha256="s0",
+    )
+    ledger = VerifiedReplacementPhaseLedger(ledger_root, pair_id=pair_id)
+    ledger.claim(
+        "baseline_candidate",
+        {
+            "task_id": task_item.task_id,
+            "s0_hash": "s0",
+            "artifact_ids": [],
+            "artifact_inventory": {},
+        },
+    )
+    ledger.terminal("baseline_candidate", {"run_id": baseline.run_id})
+    evaluator_authority = {
+        "task_id": task_item.task_id,
+        "run_id": baseline.run_id,
+        "evaluator_id": internal.evaluator_id,
+        "paper_evaluator": False,
+    }
+    ledger.claim("baseline_internal_evaluator", evaluator_authority)
+    claim_path = ledger_root / pair_id / "baseline_internal_evaluator.json"
+    ledger.reconcile_verified_no_effect_failure(
+        "baseline_internal_evaluator",
+        {
+            "schema_version": "chemcrow_baseline_evaluator_no_effect_recovery_v1",
+            "status": "VERIFIED_NO_CANDIDATE_EFFECT_REPLACEMENT_READY",
+            "pair_id": pair_id,
+            "phase": "baseline_internal_evaluator",
+            "attempt_ordinal": 1,
+            "authority_sha256": canonical_sha256(evaluator_authority),
+            "original_claim_sha256": file_sha256(claim_path),
+            "no_effect_predicates": {"zero_trajectory": True},
+            "evaluator_model_call_proven_absent": True,
+            "duplicate_scientific_call": False,
+            "recorded_before_replacement_dispatch": True,
+        },
+    )
+    runner = ThreeArtifactTaskLocalProtocolRunner(
+        run_root=tmp_path / "runs",
+        candidate=candidate,
+        evolution=FakeThreeEvolution(),
+        evolution_evaluator=internal,
+        final_evaluator=FakeFinalEvaluator(),
+        feedback_mode=FeedbackMode.F2,
+        s0_hash="s0",
+        real_mode=False,
+        ledger_root=ledger_root,
+        stop_after_artifact_generation=True,
+    )
+
+    result = runner.run_item(
+        task_item,
+        pair_id=pair_id,
+        recovered_baseline_before_evaluator=baseline,
+        allow_verified_baseline_evaluator_replacement=True,
+    )
+
+    assert isinstance(result, ThreeArtifactGenerationResult)
+    assert candidate.calls == []
+    assert internal.roles == ["baseline"]
+    claim = json.loads(claim_path.read_text())
+    assert claim["status"] == "terminal"
+    assert claim["active_attempt_ordinal"] == 2
+
+
+def test_three_pipeline_reuses_completed_reflectors_for_replacement_g2_only(tmp_path, task_item):
+    candidate = FakeThreeCandidate()
+    evolution = FakeThreeEvolution()
+    ledger_root = tmp_path / "claims"
+    runner = ThreeArtifactTaskLocalProtocolRunner(
+        run_root=tmp_path / "runs",
+        candidate=candidate,
+        evolution=evolution,
+        evolution_evaluator=FakeInternalEvaluator(),
+        final_evaluator=FakeFinalEvaluator(),
+        feedback_mode=FeedbackMode.F2,
+        s0_hash="s0",
+        real_mode=False,
+        ledger_root=ledger_root,
+    )
+    recovered_baseline = Trajectory(
+        run_id="recovered-baseline",
+        task_id=task_item.task_id,
+        role="baseline",
+        status="COMPLETED",
+        answer="preserved baseline answer",
+        candidate_config_sha256="s0",
+    )
+    recovered_evaluation = EvaluatorFeedback(
+        evaluator_role="evolution_evaluator",
+        evaluator_run_id="recovered-evaluator",
+        scores=RubricScores(
+            chemical_correctness=3,
+            reasoning_quality=3,
+            task_completion=3,
+        ),
+        actionable_critique=["Preserve the exact completed Reflectors."],
+        confidence=1.0,
+    )
+    feedback = reflector_feedback_payload(
+        mode=FeedbackMode.F2,
+        trajectory=recovered_baseline,
+        runtime=runtime_feedback(recovered_baseline),
+        evaluator=recovered_evaluation,
+    )
+    recovered_bundle = evolution.evolve_all(
+        task=task_item,
+        baseline=recovered_baseline,
+        feedback_payload=feedback,
+        pair_id="pair-recovered-g2",
+    )
+    evolution.inputs.clear()
+    replacement_run_id = _authorize_recovered_g2(
+        ledger_root=ledger_root,
+        task=task_item,
+        pair_id="pair-recovered-g2",
+        bundle=recovered_bundle,
+    )
+
+    result = runner.run_item(
+        task_item,
+        pair_id="pair-recovered-g2",
+        recovered_baseline_checkpoint=(
+            recovered_baseline,
+            recovered_evaluation,
+        ),
+        recovered_artifact_checkpoint=recovered_bundle,
+        allow_verified_evolved_candidate_replacement=True,
+        replacement_evolved_run_id=replacement_run_id,
+    )
+
+    assert evolution.inputs == []
+    assert [call[1] for call in candidate.calls] == ["evolved"]
+    assert result.artifact_bundle.artifact_ids() == recovered_bundle.artifact_ids()
+    assert result.event_order == [
+        "s0_asserted",
+        "baseline",
+        "runtime_feedback",
+        "baseline_internal_evaluator",
+        "reflector_memory",
+        "reflector_skill_bundle",
+        "reflector_agent_system",
+        "artifacts_registered",
+        "evolved",
+        "evolved_internal_evaluator",
+        "final_evaluator",
+        "sealed",
+        "reset",
+    ]
+
+
+def test_three_pipeline_refuses_recovered_artifacts_without_explicit_g2_replacement(
+    tmp_path, task_item
+):
+    runner = ThreeArtifactTaskLocalProtocolRunner(
+        run_root=tmp_path / "runs",
+        candidate=FakeThreeCandidate(),
+        evolution=FakeThreeEvolution(),
+        evolution_evaluator=FakeInternalEvaluator(),
+        final_evaluator=FakeFinalEvaluator(),
+        feedback_mode=FeedbackMode.F2,
+        s0_hash="s0",
+        real_mode=False,
+        ledger_root=None,
+    )
+    baseline = Trajectory(
+        run_id="baseline",
+        task_id=task_item.task_id,
+        role="baseline",
+        status="COMPLETED",
+        answer="answer",
+        candidate_config_sha256="s0",
+    )
+    evaluation = EvaluatorFeedback(
+        evaluator_role="evolution_evaluator",
+        evaluator_run_id="evaluation",
+        scores=RubricScores(
+            chemical_correctness=3,
+            reasoning_quality=3,
+            task_completion=3,
+        ),
+    )
+    feedback = reflector_feedback_payload(
+        mode=FeedbackMode.F2,
+        trajectory=baseline,
+        runtime=runtime_feedback(baseline),
+        evaluator=evaluation,
+    )
+    bundle = runner.evolution.evolve_all(
+        task=task_item,
+        baseline=baseline,
+        feedback_payload=feedback,
+        pair_id="pair",
+    )
+
+    with pytest.raises(ValueError, match="requires one recovered artifact checkpoint"):
+        runner.run_item(
+            task_item,
+            pair_id="pair",
+            recovered_baseline_checkpoint=(baseline, evaluation),
+            recovered_artifact_checkpoint=bundle,
+        )
+    with pytest.raises(ValueError, match="verified replacement ledger"):
+        runner.run_item(
+            task_item,
+            pair_id="pair",
+            recovered_baseline_checkpoint=(baseline, evaluation),
+            recovered_artifact_checkpoint=bundle,
+            allow_verified_evolved_candidate_replacement=True,
+            replacement_evolved_run_id="pair-evolved-2222222222",
+        )
 
 
 def test_native_three_reflectors_are_independent_and_sibling_blind(tmp_path, task_item):
@@ -464,15 +876,200 @@ def test_native_three_reflectors_are_independent_and_sibling_blind(tmp_path, tas
         assert "direct physical execution" not in port.prompts[0]
         assert "safety_metadata" not in port.prompts[0]
         assert "allowed_tool_metadata" not in port.prompts[0]
-    assert "Return only the Markdown memory.md file" in ports[
-        ArtifactKind.TEXT_MEMORY
-    ].prompts[0]
+    assert "Return only the Markdown memory.md file" in ports[ArtifactKind.TEXT_MEMORY].prompts[0]
     assert "Return only SKILL.md content" in ports[ArtifactKind.SKILL_BUNDLE].prompts[0]
-    assert "Return only the Markdown agent-system instruction file" in ports[
-        ArtifactKind.AGENT_SYSTEM
-    ].prompts[0]
+    assert (
+        "Return only the Markdown agent-system instruction file"
+        in ports[ArtifactKind.AGENT_SYSTEM].prompts[0]
+    )
     manifests = list((tmp_path / "artifacts" / "artifacts").rglob("*.json"))
     assert len(manifests) >= 3
+
+
+def test_full_core_worker_prompts_are_frozen_from_claimed_datasets(tmp_path, task_item):
+    contents = {
+        ArtifactKind.TEXT_MEMORY: (
+            "# Memory\n\nRemember the observed omission and verify units before finalizing."
+        ),
+        ArtifactKind.SKILL_BUNDLE: (
+            "# Verification skill\n\nWhen answering, inspect the evidence and verify completion."
+        ),
+        ArtifactKind.AGENT_SYSTEM: (
+            "# Operating rules\n\n- Before finalizing, verify every reported unit against evidence."
+        ),
+    }
+    ports = {kind: FakeCoreReflector(kind, content) for kind, content in contents.items()}
+    engine = ThreeIsolatedEvolutionEngine(
+        run_root=tmp_path / "runs",
+        reflector_rollouts=ports,
+        evolution_db_path=tmp_path / "evolution.sqlite3",
+        evolution_artifact_root=tmp_path / "artifacts",
+        separation_policy=ArtifactSeparationPolicy(),
+        prompt_profile=CORE_FULL_WORKER_PROMPT_PROFILE,
+    )
+    baseline = Trajectory(
+        run_id="baseline-full-worker",
+        task_id=task_item.task_id,
+        role="baseline",
+        status="COMPLETED",
+        answer="The baseline omitted a required evidence check.",
+        candidate_config_sha256="s0",
+    )
+
+    bundle = engine.evolve_all(
+        task=task_item,
+        baseline=baseline,
+        feedback_payload={
+            "mode": "F2",
+            "evaluator_feedback": {
+                "evaluator_run_id": "eval-full-worker",
+                "scores": {
+                    "chemical_correctness": 3.0,
+                    "reasoning_quality": 2.0,
+                    "task_completion": 1.0,
+                },
+                "strengths": ["The route identity was supported."],
+                "weaknesses": ["The answer omitted a required evidence check."],
+                "actionable_critique": ["Verify the reported units."],
+                "confidence": 0.8,
+            },
+        },
+        pair_id="pair-full-worker",
+    )
+
+    assert bundle.prompt_profile == CORE_FULL_WORKER_PROMPT_PROFILE
+    memory_prompt = ports[ArtifactKind.TEXT_MEMORY].prompts[0]
+    skill_prompt = ports[ArtifactKind.SKILL_BUNDLE].prompts[0]
+    system_prompt = ports[ArtifactKind.AGENT_SYSTEM].prompts[0]
+    assert "# Text Memory Reflection Context" in memory_prompt
+    assert "# Skill Bundle Reflection Context" in skill_prompt
+    assert "## Reflections From Prior Trajectories" in system_prompt
+    assert all(
+        "Shared Evolution Feedback" in prompt
+        for prompt in (memory_prompt, skill_prompt, system_prompt)
+    )
+    assert all(
+        "Observed Issues: The answer omitted a required evidence check." in prompt
+        and "Suggested Changes: Verify the reported units." in prompt
+        and "Strengths: The route identity was supported." in prompt
+        and "reward=0.5" in prompt
+        for prompt in (memory_prompt, skill_prompt, system_prompt)
+    )
+    assert all(
+        "You are one of three mutually isolated" in prompt
+        for prompt in (memory_prompt, skill_prompt, system_prompt)
+    )
+    assert all(
+        "EVIDENCE JSON" not in prompt
+        for prompt in (memory_prompt, skill_prompt, system_prompt)
+    )
+    freeze = json.loads(
+        (
+            tmp_path
+            / "runs"
+            / "pair-full-worker"
+            / "reflector_prompts"
+            / "freeze.receipt.json"
+        ).read_text()
+    )
+    assert freeze["prompts_frozen_before_first_invocation"] is True
+    assert len(set(freeze["prompt_sha256_by_type"].values())) == 3
+    assert all(item.reflector_attempt_run_ids for item in bundle.artifacts)
+    assert all(item.output_audit["finding_count"] == 0 for item in bundle.artifacts)
+
+
+def test_core_native_feedback_projection_is_exact_and_score_normalized():
+    feedback, reward = project_core_native_evolution_feedback(
+        {
+            "mode": "F2",
+            "evaluator_feedback": {
+                "evaluator_run_id": "eval-1",
+                "scores": {
+                    "chemical_correctness": 4.0,
+                    "reasoning_quality": 3.0,
+                    "task_completion": 2.0,
+                },
+                "strengths": ["strength exact"],
+                "weaknesses": ["weakness exact"],
+                "actionable_critique": ["critique exact"],
+            },
+        }
+    )
+
+    assert feedback == {
+        "status": "available_for_evolution",
+        "feedback_id": "eval-1",
+        "decision": "evaluator-summary",
+        "strengths": ["strength exact"],
+        "observed_issues": ["weakness exact"],
+        "suggested_changes": ["critique exact"],
+    }
+    assert reward == pytest.approx(0.75)
+
+
+def test_full_core_worker_replacement_reuses_first_frozen_prompts(tmp_path, task_item):
+    contents = {
+        ArtifactKind.TEXT_MEMORY: "# Memory\n\nVerify the evidence before finalizing.",
+        ArtifactKind.SKILL_BUNDLE: "# Skill\n\nInspect, answer, then validate.",
+        ArtifactKind.AGENT_SYSTEM: "# Rules\n\n- Validate task completion before finalizing.",
+    }
+    baseline = Trajectory(
+        run_id="baseline-frozen-replacement",
+        task_id=task_item.task_id,
+        role="baseline",
+        status="COMPLETED",
+        answer="The baseline omitted a required check.",
+        candidate_config_sha256="s0",
+    )
+    feedback = {
+        "mode": "F2",
+        "evaluator_feedback": {
+            "evaluator_run_id": "eval-frozen-replacement",
+            "scores": {
+                "chemical_correctness": 3.0,
+                "reasoning_quality": 3.0,
+                "task_completion": 2.0,
+            },
+            "strengths": ["The identity was supported."],
+            "weaknesses": ["The check was absent."],
+            "actionable_critique": ["Add the missing check."],
+        },
+    }
+
+    first_ports = {kind: FakeCoreReflector(kind, content) for kind, content in contents.items()}
+    first = ThreeIsolatedEvolutionEngine(
+        run_root=tmp_path / "runs",
+        reflector_rollouts=first_ports,
+        evolution_db_path=tmp_path / "first.sqlite3",
+        evolution_artifact_root=tmp_path / "first-artifacts",
+        separation_policy=ArtifactSeparationPolicy(),
+        prompt_profile=CORE_FULL_WORKER_PROMPT_PROFILE,
+    ).evolve_all(
+        task=task_item,
+        baseline=baseline,
+        feedback_payload=feedback,
+        pair_id="pair-frozen-replacement",
+    )
+    second_ports = {kind: FakeCoreReflector(kind, content) for kind, content in contents.items()}
+    second = ThreeIsolatedEvolutionEngine(
+        run_root=tmp_path / "runs",
+        reflector_rollouts=second_ports,
+        evolution_db_path=tmp_path / "second.sqlite3",
+        evolution_artifact_root=tmp_path / "second-artifacts",
+        separation_policy=ArtifactSeparationPolicy(),
+        prompt_profile=CORE_FULL_WORKER_PROMPT_PROFILE,
+    ).evolve_all(
+        task=task_item,
+        baseline=baseline,
+        feedback_payload=feedback,
+        pair_id="pair-frozen-replacement",
+    )
+
+    assert [item.prompt_hash for item in second.artifacts] == [
+        item.prompt_hash for item in first.artifacts
+    ]
+    for kind in THREE_ARTIFACT_ORDER:
+        assert second_ports[kind].prompts == first_ports[kind].prompts
 
 
 @pytest.mark.parametrize(
@@ -557,9 +1154,7 @@ def test_core_native_bundle_label_and_legacy_policy_fields_are_not_emitted():
             "minimum_tokens_for_responsibility_check": 8,
         }
     ).model_dump(mode="json")
-    assert historical["responsibility_policy_version"] == (
-        "chemcrow_artifact_responsibility_v1"
-    )
+    assert historical["responsibility_policy_version"] == ("chemcrow_artifact_responsibility_v1")
     assert historical["minimum_tokens_for_responsibility_check"] == 8
 
 

@@ -8,8 +8,11 @@ Candidate, Reflector, or evolution-evaluator execution paths.
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
+import os
 import re
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -27,11 +30,12 @@ from .three_artifact_models import (
 
 PAPER_EVALUATOR_PROTOCOL = "CHEMCROW_EVALUATORGPT_PROMPT_CALIBRATED_V2"
 PAPER_EVALUATOR_PROMPT_CANDIDATE = "PAPER_MINIMAL"
-PAPER_EVALUATOR_PROMPT_SHA256 = (
-    "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767"
-)
+PAPER_EVALUATOR_PROMPT_SHA256 = "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767"
 PAPER_EVALUATOR_CALIBRATION_RESULTS_SHA256 = (
     "a901f03a5e5a58c7d64b7e5dea36c5f6c0d1634f0432f024f69d1394240983e2"
+)
+PAPER_EVALUATOR_HISTORICAL_DATASET_SHA256 = (
+    "148ddc2bd38dc3c49a01d01cd9cc99035cb0d70c085c7c2f3e738b378c813de0"
 )
 PAPER_EVALUATOR_MODEL = "openai/gpt-4"
 PAPER_EVALUATOR_TEMPERATURE = 0.1
@@ -43,6 +47,8 @@ PAPER_EVALUATOR_INPUT_USD_PER_TOKEN = 0.00003
 PAPER_EVALUATOR_OUTPUT_USD_PER_TOKEN = 0.00006
 PAPER_EVALUATOR_CALL_COUNT = 42
 PAPER_EVALUATOR_AUTHORIZATION = "I_AUTHORIZE_42_SEALED_PAPER_EVALUATIONS"
+PAPER_EVALUATOR_PLAN_SCHEMA = "chemcrow_paper_evaluator_plan_v2"
+_MAX_SEALED_AUTHORITY_BYTES = 4 * 1024 * 1024
 SUPPORTED_PAPER_SOURCE_PAIR_PROTOCOLS = frozenset(
     {
         LEGACY_THREE_ARTIFACT_PROTOCOL_LABEL,
@@ -53,7 +59,22 @@ SUPPORTED_PAPER_SOURCE_PAIR_PROTOCOLS = frozenset(
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 FROZEN_PAPER_TASK_IDS = tuple(
     f"chemcrow-{number}"
-    for number in ("01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "12", "13", "14", "15")
+    for number in (
+        "01",
+        "02",
+        "03",
+        "04",
+        "05",
+        "06",
+        "07",
+        "08",
+        "09",
+        "10",
+        "12",
+        "13",
+        "14",
+        "15",
+    )
 )
 
 
@@ -118,6 +139,34 @@ class PaperEvaluationCall(BaseModel):
         return self
 
 
+class PaperEvaluationResult(BaseModel):
+    """Strict durable result envelope for one production paper call."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["chemcrow_paper_evaluator_result_v1"]
+    call_id: str
+    task_id: str
+    comparison: Literal["historical_control", "baseline", "evolved"]
+    student_a_system: Literal["historical_chemcrow", "openevo_baseline", "openevo_evolved"]
+    student_b_system: Literal["historical_gpt4"]
+    prompt_sha256: str
+    assessment: DualStudentAssessment
+    assessment_sha256: str
+    openrouter_receipt_sha256: str
+    core_terminal_payload_sha256: str
+    execution_route: str
+    reflector_access: Literal[False]
+    evolution_feedback_access: Literal[False]
+    provisional_llm_judged: Literal[True]
+
+    @model_validator(mode="after")
+    def _bind_assessment(self) -> PaperEvaluationResult:
+        if self.assessment_sha256 != canonical_sha256(self.assessment.model_dump(mode="json")):
+            raise ValueError("paper result assessment hash differs")
+        return self
+
+
 @dataclass(frozen=True)
 class HistoricalAnswers:
     task_id: str
@@ -133,6 +182,16 @@ class HistoricalEvaluatorGrades:
     chemcrow_grade: float
     gpt4_grade: float
     notebook_sha256: str
+
+
+@dataclass(frozen=True)
+class CompletedRunAuditBinding:
+    """Content and source-run identity pinned into a production paper plan."""
+
+    completed_run_audit_sha256: str
+    aggregate_sha256: str
+    experiment_id: str
+    artifact_protocol: str
 
 
 def paper_cost_ceiling() -> dict[str, Any]:
@@ -207,7 +266,10 @@ def extract_historical_evaluator_grades(
         ]
         if len(teacher_cells) != 1:
             raise ValueError(f"historical teacher cell is not unique for {task_id}")
-        observed = {key: float(value) for key, value in pattern.findall(_cell_stream_text(teacher_cells[0]))}
+        observed = {
+            key: float(value)
+            for key, value in pattern.findall(_cell_stream_text(teacher_cells[0]))
+        }
         if set(observed) != {"1", "2"}:
             raise ValueError(f"historical teacher grades are incomplete for {task_id}")
         grades[task_id] = HistoricalEvaluatorGrades(
@@ -219,12 +281,230 @@ def extract_historical_evaluator_grades(
     return grades
 
 
+def _lexical_absolute(path: Path) -> Path:
+    """Return an absolute normalized path without resolving symlinks."""
+
+    return Path(os.path.abspath(os.fspath(path)))
+
+
+def _is_sha256(value: Any) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
+def _opened_path_identity(value: os.stat_result) -> tuple[int, int, int]:
+    return (value.st_dev, value.st_ino, stat.S_IFMT(value.st_mode))
+
+
+def _stable_file_snapshot(value: os.stat_result) -> tuple[int, ...]:
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_mode,
+        value.st_nlink,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
+
+
+def _read_regular_file_no_follow(path: Path, *, label: str) -> bytes:
+    """Read one authority file while binding every pathname component to an FD.
+
+    This deliberately avoids ``Path.resolve`` and rejects symlinks in any
+    component.  The opened file, its directory chain, and the pathname are
+    rechecked after the bounded read so a concurrent rename/replacement cannot
+    silently change the authority being validated.
+    """
+
+    absolute = _lexical_absolute(path)
+    parts = absolute.parts
+    if (
+        not absolute.is_absolute()
+        or len(parts) < 2
+        or any(part in {"", ".", ".."} for part in parts[1:])
+    ):
+        raise ValueError(f"{label} path is invalid")
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+    file_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+    opened_fds: list[int] = []
+    directory_bindings: list[tuple[int, str, int]] = []
+    file_descriptor: int | None = None
+    try:
+        current_directory = os.open(os.sep, directory_flags)
+        opened_fds.append(current_directory)
+        for component in parts[1:-1]:
+            pathname_stat = os.stat(
+                component,
+                dir_fd=current_directory,
+                follow_symlinks=False,
+            )
+            if not stat.S_ISDIR(pathname_stat.st_mode):
+                raise ValueError(f"{label} path contains a non-directory or symlink")
+            child = os.open(component, directory_flags, dir_fd=current_directory)
+            opened_fds.append(child)
+            opened_stat = os.fstat(child)
+            if _opened_path_identity(pathname_stat) != _opened_path_identity(opened_stat):
+                raise ValueError(f"{label} directory identity changed while opening")
+            directory_bindings.append((current_directory, component, child))
+            current_directory = child
+
+        filename = parts[-1]
+        pathname_before = os.stat(
+            filename,
+            dir_fd=current_directory,
+            follow_symlinks=False,
+        )
+        if not stat.S_ISREG(pathname_before.st_mode) or pathname_before.st_nlink != 1:
+            raise ValueError(f"{label} must be a link-count-one regular file")
+        if pathname_before.st_size > _MAX_SEALED_AUTHORITY_BYTES:
+            raise ValueError(f"{label} exceeds the sealed authority byte limit")
+        file_descriptor = os.open(filename, file_flags, dir_fd=current_directory)
+        opened_fds.append(file_descriptor)
+        opened_before = os.fstat(file_descriptor)
+        if _stable_file_snapshot(pathname_before) != _stable_file_snapshot(opened_before):
+            raise ValueError(f"{label} pathname identity changed while opening")
+
+        chunks: list[bytes] = []
+        remaining = opened_before.st_size
+        while remaining:
+            chunk = os.read(file_descriptor, min(remaining, 64 * 1024))
+            if not chunk:
+                raise ValueError(f"{label} was truncated while reading")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(file_descriptor, 1):
+            raise ValueError(f"{label} grew while reading")
+
+        opened_after = os.fstat(file_descriptor)
+        pathname_after = os.stat(
+            filename,
+            dir_fd=current_directory,
+            follow_symlinks=False,
+        )
+        if _stable_file_snapshot(opened_before) != _stable_file_snapshot(
+            opened_after
+        ) or _stable_file_snapshot(opened_after) != _stable_file_snapshot(pathname_after):
+            raise ValueError(f"{label} identity or content changed while reading")
+        for parent_fd, component, child_fd in directory_bindings:
+            current_path_stat = os.stat(
+                component,
+                dir_fd=parent_fd,
+                follow_symlinks=False,
+            )
+            if _opened_path_identity(current_path_stat) != _opened_path_identity(
+                os.fstat(child_fd)
+            ):
+                raise ValueError(f"{label} pathname was replaced while reading")
+        return b"".join(chunks)
+    except OSError as exc:
+        raise ValueError(f"{label} cannot be read without following symlinks") from exc
+    finally:
+        for descriptor in reversed(opened_fds):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
+def _read_regular_json_no_follow(path: Path, *, label: str) -> tuple[dict[str, Any], str]:
+    raw = _read_regular_file_no_follow(path, label=label)
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{label} is not valid UTF-8 JSON") from exc
+    if not isinstance(value, dict):
+        raise TypeError(f"{label} must contain a JSON object")
+    return value, hashlib.sha256(raw).hexdigest()
+
+
+def load_completed_run_audit_binding(
+    *,
+    run_root: Path,
+    experiment_id: str,
+    task_ids: list[str],
+    completed_run_audit: Path,
+    expected_completed_run_audit_sha256: str | None = None,
+    expected_aggregate_sha256: str | None = None,
+) -> CompletedRunAuditBinding:
+    """Validate and bind the exact completed-run audit and sealed aggregate."""
+
+    if tuple(task_ids) != FROZEN_PAPER_TASK_IDS:
+        raise ValueError("paper evaluation requires the frozen 14-task ChemCrow order")
+    lexical_run_root = _lexical_absolute(run_root)
+    lexical_audit = _lexical_absolute(completed_run_audit)
+    if lexical_audit != lexical_run_root / "completed_run.audit.json":
+        raise ValueError("configured completed-run audit path differs from the source run root")
+    audit, audit_sha256 = _read_regular_json_no_follow(
+        lexical_audit,
+        label="completed-run audit",
+    )
+    if expected_completed_run_audit_sha256 is not None:
+        if not _is_sha256(expected_completed_run_audit_sha256):
+            raise ValueError("plan completed-run audit SHA256 is missing or invalid")
+        if audit_sha256 != expected_completed_run_audit_sha256:
+            raise ValueError("completed-run audit SHA256 differs from the frozen plan")
+
+    expected_reflector_count = len(task_ids) * 3
+    expected_role_count = len(task_ids)
+    if (
+        audit.get("status") != "PASS"
+        or audit.get("experiment_id") != experiment_id
+        or audit.get("task_ids") != task_ids
+        or audit.get("task_count") != len(task_ids)
+        or audit.get("artifact_protocol") not in SUPPORTED_PAPER_SOURCE_PAIR_PROTOCOLS
+        or audit.get("unique_artifact_count") != expected_reflector_count
+        or audit.get("artifact_registration_count") != expected_reflector_count
+        or audit.get("unique_reflector_job_count") != expected_reflector_count
+        or audit.get("unique_reflector_run_count") != expected_reflector_count
+        or audit.get("independent_reflector_job_count") != expected_reflector_count
+        or audit.get("independent_reflector_run_count") != expected_reflector_count
+        or audit.get("memory_reflector_job_count") != expected_role_count
+        or audit.get("skill_reflector_job_count") != expected_role_count
+        or audit.get("agent_system_reflector_job_count") != expected_role_count
+        or audit.get("sibling_isolation_evidence_count") != expected_reflector_count
+        or audit.get("core_evolved_injection_receipt_count") != len(task_ids)
+        or audit.get("reset_receipt_count") != len(task_ids)
+        or audit.get("mock_or_fixture_observations") != 0
+    ):
+        raise ValueError(
+            "completed-run audit does not bind the full three-artifact frozen task inventory"
+        )
+
+    aggregate_sha256 = audit.get("aggregate_sha256")
+    if not _is_sha256(aggregate_sha256):
+        raise ValueError("completed-run audit aggregate SHA256 is missing or invalid")
+    if expected_aggregate_sha256 is not None:
+        if not _is_sha256(expected_aggregate_sha256):
+            raise ValueError("plan aggregate SHA256 is missing or invalid")
+        if aggregate_sha256 != expected_aggregate_sha256:
+            raise ValueError("completed-run audit aggregate SHA256 differs from the frozen plan")
+    aggregate, observed_aggregate_sha256 = _read_regular_json_no_follow(
+        lexical_run_root / "aggregate.json",
+        label="sealed aggregate",
+    )
+    if observed_aggregate_sha256 != aggregate_sha256:
+        raise ValueError("sealed aggregate SHA256 differs from the completed-run audit")
+    if (
+        aggregate.get("task_count") != len(task_ids)
+        or aggregate.get("artifact_count") != expected_reflector_count
+        or aggregate.get("artifact_protocol") != audit["artifact_protocol"]
+    ):
+        raise ValueError("sealed aggregate does not cover the frozen three-artifact inventory")
+    return CompletedRunAuditBinding(
+        completed_run_audit_sha256=audit_sha256,
+        aggregate_sha256=aggregate_sha256,
+        experiment_id=experiment_id,
+        artifact_protocol=str(audit["artifact_protocol"]),
+    )
+
+
 def assert_sealed_run_ready(
     *,
     run_root: Path,
     experiment_id: str,
     task_ids: list[str],
     completed_run_audit: Path,
+    expected_completed_run_audit_sha256: str | None = None,
 ) -> dict[str, ThreeArtifactPairResult]:
     """Fail closed unless all 14 task-local pairs and the aggregate are sealed."""
     if tuple(task_ids) != FROZEN_PAPER_TASK_IDS:
@@ -232,27 +512,13 @@ def assert_sealed_run_ready(
     for marker in ("STOPPED_BY_USER.json", "INVALIDATED.json"):
         if (run_root / marker).exists():
             raise ValueError(f"paper evaluation refuses run marker: {marker}")
-    audit = json.loads(completed_run_audit.read_text(encoding="utf-8"))
-    if (
-        audit.get("status") != "PASS"
-        or audit.get("experiment_id") != experiment_id
-        or audit.get("task_ids") != task_ids
-        or audit.get("task_count") != len(task_ids)
-        or audit.get("artifact_protocol") not in SUPPORTED_PAPER_SOURCE_PAIR_PROTOCOLS
-        or audit.get("unique_artifact_count") != len(task_ids) * 3
-        or audit.get("independent_reflector_job_count") != len(task_ids) * 3
-        or audit.get("core_evolved_injection_receipt_count") != len(task_ids)
-        or audit.get("mock_or_fixture_observations") != 0
-    ):
-        raise ValueError(
-            "completed-run audit does not bind the full three-artifact frozen task inventory"
-        )
-    aggregate_path = run_root / "aggregate.json"
-    if not aggregate_path.is_file():
-        raise ValueError("sealed aggregate.json is missing")
-    aggregate = json.loads(aggregate_path.read_text(encoding="utf-8"))
-    if aggregate.get("task_count") != len(task_ids):
-        raise ValueError("aggregate does not cover the frozen 14-task inventory")
+    binding = load_completed_run_audit_binding(
+        run_root=run_root,
+        experiment_id=experiment_id,
+        task_ids=task_ids,
+        completed_run_audit=completed_run_audit,
+        expected_completed_run_audit_sha256=expected_completed_run_audit_sha256,
+    )
 
     pairs: dict[str, ThreeArtifactPairResult] = {}
     for task_id in task_ids:
@@ -274,7 +540,7 @@ def assert_sealed_run_ready(
         if pair.task_id != task_id or pair.pair_id != f"{experiment_id}--{task_id}":
             raise ValueError(f"pair task authority mismatch: {task_id}")
         pair_protocol = three_artifact_protocol_label(pair.artifact_bundle.protocol)
-        if pair_protocol != audit["artifact_protocol"]:
+        if pair_protocol != binding.artifact_protocol:
             raise ValueError(f"pair artifact protocol differs from audit: {task_id}")
         pairs[task_id] = pair
     return pairs
@@ -287,19 +553,28 @@ def build_paper_evaluation_plan(
     historical: dict[str, HistoricalAnswers],
     call_id_prefix: str = "paper",
     expected_source_pair_protocol: str | None = None,
+    source_completed_run_audit_sha256: str | None = None,
+    source_aggregate_sha256: str | None = None,
+    source_experiment_id: str | None = None,
 ) -> dict[str, Any]:
+    assert_historical_answers_match_frozen_calibration(historical=historical)
     if [task.task_id for task in tasks] != list(FROZEN_PAPER_TASK_IDS):
         raise ValueError("sanitized task manifest differs from frozen paper order")
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,47}", call_id_prefix):
         raise ValueError("paper evaluator call ID prefix is invalid")
+    if not _is_sha256(source_completed_run_audit_sha256):
+        raise ValueError("paper evaluator completed-run audit SHA256 is missing or invalid")
+    if not _is_sha256(source_aggregate_sha256):
+        raise ValueError("paper evaluator aggregate SHA256 is missing or invalid")
+    if not isinstance(source_experiment_id, str) or not source_experiment_id:
+        raise ValueError("paper evaluator source experiment ID is missing")
     if any(not isinstance(pair, ThreeArtifactPairResult) for pair in pairs.values()):
         raise TypeError(
             "paper evaluation requires authoritative three-artifact pair results; "
             "legacy single-artifact pairs are provisional only"
         )
     source_pair_protocols = {
-        three_artifact_protocol_label(pair.artifact_bundle.protocol)
-        for pair in pairs.values()
+        three_artifact_protocol_label(pair.artifact_bundle.protocol) for pair in pairs.values()
     }
     if len(source_pair_protocols) != 1:
         raise ValueError("paper evaluation requires one homogeneous source pair protocol")
@@ -392,8 +667,8 @@ def build_paper_evaluation_plan(
     if len(calls) != PAPER_EVALUATOR_CALL_COUNT:
         raise AssertionError("paper evaluation call inventory must contain exactly 42 calls")
     ceiling = paper_cost_ceiling()
-    return {
-        "schema_version": "chemcrow_paper_evaluator_plan_v1",
+    plan = {
+        "schema_version": PAPER_EVALUATOR_PLAN_SCHEMA,
         "protocol": PAPER_EVALUATOR_PROTOCOL,
         "prompt_candidate_id": PAPER_EVALUATOR_PROMPT_CANDIDATE,
         "prompt_candidate_sha256": PAPER_EVALUATOR_PROMPT_SHA256,
@@ -412,12 +687,235 @@ def build_paper_evaluation_plan(
         "evolution_feedback_access": False,
         "sealed_output_only": True,
         "source_pair_protocol": source_pair_protocol,
+        "source_completed_run_audit_sha256": source_completed_run_audit_sha256,
+        "source_aggregate_sha256": source_aggregate_sha256,
+        "source_experiment_id": source_experiment_id,
         "call_id_prefix": call_id_prefix,
+        "ledger_class": "production",
+        "environment_proxy_required": True,
+        "automatic_provider_retries": False,
+        "failed_call_id_reuse": False,
+        "historical_control_reuse_policy": "frozen_hash_match_only",
+        "historical_calibration_dataset_sha256": (PAPER_EVALUATOR_HISTORICAL_DATASET_SHA256),
         "contains_historical_student_answers": True,
         "call_count": len(calls),
         "cost_ceiling": ceiling,
         "calls": [call.model_dump(mode="json") for call in calls],
     }
+    validate_paper_evaluation_plan(plan)
+    return plan
+
+
+def assert_historical_answers_match_frozen_calibration(
+    *, historical: dict[str, HistoricalAnswers]
+) -> None:
+    """Bind reusable controls to the exact frozen calibration source hashes."""
+
+    records = _frozen_historical_records()
+    if set(historical) != set(FROZEN_PAPER_TASK_IDS):
+        raise ValueError("historical answer inventory differs from frozen controls")
+    for record in records:
+        task_id = str(record["repo_task_id"])
+        old = historical[task_id]
+        if (
+            old.notebook_sha256 != record.get("source_notebook_sha256")
+            or canonical_sha256(old.chemcrow_answer)
+            != record.get("historical_chemcrow_answer_sha256")
+            or canonical_sha256(old.gpt4_answer)
+            != record.get("historical_no_tools_gpt4_answer_sha256")
+        ):
+            raise ValueError(f"historical control hash differs: {task_id}")
+
+
+def validate_paper_evaluation_plan(
+    plan: dict[str, Any],
+) -> list[PaperEvaluationCall]:
+    """Validate the complete frozen 14 x 3 production authority."""
+
+    template = render_compatible_prompt(
+        task_prompt="<<TASK>>",
+        student_a="<<STUDENT_A>>",
+        student_b="<<STUDENT_B>>",
+    )
+    if canonical_sha256(template) != PAPER_EVALUATOR_PROMPT_SHA256:
+        raise ValueError("frozen paper evaluator template hash differs")
+    calibration_results = (
+        Path(__file__).resolve().parents[2]
+        / "reports"
+        / "PAPER_EVALUATOR_CALIBRATION_RESULTS.json"
+    )
+    if file_sha256(calibration_results) != PAPER_EVALUATOR_CALIBRATION_RESULTS_SHA256:
+        raise ValueError("frozen paper evaluator calibration results hash differs")
+
+    expected_top_level = {
+        "schema_version": PAPER_EVALUATOR_PLAN_SCHEMA,
+        "protocol": PAPER_EVALUATOR_PROTOCOL,
+        "prompt_candidate_id": PAPER_EVALUATOR_PROMPT_CANDIDATE,
+        "prompt_candidate_sha256": PAPER_EVALUATOR_PROMPT_SHA256,
+        "historically_calibrated_compatible_prompt": True,
+        "historical_agreement": "HIGH",
+        "calibration_results_sha256": PAPER_EVALUATOR_CALIBRATION_RESULTS_SHA256,
+        "verbatim_historical_prompt_reproduction": False,
+        "historical_prompt_availability": ("not_recovered_from_authoritative_public_source"),
+        "model": PAPER_EVALUATOR_MODEL,
+        "temperature": PAPER_EVALUATOR_TEMPERATURE,
+        "provider_only": [PAPER_EVALUATOR_PROVIDER],
+        "allow_fallbacks": False,
+        "require_parameters": True,
+        "data_collection": PAPER_EVALUATOR_DATA_COLLECTION,
+        "reflector_access": False,
+        "evolution_feedback_access": False,
+        "sealed_output_only": True,
+        "ledger_class": "production",
+        "environment_proxy_required": True,
+        "automatic_provider_retries": False,
+        "failed_call_id_reuse": False,
+        "historical_control_reuse_policy": "frozen_hash_match_only",
+        "historical_calibration_dataset_sha256": (PAPER_EVALUATOR_HISTORICAL_DATASET_SHA256),
+        "contains_historical_student_answers": True,
+        "call_count": PAPER_EVALUATOR_CALL_COUNT,
+        "cost_ceiling": paper_cost_ceiling(),
+    }
+    expected_keys = set(expected_top_level) | {
+        "source_pair_protocol",
+        "source_completed_run_audit_sha256",
+        "source_aggregate_sha256",
+        "source_experiment_id",
+        "call_id_prefix",
+        "calls",
+    }
+    if set(plan) != expected_keys:
+        raise ValueError("paper evaluator plan schema fields differ")
+    if any(plan.get(key) != value for key, value in expected_top_level.items()):
+        raise ValueError("paper evaluator plan frozen authority differs")
+    if plan.get("source_pair_protocol") not in SUPPORTED_PAPER_SOURCE_PAIR_PROTOCOLS:
+        raise ValueError("paper evaluator source pair protocol is unsupported")
+    if not _is_sha256(plan.get("source_completed_run_audit_sha256")):
+        raise ValueError("paper evaluator completed-run audit SHA256 is missing or invalid")
+    if not _is_sha256(plan.get("source_aggregate_sha256")):
+        raise ValueError("paper evaluator aggregate SHA256 is missing or invalid")
+    source_experiment_id = plan.get("source_experiment_id")
+    if not isinstance(source_experiment_id, str) or not source_experiment_id:
+        raise ValueError("paper evaluator source experiment ID is missing")
+    call_id_prefix = plan.get("call_id_prefix")
+    if not isinstance(call_id_prefix, str) or not re.fullmatch(
+        r"[a-z0-9][a-z0-9-]{0,47}", call_id_prefix
+    ):
+        raise ValueError("paper evaluator call ID prefix is invalid")
+    raw_calls = plan.get("calls")
+    if not isinstance(raw_calls, list) or len(raw_calls) != PAPER_EVALUATOR_CALL_COUNT:
+        raise ValueError("paper evaluator plan must contain exactly 42 calls")
+    calls = [PaperEvaluationCall.model_validate(item) for item in raw_calls]
+    comparisons = ("historical_control", "baseline", "evolved")
+    expected_call_ids = [
+        f"{call_id_prefix}-{task_id}-{comparison}"
+        for task_id in FROZEN_PAPER_TASK_IDS
+        for comparison in comparisons
+    ]
+    if [call.call_id for call in calls] != expected_call_ids:
+        raise ValueError("paper evaluator call inventory or order differs")
+    if len({call.call_id for call in calls}) != PAPER_EVALUATOR_CALL_COUNT:
+        raise ValueError("paper evaluator call IDs are not unique")
+
+    by_task: dict[str, dict[str, PaperEvaluationCall]] = {}
+    for call in calls:
+        by_task.setdefault(call.task_id, {})[call.comparison] = call
+    if list(by_task) != list(FROZEN_PAPER_TASK_IDS) or any(
+        set(group) != set(comparisons) for group in by_task.values()
+    ):
+        raise ValueError("paper evaluator task/comparison inventory differs")
+    systems = {
+        "historical_control": "historical_chemcrow",
+        "baseline": "openevo_baseline",
+        "evolved": "openevo_evolved",
+    }
+    historical_records = {
+        str(record["repo_task_id"]): record for record in _frozen_historical_records()
+    }
+    for task_id, group in by_task.items():
+        historical_record = historical_records[task_id]
+        expected_historical_source = historical_record["source_notebook_sha256"]
+        expected_chemcrow_answer = historical_record["historical_chemcrow_answer_sha256"]
+        expected_gpt4_answer = historical_record["historical_no_tools_gpt4_answer_sha256"]
+        if any(
+            group[comparison].student_a_system != systems[comparison] for comparison in comparisons
+        ):
+            raise ValueError(f"paper evaluator student mapping differs: {task_id}")
+        if any(
+            call.historical_source_sha256 != expected_historical_source
+            or call.historical_gpt4_answer_sha256 != expected_gpt4_answer
+            for call in group.values()
+        ):
+            raise ValueError(f"paper evaluator historical binding differs: {task_id}")
+        sentinel = "<<CHEMCROW_TARGET_ANSWER_SENTINEL>>"
+        prompt_template = render_compatible_prompt(
+            task_prompt=str(historical_record["task_text"]),
+            student_a=sentinel,
+            student_b=str(historical_record["historical_no_tools_gpt4_final_answer"]),
+        )
+        prompt_prefix, prompt_suffix = prompt_template.split(sentinel, 1)
+        for call in group.values():
+            if not call.prompt.startswith(prompt_prefix) or not call.prompt.endswith(
+                prompt_suffix
+            ):
+                raise ValueError(f"paper evaluator prompt source framing differs: {call.call_id}")
+            target_answer = call.prompt[len(prompt_prefix) : len(call.prompt) - len(prompt_suffix)]
+            if canonical_sha256(target_answer) != call.source_output_sha256:
+                raise ValueError(f"paper evaluator prompt/source hash differs: {call.call_id}")
+        control = group["historical_control"]
+        baseline = group["baseline"]
+        evolved = group["evolved"]
+        if (
+            control.source_pair_id != f"historical-notebook:{task_id}"
+            or control.source_pair_result_sha256 != control.historical_source_sha256
+            or control.source_output_id != f"{task_id}:historical_chemcrow"
+            or control.source_output_sha256 != expected_chemcrow_answer
+            or baseline.source_pair_id != evolved.source_pair_id
+            or baseline.source_pair_id != f"{source_experiment_id}--{task_id}"
+            or baseline.source_pair_result_sha256 != evolved.source_pair_result_sha256
+            or baseline.source_output_id == evolved.source_output_id
+        ):
+            raise ValueError(f"paper evaluator sealed source binding differs: {task_id}")
+    return calls
+
+
+def validate_paper_plan_source_audit(
+    *,
+    plan: dict[str, Any],
+    run_root: Path,
+    completed_run_audit: Path,
+) -> CompletedRunAuditBinding:
+    """Re-read the configured source authority before any production dispatch."""
+
+    calls = validate_paper_evaluation_plan(plan)
+    task_ids = list(dict.fromkeys(call.task_id for call in calls))
+    return load_completed_run_audit_binding(
+        run_root=run_root,
+        experiment_id=str(plan["source_experiment_id"]),
+        task_ids=task_ids,
+        completed_run_audit=completed_run_audit,
+        expected_completed_run_audit_sha256=str(plan["source_completed_run_audit_sha256"]),
+        expected_aggregate_sha256=str(plan["source_aggregate_sha256"]),
+    )
+
+
+def _frozen_historical_records() -> list[dict[str, Any]]:
+    dataset_path = (
+        Path(__file__).resolve().parents[2]
+        / "data"
+        / "paper_evaluator_historical_calibration.json"
+    )
+    dataset = json.loads(dataset_path.read_text(encoding="utf-8"))
+    if canonical_sha256(dataset) != PAPER_EVALUATOR_HISTORICAL_DATASET_SHA256:
+        raise ValueError("frozen historical calibration dataset hash differs")
+    records = dataset.get("tasks")
+    if not isinstance(records, list) or [
+        item.get("repo_task_id") for item in records if isinstance(item, dict)
+    ] != list(FROZEN_PAPER_TASK_IDS):
+        raise ValueError("frozen historical calibration task inventory differs")
+    if any(not isinstance(item, dict) for item in records):
+        raise TypeError("frozen historical calibration records are invalid")
+    return records
 
 
 def render_compatible_prompt(*, task_prompt: str, student_a: str, student_b: str) -> str:

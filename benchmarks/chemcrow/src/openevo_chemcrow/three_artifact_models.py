@@ -26,6 +26,8 @@ LEGACY_THREE_ARTIFACT_PROTOCOL_LABEL = "chemcrow-three-isolated-artifacts-v1"
 CORE_NATIVE_THREE_ARTIFACT_PROTOCOL_LABEL = (
     "chemcrow-three-isolated-core-native-artifacts-v2"
 )
+CORE_ROLE_WRAPPER_PROMPT_PROFILE = "core_role_wrapper_v1"
+CORE_FULL_WORKER_PROMPT_PROFILE = "core_full_worker_v1"
 
 
 def three_artifact_protocol_label(bundle_protocol: str) -> str:
@@ -82,9 +84,56 @@ class ThreeArtifactReceipt(BaseModel):
     size_bytes: int = Field(ge=0)
     generation_time_seconds: float = Field(ge=0.0)
     registration_receipt_sha256: str
+    reflector_attempt_run_ids: list[str] = Field(default_factory=list)
+    output_audit: dict[str, object] = Field(default_factory=dict)
     sibling_outputs_visible: Literal[False] = False
     historical_answers_included: Literal[False] = False
     consumed_by_evolved_run_id: str | None = None
+
+    @model_serializer(mode="wrap")
+    def _serialize_optional_full_worker_fields(self, serializer):
+        data = serializer(self)
+        if not self.reflector_attempt_run_ids:
+            data.pop("reflector_attempt_run_ids", None)
+        if not self.output_audit:
+            data.pop("output_audit", None)
+        return data
+
+    @model_validator(mode="after")
+    def _validate_attempt_lineage(self) -> ThreeArtifactReceipt:
+        if self.reflector_attempt_run_ids and (
+            len(set(self.reflector_attempt_run_ids)) != len(self.reflector_attempt_run_ids)
+            or self.reflector_attempt_run_ids[-1] != self.reflector_run_id
+        ):
+            raise ValueError("Reflector attempt lineage is invalid")
+        return self
+
+
+class RecoveredReflectorOutput(BaseModel):
+    """Exact native output preserved after a later sibling aborted the batch."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    artifact_type: ArtifactKind
+    original_job_id: str
+    reflector_run_id: str
+    reflector_attempt_run_ids: list[str]
+    model: str
+    system_prompt_hash: str
+    prompt_hash: str
+    input_evidence_hash: str
+    content: str
+    content_hash: str
+    generation_time_seconds: float = Field(ge=0.0)
+
+    @model_validator(mode="after")
+    def _validate_recovered_output(self) -> RecoveredReflectorOutput:
+        if (
+            not self.content.strip()
+            or self.reflector_attempt_run_ids != [self.reflector_run_id]
+        ):
+            raise ValueError("recovered Reflector output lineage is invalid")
+        return self
 
 
 class ThreeArtifactBundleReceipt(BaseModel):
@@ -98,6 +147,9 @@ class ThreeArtifactBundleReceipt(BaseModel):
     pair_id: str
     parent_run_id: str
     input_evidence_hash: str
+    prompt_profile: Literal["core_role_wrapper_v1", "core_full_worker_v1"] = (
+        CORE_ROLE_WRAPPER_PROMPT_PROFILE
+    )
     separation_policy: ArtifactSeparationPolicy
     artifacts: list[ThreeArtifactReceipt]
     byte_identical_pairs: list[list[str]] = Field(default_factory=list)
@@ -114,6 +166,8 @@ class ThreeArtifactBundleReceipt(BaseModel):
         data = serializer(self)
         if self.protocol == CORE_NATIVE_THREE_ARTIFACT_BUNDLE_PROTOCOL:
             data.pop("responsibility_violations", None)
+        if self.prompt_profile == CORE_ROLE_WRAPPER_PROMPT_PROFILE:
+            data.pop("prompt_profile", None)
         return data
 
     @model_validator(mode="after")
@@ -271,4 +325,66 @@ class ThreeArtifactPairResult(BaseModel):
         ]
         if self.event_order != expected_order:
             raise ValueError("three-artifact task-local phase order is invalid")
+        return self
+
+
+class ThreeArtifactGenerationResult(BaseModel):
+    """Sealed G1 plus three-artifact result with no G2 dispatch."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["chemcrow_three_artifact_generation_study_v1"] = (
+        "chemcrow_three_artifact_generation_study_v1"
+    )
+    task_id: str
+    task_category: str
+    pair_id: str
+    s0_hash: str
+    task_prompt_hash: str
+    baseline: Trajectory
+    runtime_feedback: RuntimeFeedback
+    baseline_internal_evaluation: EvaluatorFeedback
+    feedback_hash: str
+    artifact_bundle: ThreeArtifactBundleReceipt
+    event_order: list[str]
+    reset_receipt_sha256: str
+
+    @model_validator(mode="after")
+    def _generation_invariants(self) -> ThreeArtifactGenerationResult:
+        if self.artifact_bundle.task_id != self.task_id:
+            raise ValueError("artifact bundle task lineage differs from generation study")
+        if self.artifact_bundle.pair_id != self.pair_id:
+            raise ValueError("artifact bundle pair lineage differs from generation study")
+        if self.artifact_bundle.parent_run_id != self.baseline.run_id:
+            raise ValueError("artifact bundle parent differs from baseline run")
+        if (
+            self.baseline.task_id != self.task_id
+            or self.baseline.role != "baseline"
+            or self.baseline.status != "COMPLETED"
+            or not self.baseline.answer.strip()
+            or self.baseline.artifact_ids
+            or self.baseline.candidate_config_sha256 != self.s0_hash
+        ):
+            raise ValueError("generation study baseline is not completed bare S0")
+        if self.baseline_internal_evaluation.evaluator_role != "evolution_evaluator":
+            raise ValueError("generation study used the wrong evaluator role")
+        if any(
+            item.consumed_by_evolved_run_id is not None
+            for item in self.artifact_bundle.artifacts
+        ):
+            raise ValueError("generation-only artifacts cannot name a G2 consumer")
+        expected_order = [
+            "s0_asserted",
+            "baseline",
+            "runtime_feedback",
+            "baseline_internal_evaluator",
+            "reflector_memory",
+            "reflector_skill_bundle",
+            "reflector_agent_system",
+            "artifacts_registered",
+            "sealed",
+            "reset",
+        ]
+        if self.event_order != expected_order:
+            raise ValueError("three-artifact generation-only phase order is invalid")
         return self

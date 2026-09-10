@@ -33,7 +33,12 @@ async def test_openrouter_shim_pins_route_and_writes_value_free_receipt(tmp_path
                         "finish_reason": "stop",
                     }
                 ],
-                "usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 50,
+                    "total_tokens": 150,
+                    "cost": 0.006,
+                },
             },
         )
 
@@ -84,9 +89,7 @@ async def test_openrouter_shim_pins_route_and_writes_value_free_receipt(tmp_path
     assert "response_format" not in observed["payload"]
     assert "user" not in observed["payload"]
     assert "return_token_ids" not in observed["payload"]
-    claim = json.loads(
-        (receipt_root / "paper-v5-chemcrow-01-baseline.claim.json").read_text()
-    )
+    claim = json.loads((receipt_root / "paper-v5-chemcrow-01-baseline.claim.json").read_text())
     assert claim["request_sha256"] == canonical_sha256(request)
     receipt_text = (receipt_root / "paper-v5-chemcrow-01-baseline.receipt.json").read_text()
     assert "DO_NOT_PERSIST_THIS_KEY" not in receipt_text
@@ -95,6 +98,7 @@ async def test_openrouter_shim_pins_route_and_writes_value_free_receipt(tmp_path
     assert receipt["provider"] == "OpenAI"
     assert receipt["list_price_cost_usd"] == 0.006
     assert receipt["internal_response_format_validated"] is True
+    assert receipt["upstream_terminal_choice_validated"] is True
     assert receipt["upstream_response_format_omitted"] is True
     assert receipt["internal_call_identity_validated"] is True
     assert receipt["upstream_user_omitted"] is True
@@ -109,8 +113,13 @@ async def test_openrouter_shim_separates_calibration_call_namespace(tmp_path):
                 "id": "generation-calibration-test",
                 "model": "openai/gpt-4",
                 "provider": "OpenAI",
-                "choices": [{"message": {"role": "assistant", "content": "{}"}}],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 1},
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "{}"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 1, "cost": 0.00036},
             },
         )
 
@@ -175,8 +184,13 @@ async def test_openrouter_shim_separates_direct_comparison_ledger(tmp_path):
                 "id": "generation-direct-test",
                 "model": "openai/gpt-4",
                 "provider": "OpenAI",
-                "choices": [{"message": {"role": "assistant", "content": "{}"}}],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 1},
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "{}"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 1, "cost": 0.00036},
             },
         )
 
@@ -230,8 +244,13 @@ async def test_openrouter_shim_separates_blind_g1_g2_ledger(tmp_path):
                 "id": "generation-blind-test",
                 "model": "openai/gpt-4",
                 "provider": "OpenAI",
-                "choices": [{"message": {"role": "assistant", "content": "{}"}}],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 1},
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "{}"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 1, "cost": 0.00036},
             },
         )
 
@@ -440,3 +459,206 @@ def test_real_openrouter_shim_requires_frozen_plan_allowlist(tmp_path):
             base_url="https://openrouter.ai/api/v1",
             receipt_root=tmp_path,
         )
+
+
+@pytest.mark.asyncio
+async def test_openrouter_shim_fails_closed_when_reported_cost_is_absent(tmp_path):
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "id": "generation-without-cost",
+                "model": "openai/gpt-4",
+                "provider": "OpenAI",
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "{}"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 1},
+            },
+        )
+
+    call_id = "paper-chemcrow-01-baseline"
+    prompt = "PRIVATE PROMPT"
+    receipt_root = tmp_path / "receipts"
+    app = create_openrouter_shim_app(
+        api_key="SECRET",
+        base_url="http://mock.invalid/v1",
+        receipt_root=receipt_root,
+        transport=httpx.MockTransport(upstream),
+        allowed_call_prompt_hashes={call_id: canonical_sha256(prompt)},
+    )
+    request = {
+        "model": "openai/gpt-4",
+        "temperature": 0.1,
+        "max_tokens": 1200,
+        "stream": False,
+        "user": call_id,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "system",
+                "content": "ChemCrow sealed-output paper evaluator. Return strict JSON only.",
+            },
+            {"role": "user", "content": prompt},
+        ],
+    }
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://shim"
+    ) as client:
+        response = await client.post("/v1/chat/completions", json=request)
+
+    assert response.status_code == 502
+    receipt = json.loads((receipt_root / f"{call_id}.receipt.json").read_text())
+    assert receipt["status"] == "terminal_failure_or_ambiguous"
+    assert receipt["failure"] == "invalid_or_unpinned_upstream_receipt"
+
+
+@pytest.mark.asyncio
+async def test_openrouter_shim_allows_only_manifest_bound_replacement_id(tmp_path):
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "id": "generation-replacement",
+                "model": "openai/gpt-4",
+                "provider": "OpenAI",
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": '{"student_a":{},"student_b":{}}',
+                        },
+                        "finish_reason": "stop",
+                        "error": None,
+                    }
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 1, "cost": 0.00036},
+            },
+        )
+
+    original_id = "paper-v5-chemcrow-08-baseline"
+    replacement_id = f"{original_id}-replacement-01"
+    prompt = "PRIVATE PROMPT"
+    metadata = {
+        "replacement_authority_sha256": "a" * 64,
+        "replacement_of_call_id": original_id,
+        "replacement_attempt_ordinal": 2,
+        "explicit_failed_attempt_replacement": True,
+    }
+    receipt_root = tmp_path / "receipts"
+    app = create_openrouter_shim_app(
+        api_key="SECRET",
+        base_url="http://mock.invalid/v1",
+        receipt_root=receipt_root,
+        transport=httpx.MockTransport(upstream),
+        allowed_call_prompt_hashes={replacement_id: canonical_sha256(prompt)},
+        call_id_prefix="paper-v5-chemcrow-",
+        replacement_call_metadata={replacement_id: metadata},
+    )
+    request = {
+        "model": "openai/gpt-4",
+        "temperature": 0.1,
+        "max_tokens": 1200,
+        "stream": False,
+        "user": replacement_id,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "system",
+                "content": "ChemCrow sealed-output paper evaluator. Return strict JSON only.",
+            },
+            {"role": "user", "content": prompt},
+        ],
+    }
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://shim"
+    ) as client:
+        accepted = await client.post("/v1/chat/completions", json=request)
+        unlisted = await client.post(
+            "/v1/chat/completions",
+            json={**request, "user": f"{original_id}-replacement-02"},
+        )
+
+    assert accepted.status_code == 200
+    assert unlisted.status_code == 403
+    claim = json.loads((receipt_root / f"{replacement_id}.claim.json").read_text())
+    receipt = json.loads((receipt_root / f"{replacement_id}.receipt.json").read_text())
+    assert all(claim[key] == value for key, value in metadata.items())
+    assert all(receipt[key] == value for key, value in metadata.items())
+
+
+@pytest.mark.asyncio
+async def test_openrouter_shim_rejects_http_200_choice_level_provider_error(tmp_path):
+    partial_content = '{"student_a":{"grade":10,"weaknesses"'
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(
+            200,
+            json={
+                "id": "generation-choice-error",
+                "model": "openai/gpt-4",
+                "provider": "OpenAI",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": partial_content},
+                        "finish_reason": "error",
+                        "error": {
+                            "code": 502,
+                            "message": "PRIVATE PROVIDER ERROR",
+                        },
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                    "cost": 0,
+                },
+            },
+        )
+
+    call_id = "paper-v5-chemcrow-08-baseline"
+    prompt = "PRIVATE PROMPT"
+    receipt_root = tmp_path / "receipts"
+    app = create_openrouter_shim_app(
+        api_key="SECRET",
+        base_url="http://mock.invalid/v1",
+        receipt_root=receipt_root,
+        transport=httpx.MockTransport(upstream),
+        allowed_call_prompt_hashes={call_id: canonical_sha256(prompt)},
+        call_id_prefix="paper-v5-chemcrow-",
+    )
+    request = {
+        "model": "openai/gpt-4",
+        "temperature": 0.1,
+        "max_tokens": 1200,
+        "stream": False,
+        "user": call_id,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "system",
+                "content": "ChemCrow sealed-output paper evaluator. Return strict JSON only.",
+            },
+            {"role": "user", "content": prompt},
+        ],
+    }
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://shim"
+    ) as client:
+        response = await client.post("/v1/chat/completions", json=request)
+
+    assert response.status_code == 502
+    receipt_text = (receipt_root / f"{call_id}.receipt.json").read_text()
+    assert partial_content not in receipt_text
+    assert "PRIVATE PROVIDER ERROR" not in receipt_text
+    receipt = json.loads(receipt_text)
+    assert receipt["status"] == "terminal_failure_or_ambiguous"
+    assert receipt["failure"] == "invalid_or_unpinned_upstream_receipt"

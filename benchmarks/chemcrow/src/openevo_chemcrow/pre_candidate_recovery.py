@@ -6,7 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from .hashing import file_sha256, text_sha256
-from .replacement_ledger import VerifiedReplacementPhaseLedger
+from .replacement_ledger import (
+    VerifiedReplacementPhaseLedger,
+    verified_no_effect_attempt_count,
+)
 from .runtime import CORE_MANAGED_CODEX_ROUTE
 
 _RECOVERABLE_ERROR = (
@@ -35,11 +38,11 @@ def reconcile_pre_candidate_no_effect_failure(
         raise ValueError("sealed pair cannot be recovered")
     claim = json.loads(claim_path.read_text(encoding="utf-8"))
     if (
-        claim.get("schema_version") != "chemcrow_phase_claim_v1"
+        claim.get("schema_version") not in {"chemcrow_phase_claim_v1", "chemcrow_phase_claim_v2"}
         or claim.get("phase") != "baseline_candidate"
         or claim.get("status") != "claimed"
     ):
-        raise ValueError("baseline Candidate claim is not an unreconciled v1 claim")
+        raise ValueError("baseline Candidate claim is not an unreconciled claim")
     authority = claim.get("authority")
     if (
         not isinstance(authority, dict)
@@ -88,6 +91,26 @@ def reconcile_pre_candidate_no_effect_failure(
     session_id = completion.get("session_id")
     if not isinstance(session_id, str) or not session_id:
         raise ValueError("Core completion session identity is absent")
+    prior_attempt_count = verified_no_effect_attempt_count(
+        claim, pair_id=pair_id, phase="baseline_candidate"
+    )
+    if prior_attempt_count and claim.get("active_attempt_ordinal") != prior_attempt_count + 1:
+        raise ValueError("baseline Candidate active attempt ordinal differs")
+    prior_receipts = [
+        attempt.get("receipt", {})
+        for attempt in claim.get("failed_attempts", [])
+        if isinstance(attempt, dict)
+    ]
+    session_sha256 = text_sha256(session_id)
+    completion_sha256 = file_sha256(core_completion_path)
+    if any(
+        core_task_id == prior.get("core_task_id")
+        or session_sha256 == prior.get("core_session_id_sha256")
+        or completion_sha256 == prior.get("core_completion_sha256")
+        for prior in prior_receipts
+    ):
+        raise ValueError("Candidate no-effect recovery reused historical evidence")
+    attempt_ordinal = prior_attempt_count + 1
 
     repo_root = repository_root or Path(__file__).resolve().parents[4]
     source_paths = {
@@ -101,13 +124,13 @@ def reconcile_pre_candidate_no_effect_failure(
         "pair_id": pair_id,
         "task_id": task_id,
         "phase": "baseline_candidate",
-        "attempt_ordinal": 1,
+        "attempt_ordinal": attempt_ordinal,
         "authority_sha256": claim["authority_sha256"],
         "original_claim_sha256": file_sha256(claim_path),
         "config_sha256": file_sha256(config_path),
         "core_task_id": core_task_id,
-        "core_session_id_sha256": text_sha256(session_id),
-        "core_completion_sha256": file_sha256(core_completion_path),
+        "core_session_id_sha256": session_sha256,
+        "core_completion_sha256": completion_sha256,
         "core_completion_status": "ERROR",
         "error_category": "credential_isolation_validation_failed",
         "no_effect_predicates": no_effect_predicates,
@@ -123,7 +146,7 @@ def reconcile_pre_candidate_no_effect_failure(
         run_root
         / "recovery"
         / pair_id
-        / "baseline_candidate.attempt-1.no-effect.json"
+        / f"baseline_candidate.attempt-{attempt_ordinal}.no-effect.json"
     )
     receipt_path.parent.mkdir(parents=True, exist_ok=True)
     serialized = json.dumps(receipt, indent=2, sort_keys=True) + "\n"

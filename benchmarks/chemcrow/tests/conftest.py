@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from openevo.runtime.managed import (
@@ -12,6 +14,40 @@ from openevo.runtime.managed import (
 
 from openevo_chemcrow.hashing import canonical_sha256
 from openevo_chemcrow.models import TaskItem
+
+_DEFAULT_TEST_DEPS_ROOT = Path(__file__).resolve().parents[4]
+
+
+def _configured_fixture_root(
+    *,
+    env_var: str,
+    default: Path,
+    required_relative_path: Path,
+    required_path_kind: Literal["directory", "file"],
+) -> Path:
+    configured = os.environ.get(env_var)
+    if configured is not None and not configured.strip():
+        pytest.fail(f"{env_var} is set but empty")
+
+    source = env_var if configured is not None else "the default vendor fixture"
+    root = Path(configured).expanduser() if configured is not None else default
+    if not root.is_dir():
+        pytest.fail(
+            f"ChemCrow test fixture root from {source} is not a directory: {root}. "
+            f"Set {env_var} to the corresponding repository root."
+        )
+
+    required_path = root / required_relative_path
+    required_path_matches = (
+        required_path.is_dir() if required_path_kind == "directory" else required_path.is_file()
+    )
+    if not required_path_matches:
+        pytest.fail(
+            f"ChemCrow test fixture root from {source} is missing required "
+            f"{required_path_kind}: {required_path}. Set {env_var} to the "
+            "corresponding repository root."
+        )
+    return root
 
 
 @pytest.fixture
@@ -33,19 +69,23 @@ def task_item() -> TaskItem:
 
 @pytest.fixture
 def runs_root() -> Path:
-    return Path(__file__).resolve().parents[4] / "vendor" / "chemcrow-runs"
+    return _configured_fixture_root(
+        env_var="CHEMCROW_TEST_RUNS_ROOT",
+        default=_DEFAULT_TEST_DEPS_ROOT / "vendor" / "chemcrow-runs",
+        required_relative_path=Path("tasks"),
+        required_path_kind="directory",
+    )
 
 
 @pytest.fixture
 def controlled_csv() -> Path:
-    return (
-        Path(__file__).resolve().parents[4]
-        / "vendor"
-        / "chemcrow-public"
-        / "chemcrow"
-        / "data"
-        / "chem_wep_smi.csv"
+    public_root = _configured_fixture_root(
+        env_var="CHEMCROW_TEST_PUBLIC_ROOT",
+        default=_DEFAULT_TEST_DEPS_ROOT / "vendor" / "chemcrow-public",
+        required_relative_path=Path("chemcrow/data/chem_wep_smi.csv"),
+        required_path_kind="file",
     )
+    return public_root / "chemcrow" / "data" / "chem_wep_smi.csv"
 
 
 @pytest.fixture
@@ -57,9 +97,7 @@ def core_candidate_config() -> dict:
             "profile": "managed_science",
             "container_user": "host",
             "image": "sha256:7a0079f9cb1bce5768cff5bce3d1181811c6a231ad800cac8fb503d66852c81b",
-            "prepare": [
-                {"type": "exec", "command": MANAGED_SUBSCRIPTION_PREPARE_COMMAND}
-            ],
+            "prepare": [{"type": "exec", "command": MANAGED_SUBSCRIPTION_PREPARE_COMMAND}],
             "env": {"HOME": MANAGED_HOME, "PATH": MANAGED_PATH},
             "network": "host",
             "workdir": MANAGED_WORKSPACE,

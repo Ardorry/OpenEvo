@@ -1,5 +1,13 @@
 # OpenEvo ChemCrow Task-Local Integration
 
+Latest publication (2026-09-10): [code and reproduction guide](PUBLICATION.md),
+[full-v8 aggregate results](reports/full_v8_public_20260831/README.md).
+The sealed full-v8 experiment covers 14 tasks and 42 independent typed artifacts.
+The calibrated GPT-4 Judge reports G1 9.357/10 and G2 9.214/10;
+the result remains `PROVISIONAL_LLM_JUDGED_RESULT`.
+The legacy/full-v3/full-v4 preparation notes below describe historical protocols,
+not the current completion status. Private runtime inputs are required for historical reanalysis.
+
 This package treats ChemCrow as benchmark tasks plus a chemistry-tool environment. It does
 not instantiate the legacy `ChemCrow` GPT-4/LangChain agent. Candidate, three typed Reflectors,
 evolution evaluator, and final evaluator remain separate OpenEvo runtime/provider roles with

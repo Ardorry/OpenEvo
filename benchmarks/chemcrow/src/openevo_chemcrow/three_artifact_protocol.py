@@ -14,6 +14,7 @@ from .models import (
     EvaluatorFeedback,
     FeedbackMode,
     PairwiseEvaluation,
+    RuntimeFeedback,
     TaskItem,
     Trajectory,
 )
@@ -22,11 +23,22 @@ from .replacement_ledger import VerifiedReplacementPhaseLedger
 from .three_artifact_evolution import ThreeIsolatedEvolutionEngine
 from .three_artifact_models import (
     THREE_ARTIFACT_ORDER,
+    RecoveredReflectorOutput,
     ThreeArtifactBundleReceipt,
+    ThreeArtifactGenerationResult,
     ThreeArtifactPairResult,
     three_artifact_protocol_label,
 )
 from .three_artifact_runtime import ThreeArtifactRolloutPort
+
+
+def _task_authority_sha256(task: TaskItem) -> str:
+    payload = task.model_dump(mode="json")
+    body = dict(payload)
+    stored_sha256 = str(body.pop("sanitized_item_sha256"))
+    if canonical_sha256(body) != stored_sha256:
+        raise ValueError("task sanitized-item hash differs from the full canonical body")
+    return canonical_sha256(payload)
 
 
 class ThreeArtifactCandidatePort(Protocol):
@@ -40,6 +52,7 @@ class ThreeArtifactCandidatePort(Protocol):
         artifact_ids_by_type: dict[ArtifactKind, str],
         pair_id: str,
         mcp_url: str | None,
+        run_id: str | None = None,
     ): ...
 
 
@@ -51,6 +64,7 @@ class ThreeArtifactEvolutionPort(Protocol):
         baseline: Trajectory,
         feedback_payload: dict,
         pair_id: str,
+        recovered_outputs: dict[ArtifactKind, RecoveredReflectorOutput] | None = None,
     ) -> ThreeArtifactBundleReceipt: ...
 
 
@@ -68,6 +82,7 @@ class ThreeArtifactTaskLocalProtocolRunner:
         real_mode: bool,
         random_seed: int = 20260825,
         ledger_root: Path | None = None,
+        stop_after_artifact_generation: bool = False,
     ) -> None:
         if evolution_evaluator.evaluator_id == final_evaluator.evaluator_id:
             raise ValueError(
@@ -83,6 +98,7 @@ class ThreeArtifactTaskLocalProtocolRunner:
         self.real_mode = real_mode
         self.random_seed = random_seed
         self.ledger_root = ledger_root
+        self.stop_after_artifact_generation = stop_after_artifact_generation
         self._active_artifacts: dict[ArtifactKind, tuple[str, str]] = {}
         self._seen_artifact_ids: set[str] = set()
         self._observed_s0_hashes: set[str] = set()
@@ -94,15 +110,92 @@ class ThreeArtifactTaskLocalProtocolRunner:
         pair_id: str,
         mcp_url: str | None = None,
         allow_verified_baseline_replacement: bool = False,
+        recovered_baseline_before_evaluator: Trajectory | None = None,
+        allow_verified_baseline_evaluator_replacement: bool = False,
         recovered_baseline_checkpoint: tuple[Trajectory, EvaluatorFeedback] | None = None,
         allow_verified_reflector_replacements: frozenset[str] = frozenset(),
-    ) -> ThreeArtifactPairResult:
+        recovered_reflector_outputs: dict[
+            ArtifactKind, RecoveredReflectorOutput
+        ] | None = None,
+        recovered_artifact_checkpoint: ThreeArtifactBundleReceipt | None = None,
+        continue_from_sealed_generation: bool = False,
+        allow_verified_evolved_candidate_replacement: bool = False,
+        replacement_evolved_run_id: str | None = None,
+    ) -> ThreeArtifactPairResult | ThreeArtifactGenerationResult:
         self._assert_bare_s0(task=task)
+        recovered_reflector_outputs = dict(recovered_reflector_outputs or {})
+        if recovered_reflector_outputs and recovered_baseline_checkpoint is None:
+            raise ValueError("recovered Reflector outputs require recovered G1")
+        if {
+            _reflector_phase(kind) for kind in recovered_reflector_outputs
+        } & set(allow_verified_reflector_replacements):
+            raise ValueError("completed and failed Reflector recovery phases overlap")
+        if recovered_baseline_before_evaluator is not None and (
+            recovered_baseline_checkpoint is not None
+            or allow_verified_baseline_replacement
+            or not allow_verified_baseline_evaluator_replacement
+        ):
+            raise ValueError("baseline evaluator replacement boundary is inconsistent")
+        if allow_verified_baseline_evaluator_replacement and (
+            recovered_baseline_before_evaluator is None
+        ):
+            raise ValueError("baseline evaluator replacement requires recovered G1")
+        if continue_from_sealed_generation:
+            if (
+                recovered_artifact_checkpoint is None
+                or recovered_baseline_checkpoint is None
+                or allow_verified_evolved_candidate_replacement
+                or replacement_evolved_run_id is not None
+                or self.stop_after_artifact_generation
+            ):
+                raise ValueError("sealed generation continuation boundary is inconsistent")
+        elif (recovered_artifact_checkpoint is None) != (
+            not allow_verified_evolved_candidate_replacement
+        ):
+            raise ValueError(
+                "evolved Candidate replacement requires one recovered artifact checkpoint"
+            )
+        if recovered_artifact_checkpoint is not None and (
+            recovered_baseline_checkpoint is None or allow_verified_reflector_replacements
+        ):
+            raise ValueError(
+                "recovered artifact checkpoint requires the exact recovered G1 boundary"
+            )
+        if not continue_from_sealed_generation and (replacement_evolved_run_id is None) != (
+            not allow_verified_evolved_candidate_replacement
+        ):
+            raise ValueError("evolved Candidate replacement requires one preallocated run ID")
+        if recovered_artifact_checkpoint is not None and self.ledger_root is None:
+            raise ValueError("recovered artifacts require a verified replacement ledger")
         ledger = (
             VerifiedReplacementPhaseLedger(self.ledger_root, pair_id=pair_id)
             if self.ledger_root
             else None
         )
+        evolved_replacement_expectation = None
+        if allow_verified_evolved_candidate_replacement and ledger is not None:
+            evolved_replacement_expectation = ledger.replacement_expectation("evolved_candidate")
+            recovery_authority = ledger.evolved_replacement_receipt()
+            if (
+                recovery_authority["replacement_run_id"] != replacement_evolved_run_id
+                or evolved_replacement_expectation.replacement_run_id != replacement_evolved_run_id
+                or recovery_authority["task_authority_sha256"] != _task_authority_sha256(task)
+                or recovery_authority["artifact_ids_by_type"]
+                != recovered_artifact_checkpoint.artifact_id_by_type()
+                or recovery_authority["input_evidence_sha256"]
+                != recovered_artifact_checkpoint.input_evidence_hash
+                or recovery_authority["reflector_job_ids"]
+                != [
+                    receipt.reflector_job_id for receipt in recovered_artifact_checkpoint.artifacts
+                ]
+                or recovery_authority["reflector_run_ids"]
+                != [
+                    receipt.reflector_run_id for receipt in recovered_artifact_checkpoint.artifacts
+                ]
+                or recovery_authority["reflector_prompt_hashes"]
+                != [receipt.prompt_hash for receipt in recovered_artifact_checkpoint.artifacts]
+            ):
+                raise ValueError("replacement G2 differs from verified ledger authority")
         event_order = ["s0_asserted"]
         if recovered_baseline_checkpoint is not None:
             if allow_verified_baseline_replacement:
@@ -120,12 +213,65 @@ class ThreeArtifactTaskLocalProtocolRunner:
             _assert_internal_evaluation(baseline_evaluation)
             if baseline_evaluation.evaluator_role != "evolution_evaluator":
                 raise ValueError("recovered baseline evaluator role is invalid")
-            event_order.extend(
-                ["baseline", "runtime_feedback", "baseline_internal_evaluator"]
+            event_order.extend(["baseline", "runtime_feedback", "baseline_internal_evaluator"])
+        elif recovered_baseline_before_evaluator is not None:
+            baseline = recovered_baseline_before_evaluator
+            if (
+                baseline.task_id != task.task_id
+                or baseline.role != "baseline"
+                or baseline.status != "COMPLETED"
+                or not baseline.answer.strip()
+                or baseline.artifact_ids
+                or baseline.candidate_config_sha256 != self.candidate.config_sha256
+            ):
+                raise ValueError("recovered pre-evaluator baseline authority is invalid")
+            if ledger is None:
+                raise ValueError("baseline evaluator replacement requires verified ledger")
+            evaluator_expectation = ledger.replacement_expectation(
+                "baseline_internal_evaluator"
             )
+            evaluator_activation = ledger.claim(
+                "baseline_internal_evaluator",
+                {
+                    "task_id": task.task_id,
+                    "run_id": baseline.run_id,
+                    "evaluator_id": self.evolution_evaluator.evaluator_id,
+                    "paper_evaluator": False,
+                },
+                allow_verified_replacement=True,
+                expected_replacement=evaluator_expectation,
+            )
+            event_order.extend(["baseline", "runtime_feedback"])
+            baseline_evaluation = self.evolution_evaluator.evaluate(
+                task=task, trajectory=baseline
+            )
+            _assert_internal_evaluation(baseline_evaluation)
+            parse_receipt = confidence_parse_receipt(self.evolution_evaluator)
+            ledger.terminal(
+                "baseline_internal_evaluator",
+                {
+                    "evaluator_run_id": baseline_evaluation.evaluator_run_id,
+                    "feedback_sha256": canonical_sha256(
+                        baseline_evaluation.model_dump(mode="json")
+                    ),
+                    **(
+                        {"confidence_parse_receipt": parse_receipt}
+                        if parse_receipt is not None
+                        else {}
+                    ),
+                },
+                replacement_activation=evaluator_activation,
+            )
+            event_order.append("baseline_internal_evaluator")
         else:
+            baseline_replacement_activation = None
+            baseline_replacement_expectation = None
             if ledger:
-                ledger.claim(
+                if allow_verified_baseline_replacement:
+                    baseline_replacement_expectation = ledger.replacement_expectation(
+                        "baseline_candidate"
+                    )
+                baseline_replacement_activation = ledger.claim(
                     "baseline_candidate",
                     {
                         "task_id": task.task_id,
@@ -134,6 +280,7 @@ class ThreeArtifactTaskLocalProtocolRunner:
                         "artifact_inventory": {},
                     },
                     allow_verified_replacement=allow_verified_baseline_replacement,
+                    expected_replacement=baseline_replacement_expectation,
                 )
             baseline, baseline_injection = self.candidate.run_candidate_with_receipt(
                 task=task,
@@ -159,11 +306,10 @@ class ThreeArtifactTaskLocalProtocolRunner:
                     "baseline_candidate",
                     {
                         "run_id": baseline.run_id,
-                        "trajectory_sha256": canonical_sha256(
-                            baseline.model_dump(mode="json")
-                        ),
+                        "trajectory_sha256": canonical_sha256(baseline.model_dump(mode="json")),
                         "runtime_context": "bare_s0",
                     },
+                    replacement_activation=baseline_replacement_activation,
                 )
             event_order.append("baseline")
             runtime = runtime_feedback(baseline)
@@ -178,9 +324,7 @@ class ThreeArtifactTaskLocalProtocolRunner:
                         "paper_evaluator": False,
                     },
                 )
-            baseline_evaluation = self.evolution_evaluator.evaluate(
-                task=task, trajectory=baseline
-            )
+            baseline_evaluation = self.evolution_evaluator.evaluate(task=task, trajectory=baseline)
             _assert_internal_evaluation(baseline_evaluation)
             if ledger:
                 parse_receipt = confidence_parse_receipt(self.evolution_evaluator)
@@ -220,35 +364,57 @@ class ThreeArtifactTaskLocalProtocolRunner:
                 "feedback": feedback_payload,
             }
         )
-        for kind in THREE_ARTIFACT_ORDER:
-            phase = _reflector_phase(kind)
-            if ledger:
-                ledger.claim(
-                    phase,
-                    {
-                        "task_id": task.task_id,
-                        "pair_id": pair_id,
-                        "parent_run_id": baseline.run_id,
-                        "artifact_type": kind.value,
-                        "input_evidence_hash": frozen_input_hash,
-                        "sibling_artifact_ids": [],
-                        "paper_evaluator_feedback_included": False,
-                    },
-                    allow_verified_replacement=(
-                        phase in allow_verified_reflector_replacements
-                    ),
+        reflector_replacement_activations = {}
+        if recovered_artifact_checkpoint is None:
+            for kind in THREE_ARTIFACT_ORDER:
+                phase = _reflector_phase(kind)
+                if ledger and kind not in recovered_reflector_outputs:
+                    reflector_expectation = (
+                        ledger.replacement_expectation(phase)
+                        if phase in allow_verified_reflector_replacements
+                        else None
+                    )
+                    reflector_replacement_activations[phase] = ledger.claim(
+                        phase,
+                        {
+                            "task_id": task.task_id,
+                            "pair_id": pair_id,
+                            "parent_run_id": baseline.run_id,
+                            "artifact_type": kind.value,
+                            "input_evidence_hash": frozen_input_hash,
+                            "sibling_artifact_ids": [],
+                            "paper_evaluator_feedback_included": False,
+                        },
+                        allow_verified_replacement=(
+                            phase in allow_verified_reflector_replacements
+                        ),
+                        expected_replacement=reflector_expectation,
+                    )
+            evolve_kwargs = {
+                "task": task,
+                "baseline": baseline,
+                "feedback_payload": feedback_payload,
+                "pair_id": pair_id,
+            }
+            if recovered_reflector_outputs:
+                evolve_kwargs["recovered_outputs"] = recovered_reflector_outputs
+            bundle = self.evolution.evolve_all(**evolve_kwargs)
+        else:
+            bundle = recovered_artifact_checkpoint
+            if (
+                bundle.task_id != task.task_id
+                or bundle.pair_id != pair_id
+                or bundle.parent_run_id != baseline.run_id
+                or any(
+                    receipt.consumed_by_evolved_run_id is not None for receipt in bundle.artifacts
                 )
-        bundle = self.evolution.evolve_all(
-            task=task,
-            baseline=baseline,
-            feedback_payload=feedback_payload,
-            pair_id=pair_id,
-        )
+            ):
+                raise ValueError("recovered artifact checkpoint authority is invalid")
         if bundle.input_evidence_hash != frozen_input_hash:
             raise ValueError("Reflector evidence differs from the pre-G2 frozen authority")
         for receipt in bundle.artifacts:
             phase = _reflector_phase(receipt.artifact_type)
-            if ledger:
+            if ledger and recovered_artifact_checkpoint is None:
                 ledger.terminal(
                     phase,
                     {
@@ -262,6 +428,7 @@ class ThreeArtifactTaskLocalProtocolRunner:
                         "artifact_type": receipt.artifact_type.value,
                         "registration_receipt_sha256": receipt.registration_receipt_sha256,
                     },
+                    replacement_activation=reflector_replacement_activations.get(phase),
                 )
             event_order.append(phase)
             if receipt.artifact_id in self._seen_artifact_ids:
@@ -275,11 +442,25 @@ class ThreeArtifactTaskLocalProtocolRunner:
             raise ValueError("task-local artifact inventory is incomplete")
         event_order.append("artifacts_registered")
 
+        if self.stop_after_artifact_generation:
+            return self._seal_generation_only(
+                task=task,
+                pair_id=pair_id,
+                baseline=baseline,
+                runtime=runtime,
+                baseline_evaluation=baseline_evaluation,
+                feedback_payload=feedback_payload,
+                frozen_feedback_hash=frozen_feedback_hash,
+                bundle=bundle,
+                event_order=event_order,
+            )
+
         artifact_mapping = {
             receipt.artifact_type: receipt.artifact_id for receipt in bundle.artifacts
         }
+        evolved_replacement_activation = None
         if ledger:
-            ledger.claim(
+            evolved_replacement_activation = ledger.claim(
                 "evolved_candidate",
                 {
                     "task_id": task.task_id,
@@ -289,6 +470,8 @@ class ThreeArtifactTaskLocalProtocolRunner:
                     },
                     "artifact_count": 3,
                 },
+                allow_verified_replacement=(allow_verified_evolved_candidate_replacement),
+                expected_replacement=evolved_replacement_expectation,
             )
         evolved, injection = self.candidate.run_candidate_with_receipt(
             task=task,
@@ -296,6 +479,7 @@ class ThreeArtifactTaskLocalProtocolRunner:
             artifact_ids_by_type=artifact_mapping,
             pair_id=pair_id,
             mcp_url=mcp_url,
+            run_id=replacement_evolved_run_id,
         )
         if injection is None:
             raise ValueError("G2 did not return a three-artifact injection receipt")
@@ -317,6 +501,7 @@ class ThreeArtifactTaskLocalProtocolRunner:
                     "artifact_ids_by_type": bundle.artifact_id_by_type(),
                     "artifact_count": 3,
                 },
+                replacement_activation=evolved_replacement_activation,
             )
         event_order.append("evolved")
         bundle = bundle.model_copy(
@@ -470,6 +655,96 @@ class ThreeArtifactTaskLocalProtocolRunner:
             evolved=evolved,
             mapping_seal=final.mapping_seal_sha256,
             artifact_protocol=three_artifact_protocol_label(bundle.protocol),
+        )
+        return result
+
+    def _seal_generation_only(
+        self,
+        *,
+        task: TaskItem,
+        pair_id: str,
+        baseline: Trajectory,
+        runtime: RuntimeFeedback,
+        baseline_evaluation: EvaluatorFeedback,
+        feedback_payload: dict,
+        frozen_feedback_hash: str,
+        bundle: ThreeArtifactBundleReceipt,
+        event_order: list[str],
+    ) -> ThreeArtifactGenerationResult:
+        if self.real_mode:
+            assert_real_metric_observations(baseline.observations)
+        item_root = self.run_root / pair_id
+        item_root.mkdir(parents=True, exist_ok=True)
+        baseline_path = item_root / "baseline.trajectory.json"
+        feedback_path = item_root / "feedback.json"
+        artifacts_path = item_root / "artifacts.receipt.json"
+        baseline_path.write_text(baseline.model_dump_json(indent=2), encoding="utf-8")
+        feedback_path.write_text(
+            json.dumps(feedback_payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        artifacts_path.write_text(bundle.model_dump_json(indent=2), encoding="utf-8")
+        boundary_payload = {
+            "schema_version": "chemcrow_g1_artifact_generation_boundary_v1",
+            "status": "G1_AND_ARTIFACTS_SEALED",
+            "task_id": task.task_id,
+            "pair_id": pair_id,
+            "baseline_trajectory_sha256": file_sha256(baseline_path),
+            "feedback_sha256": file_sha256(feedback_path),
+            "artifact_bundle_sha256": file_sha256(artifacts_path),
+            "artifact_ids_by_type": bundle.artifact_id_by_type(),
+            "g2_dispatched": False,
+            "g2_evaluator_dispatched": False,
+            "final_evaluator_dispatched": False,
+        }
+        (item_root / "generation.boundary.receipt.json").write_text(
+            json.dumps(boundary_payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        event_order.append("sealed")
+
+        discarded = bundle.artifact_id_by_type()
+        self._active_artifacts.clear()
+        reset_payload = {
+            "schema_version": "chemcrow_three_artifact_generation_reset_v1",
+            "task_id": task.task_id,
+            "pair_id": pair_id,
+            "discarded_task_local_artifact_ids": discarded,
+            "active_artifact_ids_after": [],
+            "artifact_inventory_after": [],
+            "prior_artifact_ids_exported": [],
+            "memory_after": [],
+            "skill_bundle_after": [],
+            "agent_system_after": [],
+            "runtime_context_after": "bare_s0",
+            "s0_hash_for_next_item": self.s0_hash,
+            "archival_evidence_retained": True,
+            "archival_artifacts_auto_selected": False,
+            "g2_dispatched": False,
+        }
+        reset_path = item_root / "reset.receipt.json"
+        reset_path.write_text(
+            json.dumps(reset_payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        event_order.append("reset")
+        result = ThreeArtifactGenerationResult(
+            task_id=task.task_id,
+            task_category=task.broad_category,
+            pair_id=pair_id,
+            s0_hash=self.s0_hash,
+            task_prompt_hash=canonical_sha256({"task_prompt": task.prompt}),
+            baseline=baseline,
+            runtime_feedback=runtime,
+            baseline_internal_evaluation=baseline_evaluation,
+            feedback_hash=frozen_feedback_hash,
+            artifact_bundle=bundle,
+            event_order=event_order,
+            reset_receipt_sha256=file_sha256(reset_path),
+        )
+        (item_root / "artifact.study.result.json").write_text(
+            result.model_dump_json(indent=2),
+            encoding="utf-8",
         )
         return result
 

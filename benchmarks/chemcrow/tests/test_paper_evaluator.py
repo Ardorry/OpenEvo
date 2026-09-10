@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -31,7 +32,7 @@ from openevo_chemcrow.paper_evaluator import (
     render_compatible_prompt,
     validate_assessment_text,
 )
-from openevo_chemcrow.paper_harness import PaperEvaluatorHarness
+from openevo_chemcrow.paper_harness import _RUNTIME_CLIENT, PaperEvaluatorHarness
 from openevo_chemcrow.three_artifact_models import (
     CORE_NATIVE_THREE_ARTIFACT_BUNDLE_PROTOCOL,
     CORE_NATIVE_THREE_ARTIFACT_PROTOCOL_LABEL,
@@ -98,6 +99,9 @@ def test_plan_has_exactly_three_fixed_comparisons_per_task(runs_root):
         tasks=tasks,
         pairs=pairs,
         historical=extract_historical_answers(runs_root=runs_root),
+        source_completed_run_audit_sha256="a" * 64,
+        source_aggregate_sha256="b" * 64,
+        source_experiment_id="test-full-v4",
     )
 
     assert plan["protocol"] == PAPER_EVALUATOR_PROTOCOL
@@ -159,6 +163,9 @@ def test_core_native_plan_uses_fresh_namespace_and_native_source_protocol(runs_r
         historical=extract_historical_answers(runs_root=runs_root),
         call_id_prefix="paper-v5",
         expected_source_pair_protocol=CORE_NATIVE_THREE_ARTIFACT_PROTOCOL_LABEL,
+        source_completed_run_audit_sha256="a" * 64,
+        source_aggregate_sha256="b" * 64,
+        source_experiment_id="test-full-v5",
     )
 
     assert plan["source_pair_protocol"] == CORE_NATIVE_THREE_ARTIFACT_PROTOCOL_LABEL
@@ -192,6 +199,9 @@ def test_paper_plan_rejects_legacy_single_artifact_pairs(runs_root):
             tasks=tasks,
             pairs=legacy_pairs,  # type: ignore[arg-type]
             historical=extract_historical_answers(runs_root=runs_root),
+            source_completed_run_audit_sha256="a" * 64,
+            source_aggregate_sha256="b" * 64,
+            source_experiment_id="test-full-v5",
         )
 
 
@@ -274,6 +284,70 @@ def test_paper_harness_routes_only_through_core_gateway():
     assert step.env["PAPER_EVALUATOR_PROMPT"] == "private sealed prompt"
 
 
+def test_paper_runtime_client_emits_transcript_before_strict_json_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    malformed = '{"student_a":{"grade":10,"weaknesses"'
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            del args
+
+        def read(self) -> bytes:
+            return json.dumps(
+                {"choices": [{"message": {"role": "assistant", "content": malformed}}]}
+            ).encode()
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *args, **kwargs: Response())
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://gateway.invalid/v1")
+    monkeypatch.setenv("OPENAI_API_KEY", "session-scoped-key")
+    monkeypatch.setenv("PAPER_EVALUATOR_MODEL", PAPER_EVALUATOR_MODEL)
+    monkeypatch.setenv("PAPER_EVALUATOR_TEMPERATURE", "0.1")
+    monkeypatch.setenv("PAPER_EVALUATOR_MAX_TOKENS", "1200")
+    monkeypatch.setenv("PAPER_EVALUATOR_CALL_ID", "paper-v5r1-chemcrow-01-baseline")
+    monkeypatch.setenv("PAPER_EVALUATOR_PROMPT", "sealed prompt")
+
+    with pytest.raises(json.JSONDecodeError):
+        exec(_RUNTIME_CLIENT, {})  # noqa: S102 - execute the fixed embedded client verbatim
+
+    transcript = json.loads(capsys.readouterr().out)
+    assert transcript == {"role": "assistant", "content": malformed}
+
+
+def test_paper_runtime_client_emits_value_free_transcript_on_transport_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fail(*args, **kwargs):
+        del args, kwargs
+        raise OSError("PRIVATE TRANSPORT DETAIL")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fail)
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://gateway.invalid/v1")
+    monkeypatch.setenv("OPENAI_API_KEY", "session-scoped-key")
+    monkeypatch.setenv("PAPER_EVALUATOR_MODEL", PAPER_EVALUATOR_MODEL)
+    monkeypatch.setenv("PAPER_EVALUATOR_TEMPERATURE", "0.1")
+    monkeypatch.setenv("PAPER_EVALUATOR_MAX_TOKENS", "1200")
+    monkeypatch.setenv("PAPER_EVALUATOR_CALL_ID", "paper-v5r1-chemcrow-01-baseline")
+    monkeypatch.setenv("PAPER_EVALUATOR_PROMPT", "sealed prompt")
+
+    with pytest.raises(OSError, match="PRIVATE TRANSPORT DETAIL"):
+        exec(_RUNTIME_CLIENT, {})  # noqa: S102 - execute the fixed embedded client verbatim
+
+    rendered = capsys.readouterr().out
+    assert "PRIVATE TRANSPORT DETAIL" not in rendered
+    transcript = json.loads(rendered)
+    assert transcript["role"] == "assistant"
+    assert json.loads(transcript["content"]) == {
+        "error_type": "OSError",
+        "schema_version": "paper_evaluator_transport_error_v1",
+    }
+
+
 def test_paper_harness_rejects_calibration_namespace():
     spec = AgentSpec(
         import_path="openevo_chemcrow.paper_harness:PaperEvaluatorHarness",
@@ -284,11 +358,7 @@ def test_paper_harness_rejects_calibration_namespace():
             "max_tokens": 1200,
             "runtime_gateway_base_url": "http://host.docker.internal:8110/v1",
         },
-        env={
-            "PAPER_EVALUATOR_CALL_ID": (
-                "paper-chemcrow-cal-v1-chemcrow-01-baseline"
-            )
-        },
+        env={"PAPER_EVALUATOR_CALL_ID": ("paper-chemcrow-cal-v1-chemcrow-01-baseline")},
     )
 
     with pytest.raises(ValueError, match="call ID"):
@@ -345,12 +415,7 @@ def test_two_task_repair_freezes_same_s0_and_all_model_roles():
 
 def test_duplicate_authorization_is_bound_to_interrupted_claim(tmp_path):
     experiment_id = "chemcrow-task-local-full-v3"
-    claim = (
-        tmp_path
-        / "claims"
-        / f"{experiment_id}--chemcrow-14"
-        / "evolved_candidate.json"
-    )
+    claim = tmp_path / "claims" / f"{experiment_id}--chemcrow-14" / "evolved_candidate.json"
     claim.parent.mkdir(parents=True)
     claim.write_text('{"status":"claimed"}\n', encoding="utf-8")
     receipt = tmp_path / "authorization.json"
@@ -363,9 +428,7 @@ def test_duplicate_authorization_is_bound_to_interrupted_claim(tmp_path):
                 "prior_experiment_id": experiment_id,
                 "prior_phase": "evolved_candidate",
                 "prior_claim_sha256": file_sha256(claim),
-                "authorization_literal": (
-                    "I_AUTHORIZE_FRESH_CHEMCROW_14_PAIR_AFTER_USER_STOP"
-                ),
+                "authorization_literal": ("I_AUTHORIZE_FRESH_CHEMCROW_14_PAIR_AFTER_USER_STOP"),
                 "reason": (
                     "prior pair interrupted before sealing; no prior pair result is eligible"
                 ),

@@ -15,42 +15,67 @@ from .paper_evaluator import (
     PAPER_EVALUATOR_TEMPERATURE,
 )
 
-_RUNTIME_CLIENT = r'''
+_RUNTIME_CLIENT = r"""
 import json
 import os
 import urllib.request
 
-base_url = os.environ["OPENAI_BASE_URL"].rstrip("/")
-payload = {
-    "model": os.environ["PAPER_EVALUATOR_MODEL"],
-    "temperature": float(os.environ["PAPER_EVALUATOR_TEMPERATURE"]),
-    "max_tokens": int(os.environ["PAPER_EVALUATOR_MAX_TOKENS"]),
-    "stream": False,
-    "user": os.environ["PAPER_EVALUATOR_CALL_ID"],
-    "response_format": {"type": "json_object"},
-    "messages": [
-        {
-            "role": "system",
-            "content": "ChemCrow sealed-output paper evaluator. Return strict JSON only.",
+def emit_transcript(content):
+    print(json.dumps({"role": "assistant", "content": content}), flush=True)
+
+
+try:
+    base_url = os.environ["OPENAI_BASE_URL"].rstrip("/")
+    payload = {
+        "model": os.environ["PAPER_EVALUATOR_MODEL"],
+        "temperature": float(os.environ["PAPER_EVALUATOR_TEMPERATURE"]),
+        "max_tokens": int(os.environ["PAPER_EVALUATOR_MAX_TOKENS"]),
+        "stream": False,
+        "user": os.environ["PAPER_EVALUATOR_CALL_ID"],
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "system",
+                "content": "ChemCrow sealed-output paper evaluator. Return strict JSON only.",
+            },
+            {"role": "user", "content": os.environ["PAPER_EVALUATOR_PROMPT"]},
+        ],
+    }
+    request = urllib.request.Request(
+        base_url + "/chat/completions",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": "Bearer " + os.environ["OPENAI_API_KEY"],
+            "Content-Type": "application/json",
         },
-        {"role": "user", "content": os.environ["PAPER_EVALUATOR_PROMPT"]},
-    ],
-}
-request = urllib.request.Request(
-    base_url + "/chat/completions",
-    data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-    headers={
-        "Authorization": "Bearer " + os.environ["OPENAI_API_KEY"],
-        "Content-Type": "application/json",
-    },
-    method="POST",
-)
-with urllib.request.urlopen(request, timeout=300) as response:
-    body = json.loads(response.read().decode("utf-8"))
-content = body["choices"][0]["message"]["content"]
-parsed = json.loads(content)
-print(json.dumps({"role": "assistant", "content": json.dumps(parsed, sort_keys=True)}))
-'''.strip()
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=300) as response:
+        body = json.loads(response.read().decode("utf-8"))
+    content = body["choices"][0]["message"]["content"]
+    if not isinstance(content, str):
+        raise TypeError("paper evaluator response content is not text")
+except Exception as exc:
+    # Core's transcript builder requires a stable stdout authority even when
+    # transport or response-envelope validation fails.  Emit only a closed,
+    # value-free category before retaining the non-zero process exit.
+    emit_transcript(
+        json.dumps(
+            {
+                "schema_version": "paper_evaluator_transport_error_v1",
+                "error_type": type(exc).__name__,
+            },
+            sort_keys=True,
+        )
+    )
+    raise
+
+# Preserve the exact model text before strict downstream JSON validation.  If
+# validation fails, the process remains failed, but Gateway postrun still has
+# the verified stdout transcript needed to report the real agent failure.
+emit_transcript(content)
+json.loads(content)
+""".strip()
 
 PAPER_RUNTIME_GATEWAY_BASE_URL = "http://host.docker.internal:8110/v1"
 
@@ -68,7 +93,8 @@ class PaperEvaluatorHarness(BaseHarness):
     def _validate_call_id(self, call_id: str) -> None:
         match = re.fullmatch(
             r"(paper(?:-[a-z0-9]+)*)-(chemcrow-[0-9]{2})-"
-            r"(historical_control|baseline|evolved|direct|blind)",
+            r"(historical_control|baseline|evolved|direct|blind)"
+            r"(?:-replacement-01)?",
             call_id,
         )
         if (
