@@ -1,3 +1,7 @@
+> 本分支保存 ResearchClawBench 适配代码、协议说明和历史实验记录。
+> [ResearchClaw 分支导航](benchmarks/researchclaw/PUBLICATION.md)
+> · [Fork 实验分支总览](https://github.com/Ardorry/OpenEvo/blob/stable/BENCHMARKS.md)
+
 <p align="center">
   <img src="assets/openevo-logo.svg" alt="OpenEvo" width="520">
 </p>
