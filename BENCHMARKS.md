@@ -1,12 +1,11 @@
 # OpenEvo benchmark 分支总览
 
-整理日期：2026-09-10。每个实验使用独立分支；本页是 fork 首页的导航索引。
+整理日期：2026-09-11。每个实验使用独立分支；本页是 fork 首页的导航索引。
 
 | 分支 | 核心内容与结果 | 核验范围 |
 | --- | --- | --- |
 | [chemcrow](https://github.com/Ardorry/OpenEvo/tree/chemcrow) | [发布说明](https://github.com/Ardorry/OpenEvo/blob/chemcrow/benchmarks/chemcrow/PUBLICATION.md) · [full-v8 汇总](https://github.com/Ardorry/OpenEvo/blob/chemcrow/benchmarks/chemcrow/reports/full_v8_public_20260831/README.md) · [进化产物](https://github.com/Ardorry/OpenEvo/blob/chemcrow/benchmarks/chemcrow/artifacts/README.md) | 当前本地代码、已封存结果，以及两套实验共 84 份原生文本产物和来源哈希 |
 | [chembench](https://github.com/Ardorry/OpenEvo/tree/chembench) | [发布说明](https://github.com/Ardorry/OpenEvo/blob/chembench/benchmarks/chembench/PUBLICATION.md) | 已公开 STV3 历史快照；无法确认等于缺失的 readiness-v4 本地最新版本 |
-| [researchclaw](https://github.com/Ardorry/OpenEvo/tree/researchclaw) | [历史代码与报告导航](https://github.com/Ardorry/OpenEvo/blob/researchclaw/benchmarks/researchclaw/PUBLICATION.md) | Dev17 归档为部分完成状态；归档哈希 5/5 一致，本次未重算成绩 |
 
 ## 结果索引
 
@@ -30,7 +29,7 @@ ChemBench 属于归档的配对描述性恢复比较，结论为
 历史记忆中的分数未用作本次发布证据。
 
 当前可取得的真实进化产物正文来自 ChemCrow，已按两套独立实验公开。
-ChemBench 和 ResearchClaw 的已有仓库只保留产物元数据或实验摘要，没有可追加上传的
+ChemBench 的已有仓库只保留产物元数据或实验摘要，没有可追加上传的
 原生正文；测试 fixture 和配置模板不作为真实产物展示。
 
 ## 归档约定
