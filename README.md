@@ -1,3 +1,7 @@
+> 本分支保存 ChemBench 研究代码和历史汇总结果。
+> [ChemBench 分支导航与结果口径](benchmarks/chembench/PUBLICATION.md)
+> · [Fork 实验分支总览](https://github.com/Ardorry/OpenEvo/blob/stable/BENCHMARKS.md)
+
 <p align="center">
   <img src="assets/openevo-logo.svg" alt="OpenEvo" width="520">
 </p>
