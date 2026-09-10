@@ -13,6 +13,7 @@ full-v8 使用 Core 的完整 Reflector 提示构造与输出审核。
 | 内容 | 入口 |
 | --- | --- |
 | 最新汇总、统计口径、原件哈希 | [full-v8 结果](reports/full_v8_public_20260831/README.md) |
+| 两套实验共 84 份进化产物 | [产物索引与下载](artifacts/README.md) |
 | 适配包和命令入口 | [src/openevo_chemcrow](src/openevo_chemcrow/)、[cli.py](src/openevo_chemcrow/cli.py) |
 | 三产物协议 | [three_artifact_protocol.py](src/openevo_chemcrow/three_artifact_protocol.py) |
 | 封存代际延续与恢复 | [generation_continuation.py](src/openevo_chemcrow/generation_continuation.py)、[paper_recovery.py](src/openevo_chemcrow/paper_recovery.py) |
@@ -57,8 +58,9 @@ Docker 文件与来源提交逐字节一致。这些验证没有调用真实模�
 `configs/` 中的绝对路径、端口、镜像、来源哈希是历史环境记录，使用前须配置新的独立
 运行目录并完成零模型 preflight；仅克隆分支不能恢复原有运行状态。
 
-产物相似度与历史报告脚本需要对应封存审计、私有产物和人工注释输入。本次发布保留代码与
-依赖锁，公开汇总不能替代这些原件，也不足以独立重建全部结果。
+已公开 full-v8 与 full-v5 replication 的 84 份真实进化产物，附原始哈希与来源清单。
+产物相似度与历史报告脚本还需要对应的完整封存审计和人工注释输入；公开正文与汇总
+不能替代这些原件，也不足以独立重建全部结果。
 
 ## 发布来源与边界
 
@@ -66,8 +68,9 @@ Docker 文件与来源提交逐字节一致。这些验证没有调用真实模�
 本次以已公开 `chemcrow` 提交 `318f1c522fab44357e6bda4b6823ec3c391cb80c` 为基础，
 按明确路径复制当前代码、配置、脚本、测试和所需 Core 实现。原始本地提交链保留在实验工作区。
 
-新增结果位于 `reports/full_v8_public_20260831/`，只发布汇总与来源哈希。
-未新增上传逐题答案、产物正文、审阅工作表、轨迹、运行数据库、凭据、缓存或第三方依赖目录。
+评分结果包位于 `reports/full_v8_public_20260831/`，包含汇总与来源哈希。
+进化产物正文位于 `artifacts/`，按两套独立实验分别归档并逐字节核验。
+逐题最终答案、审阅工作表、轨迹、运行数据库、凭据、缓存和第三方依赖目录未新增上传。
 旧分支中已经公开的任务、历史报告和校准材料保持原样；它们属于各自历史协议。
 历史文档中的准备阶段、legacy/full-v3/full-v4 描述不能作为 full-v8 的当前状态。
 

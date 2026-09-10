@@ -4,6 +4,7 @@
 
 [实验与代码导航](benchmarks/chemcrow/PUBLICATION.md) ·
 [最新 full-v8 结果](benchmarks/chemcrow/reports/full_v8_public_20260831/README.md) ·
+[84 份进化产物](benchmarks/chemcrow/artifacts/README.md) ·
 [全部实验分支](https://github.com/Ardorry/OpenEvo/blob/stable/BENCHMARKS.md)
 
 最新实验包含 14 个任务、42 个独立 Reflector 产物。校准 GPT-4 Judge 的

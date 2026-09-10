@@ -1,0 +1,4 @@
+# Preserve registered payload bytes, including Markdown hard-break spaces.
+**/memory.md -text whitespace=-blank-at-eol
+**/agent_system.md -text whitespace=-blank-at-eol
+**/skill_bundle/SKILL.md -text whitespace=-blank-at-eol

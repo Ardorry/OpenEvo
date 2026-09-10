@@ -2,6 +2,8 @@
 
 Latest publication (2026-09-10): [code and reproduction guide](PUBLICATION.md),
 [full-v8 aggregate results](reports/full_v8_public_20260831/README.md).
+The [evolution artifact archive](artifacts/README.md) contains 84 hash-verified native
+text artifacts from the separate full-v8 and full-v5 replication experiments.
 The sealed full-v8 experiment covers 14 tasks and 42 independent typed artifacts.
 The calibrated GPT-4 Judge reports G1 9.357/10 and G2 9.214/10;
 the result remains `PROVISIONAL_LLM_JUDGED_RESULT`.
