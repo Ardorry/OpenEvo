@@ -4,9 +4,8 @@
 
 | 实验 | 分支入口 | 当前归档 |
 | --- | --- | --- |
-| ChemCrow | [chemcrow](https://github.com/Ardorry/OpenEvo/tree/chemcrow) | full-v8：14 个任务，核心代码与公开汇总 |
+| ChemCrow | [chemcrow](https://github.com/Ardorry/OpenEvo/tree/chemcrow) | 核心代码、full-v8 汇总与 [84 份进化产物](https://github.com/Ardorry/OpenEvo/blob/chemcrow/benchmarks/chemcrow/artifacts/README.md) |
 | ChemBench | [chembench](https://github.com/Ardorry/OpenEvo/tree/chembench) | 历史 STV3：450 对 Test；本地 readiness-v4 原件待恢复 |
-| CompChemBench | 待恢复原件 | 当前工作区只有空目录，尚无可发布代码/结果分支 |
 | ResearchClaw | [researchclaw](https://github.com/Ardorry/OpenEvo/tree/researchclaw) | 历史代码与报告导航 |
 
 详细入口、成绩口径和缺失材料见 [BENCHMARKS.md](BENCHMARKS.md)。
