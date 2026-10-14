@@ -405,10 +405,27 @@ def check_reproduction_environment(
     publication_receipt = verify_publication(package_root)
 
     docker_binary = shutil.which("docker")
+    docker_cli_version: str | None = None
+    docker_cli_ok = False
+    docker_server_version: str | None = None
     docker_server_ready = False
     runtime_image_ready = False
     runtime_image_id: str | None = None
     if docker_binary:
+        client = subprocess.run(
+            [docker_binary, "--version"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        client_match = re.fullmatch(
+            r"Docker version ([0-9]+(?:\.[0-9]+){2}), build .+",
+            client.stdout.strip(),
+        )
+        if client.returncode == 0 and client_match is not None:
+            docker_cli_version = client_match.group(1)
+            docker_cli_ok = docker_cli_version == toolchain["docker"]["cli"]
         server = subprocess.run(
             [docker_binary, "info", "--format", "{{.ServerVersion}}"],
             check=False,
@@ -416,7 +433,11 @@ def check_reproduction_environment(
             text=True,
             timeout=20,
         )
-        docker_server_ready = server.returncode == 0
+        docker_server_version = server.stdout.strip() or None
+        docker_server_ready = (
+            server.returncode == 0
+            and docker_server_version == toolchain["docker"]["engine"]
+        )
         if docker_server_ready:
             image = str(toolchain["managed_runtime"]["oci_index_id"])
             inspect = subprocess.run(
@@ -483,7 +504,7 @@ def check_reproduction_environment(
         and fixture_receipt["status"] == "PASS"
         and publication_receipt["status"] == "PASS"
     )
-    runtime_ready = docker_server_ready and runtime_image_ready
+    runtime_ready = docker_cli_ok and docker_server_ready and runtime_image_ready
     return {
         "schema_version": "chemcrow_reproduction_environment_check_v1",
         "status": "READY" if offline_ready and runtime_ready else "BLOCKED",
@@ -525,6 +546,11 @@ def check_reproduction_environment(
             "publication": publication_receipt,
             "docker": {
                 "binary_present": docker_binary is not None,
+                "cli_expected": toolchain["docker"]["cli"],
+                "cli_observed": docker_cli_version,
+                "cli_pass": docker_cli_ok,
+                "engine_expected": toolchain["docker"]["engine"],
+                "engine_observed": docker_server_version,
                 "server_ready": docker_server_ready,
                 "managed_runtime_image_ready": runtime_image_ready,
                 "managed_runtime_image_id": runtime_image_id,

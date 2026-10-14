@@ -10,7 +10,7 @@
   clean。submission 会记录并校验该 commit。
 - Python：`3.11.15`；uv：`0.12.5`；Python 依赖由
   [`uv.lock`](uv.lock) 固定。
-- Linux runtime：`linux-amd64`，OCI index
+- Docker CLI/Engine：`29.5.2`；Linux runtime：`linux-amd64`，OCI index
   `sha256:7a0079f9cb1bce5768cff5bce3d1181811c6a231ad800cac8fb503d66852c81b`。
   完整身份和归档哈希见 [`reproduction/toolchain.lock.json`](reproduction/toolchain.lock.json)。
 - 外部源码和数据由
@@ -136,6 +136,11 @@ Reflector timeout 为 900 秒，两个 evaluator 为 600 秒。种子是 `202608
 112 次模型调用，即每题 G1、G1 内评、三个 Reflector、G2、G2 内评和盲评各一次。自动 retry 为
 0；失败调用只有在生成带哈希的显式 replacement authority 后才能替换，旧 call ID 不得重用，
 不得按分数重试。
+
+Codex subscription harness 的 admitted config 不暴露 `temperature` 或 `top_p`，因此协议不虚构
+这些参数；配置固定 reasoning effort/summary 和本地随机种子，但该种子不能控制 provider 端采样。
+每个 submission 必须记录实际 provider、模型标识和时间，重复 run 应作为随机实现比较，不能要求
+答案正文逐字节一致。
 
 盲评使用 `chemcrow-final-blind-evaluator-v1`，三个维度分别为 chemical correctness、reasoning
 quality、task completion，每项 0–4，总分 0–12。人工专家评价未完成时必须保持

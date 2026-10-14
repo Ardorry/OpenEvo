@@ -33,6 +33,11 @@ def test_portable_reproduction_config_and_locks_are_closed() -> None:
     }
     assert toolchain["python"] == "3.11.15"
     assert toolchain["uv"] == "0.12.5"
+    assert toolchain["docker"] == {
+        "cli": "29.5.2",
+        "engine": "29.5.2",
+        "engine_verified_in_acceptance_environment": False,
+    }
     assert toolchain["package_lock_sha256"] == (
         "05ed78b4ef903a51cc3158ce445d7e2f5bf5696d0c2020ad37f3fba40188582f"
     )
