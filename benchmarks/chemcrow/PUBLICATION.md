@@ -13,6 +13,8 @@ full-v8 使用 Core 的完整 Reflector 提示构造与输出审核。
 | 内容 | 入口 |
 | --- | --- |
 | 最新汇总、统计口径、原件哈希 | [full-v8 结果](reports/full_v8_public_20260831/README.md) |
+| 从全新 clone 复现与导出成绩 | [REPRODUCE.md](REPRODUCE.md) |
+| 标准 submission 格式 | [submission.schema.json](reproduction/submission.schema.json) |
 | 两套实验共 84 份进化产物 | [产物索引与下载](artifacts/README.md) |
 | 适配包和命令入口 | [src/openevo_chemcrow](src/openevo_chemcrow/)、[cli.py](src/openevo_chemcrow/cli.py) |
 | 三产物协议 | [three_artifact_protocol.py](src/openevo_chemcrow/three_artifact_protocol.py) |
@@ -68,7 +70,7 @@ Docker 文件与来源提交逐字节一致。这些验证没有调用真实模�
 本次以已公开 `chemcrow` 提交 `318f1c522fab44357e6bda4b6823ec3c391cb80c` 为基础，
 按明确路径复制当前代码、配置、脚本、测试和所需 Core 实现。原始本地提交链保留在实验工作区。
 
-评分结果包位于 `reports/full_v8_public_20260831/`，包含汇总与来源哈希。
+评分结果包位于 `reports/full_v8_public_20260831/`，包含汇总、来源哈希和脱敏逐题证据索引。
 进化产物正文位于 `artifacts/`，按两套独立实验分别归档并逐字节核验。
 逐题最终答案、审阅工作表、轨迹、运行数据库、凭据、缓存和第三方依赖目录未新增上传。
 旧分支中已经公开的任务、历史报告和校准材料保持原样；它们属于各自历史协议。

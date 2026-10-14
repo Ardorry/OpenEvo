@@ -1,0 +1,586 @@
+{
+  "$defs": {
+    "ArtifactKind": {
+      "enum": [
+        "text_memory",
+        "skill_bundle",
+        "agent_system"
+      ],
+      "title": "ArtifactKind",
+      "type": "string"
+    },
+    "RubricScores": {
+      "additionalProperties": false,
+      "properties": {
+        "chemical_correctness": {
+          "maximum": 4.0,
+          "minimum": 0.0,
+          "title": "Chemical Correctness",
+          "type": "number"
+        },
+        "reasoning_quality": {
+          "maximum": 4.0,
+          "minimum": 0.0,
+          "title": "Reasoning Quality",
+          "type": "number"
+        },
+        "task_completion": {
+          "maximum": 4.0,
+          "minimum": 0.0,
+          "title": "Task Completion",
+          "type": "number"
+        }
+      },
+      "required": [
+        "chemical_correctness",
+        "reasoning_quality",
+        "task_completion"
+      ],
+      "title": "RubricScores",
+      "type": "object"
+    },
+    "SubmissionAggregate": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_count": {
+          "const": 42,
+          "default": 42,
+          "title": "Artifact Count",
+          "type": "integer"
+        },
+        "losses": {
+          "maximum": 14,
+          "minimum": 0,
+          "title": "Losses",
+          "type": "integer"
+        },
+        "mean_baseline": {
+          "$ref": "#/$defs/RubricScores"
+        },
+        "mean_delta": {
+          "$ref": "#/$defs/SubmissionScoreDelta"
+        },
+        "mean_evolved": {
+          "$ref": "#/$defs/RubricScores"
+        },
+        "task_count": {
+          "const": 14,
+          "default": 14,
+          "title": "Task Count",
+          "type": "integer"
+        },
+        "ties": {
+          "maximum": 14,
+          "minimum": 0,
+          "title": "Ties",
+          "type": "integer"
+        },
+        "wins": {
+          "maximum": 14,
+          "minimum": 0,
+          "title": "Wins",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "mean_baseline",
+        "mean_evolved",
+        "mean_delta",
+        "wins",
+        "losses",
+        "ties"
+      ],
+      "title": "SubmissionAggregate",
+      "type": "object"
+    },
+    "SubmissionArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_bytes": {
+          "minimum": 1,
+          "title": "Artifact Bytes",
+          "type": "integer"
+        },
+        "artifact_id": {
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "artifact_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Artifact Sha256",
+          "type": "string"
+        },
+        "artifact_type": {
+          "$ref": "#/$defs/ArtifactKind"
+        },
+        "input_evidence_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Input Evidence Sha256",
+          "type": "string"
+        },
+        "prompt_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Prompt Sha256",
+          "type": "string"
+        },
+        "reflector_job_id": {
+          "title": "Reflector Job Id",
+          "type": "string"
+        },
+        "reflector_run_id": {
+          "title": "Reflector Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_type",
+        "artifact_id",
+        "artifact_sha256",
+        "artifact_bytes",
+        "reflector_job_id",
+        "reflector_run_id",
+        "prompt_sha256",
+        "input_evidence_sha256"
+      ],
+      "title": "SubmissionArtifact",
+      "type": "object"
+    },
+    "SubmissionBlindEvaluation": {
+      "additionalProperties": false,
+      "properties": {
+        "baseline_scores": {
+          "$ref": "#/$defs/RubricScores"
+        },
+        "confidence": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        },
+        "evolved_scores": {
+          "$ref": "#/$defs/RubricScores"
+        },
+        "mapping_seal_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Mapping Seal Sha256",
+          "type": "string"
+        },
+        "provisional_llm_judged": {
+          "const": true,
+          "default": true,
+          "title": "Provisional Llm Judged",
+          "type": "boolean"
+        },
+        "winner": {
+          "enum": [
+            "baseline",
+            "evolved",
+            "tie"
+          ],
+          "title": "Winner",
+          "type": "string"
+        }
+      },
+      "required": [
+        "baseline_scores",
+        "evolved_scores",
+        "winner",
+        "mapping_seal_sha256"
+      ],
+      "title": "SubmissionBlindEvaluation",
+      "type": "object"
+    },
+    "SubmissionEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "aggregate_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Aggregate Sha256",
+          "type": "string"
+        },
+        "audit_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Audit Sha256",
+          "type": "string"
+        },
+        "audit_status": {
+          "const": "PASS",
+          "default": "PASS",
+          "title": "Audit Status",
+          "type": "string"
+        },
+        "host_paths_included": {
+          "const": false,
+          "default": false,
+          "title": "Host Paths Included",
+          "type": "boolean"
+        },
+        "raw_answers_included": {
+          "const": false,
+          "default": false,
+          "title": "Raw Answers Included",
+          "type": "boolean"
+        },
+        "secrets_included": {
+          "const": false,
+          "default": false,
+          "title": "Secrets Included",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "audit_sha256",
+        "aggregate_sha256"
+      ],
+      "title": "SubmissionEvidence",
+      "type": "object"
+    },
+    "SubmissionExecution": {
+      "additionalProperties": false,
+      "properties": {
+        "automatic_retry_count": {
+          "const": 0,
+          "default": 0,
+          "title": "Automatic Retry Count",
+          "type": "integer"
+        },
+        "completed_at": {
+          "format": "date-time",
+          "title": "Completed At",
+          "type": "string"
+        },
+        "config_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Config Sha256",
+          "type": "string"
+        },
+        "model_bindings": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SubmissionModelBinding"
+          },
+          "title": "Model Bindings",
+          "type": "object"
+        },
+        "random_seed": {
+          "title": "Random Seed",
+          "type": "integer"
+        },
+        "replacements": {
+          "items": {
+            "$ref": "#/$defs/SubmissionReplacement"
+          },
+          "title": "Replacements",
+          "type": "array"
+        },
+        "source_commit": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Source Commit",
+          "type": "string"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "task_manifest_sha256": {
+          "const": "8c69883d4a2424ed66f4dea0b9d0a0496129556e998902f278ad36a72d132604",
+          "default": "8c69883d4a2424ed66f4dea0b9d0a0496129556e998902f278ad36a72d132604",
+          "title": "Task Manifest Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_commit",
+        "config_sha256",
+        "started_at",
+        "completed_at",
+        "random_seed",
+        "model_bindings"
+      ],
+      "title": "SubmissionExecution",
+      "type": "object"
+    },
+    "SubmissionModelBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "capture_mode": {
+          "const": "transcript",
+          "default": "transcript",
+          "title": "Capture Mode",
+          "type": "string"
+        },
+        "model": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "provider": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "model"
+      ],
+      "title": "SubmissionModelBinding",
+      "type": "object"
+    },
+    "SubmissionReplacement": {
+      "additionalProperties": false,
+      "properties": {
+        "authority_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Authority Sha256",
+          "type": "string"
+        },
+        "failed_call_id": {
+          "title": "Failed Call Id",
+          "type": "string"
+        },
+        "phase": {
+          "title": "Phase",
+          "type": "string"
+        },
+        "replacement_call_id": {
+          "title": "Replacement Call Id",
+          "type": "string"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "phase",
+        "failed_call_id",
+        "replacement_call_id",
+        "authority_sha256"
+      ],
+      "title": "SubmissionReplacement",
+      "type": "object"
+    },
+    "SubmissionRunRef": {
+      "additionalProperties": false,
+      "properties": {
+        "answer_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Answer Sha256",
+          "type": "string"
+        },
+        "run_id": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "answer_sha256"
+      ],
+      "title": "SubmissionRunRef",
+      "type": "object"
+    },
+    "SubmissionScoreDelta": {
+      "additionalProperties": false,
+      "properties": {
+        "chemical_correctness": {
+          "maximum": 4.0,
+          "minimum": -4.0,
+          "title": "Chemical Correctness",
+          "type": "number"
+        },
+        "reasoning_quality": {
+          "maximum": 4.0,
+          "minimum": -4.0,
+          "title": "Reasoning Quality",
+          "type": "number"
+        },
+        "task_completion": {
+          "maximum": 4.0,
+          "minimum": -4.0,
+          "title": "Task Completion",
+          "type": "number"
+        }
+      },
+      "required": [
+        "chemical_correctness",
+        "reasoning_quality",
+        "task_completion"
+      ],
+      "title": "SubmissionScoreDelta",
+      "type": "object"
+    },
+    "SubmissionTaskResult": {
+      "additionalProperties": false,
+      "properties": {
+        "artifacts": {
+          "items": {
+            "$ref": "#/$defs/SubmissionArtifact"
+          },
+          "title": "Artifacts",
+          "type": "array"
+        },
+        "baseline": {
+          "$ref": "#/$defs/SubmissionRunRef"
+        },
+        "baseline_internal_scores": {
+          "$ref": "#/$defs/RubricScores"
+        },
+        "blind_evaluation": {
+          "$ref": "#/$defs/SubmissionBlindEvaluation"
+        },
+        "evolved": {
+          "$ref": "#/$defs/SubmissionRunRef"
+        },
+        "evolved_internal_scores": {
+          "$ref": "#/$defs/RubricScores"
+        },
+        "injection_receipt_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Injection Receipt Sha256",
+          "type": "string"
+        },
+        "pair_id": {
+          "title": "Pair Id",
+          "type": "string"
+        },
+        "reset_receipt_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Reset Receipt Sha256",
+          "type": "string"
+        },
+        "s0_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "S0 Sha256",
+          "type": "string"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "task_prompt_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Task Prompt Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "pair_id",
+        "task_prompt_sha256",
+        "s0_sha256",
+        "baseline",
+        "evolved",
+        "baseline_internal_scores",
+        "evolved_internal_scores",
+        "artifacts",
+        "injection_receipt_sha256",
+        "reset_receipt_sha256",
+        "blind_evaluation"
+      ],
+      "title": "SubmissionTaskResult",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "aggregate": {
+      "$ref": "#/$defs/SubmissionAggregate"
+    },
+    "evidence": {
+      "$ref": "#/$defs/SubmissionEvidence"
+    },
+    "execution": {
+      "$ref": "#/$defs/SubmissionExecution"
+    },
+    "experiment_id": {
+      "maxLength": 512,
+      "minLength": 1,
+      "title": "Experiment Id",
+      "type": "string"
+    },
+    "human_review_status": {
+      "const": "PROVISIONAL_NOT_COMPLETED",
+      "default": "PROVISIONAL_NOT_COMPLETED",
+      "title": "Human Review Status",
+      "type": "string"
+    },
+    "judge_protocol": {
+      "const": "chemcrow-final-blind-evaluator-v1",
+      "default": "chemcrow-final-blind-evaluator-v1",
+      "title": "Judge Protocol",
+      "type": "string"
+    },
+    "protocol_version": {
+      "const": "chemcrow_full_v8_reproduction_v1",
+      "default": "chemcrow_full_v8_reproduction_v1",
+      "title": "Protocol Version",
+      "type": "string"
+    },
+    "results": {
+      "items": {
+        "$ref": "#/$defs/SubmissionTaskResult"
+      },
+      "title": "Results",
+      "type": "array"
+    },
+    "run_kind": {
+      "enum": [
+        "authoritative_original",
+        "third_party_reproduction"
+      ],
+      "title": "Run Kind",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "chemcrow_submission_v1",
+      "default": "chemcrow_submission_v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "scoring_rule": {
+      "const": "three_axes_0_to_4_sum_12_v1",
+      "default": "three_axes_0_to_4_sum_12_v1",
+      "title": "Scoring Rule",
+      "type": "string"
+    },
+    "submission_id": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Submission Id",
+      "type": "string"
+    },
+    "task_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Task Ids",
+      "type": "array"
+    }
+  },
+  "required": [
+    "submission_id",
+    "run_kind",
+    "experiment_id",
+    "task_ids",
+    "execution",
+    "results",
+    "aggregate",
+    "evidence"
+  ],
+  "title": "ChemCrowSubmission",
+  "type": "object"
+}

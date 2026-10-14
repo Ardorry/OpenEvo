@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -70,12 +71,24 @@ from .reflector_recovery import (
     reconcile_reflector_no_effect_failure,
 )
 from .replacement_ledger import VerifiedReplacementPhaseLedger
+from .reproduction import (
+    check_reproduction_environment,
+    prepare_or_validate_fixtures,
+    verify_publication,
+)
 from .runtime import (
     CORE_MANAGED_CODEX_ROUTE,
     OpenEvoRolloutPort,
     assert_core_managed_codex_config,
     build_task_request,
     s0_config_hash,
+)
+from .submission import (
+    REPRODUCTION_CONTRACT,
+    TASK_MANIFEST_SHA256,
+    aggregate_submissions,
+    export_submission,
+    validate_submission_file,
 )
 from .tasks import extract_safety_demonstrations, extract_scored_tasks, write_jsonl
 from .three_artifact_aggregate import (
@@ -203,6 +216,28 @@ def _assert_authoritative_role_models(role_configs: dict[str, dict[str, Any]]) -
         raise ValueError(
             "authoritative ChemCrow roles must all use frozen gpt-5.5: " + ", ".join(wrong)
         )
+
+
+def _assert_reproduction_contract(
+    *, config: dict[str, Any], manifest_path: Path, selected_task_ids: list[str]
+) -> None:
+    contract = config.get("reproduction_contract")
+    if contract is None:
+        return
+    if not isinstance(contract, dict) or contract != REPRODUCTION_CONTRACT:
+        raise ValueError("reproduction contract differs from ChemCrow full-v8 authority")
+    if (
+        config.get("schema_version") != "chemcrow_experiment_v8"
+        or config.get("artifact_protocol") != _CORE_NATIVE_THREE_ARTIFACT_PROTOCOL
+        or config.get("execution_scope") != "full_g1_g2_pair"
+        or config.get("reflector_prompt_profile") != "core_full_worker_v1"
+        or config.get("feedback_mode") != "F2"
+        or config.get("task_ids") != "all"
+        or config.get("random_seed") != 20260825
+        or selected_task_ids != list(FROZEN_PAPER_TASK_IDS)
+        or file_sha256(manifest_path) != TASK_MANIFEST_SHA256
+    ):
+        raise ValueError("portable full-v8 reproduction configuration differs")
 
 
 def command_extract(args: argparse.Namespace) -> int:
@@ -463,6 +498,11 @@ def command_preflight(args: argparse.Namespace) -> int:
     items = _read_tasks(manifest)
     ids = [item.task_id for item in items]
     selected = ids if config.get("task_ids") == "all" else list(config.get("task_ids", []))
+    _assert_reproduction_contract(
+        config=config,
+        manifest_path=manifest,
+        selected_task_ids=selected,
+    )
     unknown = sorted(set(selected) - set(ids))
     candidate = config["candidate"]
     three_artifact_protocol = _uses_three_artifact_protocol(config)
@@ -808,6 +848,11 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
     selected = [item for item in items if item.task_id in requested]
     if [item.task_id for item in selected] != requested:
         raise ValueError("requested task order differs from sanitized manifest authority")
+    _assert_reproduction_contract(
+        config=config,
+        manifest_path=manifest_path,
+        selected_task_ids=requested,
+    )
     full_selected_task_ids = [item.task_id for item in selected]
     stop_after_task_id = getattr(args, "stop_after_task_id", None)
     selected = _bounded_task_prefix(
@@ -902,6 +947,7 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
             feedback_mode=FeedbackMode(config["feedback_mode"]),
             s0_hash=s0_config_hash(config["candidate"]),
             real_mode=True,
+            random_seed=int(config.get("random_seed", 20260825)),
             ledger_root=ledger_root,
             stop_after_artifact_generation=generation_only,
         )
@@ -1170,6 +1216,123 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
     print(
         json.dumps(
             {"status": aggregate["status"], "task_count": aggregate["task_count"]}, sort_keys=True
+        )
+    )
+    return 0
+
+
+def command_fixture_prepare(args: argparse.Namespace) -> int:
+    payload = prepare_or_validate_fixtures(
+        lock_path=args.lock.resolve(),
+        destination_root=args.destination_root.resolve(),
+        check_only=args.check_only,
+        required_for=frozenset(args.required_for),
+    )
+    rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    if args.output:
+        args.output.resolve().parent.mkdir(parents=True, exist_ok=True)
+        args.output.resolve().write_text(rendered, encoding="utf-8")
+    print(rendered, end="")
+    return 0
+
+
+def command_verify_publication(args: argparse.Namespace) -> int:
+    payload = verify_publication(args.package_root.resolve())
+    rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    if args.output:
+        args.output.resolve().parent.mkdir(parents=True, exist_ok=True)
+        args.output.resolve().write_text(rendered, encoding="utf-8")
+    print(rendered, end="")
+    return 0
+
+
+def command_reproduction_check(args: argparse.Namespace) -> int:
+    payload = check_reproduction_environment(
+        package_root=args.package_root.resolve(),
+        config_path=args.config.resolve(),
+        fixture_lock_path=args.fixture_lock.resolve(),
+        fixture_root=args.fixture_root.resolve(),
+        toolchain_lock_path=args.toolchain_lock.resolve(),
+        runtime_archive=(args.runtime_archive.resolve() if args.runtime_archive else None),
+    )
+    rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    if args.output:
+        args.output.resolve().parent.mkdir(parents=True, exist_ok=True)
+        args.output.resolve().write_text(rendered, encoding="utf-8")
+    print(rendered, end="")
+    return 0 if payload["status"] == "READY" else 2
+
+
+def _iso_datetime(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        raise ValueError("submission timestamps must include a timezone")
+    return parsed
+
+
+def command_export_submission(args: argparse.Namespace) -> int:
+    submission = export_submission(
+        config_path=args.config.resolve(),
+        audit_path=args.audit.resolve(),
+        aggregate_path=args.aggregate.resolve(),
+        repository_root=args.repository_root.resolve(),
+        source_commit=args.source_commit,
+        provider=args.provider,
+        started_at=_iso_datetime(args.started_at),
+        completed_at=_iso_datetime(args.completed_at),
+        run_kind=args.run_kind,
+    )
+    output = args.output.resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps(submission.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    print(
+        json.dumps(
+            {
+                "status": "PASS",
+                "submission_id": submission.submission_id,
+                "task_count": len(submission.results),
+                "model_calls": 0,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def command_validate_submission(args: argparse.Namespace) -> int:
+    submission = validate_submission_file(args.submission.resolve())
+    print(
+        json.dumps(
+            {
+                "status": "PASS",
+                "submission_id": submission.submission_id,
+                "protocol_version": submission.protocol_version,
+                "task_count": len(submission.results),
+                "model_calls": 0,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def command_aggregate_submissions(args: argparse.Namespace) -> int:
+    submissions = [validate_submission_file(path.resolve()) for path in args.submission]
+    payload = aggregate_submissions(submissions)
+    output = args.output.resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(
+        json.dumps(
+            {
+                "status": "PASS",
+                "submission_count": payload["submission_count"],
+                "model_calls": 0,
+            },
+            sort_keys=True,
         )
     )
     return 0
@@ -2004,6 +2167,59 @@ def build_parser() -> argparse.ArgumentParser:
     aggregate.add_argument("--no-model-calls", action="store_true", required=True)
     aggregate.add_argument("--stop-after-task-id")
     aggregate.set_defaults(function=command_aggregate_run)
+    fixtures = commands.add_parser("reproduction-fixtures")
+    fixtures.add_argument("--lock", type=Path, required=True)
+    fixtures.add_argument("--destination-root", type=Path, required=True)
+    fixtures.add_argument("--required-for", action="append", default=[])
+    fixtures.add_argument("--check-only", action="store_true")
+    fixtures.add_argument("--output", type=Path)
+    fixtures.add_argument("--no-model-calls", action="store_true", required=True)
+    fixtures.set_defaults(function=command_fixture_prepare)
+    publication = commands.add_parser("verify-publication")
+    publication.add_argument("--package-root", type=Path, required=True)
+    publication.add_argument("--output", type=Path)
+    publication.add_argument("--no-model-calls", action="store_true", required=True)
+    publication.set_defaults(function=command_verify_publication)
+    reproduction_check = commands.add_parser("reproduction-check")
+    reproduction_check.add_argument("--package-root", type=Path, required=True)
+    reproduction_check.add_argument("--config", type=Path, required=True)
+    reproduction_check.add_argument("--fixture-lock", type=Path, required=True)
+    reproduction_check.add_argument("--fixture-root", type=Path, required=True)
+    reproduction_check.add_argument("--toolchain-lock", type=Path, required=True)
+    reproduction_check.add_argument("--runtime-archive", type=Path)
+    reproduction_check.add_argument("--output", type=Path)
+    reproduction_check.add_argument("--no-model-calls", action="store_true", required=True)
+    reproduction_check.set_defaults(function=command_reproduction_check)
+    export = commands.add_parser("export-submission")
+    export.add_argument("--config", type=Path, required=True)
+    export.add_argument("--audit", type=Path, required=True)
+    export.add_argument("--aggregate", type=Path, required=True)
+    export.add_argument("--repository-root", type=Path, required=True)
+    export.add_argument("--source-commit", required=True)
+    export.add_argument("--provider", required=True)
+    export.add_argument("--started-at", required=True)
+    export.add_argument("--completed-at", required=True)
+    export.add_argument(
+        "--run-kind",
+        choices=("authoritative_original", "third_party_reproduction"),
+        default="third_party_reproduction",
+    )
+    export.add_argument("--output", type=Path, required=True)
+    export.add_argument("--no-model-calls", action="store_true", required=True)
+    export.set_defaults(function=command_export_submission)
+    validate_submission = commands.add_parser("validate-submission")
+    validate_submission.add_argument("--submission", type=Path, required=True)
+    validate_submission.add_argument("--no-model-calls", action="store_true", required=True)
+    validate_submission.set_defaults(function=command_validate_submission)
+    aggregate_submissions_parser = commands.add_parser("aggregate-submissions")
+    aggregate_submissions_parser.add_argument(
+        "--submission", type=Path, action="append", required=True
+    )
+    aggregate_submissions_parser.add_argument("--output", type=Path, required=True)
+    aggregate_submissions_parser.add_argument(
+        "--no-model-calls", action="store_true", required=True
+    )
+    aggregate_submissions_parser.set_defaults(function=command_aggregate_submissions)
     credentials = commands.add_parser("credential-check")
     credentials.add_argument("--output", type=Path, required=True)
     credentials.set_defaults(function=command_credential_check)

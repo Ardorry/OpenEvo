@@ -31,7 +31,7 @@ G1 与产物生成封存于 `full-v8-core-full-worker-g1-artifacts-20260830T1211
 
 已有完成审计为 `PASS`：14 题对应 42 个独立 Reflector jobs、42 个唯一产物，`text_memory`、`skill_bundle`、`agent_system` 各 14 个；共有 42 份 sibling-isolation 证据、14 份 G2 Core 注入凭证和 14 份 reset 凭证，mock/fixture 观测为 0。G1 生成阶段自身没有 G2 调用或 G2 注入，G2 完成计数来自后续 continuation 审计。
 
-这些是现存封存审计的汇总。本次整理核对了输入文件哈希及报告间绑定，未重新执行完整实验审计或科学调用。公开汇总没有逐题轨迹、答案、产物正文、Judge 请求或私人账本，读者无法仅凭本目录独立重建完整审计；哈希是对原文件的标识，不能替代原始证据。此说明针对本次结果包，不宣称仓库旧历史从未包含数据。
+这些是现存封存审计的汇总。本次整理核对了输入文件哈希及报告间绑定，未重新执行完整实验审计或科学调用。公开的 [per_task_evidence.json](per_task_evidence.json) 给出 14 题 run identity、答案哈希、42 个 artifact 哈希与 Reflector 身份、注入/reset 回执和评分关联。它不含逐题轨迹、答案正文、产物正文、Judge 请求或私人账本，读者仍无法仅凭本目录独立重建完整 provider 调用或语义审计；哈希是对原文件的标识，不能替代原始证据。此说明针对本次结果包，不宣称仓库旧历史从未包含数据。
 
 ## GPT-4 Judge 账本与费用
 
@@ -43,6 +43,7 @@ Judge run 为 `paper-evaluator-full-v8-core-full-worker-20260831-r2`，模型为
 
 - [summary.json](summary.json)：白名单导出的审计计数、内部和 GPT-4 aggregate、配对统计及比较口径。
 - [summary_comparisons.csv](summary_comparisons.csv)：原报告的九行汇总比较，保持原始字节内容。
-- [provenance.json](provenance.json)：来源提交、三个 run 身份、来源文件相对路径与 SHA256，以及本目录其他三个文件的哈希。
+- [per_task_evidence.json](per_task_evidence.json)：脱敏逐题证据索引；保留身份、哈希、注入/reset 和评分关联，不含正文与凭据。
+- [provenance.json](provenance.json)：来源提交、三个 run 身份、来源文件相对路径与 SHA256，以及本目录公开文件的哈希。
 
 来源路径以原 `chemcrowrun` 工作区为基准，仅用于来源标识，不表示这些原始文件随本结果包发布。重新开展产物分析需要另外取得封存产物与人工注释输入。

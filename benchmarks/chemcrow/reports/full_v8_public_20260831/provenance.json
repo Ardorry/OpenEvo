@@ -5,25 +5,24 @@
     "historical_repository_scope": "This export makes no assertion that older branch history never contained raw benchmark material.",
     "independent_full_audit_possible_from_public_package_alone": false,
     "omitted_from_new_result_package": [
-      "task_ids arrays",
-      "per-task scores and outcome rows",
-      "task prompts and answers",
+      "task prompts and answer bodies",
       "raw trajectories and tool observations",
       "artifact bodies and semantic-unit inventories",
       "per-item manual annotations",
       "private judge plan contents and requests",
       "raw provider responses, receipts and ledgers"
     ],
+    "per_task_evidence.json": "Sanitized row-level linkage derived from sealed pair results; contains hashes and scores but no prompt, answer, artifact body, tool observation, secret or host path.",
     "raw_details_published_in_this_package": false,
     "raw_source_availability": "Not bundled; continued local availability is not guaranteed.",
-    "summary": "Explicit allowlists for generation audit, continuation audit, internal aggregate and paper evaluator aggregate; existing aggregate statistics and summary comparison rows retained.",
+    "summary": "Allowlisted generation/continuation audits and aggregate statistics, plus a sanitized 14-task identity, artifact, injection, reset and score-linkage index.",
     "summary_comparisons.csv": "Byte-for-byte copy of the existing aggregate-only table."
   },
   "public_files": [
     {
       "relative_path": "README.md",
-      "sha256": "093ce4118f2fdf35bf567592dc509ff579268050929adc56804892d72fcb98a4",
-      "size_bytes": 4691
+      "sha256": "8159f4d2d3f960df3aaa754dc7a76dace2deb1c4b104fee0d82f32aa676f41bb",
+      "size_bytes": 5055
     },
     {
       "relative_path": "summary.json",
@@ -34,6 +33,11 @@
       "relative_path": "summary_comparisons.csv",
       "sha256": "31de80960c1c31707d19568f78e46d071b2ad91ad2392e64c9337076b0a3176a",
       "size_bytes": 1130
+    },
+    {
+      "relative_path": "per_task_evidence.json",
+      "sha256": "e3908ffcccc3240d7d108d07aaf71c679fd5683402ea03226b2501b24db97bb0",
+      "size_bytes": 55383
     }
   ],
   "publication_date": "2026-09-10",

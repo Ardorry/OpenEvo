@@ -1,0 +1,35 @@
+{
+  "schema_version": "chemcrow_reproduction_toolchain_v1",
+  "python": "3.11.15",
+  "uv": "0.12.5",
+  "package_lock": "../uv.lock",
+  "package_lock_sha256": "05ed78b4ef903a51cc3158ce445d7e2f5bf5696d0c2020ad37f3fba40188582f",
+  "package_lock_size_bytes": 122775,
+  "publication_base_commit": "4bfe8f797a2026ebbcd95fb64b6ea32646c827dd",
+  "managed_runtime": {
+    "platform": "linux-amd64",
+    "alias": "openevo/science-runtime:0.1.1",
+    "oci_index_id": "sha256:7a0079f9cb1bce5768cff5bce3d1181811c6a231ad800cac8fb503d66852c81b",
+    "config_id": "sha256:0e5783e7839fe06d2df14d7a431c90f0982ca2099ef33bfa4c9e5933149bf5f2",
+    "archive_name": "openevo-science-runtime-0.1.1-linux-amd64.tar.gz",
+    "archive_sha256": "ad9c5ebd69b5785b94dd52dc077d93ababfa9cf8cbcbf92940f60bee48a91149",
+    "archive_size_bytes": 352236726,
+    "release_tag": "openevo-managed-runtime-assets-v0.1.1",
+    "anonymous_registry_pull": {
+      "checked_at": "2026-10-14",
+      "command_target": "openevo/science-runtime:0.1.1",
+      "verified": false,
+      "result": "registry denied anonymous access and required authentication"
+    },
+    "anonymous_release_archive": {
+      "checked_at": "2026-10-14",
+      "verified": false,
+      "result": "no verified public release URL returned the locked archive"
+    },
+    "equivalent_public_dockerfile": {
+      "verified": false,
+      "result": "the repository contains archive verification/rebuild tooling but no source Dockerfile proven to reproduce the locked OCI identity"
+    }
+  },
+  "rxn_runtime_manifest": "../reports/RXN_RUNTIME_MANIFEST.json"
+}

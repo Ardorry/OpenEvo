@@ -1,6 +1,7 @@
 # OpenEvo ChemCrow Task-Local Integration
 
-Latest publication (2026-09-10): [code and reproduction guide](PUBLICATION.md),
+Latest publication (2026-09-10): [code and publication guide](PUBLICATION.md),
+[fresh-clone reproduction procedure](REPRODUCE.md),
 [full-v8 aggregate results](reports/full_v8_public_20260831/README.md).
 The [evolution artifact archive](artifacts/README.md) contains 84 hash-verified native
 text artifacts from the separate full-v8 and full-v5 replication experiments.
