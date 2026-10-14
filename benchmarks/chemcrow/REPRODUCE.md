@@ -209,6 +209,8 @@ uv run --frozen --project benchmarks/chemcrow openevo-chemcrow aggregate-submiss
 是原始 full-v8 的脱敏逐题索引，连接 run identity、答案哈希、42 个 artifact 哈希、Reflector
 job/run、注入回执、reset 回执和评分。它与公开 aggregate 和完成审计的哈希绑定。公开 84 个
 artifact 可用 `verify-publication` 逐字节验证。
+[`paper_judge_evidence.json`](reports/full_v8_public_20260831/paper_judge_evidence.json)
+提供 42 个校准 GPT-4 Judge 分数及其证据哈希，可独立重算 G1/G2 均值、差值和胜平负。
 
 公开材料仍不含 prompt、答案正文、trajectory、tool observation、provider 原始响应、私有账本和
 人工专家标注，因此第三方可验证已公开字节与关联结构，但不能仅靠公开包重建历史 provider 调用或

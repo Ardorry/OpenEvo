@@ -12,6 +12,8 @@
 
 GPT-4 的 G2−G1 平均差为 −0.143，配对 bootstrap 95% 区间为 [−0.429, +0.143]；Wilcoxon 双侧 p=0.3173，排除平局后的 exact sign-test 双侧 p=0.6250。样本量为 14 且平局较多，不能据此声称显著改善或显著退化。
 
+[paper_judge_evidence.json](paper_judge_evidence.json) 公开了 14 题、三种比较的 42 组 0–10 分数以及 assessment、prompt、Core terminal payload 和 OpenRouter receipt 的哈希。由这些逐题分数可重算 G1 9.357、G2 9.214、差值 −0.143 和 1/10/3 胜平负；文件不含评语、答案、prompt 正文或 provider response。
+
 ## 历史结果与本项目评估
 
 | 比较层 | 前者 | 后者 | 前者−后者 |
@@ -44,6 +46,7 @@ Judge run 为 `paper-evaluator-full-v8-core-full-worker-20260831-r2`，模型为
 - [summary.json](summary.json)：白名单导出的审计计数、内部和 GPT-4 aggregate、配对统计及比较口径。
 - [summary_comparisons.csv](summary_comparisons.csv)：原报告的九行汇总比较，保持原始字节内容。
 - [per_task_evidence.json](per_task_evidence.json)：脱敏逐题证据索引；保留身份、哈希、注入/reset 和评分关联，不含正文与凭据。
+- [paper_judge_evidence.json](paper_judge_evidence.json)：校准 GPT-4 Judge 的脱敏逐题分数与证据哈希，可重算主要比较结论。
 - [provenance.json](provenance.json)：来源提交、三个 run 身份、来源文件相对路径与 SHA256，以及本目录公开文件的哈希。
 
 来源路径以原 `chemcrowrun` 工作区为基准，仅用于来源标识，不表示这些原始文件随本结果包发布。重新开展产物分析需要另外取得封存产物与人工注释输入。
