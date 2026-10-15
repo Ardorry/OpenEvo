@@ -1,0 +1,138 @@
+schema_version: chemcrow_experiment_v8
+experiment_id: ${CHEMCROW_EXPERIMENT_ID}
+artifact_protocol: three_isolated_core_native_v2
+execution_scope: full_g1_g2_pair
+reflector_prompt_profile: core_full_worker_v1
+task_manifest: ../tasks.jsonl
+task_ids: all
+feedback_mode: F2
+random_seed: 20260825
+reproduction_contract:
+  protocol_version: chemcrow_full_v8_reproduction_v1
+  task_manifest_sha256: 8c69883d4a2424ed66f4dea0b9d0a0496129556e998902f278ad36a72d132604
+  task_count: 14
+  random_seed: 20260825
+  expected_paid_model_calls: 112
+  automatic_retries: 0
+  replacement_policy: explicit_verified_authority_only
+  judge_protocol: chemcrow-final-blind-evaluator-v1
+  scoring_rule: three_axes_0_to_4_sum_12_v1
+artifact_separation:
+  normalized_token_ngram_size: 3
+  near_duplicate_jaccard_threshold: 0.90
+  near_duplicate_sequence_threshold: 0.95
+  minimum_tokens_for_near_duplicate_check: 12
+  baseline_answer_sequence_threshold: 0.98
+run_root: ${CHEMCROW_RUN_ROOT}
+cache_root: ${CHEMCROW_CACHE_ROOT}
+ledger_root: ${CHEMCROW_LEDGER_ROOT}
+evolution_store:
+  backend_url: ${OPENEVO_EVOLUTION_BASE_URL}
+  db_path: ${CHEMCROW_EVOLUTION_DB}
+  artifact_root: ${CHEMCROW_EVOLUTION_ARTIFACT_ROOT}
+controlled_chemicals_csv: ${CHEMCROW_CONTROLLED_CSV}
+network_enabled: true
+rollout_base_url: ${OPENEVO_ROLLOUT_BASE_URL}
+candidate:
+  timeout_seconds: 900
+  runtime: &managed_runtime
+    backend: docker
+    profile: managed_science
+    container_user: host
+    image: sha256:7a0079f9cb1bce5768cff5bce3d1181811c6a231ad800cac8fb503d66852c81b
+    prepare:
+      - type: exec
+        command: >-
+          mkdir -p /openevo/session/home/.codex /openevo/session/home/.openevo-codex-readiness /openevo/session/workspace /openevo/session/logs/agent && chmod 700 /openevo/session/home /openevo/session/home/.codex /openevo/session/home/.openevo-codex-readiness /openevo/session/logs /openevo/session/logs/agent
+    env:
+      HOME: /openevo/session/home
+      PATH: /opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    network: host
+    workdir: /openevo/session/workspace
+    gpus: 0
+    allow_internet: true
+    import_path: null
+    kwargs: {}
+  agent:
+    harness: codex
+    import_path: null
+    model_name: gpt-5.5
+    settings: &candidate_settings
+      auth_mode: subscription
+      capture_mode: transcript
+      reasoning_effort: high
+      reasoning_summary: auto
+    env: {}
+    mcp_servers: []
+    skills_path: null
+    custom_shell: null
+  builder: &transcript_builder
+    strategy: agent_transcript
+    config: {}
+  metadata:
+    policy_version: chemcrow-full-v8-reproduction-v1
+    rollout_step: 0
+reflectors:
+  memory:
+    timeout_seconds: 900
+    runtime: *managed_runtime
+    agent: &reflector_agent
+      harness: codex
+      import_path: null
+      model_name: gpt-5.5
+      settings: *candidate_settings
+      env: {}
+      mcp_servers: []
+      skills_path: null
+      custom_shell: null
+    builder: *transcript_builder
+    metadata:
+      policy_version: openevo-core-full-worker-text-memory-reflector-v1
+  skill_bundle:
+    timeout_seconds: 900
+    runtime: *managed_runtime
+    agent: *reflector_agent
+    builder: *transcript_builder
+    metadata:
+      policy_version: openevo-core-full-worker-skill-bundle-reflector-v1
+  agent_system:
+    timeout_seconds: 900
+    runtime: *managed_runtime
+    agent: *reflector_agent
+    builder: *transcript_builder
+    metadata:
+      policy_version: openevo-core-full-worker-agent-system-reflector-v1
+evolution_evaluator:
+  timeout_seconds: 600
+  runtime: *managed_runtime
+  agent:
+    harness: codex
+    import_path: null
+    model_name: gpt-5.5
+    settings:
+      auth_mode: subscription
+      capture_mode: transcript
+      reasoning_effort: medium
+      reasoning_summary: auto
+    env: {}
+    mcp_servers: []
+    skills_path: null
+    custom_shell: null
+  builder: *transcript_builder
+  metadata:
+    policy_version: chemcrow-evolution-evaluator-v1
+final_evaluator:
+  timeout_seconds: 600
+  runtime: *managed_runtime
+  agent:
+    harness: codex
+    import_path: null
+    model_name: gpt-5.5
+    settings: *candidate_settings
+    env: {}
+    mcp_servers: []
+    skills_path: null
+    custom_shell: null
+  builder: *transcript_builder
+  metadata:
+    policy_version: chemcrow-final-blind-evaluator-v1

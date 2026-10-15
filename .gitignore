@@ -135,6 +135,9 @@ docs/*
 !docs/maintainer/
 !docs/maintainer/**
 /site
+/outputs/
+/.reproduction-fixtures/
+/.reproduction-cache/
 
 # Desktop frontend build artifacts
 desktop/node_modules/

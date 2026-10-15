@@ -1,112 +1,35 @@
-# OpenEvo ChemCrow Task-Local Integration
+# ChemCrowRun
 
-Latest publication (2026-09-10): [code and publication guide](PUBLICATION.md),
-[fresh-clone reproduction procedure](REPRODUCE.md),
-[full-v8 aggregate results](reports/full_v8_public_20260831/README.md).
-The [evolution artifact archive](artifacts/README.md) contains 84 hash-verified native
-text artifacts from the separate full-v8 and full-v5 replication experiments.
-The sealed full-v8 experiment covers 14 tasks and 42 independent typed artifacts.
-The calibrated GPT-4 Judge reports G1 9.357/10 and G2 9.214/10;
-the result remains `PROVISIONAL_LLM_JUDGED_RESULT`.
-The legacy/full-v3/full-v4 preparation notes below describe historical protocols,
-not the current completion status. Private runtime inputs are required for historical reanalysis.
+**ChemCrowRun v1.0** is an independent reproduction and evaluation implementation of the
+ChemCrow benchmark on OpenEvo. It runs 14 tasks with isolated G1 → three native Reflectors →
+G2, internal blind evaluation, and a separate calibrated GPT-4 Judge. It is not the original
+ChemCrow agent, an official leaderboard, or an endorsed certification.
 
-This package treats ChemCrow as benchmark tasks plus a chemistry-tool environment. It does
-not instantiate the legacy `ChemCrow` GPT-4/LangChain agent. Candidate, three typed Reflectors,
-evolution evaluator, and final evaluator remain separate OpenEvo runtime/provider roles with
-frozen model settings.
-
-All six Codex roles are admitted only through OpenEvo Core Rollout/Gateway and execute in the
-immutable managed Docker runtime. Host `codex exec`, custom shells, custom runtimes, and caller
-MCP injection fail closed. ChemCrow tools are exposed through a pair-scoped receipt-producing
-REST bridge because the Core subscription contract forbids caller MCP servers.
-
-The mandatory authoritative item protocol is:
-
-`bare S0 -> G1 -> internal feedback -> three isolated native Reflector jobs -> exactly three typed artifacts -> G2 -> seal -> destroy task-local artifacts -> bare-S0 reset`
-
-The three jobs independently produce `text_memory`, `skill_bundle`, and `agent_system`. Their prompts
-are frozen before sibling output exists, and duplicate/near-duplicate outputs fail closed.
-
-No artifact, feedback, trajectory, tool cache, or active Core store is inherited by the next
-item. A pair-scoped tool server may replay only identical canonical tool calls within that
-baseline/evolved pair. Real metrics reject fixture and mock observations.
-
-## Development
+Start with [REPRODUCE.md](REPRODUCE.md). The public entry point is `chemcrowrun`; the
+`openevo-chemcrow` command and Python package remain compatible. Run data live under
+`outputs/chemcrowrun/<run_id>/`; reports and submissions use `chemcrowrun-report.json` and
+`chemcrowrun-submission.json`.
 
 ```bash
-uv sync --python 3.11 --extra dev
-uv run pytest -q
-uv run openevo-chemcrow extract-tasks \
-  --runs-root ../../../vendor/chemcrow-runs \
-  --output tasks.jsonl \
-  --safety-output safety_tasks.jsonl \
-  --audit-output reports/LEAKAGE_AUDIT.json
-uv run openevo-chemcrow preflight \
-  --config configs/preflight.yaml \
-  --no-model-calls
+uv sync --frozen --project benchmarks/chemcrow --python 3.11.15 --extra dev
+uv run --frozen --project benchmarks/chemcrow chemcrowrun --help
 ```
 
-## Sealed paper-compatible evaluator
+The reproduction guide covers public fixtures, the original locked runtime archive, isolated
+services, a real single-task smoke run, a fresh 14-task run, budgeted evaluation, and audited
+exports. Source availability and offline test success do **not** demonstrate successful live
+reproduction. Anonymous runtime asset download and remote fresh-clone acceptance remain pending
+until an approved release is actually published and tested.
 
-The optional paper evaluator is a final-evaluation-only protocol. It reconstructs the publicly
-recoverable ChemCrow EvaluatorGPT semantics (two students, one 0--10 grade per student, task
-completion plus overall chemistry thought-process correctness, strengths, weaknesses,
-justification, and feedback). The authoritative exact prompt was not recovered. Three
-paper-grounded variants were frozen and evaluated against all 14 released historical notebook
-judgments; `PAPER_MINIMAL` was selected under the preregistered rule. The production protocol is
-therefore labeled `CHEMCROW_EVALUATORGPT_PROMPT_CALIBRATED_V2`, meaning historically calibrated
-and compatible, never official or verbatim.
+Historical full-v8 remains the immutable reference experiment. Its identities and file hashes
+are mapped in [legacy-aliases.json](reproduction/legacy-aliases.json); no historical payload or
+hash is renamed or regenerated. [Historical published results](reports/full_v8_public_20260831/README.md)
+report internal blind G1 9.9286/12 and G2 10.2857/12, calibrated GPT-4 G1 9.3571/10 and
+G2 9.2143/10. They do not establish statistically significant G2 improvement and are not new-run
+results. The [artifact archive](artifacts/README.md) holds 84 original text artifacts across two
+experiments, with 42 belonging to full-v8.
 
-Its route is independent from Candidate evolution:
-
-`PaperEvaluatorHarness container -> dedicated OpenEvo Rollout/Gateway -> OpenRouter auth shim -> openai/gpt-4`
-
-The historical notebook answers can be extracted only after a 14-task completed-run audit passes.
-They are never placed in `tasks.jsonl`, Candidate input, Reflector input, evolution feedback, or
-the regular final evaluator. Preflight performs zero model calls:
-
-```bash
-uv run --project benchmarks/chemcrow openevo-chemcrow paper-evaluator-preflight \
-  --config benchmarks/chemcrow/configs/paper_evaluator.full-v4-three-pipeline.yaml \
-  --output /home/lhy-h/work/chemcrowrun/reports/PAPER_EVALUATOR_PREFLIGHT.json \
-  --no-model-calls
-```
-
-The current `full-v3` is stopped and contains 12 legacy single-artifact pairs. It is
-`LEGACY_PROVISIONAL` and cannot be combined with new three-artifact pairs. The authoritative source
-must be a fresh complete `full-v4-three-pipeline`; until it exists this command correctly returns
-`BLOCKED`.
-
-The published human-expert layer is separate again. ChemCrow Source Data Fig. 4 records three
-scores on a 0--10 scale (`Chemically accurate`, `Quality of reasoning`, `Task completed`) from four
-expert chemists. The existing OpenEvo 0--4 three-dimensional judge remains an internal diagnostic,
-not the paper's human score. Once the fresh full-v4 14-task authority is sealed, prepare 42 blinded
-comparisons and four response forms per comparison without a model call:
-
-```bash
-uv run --project benchmarks/chemcrow openevo-chemcrow paper-human-review-prepare \
-  --config benchmarks/chemcrow/configs/paper_human_review.full-v4-three-pipeline.yaml \
-  --output /home/lhy-h/work/chemcrowrun/reports/PAPER_HUMAN_REVIEW_PREPARE.json \
-  --no-model-calls
-```
-
-The condition mapping and randomization secret are permission-0600 and private; public packet IDs
-are opaque and only the secret hash is exposed. Reviewer packets contain final responses only,
-randomized as A/B, with no runtime trajectory or system identity. Four completed independent
-reviews per comparison are required for a paper-comparable human result; fewer reviews are
-exploratory.
-
-Those 12 pairs remain useful historical evidence only. The authoritative experiment is the frozen
-fresh 14-task `full.v4-three-pipeline.yaml`; no task-14-only repair or mixed aggregate is allowed.
-
-Local RXN services use exact image IDs:
-
-```bash
-docker compose -f configs/rxn_sandbox.services.yaml up -d
-curl -fsS http://127.0.0.1:8300/openapi.json
-```
-
-`run` is fail-closed. It requires both `--allow-paid` and
-`CHEMCROW_FULL_RUN_AUTHORIZATION=I_UNDERSTAND_THIS_MAY_INCUR_COST` before any Candidate,
-Reflector, or evaluator dispatch. `resume` never replays an ambiguous claimed phase.
+See also [publication provenance](PUBLICATION.md), [release preparation](docs/RELEASE.md),
+[service architecture](deployment/README.md), and [submission schema](reproduction/submission.schema.json).
+The historical machine protocol identifier `chemcrow_full_v8_reproduction_v1` remains stable;
+ChemCrowRun v1.0 is its public name, not a changed scoring protocol.

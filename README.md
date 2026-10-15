@@ -1,13 +1,15 @@
-# OpenEvo fork · ChemCrow
+# ChemCrowRun
 
-本分支收录 ChemCrow 的任务内演化适配、复现配置、测试和已核验的汇总结果。
+ChemCrowRun 是基于 OpenEvo 的独立 ChemCrow benchmark 复现与评估工程，不代表原始 ChemCrow 官方认证。
+
+[ChemCrowRun 入门](benchmarks/chemcrow/README.md) · [完整复现流程](benchmarks/chemcrow/REPRODUCE.md)
 
 [实验与代码导航](benchmarks/chemcrow/PUBLICATION.md) ·
-[最新 full-v8 结果](benchmarks/chemcrow/reports/full_v8_public_20260831/README.md) ·
+[权威历史结果（legacy full-v8）](benchmarks/chemcrow/reports/full_v8_public_20260831/README.md) ·
 [84 份进化产物](benchmarks/chemcrow/artifacts/README.md) ·
 [全部实验分支](https://github.com/Ardorry/OpenEvo/blob/stable/BENCHMARKS.md)
 
-最新实验包含 14 个任务、42 个独立 Reflector 产物。校准 GPT-4 Judge 的
+历史权威实验包含 14 个任务、42 个独立 Reflector 产物。校准 GPT-4 Judge 的
 G1 / G2 均分为 **9.357 / 9.214（满分 10）**，G2 胜/平/负为 **1 / 10 / 3**。
 这些是项目研究结果，状态为 `PROVISIONAL_LLM_JUDGED_RESULT`；尚未获得人类评审确认。
 

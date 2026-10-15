@@ -1,4 +1,7 @@
-# ChemCrow 发布导航
+# ChemCrowRun 发布导航
+
+正式入口为 [ChemCrowRun v1.0](README.md)；历史身份见 [legacy mapping](reproduction/legacy-aliases.json)。
+以下为 2026-09-10 的历史发布记录，不代表本轮新实验的完成情况。
 
 2026-09-10 整理。最新公开结果来自 2026-08-31 完成的 full-v8 实验，覆盖 14 个任务。
 本次仅整理既有代码和结果，没有重新调用模型或重跑科学实验。

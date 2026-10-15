@@ -172,6 +172,8 @@ def _validate_fixture(repository: Path, locked: dict[str, Any]) -> dict[str, Any
 def _clone_fixture(destination: Path, locked: dict[str, Any]) -> None:
     if destination.exists():
         raise FileExistsError(f"fixture destination already exists: {destination}")
+    if locked.get("requires_git_lfs") and shutil.which("git-lfs") is None:
+        raise ValueError("Git LFS is required; install git-lfs before fetching RXN fixtures")
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(
         tempfile.mkdtemp(prefix=f".{locked['name']}-", dir=os.fspath(destination.parent))
@@ -192,12 +194,18 @@ def _clone_fixture(destination: Path, locked: dict[str, Any]) -> None:
             env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
             timeout=600,
         )
+        if locked.get("requires_git_lfs"):
+            subprocess.run(["git", "-C", os.fspath(temporary), "lfs", "install", "--local"],
+                           check=True, timeout=30)
         subprocess.run(
             ["git", "-C", os.fspath(temporary), "checkout", "--detach", str(locked["commit"])],
             check=True,
             env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
             timeout=900,
         )
+        if locked.get("requires_git_lfs"):
+            subprocess.run(["git", "-C", os.fspath(temporary), "lfs", "pull"],
+                           check=True, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}, timeout=900)
         _validate_fixture(temporary, locked)
         os.rename(temporary, destination)
     except BaseException:
