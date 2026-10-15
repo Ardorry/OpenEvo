@@ -189,6 +189,11 @@ uv run --frozen --project benchmarks/chemcrow python -m openevo_chemcrow.usage \
 The output binds the completion-file inventory and analysis module by SHA-256, excludes raw
 transcript bodies, and refuses to overwrite an existing analysis file.
 
+Submission exports include every verified no-effect replacement from the terminal claim ledger.
+Counts must match the completed-run audit; missing or altered recovery evidence blocks export.
+Each `replacements[].authority_sha256` binds the canonical recovery receipt. These are explicit
+infrastructure recoveries, separate from the protocol's zero automatic retries.
+
 ## Offline checks and acceptance layers
 
 ```bash

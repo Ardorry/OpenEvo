@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_valid
 from .hashing import canonical_sha256, file_sha256
 from .models import ArtifactKind, RubricScores, TaskItem
 from .paper_evaluator import FROZEN_PAPER_TASK_IDS
+from .replacement_ledger import verified_no_effect_attempt_count
 from .three_artifact_aggregate import aggregate_three_artifact_results
 from .three_artifact_models import THREE_ARTIFACT_ORDER, ThreeArtifactPairResult
 
@@ -345,6 +346,72 @@ def _git_identity(repository_root: Path, source_commit: str) -> None:
         raise ValueError("submission export requires a clean source checkout")
 
 
+def collect_submission_replacements(
+    ledger_root: Path, experiment_id: str, task_ids: list[str], audit: dict[str, Any]
+) -> list[SubmissionReplacement]:
+    """Export only verified terminal histories and reconcile them with the PASS audit."""
+    count_fields = {
+        "baseline_candidate": "verified_pre_candidate_no_effect_attempt_count",
+        "baseline_internal_evaluator": "verified_baseline_evaluator_no_effect_attempt_count",
+        "evolved_candidate": "verified_evolved_candidate_no_effect_attempt_count",
+        **{
+            f"reflector_{kind}": "verified_reflector_no_effect_attempt_count"
+            for kind in ("memory", "skill_bundle", "agent_system")
+        },
+    }
+    counts: Counter = Counter()
+    replacements = []
+    for task_id in task_ids:
+        pair_id = f"{experiment_id}--{task_id}"
+        for path in sorted((ledger_root / pair_id).glob("*.json")):
+            claim = json.loads(path.read_text())
+            if "failed_attempts" not in claim:
+                continue
+            phase = path.stem
+            if (
+                phase not in count_fields
+                or claim.get("phase") != phase
+                or claim.get("status") != "terminal"
+                or claim.get("authority_sha256") != canonical_sha256(claim.get("authority"))
+                or claim.get("receipt_sha256") != canonical_sha256(claim.get("receipt"))
+            ):
+                raise ValueError("replacement claim is not sealed with matching authority")
+            counts[count_fields[phase]] += verified_no_effect_attempt_count(
+                claim, pair_id=pair_id, phase=phase
+            )
+            terminal = claim["receipt"]
+            final_id = (
+                terminal.get("run_id")
+                or terminal.get("evaluator_run_id")
+                or terminal.get("reflector_run_id")
+            )
+            attempts = claim["failed_attempts"]
+            for index, attempt in enumerate(attempts):
+                failed_id = attempt["receipt"].get("core_task_id")
+                successor = (
+                    attempts[index + 1]["receipt"].get("core_task_id")
+                    if index + 1 < len(attempts)
+                    else final_id
+                )
+                if (
+                    not all(isinstance(value, str) and value for value in (failed_id, successor))
+                    or failed_id == successor
+                ):
+                    raise ValueError("replacement call identities are absent or ambiguous")
+                replacements.append(
+                    SubmissionReplacement(
+                        task_id=task_id,
+                        phase=phase,
+                        failed_call_id=failed_id,
+                        replacement_call_id=successor,
+                        authority_sha256=attempt["receipt_sha256"],
+                    )
+                )
+    if any(counts[key] != audit.get(key, 0) for key in set(count_fields.values())):
+        raise ValueError("submission replacement counts differ from completed-run audit")
+    return replacements
+
+
 def export_submission(
     *,
     config_path: Path,
@@ -464,6 +531,12 @@ def export_submission(
         completed_at=completed_at,
         random_seed=int(config.get("random_seed", 20260825)),
         model_bindings=bindings,
+        replacements=collect_submission_replacements(
+            _config_path(config_path, config.get("ledger_root", str(run_root / "claims"))),
+            str(config["experiment_id"]),
+            list(FROZEN_PAPER_TASK_IDS),
+            audit,
+        ),
     )
     base_payload: dict[str, Any] = {
         "schema_version": SUBMISSION_SCHEMA_VERSION,
