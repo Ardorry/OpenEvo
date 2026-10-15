@@ -27,10 +27,13 @@ run ID for every independent experiment. Results live in `outputs/chemcrowrun/<r
 
 ## Candidate status
 
-Snapshot: 2026-10-15 04:22 UTC; the next experiment check is scheduled for 08:30 UTC.
+Snapshot: 2026-10-15 08:37 UTC; the next experiment check is scheduled for 10:00 UTC.
 
 The local candidate has passed independent-clone installation, runtime verification, service and
-chemical-tool checks, and one real end-to-end task. A fresh 14-task experiment is in progress;
+chemical-tool checks, and one real end-to-end task. The fresh full experiment sealed seven tasks,
+then stopped at task08's pre-evaluator credential-isolation check. The existing no-effect recovery
+proof passed without changing sealed results or replaying G1; an explicit evaluator replacement
+and continuation have been launched. The 14-task experiment remains incomplete;
 consult the dated acceptance record for its completion and calibration status. Offline tests and
 historical scores do not stand in for new experimental results.
 

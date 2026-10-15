@@ -1,7 +1,7 @@
 {
-  "status": "PARTIAL_ACCEPTANCE_FULL_RUN_NOT_YET_CHECKED",
+  "status": "PARTIAL_ACCEPTANCE_RESUMED_WITH_VERIFIED_NO_EFFECT_AUTHORITY",
   "full_experiment_source_commit": "1bf37ce0b386be4abccbcaed8daf5a5f34d1f54b",
-  "next_experiment_check_utc": "2026-10-15T08:30:00+00:00",
+  "next_experiment_check_utc": "2026-10-15T10:00:00+00:00",
   "experiment_polling": false,
   "evidence": [
     {
@@ -39,6 +39,10 @@
     {
       "filename": "source-and-document-checks.json",
       "sha256": "7bf4cbbdc8083801457becbc5f42d0c42405895b579367fcdb748c27fcd7c276"
+    },
+    {
+      "filename": "task08-evaluator-recovery.json",
+      "sha256": "e1e7139dd5477a12747dfcb88bc1866759e31fea099999229e5699002bfcf0c6"
     }
   ]
 }

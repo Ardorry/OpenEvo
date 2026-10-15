@@ -2,7 +2,7 @@
 
 本记录区分已观察到的真实结果、离线验证和待执行步骤。完整实验正在进行，当前文件为工作快照；最终状态以本目录的验收状态和封存报告为准。ChemCrowRun 是 OpenEvo 中对 ChemCrow benchmark 的复现与评价实现，不代表原作者或官方排行榜认证。
 
-快照时间：2026-10-15 04:22 UTC。根据用户要求，实验自主逐题运行，不轮询；下一次检查为当日 08:30 UTC（北京时间 16:30）。之后仅在 14 题完成、审计和 submission 均通过时，才启动一次预算 USD 12 的 GPT-4 校准。
+快照时间：2026-10-15 08:37 UTC。根据用户要求，实验自主逐题运行，不轮询。08:30 UTC 后检查发现前 7 题已封存，第 8 题内部评价的凭据隔离 canary 校验失败并安全停止。既有 no-effect 恢复证明通过后，已显式替换该评价并续跑。下一次检查为 10:00 UTC（北京时间 18:00）；仅在 14 题完成、审计和 submission 均通过时，才启动一次预算 USD 12 的 GPT-4 校准。
 
 ## A. 工程完成情况
 
@@ -76,10 +76,12 @@
 | 替代模型 managed probe | gpt-5.6-sol，原始容器与凭据隔离不变，真实 Core completion 成功 |
 | Stage A | 服务健康、真实工具调用、Candidate/Reflector managed 路由 PASS；probe 不等于完整 Judge harness 验收 |
 | Stage B | 独立真实 task01，8 次逻辑调用，三路 Reflector、G2 注入、最终盲评全部完成，审计 PASS |
-| Stage C | `reproduction-v1-sol-20261015`，完整 14 题正在执行；最终封存后更新结果 |
+| Stage C | `reproduction-v1-sol-20261015`，前 7 题封存；task08 评价前 canary 失败，经原协议显式恢复后续跑，尚未完成 14 题 |
 | Stage D | PENDING，完整实验审计通过后才能执行 42 次 GPT-4 校准及最终导出 |
 
 单题 smoke：2026-10-15 03:40:02–03:54:28 UTC，865.75 秒；8/8 Core terminal COMPLETED、0 failed、0 自动 retry/replacement。生成源码 `95df3151b0a483694de65f83f9113f072e85ef62`；发现 ledger 路径审计缺陷后，用 `6791d6bbed553520b759e71fb13e50778d79551e` 离线重审。对所有既有 run/claim/completion JSON 做前后哈希验证，科学证据未改动，增加模型调用数为 0；保留初次失败报告。
+
+完整实验首次运行于 04:07:09–05:03:55 UTC，3406.25 秒后停止；当时共有 57 条 COMPLETED 和 1 条 ERROR 终态记录。task08 的 G1 已成功，失败的内部评价没有轨迹记录、没有 trace、没有 workspace result。原有 `recover-baseline-evaluator-no-effect` 命令的全部谓词通过，生成 [恢复凭证](task08-evaluator-recovery.json)，保留原失败 claim 和 completion，前 7 题及既有 completion 的哈希不变。此次离线恢复调用模型 0 次；随后显式安排一次评价替换，而非重跑 Candidate 或放宽隔离校验。基础设施 canary 可能已消耗订阅调用；不能把本次失败说成完全无费用。凭据隔离 canary 未通过是可证实的失败类别，缺乏保留的 canary 细节，不能进一步断言是余额、地区或某个具体校验谓词导致。
 
 新实验六种角色全部显式使用 gpt-5.6-sol，variant 为 `chemcrowrun_v1_model_substitution_v1`。task 顺序、三个独立 Reflector、artifact 注入、超时、零自动重试和评分协议保持不变。订阅服务无法保证服务端权重快照固定，不能宣称与历史 gpt-5.5 完全同条件。
 
