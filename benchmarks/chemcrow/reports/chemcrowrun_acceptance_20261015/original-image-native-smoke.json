@@ -9,7 +9,7 @@
   "credentials_mounted": false,
   "codex_version": "codex-cli 0.144.1",
   "modified_bwrap_version": "bubblewrap built for Codex (ChemCrowRun relink verification)",
-  "modified_bwrap_sha256": "a620e531d886684cb88d451ff0e568f0494ba7664a1b149eac4e84f4dd22fcc5",
+  "modified_bwrap_sha256": "cfb9dc7ba6da7d8a25e03b9f642f4c5e6f3d17d88e1dd0ae556b7fec8ec5a558",
   "code_mode_host": {
     "frames": [
       {

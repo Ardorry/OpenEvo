@@ -31,8 +31,8 @@ is unchanged; `runtime-native-link-materials.tar.gz` is additive. The authoritat
 
 Proposed destination: a GitHub Release in `Ardorry/OpenEvo`, tag **`chemcrowrun-v1.0`**, at the approved
 candidate commit. Title: **ChemCrowRun v1.0 reproduction runtime and source companions**. This tag,
-release and its asset URLs are proposals, not existing public artifacts. The release description
-must link the distribution review and required source/notice companions and disclose the zsh
+release and its asset URLs are proposals, not existing public artifacts. The [prepared release description](RUNTIME_RELEASE_BODY.md)
+links the distribution review and required source/notice companions and discloses the zsh
 GLIBC limitation. The runtime retains its original archive/index/config hashes.
 
 No release or upload has been executed. The final approval request covers only the reviewed source

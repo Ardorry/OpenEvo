@@ -28,6 +28,16 @@
       "bytes": 250
     },
     {
+      "path": "src/base/ieee754.cc",
+      "sha256": "f1ac72f9846e2425a24ef0d3cd705edb6a1f578bd3422e81f23154cd001f17ce",
+      "bytes": 101392
+    },
+    {
+      "path": "src/base/ieee754.h",
+      "sha256": "054329d9a0332179d1d57ac602742f857d45374415ce63ce814315576a7f5d98",
+      "bytes": 3766
+    },
+    {
       "path": "third_party/glibc/LICENSE",
       "sha256": "b634ab5640e258563c536e658cad87080553df6f34f62269a21d554844e58bfe",
       "bytes": 26526

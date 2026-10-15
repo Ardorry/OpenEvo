@@ -83,7 +83,10 @@ and [bubblewrap terms](https://raw.githubusercontent.com/openai/codex/rust-v0.14
 The glibc README's broad `Shipped: yes` is upstream metadata, not this package's link evidence.
 All nine glibc source/header hashes and license hashes are recorded in
 [native-link-verification.json](../reports/chemcrowrun_acceptance_20261015/native-link-verification.json).
-No release-number inference was substituted for the recorded upstream revision.
+No release-number inference was substituted for the recorded upstream revision. Of the nine files,
+**seven** carry LGPL-2.1-or-later headers; `endian.h` and `trig.h` instead carry Chromium BSD
+headers. The fdlibm adaptation retains SunPro **and** V8 BSD modification terms. See the
+[per-file SPDX/hash worksheet](../reports/chemcrowrun_acceptance_20261015/runtime-math-license-disposition.json).
 
 ## Actual linking and executable verification
 
@@ -139,6 +142,8 @@ new Codex/V8 release requires a fresh applicability check.
 See [reproducible commands and material inventory](RUNTIME_LINK_VERIFICATION.md),
 [clean relink/replacement receipt](../reports/chemcrowrun_acceptance_20261015/bubblewrap-clean-relink.json),
 and [original-image smoke receipt](../reports/chemcrowrun_acceptance_20261015/original-image-native-smoke.json).
+The [final release checks](../reports/chemcrowrun_acceptance_20261015/native-review-checks.json)
+verify the asset checksums, historical payload hashes and changed public files.
 The original-image test uses no network, model calls or credentials and verifies Codex version,
 code-mode handshake/session/JavaScript execution/shutdown, sin/cos and ICU number formatting.
 

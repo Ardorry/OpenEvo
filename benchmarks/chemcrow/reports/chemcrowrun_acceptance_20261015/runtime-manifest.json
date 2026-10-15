@@ -23,7 +23,7 @@
   "notice_review": "runtime-distribution-review.json",
   "distribution_review_status": "COMPLETED_WITH_EVIDENCE_SUPPORTED_REDISTRIBUTION",
   "distribution_blocker": null,
-  "last_reviewed_at": "2026-10-15T14:21:59.133916+00:00",
+  "last_reviewed_at": "2026-10-15T14:32:54.948615+00:00",
   "supplementary_sources_and_notices": "runtime-distribution-supplements.tar.gz",
   "bubblewrap_relink_verification": "PASS_CLEAN_RELINK_AND_ORIGINAL_CODEX_REPLACEMENT",
   "bundled_zsh_limitation": "GLIBC_2.38_REQUIRED_IMAGE_HAS_2.36",

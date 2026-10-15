@@ -17,7 +17,7 @@
     },
     {
       "filename": "PUBLICATION_PLAN.md",
-      "sha256": "b9b0a0fcae1554c2f25e1843cc2d3f00ac9cf5d2e249b03dcd69543d20fc6259"
+      "sha256": "888f99ee6ee8d58b03a2584d4a8d3e1a68018178c3028640f7fd1e9aada72298"
     },
     {
       "filename": "benchmark-tests.txt",
@@ -93,15 +93,15 @@
     },
     {
       "filename": "publication-commits.txt",
-      "sha256": "259277e37ec00d9fe89bcbd3c2a7a954bc33d277e0e3b675dde2231531f00b72"
+      "sha256": "9570a2617011e460296b8da43bc6e9815933134eb80ddf3943d53dfe900248b1"
     },
     {
       "filename": "publication-diff-stat.txt",
-      "sha256": "defbc20ac85d4ecbe484919c1e78d264fb09337496520efe376f48548e9daa3e"
+      "sha256": "eea5244c007149f7b64f83cf8caf2d8a004aab2b8d948ebcdbd849117cc7ff41"
     },
     {
       "filename": "publication-git-state.json",
-      "sha256": "5fd482573cb77c2363c6d7b354b80f4e20ddf32f69b80924abaaecc2b836e099"
+      "sha256": "4050eac942afb8323791000c177d4a75689ca0dd7618363ef137031eb1de76d3"
     },
     {
       "filename": "recorded-codex-usage.json",
@@ -109,11 +109,11 @@
     },
     {
       "filename": "release-assets.json",
-      "sha256": "0b06bf186a0d0da5897dff15e190d5a5b5132e729c05287e7d36a32b6199d7cb"
+      "sha256": "6c0ce4a79f30cb94c06fd81f0c3fc945b67ddacac3092aa938451fdb8b75bf43"
     },
     {
       "filename": "runtime-distribution-review.json",
-      "sha256": "2fe03ffeb0e11288e8f9ef4183f1f61d1242a54410609b2d05fdc2014d5a3e29"
+      "sha256": "d19cd76946370849d0537a8dcc809be6e667b0156dc7bafc66a8812d571979e9"
     },
     {
       "filename": "runtime-layer-scan-summary.json",
@@ -125,7 +125,7 @@
     },
     {
       "filename": "runtime-manifest.json",
-      "sha256": "906de5422342506ea92c482d704020f6e5b29a7ecccb004855096794591337ea"
+      "sha256": "ffd810017b3cfd1d7d9b9c6771f5b09b586b5eea0162c9ffcbdd6de353b76c17"
     },
     {
       "filename": "runtime-metadata-scan.json",
@@ -169,19 +169,35 @@
     },
     {
       "filename": "native-link-verification.json",
-      "sha256": "1ef24124822a8e0d6758e31c492307aea047c30ebffb958d06a463c054495e6b"
+      "sha256": "3bcaeb3f0cebec8efcf7a683b9f4230cf2ddbd3d729007f36e9eb2f5d7da0da6"
     },
     {
       "filename": "bubblewrap-clean-relink.json",
-      "sha256": "61af66369454ac4db1117916726e60634d6436259514c5794cc3166e158805a7"
+      "sha256": "eab39418f103d101d0bb73ac2f4c480cf739feb801d2aa1e2ce6b4c3cbe57270"
     },
     {
       "filename": "original-image-native-smoke.json",
-      "sha256": "eb597991f922161e4d87b268af3310c2e76999a7627a655d92ef594e2f638b56"
+      "sha256": "eb9df9a314903d2e29415645473d7088c458d90113f9f5db9b09aebb41123beb"
     },
     {
       "filename": "native-materials-index.json",
       "sha256": "d3c579d27584f3a1015b2d54cf8bbc4c6fa55c9228883c4575ef2a32c638bba6"
+    },
+    {
+      "filename": "native-independent-acceptance.json",
+      "sha256": "2bf2e460ef9d20a4b64c2b65ae650af419d7f72bf400d4f85b782ad0d0c63c01"
+    },
+    {
+      "filename": "runtime-math-license-disposition.json",
+      "sha256": "03a4433daa361ccd55492c7eb92b79cd0277c466c27f70f1bc56794fedfa4136"
+    },
+    {
+      "filename": "native-review-checks.json",
+      "sha256": "b6d3c17b57e9dcfb754feaffa1265d593f4c8732742d52c2ab95f32ea2580cba"
+    },
+    {
+      "filename": "RUNTIME_RELEASE_BODY.md",
+      "sha256": "2be8afd97cea58f5eb8fed340c57ac1e9d4bc995ed9697f61019db4abbbd7174"
     }
   ],
   "runtime_distribution_review": "runtime-distribution-review.json",

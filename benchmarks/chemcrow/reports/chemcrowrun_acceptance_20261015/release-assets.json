@@ -10,7 +10,7 @@
     {
       "filename": "runtime-manifest.json",
       "bytes": 1776,
-      "sha256": "906de5422342506ea92c482d704020f6e5b29a7ecccb004855096794591337ea"
+      "sha256": "ffd810017b3cfd1d7d9b9c6771f5b09b586b5eea0162c9ffcbdd6de353b76c17"
     },
     {
       "filename": "runtime-layer-audit.json",
@@ -144,8 +144,8 @@
     },
     {
       "filename": "runtime-distribution-review.json",
-      "bytes": 6751,
-      "sha256": "2fe03ffeb0e11288e8f9ef4183f1f61d1242a54410609b2d05fdc2014d5a3e29"
+      "bytes": 6919,
+      "sha256": "d19cd76946370849d0537a8dcc809be6e667b0156dc7bafc66a8812d571979e9"
     },
     {
       "filename": "runtime-native-inventory.json",
@@ -189,18 +189,28 @@
     },
     {
       "filename": "native-link-verification.json",
-      "bytes": 65025,
-      "sha256": "1ef24124822a8e0d6758e31c492307aea047c30ebffb958d06a463c054495e6b"
+      "bytes": 65334,
+      "sha256": "3bcaeb3f0cebec8efcf7a683b9f4230cf2ddbd3d729007f36e9eb2f5d7da0da6"
     },
     {
       "filename": "bubblewrap-clean-relink.json",
-      "bytes": 5163,
-      "sha256": "61af66369454ac4db1117916726e60634d6436259514c5794cc3166e158805a7"
+      "bytes": 4945,
+      "sha256": "eab39418f103d101d0bb73ac2f4c480cf739feb801d2aa1e2ce6b4c3cbe57270"
     },
     {
       "filename": "original-image-native-smoke.json",
       "bytes": 2263,
-      "sha256": "eb597991f922161e4d87b268af3310c2e76999a7627a655d92ef594e2f638b56"
+      "sha256": "eb9df9a314903d2e29415645473d7088c458d90113f9f5db9b09aebb41123beb"
+    },
+    {
+      "filename": "native-independent-acceptance.json",
+      "bytes": 2889,
+      "sha256": "2bf2e460ef9d20a4b64c2b65ae650af419d7f72bf400d4f85b782ad0d0c63c01"
+    },
+    {
+      "filename": "runtime-math-license-disposition.json",
+      "bytes": 4880,
+      "sha256": "03a4433daa361ccd55492c7eb92b79cd0277c466c27f70f1bc56794fedfa4136"
     }
   ]
 }

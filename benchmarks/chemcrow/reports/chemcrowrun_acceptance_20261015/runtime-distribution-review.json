@@ -125,7 +125,11 @@
     "glibc_binary_applicability": "EXCLUDED_FROM_PINNED_RELEASE_MATH_PATH",
     "fdlibm_functions_unique_matches_per_binary": 21,
     "full_codex_or_v8_rebuild": "NOT_PERFORMED_NOT_REQUIRED_FOR_EXCLUDED_MATH_PATH",
-    "evidence": "native-link-verification.json"
+    "evidence": "native-link-verification.json",
+    "glibc_source_file_licenses": {
+      "LGPL-2.1-or-later": 7,
+      "BSD-3-Clause": 2
+    }
   },
   "closed_blockers": [
     {
@@ -151,5 +155,6 @@
     "Confirm complete companions and licenses remain available with the binary",
     "Confirm distribution platform/additional terms do not restrict applicable modification, relinking or debugging rights",
     "Review bounded scope and optional zsh GLIBC limitation; do not claim exhaustive SBOM or full rebuilt Codex"
-  ]
+  ],
+  "math_license_disposition": "runtime-math-license-disposition.json"
 }
