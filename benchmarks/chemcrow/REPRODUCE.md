@@ -174,6 +174,21 @@ Per-call token/cost receipts remain in `judge/openrouter-receipts`; subscription
 be inferred from those receipts. Interrupted Judge execution reuses only fully validated sealed
 results from **this** plan; ambiguous attempts fail closed.
 
+Reports also summarize recorded Codex `turn.completed` usage counters. Input, cached input,
+output and reasoning counters are summed independently; overlapping fields must not be added
+again. These observations exclude infrastructure canaries and do not establish the subscription
+account's total usage or dollar cost. To analyze a frozen older run without changing its source
+checkout or regenerating its canonical report, use the newer analysis package separately:
+
+```bash
+uv run --frozen --project benchmarks/chemcrow python -m openevo_chemcrow.usage \
+  --core-completions /absolute/path/frozen-workspace/state/completions \
+  --output /absolute/path/new-analysis/recorded-codex-usage.json --no-model-calls
+```
+
+The output binds the completion-file inventory and analysis module by SHA-256, excludes raw
+transcript bodies, and refuses to overwrite an existing analysis file.
+
 ## Offline checks and acceptance layers
 
 ```bash

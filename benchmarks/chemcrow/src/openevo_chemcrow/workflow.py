@@ -31,6 +31,7 @@ from .paper_evaluator import (
     paper_cost_ceiling,
 )
 from .three_artifact_models import ThreeArtifactPairResult
+from .usage import summarize_codex_usage
 
 
 def invoke(arguments: list[str]) -> None:
@@ -99,7 +100,8 @@ def export_report(root: Path, *, smoke: bool = False) -> dict:
         )
         / 1000,
         "token_count": None,
-        "limitation": "Transcript capture does not expose provider token totals; readiness canaries are not separate terminal records",
+        "observed_codex_usage": summarize_codex_usage(root / "state/completions"),
+        "limitation": "Recorded turn counters are available separately; provider totals including readiness canaries and subscription dollar costs are not known",
     }
     if results:
         g1 = [sum(r.final_evaluation.baseline_scores.model_dump().values()) for r in results]
@@ -116,7 +118,7 @@ def export_report(root: Path, *, smoke: bool = False) -> dict:
     try:
         verify_workspace_binding(root)
         invoke(["aggregate-run", "--config", str(config), "--no-model-calls", *suffix])
-        audit = root / "runs/completed-run.audit.json"
+        audit = root / "runs/completed_run.audit.json"
         invoke(
             [
                 "audit-run",
@@ -315,7 +317,7 @@ def run_judge(root: Path, *, credential_file: Path, budget_usd: float, allow_pai
         task_manifest=str(PACKAGE / "tasks.jsonl"),
         historical_runs_root=str(Path(record["fixture_root"]) / "chemcrow-runs"),
         run_root=str(root / "runs"),
-        completed_run_audit=str(root / "runs/completed-run.audit.json"),
+        completed_run_audit=str(root / "runs/completed_run.audit.json"),
         plan_path=str(judge / "private/plan.json"),
         result_root=str(judge / "results"),
         shim_receipt_root=str(judge / "openrouter-receipts"),

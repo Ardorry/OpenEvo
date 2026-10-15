@@ -187,9 +187,16 @@ def test_service_readiness_rejects_another_workspaces_evolution(tmp_path, monkey
 
 
 @pytest.mark.parametrize(
-    "price,credit,expected", [("0.001", 20, "price/context"), ("0.00003", 1, "available credit")]
+    "price,credit,expected",
+    [
+        ("0.001", 20, "price/context"),
+        ("0.00003", 1, "available credit"),
+        ("0.00003", 20, "preflight reached"),
+    ],
 )
 def test_judge_guard_stops_before_any_paid_request(tmp_path, monkeypatch, price, credit, expected):
+    import json
+
     import httpx
 
     from openevo_chemcrow import workflow
@@ -200,6 +207,25 @@ def test_judge_guard_stops_before_any_paid_request(tmp_path, monkeypatch, price,
     credential = tmp_path / "private.env"
     credential.write_text("# existing process credentials\n")
     credential.chmod(0o600)
+    (tmp_path / "run.json").write_text(
+        json.dumps(
+            {
+                "environment": {"CHEMCROW_EXPERIMENT_ID": "test-experiment"},
+                "run_id": "test",
+                "fixture_root": str(tmp_path / "fixtures"),
+            }
+        )
+    )
+
+    def preflight(arguments):
+        import yaml
+
+        config = yaml.safe_load((tmp_path / "judge/judge.yaml").read_text())
+        assert config["completed_run_audit"] == str(tmp_path / "runs/completed_run.audit.json")
+        assert arguments[0] == "paper-evaluator-preflight"
+        raise ValueError("preflight reached")
+
+    monkeypatch.setattr(workflow, "invoke", preflight)
     requests = []
 
     def handler(request):
