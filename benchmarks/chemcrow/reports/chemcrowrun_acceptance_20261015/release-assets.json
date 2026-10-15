@@ -1,0 +1,120 @@
+{
+  "status": "PREPARED_NOT_APPROVED_FOR_DISTRIBUTION",
+  "assets": [
+    {
+      "filename": "openevo-science-runtime-0.1.1-linux-amd64.tar.gz",
+      "bytes": 352236726,
+      "sha256": "ad9c5ebd69b5785b94dd52dc077d93ababfa9cf8cbcbf92940f60bee48a91149"
+    },
+    {
+      "filename": "runtime-manifest.json",
+      "bytes": 1103,
+      "sha256": "e6e96a31d5cb1912d1d371fa9cfb521bb005571d67a1adf935274bac424de8ba"
+    },
+    {
+      "filename": "runtime-layer-audit.json",
+      "bytes": 59110,
+      "sha256": "b20b83294c62a70329f2674711b94f69403d0781767ab0b26fc742ddc0182000"
+    },
+    {
+      "filename": "debian-packages.tsv",
+      "bytes": 7998,
+      "sha256": "37715197cba0e15d358d76996c6293aa4b0df4beb0f1b5cf73c32aa949709094"
+    },
+    {
+      "filename": "source-package-versions.txt",
+      "bytes": 2070,
+      "sha256": "1440203ba6d8cceddc751d9a0d61d8a1daba252221e3a3384e347a1932d6aaf9"
+    },
+    {
+      "filename": "source-download-status.tsv",
+      "bytes": 2590,
+      "sha256": "9220161b5bdbc914865debe8f149d6d89c44a3b28331976cb79020cbdacb76ba"
+    },
+    {
+      "filename": "debian-corresponding-sources.tar.gz",
+      "bytes": 539384622,
+      "sha256": "28c5b9683b3ffa6e74c5345550fa31d530588c7bf5aace67fe2147d50cf07dae"
+    },
+    {
+      "filename": "bundled-debian-notices.tar.gz",
+      "bytes": 549783,
+      "sha256": "309b735f9562d038ad85c86594971d5de36114703d7830d234dc14bd0ac06703"
+    },
+    {
+      "filename": "bundled-non-debian-notices.tar.gz",
+      "bytes": 74319,
+      "sha256": "c16cc7c038f66b5686479904ece2575af66112540d8b138993814b7ca9d957bf"
+    },
+    {
+      "filename": "Codex-0.144.1-LICENSE",
+      "bytes": 10926,
+      "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
+    },
+    {
+      "filename": "Codex-0.144.1-NOTICE",
+      "bytes": 242,
+      "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+    },
+    {
+      "filename": "Codex-0.144.1-Cargo.lock",
+      "bytes": 364097,
+      "sha256": "175793a40a3147db1fee08fd9db0acc59312c344b3513dd7ee316f5446d8119e"
+    },
+    {
+      "filename": "codex-rust-v0.144.1-source.tar.gz",
+      "bytes": 9533046,
+      "sha256": "c11868501ef0e67c90759deaf2c0933cd07e4bea4f47a47186ee6de046c57ef6"
+    },
+    {
+      "filename": "codex-source-provenance.json",
+      "bytes": 277,
+      "sha256": "704f4cb887a8505ec1bf5ff73a827aaea86eca418a3eb101db32ef23f961143a"
+    },
+    {
+      "filename": "codex-locked-dependencies.tar.gz",
+      "bytes": 240546851,
+      "sha256": "029746f0dd1c211e889a10dfead1058ecb7d08f2e881b2c1a84a169a479c19ae"
+    },
+    {
+      "filename": "codex-additional-notices.tar.gz",
+      "bytes": 382987,
+      "sha256": "8300b9368983abe04ebb90ef8382917bd15b756c0e49019ec3e4fbdd5a6708bc"
+    },
+    {
+      "filename": "codex-registry-license-inventory.json",
+      "bytes": 680837,
+      "sha256": "ae7567279fb366b2565f43b3ba7d295b03df42fc81268ca72865a2796bb3eff4"
+    },
+    {
+      "filename": "codex-git-license-inventory.json",
+      "bytes": 5760,
+      "sha256": "a03b1ae261d42c57f2b1d7fe90c2cdfc3c6d1a425b3b6acd68648ca6d41b1258"
+    },
+    {
+      "filename": "codex-upstream-license-supplements.json",
+      "bytes": 20026,
+      "sha256": "d5dcaf7e9102c4e315591f83844484d53ac0496a33a5602a3db99dec35185e03"
+    },
+    {
+      "filename": "codex-exact-tree-notices.json",
+      "bytes": 8631,
+      "sha256": "62c5c1f270edb9dc2a987f792ddec275a8ff2a99962f7bd146d2844d0556db79"
+    },
+    {
+      "filename": "native-notice-coverage-review.json",
+      "bytes": 5463,
+      "sha256": "7a0938a97f8049f71ed29d8ded4033d4558c18972e4e9f5b888d0831a3800bd5"
+    },
+    {
+      "filename": "non-debian-software-inventory.txt",
+      "bytes": 176,
+      "sha256": "0a3b652c6d6701a73be6cd4479f64ca49fb1053f4dff7a71d83b2e578a1904e9"
+    },
+    {
+      "filename": "notice-provenance.json",
+      "bytes": 410,
+      "sha256": "8d06d61c1a454e51334df645a813246f8fc0a4de8c6a120ae18465243d2a0a8e"
+    }
+  ]
+}

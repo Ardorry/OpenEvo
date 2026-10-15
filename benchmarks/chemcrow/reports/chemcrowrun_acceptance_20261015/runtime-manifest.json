@@ -1,0 +1,22 @@
+{
+  "original_archive": true,
+  "archive_size_bytes": 352236726,
+  "oci_index_id": "sha256:7a0079f9cb1bce5768cff5bce3d1181811c6a231ad800cac8fb503d66852c81b",
+  "config_id": "sha256:0e5783e7839fe06d2df14d7a431c90f0982ca2099ef33bfa4c9e5933149bf5f2",
+  "platform": "linux-amd64",
+  "publication": "PENDING_USER_APPROVAL",
+  "redistribution": "PENDING_LICENSE_OBLIGATION_REVIEW",
+  "sha256": "ad9c5ebd69b5785b94dd52dc077d93ababfa9cf8cbcbf92940f60bee48a91149",
+  "debian_exact_sources_obtained": 104,
+  "debian_exact_sources_required": 104,
+  "secret_scan": "PASS_BOUNDED_ALL_LAYER_SCAN",
+  "codex_license_and_notice": "MATCHING_0.144.1_TAG",
+  "registry_source_archives_checksum_verified": 1193,
+  "exact_git_source_repositories_obtained": 7,
+  "native_binary_dependency_attribution": "INCOMPLETE_NO_EXACT_LINK_SBOM",
+  "additional_exact_tree_notice_review": "codex-exact-tree-notices.json",
+  "prepared_at": "2026-10-15T04:17:59.545071+00:00",
+  "public_anonymous_download": "NOT_EXECUTED_ASSET_UNPUBLISHED",
+  "repository_fresh_clone": "LOCAL_CANDIDATE_ONLY_REMOTE_PENDING",
+  "release_asset_url": null
+}

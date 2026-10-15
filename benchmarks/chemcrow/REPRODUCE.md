@@ -3,6 +3,8 @@
 This guide describes the candidate workflow. Consult the acceptance report for which commands
 have actually passed. The original archive is locally verified; public anonymous asset download
 and post-publication remote-clone acceptance require an approved release and remain PENDING.
+The [2026-10-15 acceptance record](reports/chemcrowrun_acceptance_20261015/ACCEPTANCE.md)
+separates real execution evidence from offline checks and pending steps.
 
 ## Install from an empty directory
 

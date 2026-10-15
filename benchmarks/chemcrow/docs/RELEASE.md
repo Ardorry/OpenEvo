@@ -31,9 +31,18 @@ approved release assets (or approved public images), then anonymously download a
 asset and repeat fresh-clone acceptance from the actual remote commit. A local clone or cached
 archive does not certify public delivery. No force push, historical rewrite, or runtime substitution.
 
-Local review evidence on 2026-10-15: ten OCI layers, 17,480 members, 352 notice/license files;
+Local review evidence on 2026-10-15: ten OCI layers, 17,480 members, 352 filename-matched notice/license candidates;
 no matches in the stated bounded scan. All 104 exact Debian source package versions were
 downloaded and a corresponding-source companion archive prepared. Matching Codex 0.144.1
 LICENSE and NOTICE were obtained from its upstream tag. Complete non-Debian/native dependency
 notice coverage remains a distribution review limitation; the automated scan does not grant
 redistribution clearance. RXN source/weights are fetched, not included in the original runtime.
+
+Matching source and checksum-verified archives for all 1,193 registry dependencies in Codex's
+workspace Cargo.lock and seven exact Git dependency repositories have also been collected. This
+overinclusive inventory is not an exact native binary link SBOM. Source availability and filename
+matches alone do not establish complete attribution coverage. Do not conflate this review with the
+separately passed historical image identity checks.
+
+See the [dated engineering acceptance record](../reports/chemcrowrun_acceptance_20261015/ACCEPTANCE.md)
+for actual execution, model substitution, costs, service isolation and remaining publication gates.

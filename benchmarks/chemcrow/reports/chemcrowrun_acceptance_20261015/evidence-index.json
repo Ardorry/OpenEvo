@@ -1,0 +1,40 @@
+{
+  "status": "PARTIAL_ACCEPTANCE_FULL_RUN_NOT_YET_CHECKED",
+  "full_experiment_source_commit": "1bf37ce0b386be4abccbcaed8daf5a5f34d1f54b",
+  "next_experiment_check_utc": "2026-10-15T08:30:00+00:00",
+  "experiment_polling": false,
+  "evidence": [
+    {
+      "filename": "benchmark-tests.txt",
+      "sha256": "8a95702933dd31f87a1b95fe945cf749419191897a7874b90f79482e967d8ce9"
+    },
+    {
+      "filename": "fixture-verification.json",
+      "sha256": "28985cb9d6a326f81d0001cfc32b3a3df8acaa89d9437e9a6ade4496765c8ac6"
+    },
+    {
+      "filename": "paid-probe-summary.json",
+      "sha256": "d64dba9315d800085a112e5d55074e31e8013a977e8014d1f1cdc5fd79df21ac"
+    },
+    {
+      "filename": "release-assets.json",
+      "sha256": "c04972e4d45535c5f2f760c5fe8e58c834d9def9e962a252e04553b28897674f"
+    },
+    {
+      "filename": "runtime-layer-scan-summary.json",
+      "sha256": "380d3781139b877b700c8c5fa1f3b7df08b2787ea1a26f4e8ffb38d8ebe24d81"
+    },
+    {
+      "filename": "runtime-manifest.json",
+      "sha256": "e6e96a31d5cb1912d1d371fa9cfb521bb005571d67a1adf935274bac424de8ba"
+    },
+    {
+      "filename": "smoke-report.json",
+      "sha256": "86f33fea84ba36f19c79b8cc28d6f0d3b8bd495787a6702b1c89c71c887f2756"
+    },
+    {
+      "filename": "source-and-document-checks.json",
+      "sha256": "7bf4cbbdc8083801457becbc5f42d0c42405895b579367fcdb748c27fcd7c276"
+    }
+  ]
+}
