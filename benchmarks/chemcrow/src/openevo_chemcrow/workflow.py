@@ -27,6 +27,7 @@ from .hashing import file_sha256
 from .paper_evaluator import (
     FROZEN_PAPER_TASK_IDS,
     PAPER_EVALUATOR_AUTHORIZATION,
+    PaperEvaluationResult,
     paper_cost_ceiling,
 )
 from .three_artifact_models import ThreeArtifactPairResult
@@ -179,6 +180,44 @@ def export_report(root: Path, *, smoke: bool = False) -> dict:
         aggregate = root / "judge/results/aggregate.json"
         if aggregate.is_file():
             report["paper_judge"] = json.loads(aggregate.read_text())
+            assessments = [
+                PaperEvaluationResult.model_validate_json(path.read_text())
+                for path in sorted((root / "judge/results").glob("*.result.json"))
+            ]
+            grades = {(r.task_id, r.comparison): r.assessment.student_a.grade for r in assessments}
+            if len(assessments) != 42 or len(grades) != 42:
+                raise ValueError("paper statistics require 42 distinct sealed assessments")
+            report["paper_paired_statistics"] = paired_statistics(
+                [grades[(task, "baseline")] for task in FROZEN_PAPER_TASK_IDS],
+                [grades[(task, "evolved")] for task in FROZEN_PAPER_TASK_IDS],
+            )
+            report["paper_per_task"] = [
+                {
+                    "task_id": task,
+                    "g1": grades[(task, "baseline")],
+                    "g2": grades[(task, "evolved")],
+                }
+                for task in FROZEN_PAPER_TASK_IDS
+            ]
+            report["status"] = "CALIBRATED_EXPERIMENT_PASS"
+        receipts = [
+            json.loads(path.read_text())
+            for path in sorted((root / "judge/openrouter-receipts").glob("*.receipt.json"))
+        ]
+        if receipts:
+            report["judge_accounting"] = {
+                "receipt_count": len(receipts),
+                "terminal_successes": sum(r.get("status") == "terminal_success" for r in receipts),
+                "prompt_tokens": sum(r.get("prompt_tokens", 0) or 0 for r in receipts),
+                "completion_tokens": sum(r.get("completion_tokens", 0) or 0 for r in receipts),
+                "reported_cost_usd": sum(
+                    r.get("openrouter_reported_cost_usd", 0) or 0 for r in receipts
+                ),
+                "list_price_cost_usd": sum(r.get("list_price_cost_usd", 0) or 0 for r in receipts),
+                "receipts_without_reported_cost": sum(
+                    r.get("openrouter_reported_cost_usd") is None for r in receipts
+                ),
+            }
     except (ValueError, RuntimeError, OSError) as exc:
         report["status"] = "BLOCKED"
         report["blocking_reason"] = str(exc)
