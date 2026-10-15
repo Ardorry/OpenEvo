@@ -1,0 +1,187 @@
+{
+  "status": "PASS_CLEAN_MODIFIED_LIBRARY_RELINK",
+  "toolchain": "rustc 1.95.0 (59807616e 2026-04-14)",
+  "source_companions": {
+    "codex-rust-v0.144.1-source.tar.gz": "c11868501ef0e67c90759deaf2c0933cd07e4bea4f47a47186ee6de046c57ef6",
+    "codex-locked-dependencies.tar.gz": "029746f0dd1c211e889a10dfead1058ecb7d08f2e881b2c1a84a169a479c19ae",
+    "runtime-distribution-supplements.tar.gz": "d008203723b3a4c2947beb03d321f9b3e9b5fcfc9513ed6d139b1e58ef79dd79"
+  },
+  "commands": [
+    {
+      "command": [
+        "<toolchain>/bin/rustc",
+        "--version"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "patch",
+        "-p1",
+        "-i",
+        "<work>/unpack/license-followup/relink-check/version-banner.patch"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "make",
+        "-C",
+        "<work>/source/libcap-2.75/libcap",
+        "libcap.a"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "gcc",
+        "-O2",
+        "-D_GNU_SOURCE",
+        "-Dmain=bwrap_main",
+        "-I<work>/source/wrapper",
+        "-I<work>/source/bubblewrap",
+        "-I<work>/source/libcap-2.75/libcap/include",
+        "-I<work>/source/libcap-2.75/libcap/include/uapi",
+        "-c",
+        "<work>/source/bubblewrap/bubblewrap.c",
+        "-o",
+        "<work>/objects/bubblewrap.c.o"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "gcc",
+        "-O2",
+        "-D_GNU_SOURCE",
+        "-Dmain=bwrap_main",
+        "-I<work>/source/wrapper",
+        "-I<work>/source/bubblewrap",
+        "-I<work>/source/libcap-2.75/libcap/include",
+        "-I<work>/source/libcap-2.75/libcap/include/uapi",
+        "-c",
+        "<work>/source/bubblewrap/bind-mount.c",
+        "-o",
+        "<work>/objects/bind-mount.c.o"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "gcc",
+        "-O2",
+        "-D_GNU_SOURCE",
+        "-Dmain=bwrap_main",
+        "-I<work>/source/wrapper",
+        "-I<work>/source/bubblewrap",
+        "-I<work>/source/libcap-2.75/libcap/include",
+        "-I<work>/source/libcap-2.75/libcap/include/uapi",
+        "-c",
+        "<work>/source/bubblewrap/network.c",
+        "-o",
+        "<work>/objects/network.c.o"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "gcc",
+        "-O2",
+        "-D_GNU_SOURCE",
+        "-Dmain=bwrap_main",
+        "-I<work>/source/wrapper",
+        "-I<work>/source/bubblewrap",
+        "-I<work>/source/libcap-2.75/libcap/include",
+        "-I<work>/source/libcap-2.75/libcap/include/uapi",
+        "-c",
+        "<work>/source/bubblewrap/utils.c",
+        "-o",
+        "<work>/objects/utils.c.o"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "ar",
+        "rcs",
+        "<work>/objects/libbwrap_modified.a",
+        "<work>/objects/bubblewrap.c.o",
+        "<work>/objects/bind-mount.c.o",
+        "<work>/objects/network.c.o",
+        "<work>/objects/utils.c.o"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "cargo",
+        "rustc",
+        "--offline",
+        "--locked",
+        "--release",
+        "--bin",
+        "bwrap",
+        "--",
+        "--cfg",
+        "bwrap_available",
+        "-L",
+        "native=<work>/objects",
+        "-L",
+        "native=<work>/source/libcap-2.75/libcap",
+        "-l",
+        "static=bwrap_modified",
+        "-l",
+        "static=cap"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "<work>/target/release/bwrap",
+        "--version"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "<work>/target/release/bwrap",
+        "--help"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "strace",
+        "-f",
+        "-e",
+        "trace=execve",
+        "-o",
+        "<work>/codex-replacement.trace",
+        "<original-codex>",
+        "sandbox",
+        "--",
+        "/bin/sh",
+        "-c",
+        "printf CHEMCROWRUN_REPLACEMENT_OK"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "version_stdout": "bubblewrap built for Codex (ChemCrowRun relink verification)",
+  "binary_sha256": "ece37eac6e3f5bb7e1d9c9b53afb124e4264e8d9377e3f1f651b9096c5ad8015",
+  "original_main_rs_unchanged": true,
+  "scope": "Independent GNU/Linux bwrap build; not a rebuilt Codex or original musl binary",
+  "build_log_sha256": "496ff509a97ab883b4847c1353f842e46ee2f5ac59c53e2a3e0599fd431394bb",
+  "environment": "Empty Cargo cache; allowlisted environment; Cargo offline and locked",
+  "replacement": {
+    "status": "PASS_ORIGINAL_CODEX_USES_MODIFIED_BWRAP",
+    "codex_sha256": "a96f944d1a596dbfb7fdd84f482be5c50e34b04bb371126840d873e4ebf26902",
+    "trace_sha256": "64b81b1a0053257c447abf164c91cbf183809599e208b5e633920725047112b6",
+    "successful_replacement_execs": 4,
+    "successful_sandbox_execs": 2,
+    "stdout": "CHEMCROWRUN_REPLACEMENT_OK",
+    "method": "Supported PATH discovery; bundled digest untouched"
+  },
+  "receipt_sanitization": "Only external local toolchain/original-binary path placeholders; source receipt hash retained",
+  "source_receipt_sha256": "d747f32cfa0b71be56276b9b967980531fe1d5c1f0108c3f7a3f635c23ba42d3"
+}

@@ -35,7 +35,7 @@
 | 平台/环境 | Linux amd64；Debian 12、Python 3.12.13、Codex 0.144.1、Node 22.23.1 |
 | 本地验证 | 历史锁、归档、OCI identity、Docker import、无网络只读启动：PASS；真实实验使用相同原始镜像 |
 | 匿名下载 | PENDING：两个已知 GitHub release tag 的匿名查询均返回 404；不能据此证明上游从未发布，也不能声称匿名下载成功 |
-| 再分发审查 | BLOCKED_V8_LINKABLE_SOURCE_CLOSURE：本轮审查完成，V8 原生链接及 LGPL 重链接材料仍缺闭环证据 |
+| 再分发审查 | EVIDENCE_SUPPORTS_REDISTRIBUTION_WITH_COMPANIONS：实际 Bazel/静态库/ELF 证据及适用的重链接验证通过；尚未获发布批准 |
 
 [全部 layer 扫描](runtime-layer-scan-summary.json)覆盖 10 层、17,480 个成员（含后续删除的文件）；[OCI 元数据扫描](runtime-metadata-scan.json)核验 config/hash、环境变量名称及 19 条 history 元数据。规定范围内未命中敏感文件或高置信度凭据模式。文本扫描有 2 MiB 上限，不是对任意秘密的绝对排除。352 项是文件名匹配的 license/notice 候选，不是 352 份审定许可。
 
@@ -45,9 +45,11 @@
 
 43 个原始文件名候选已逐项记录：14 个取得精确源码树许可文本，2 个含嵌入式授权文本，27 个保留声明、源码及其实际版权/许可头；文件名缺失不自动等于违规。补齐了 V8 的 23 份精确源码树许可和 22 份子模块根许可、pip 内嵌依赖许可、两版 Rust 编译器版权清单。Cargo.lock 仍不是精确 Linux 链接 SBOM。
 
-原镜像发布阻断已明确为 **V8-LGPL-RELINK**：V8 含 LGPL glibc 数学代码，其默认开关与 Clang 有关，当前尚未证明原二进制的实际链接范围及完整可重链接源码闭包。另发现附带 zsh 需要 GLIBC 2.38，不能在镜像的 glibc 2.36 上启动；这是可选组件限制，不改动已完成实验的结果。见[本轮审查结论](runtime-distribution-review.json)、[43 项处置](runtime-license-candidate-dispositions.json)、[重链接验证](bubblewrap-relink-verification.json)与[分发审查说明](../../docs/RUNTIME_DISTRIBUTION_REVIEW.md)。
+后续审查纠正了 GN 默认值无法代表实际 Bazel 发布构建的问题：21 个 fdlibm 数学函数在原始 Codex 和 code-mode-host 中分别获得唯一机器码匹配，实际发布静态库及 Bazel 源码表未包含 glibc 数学路径。fdlibm 为 SunPro 许可，条件编译的 glibc 文件为 LGPL-2.1-or-later，不能混为一谈。整个 10,822,192-byte ICU 数据块与两个原始程序、锁定 crate 及实际 Bazel ICU 版本完全匹配，原始许可已附齐。
 
-较早的 runtime-notice-review.json、runtime-layer-scan-summary.json 和 sealed chemcrowrun-report.json 保留当时状态，未重写；当前再分发决策以新增审查报告和更新后的 runtime-manifest.json 为准。原镜像及 companions 仍不列入可批准的发布资产。
+**V8-LGPL-RELINK 现已关闭**。从空构建目录重链接修改版 bubblewrap，并由原始 Codex 通过正常 PATH 选择它执行沙箱命令，strace 确认成功；原镜像断网只读 smoke 验证了 Codex、code-mode-host/V8/ICU 和修改版 bwrap。没有执行完整 V8/Codex 重建，也不再对被排除的数学路径虚设应用重链接要求。原有 53 MB 许可补充包保持不变，新材料独立附加。见[实际链接证据](native-link-verification.json)、[干净重链接与替换](bubblewrap-clean-relink.json)、[原镜像 smoke](original-image-native-smoke.json)及[独立验收](native-independent-acceptance.json)。
+
+附带 zsh 仍因 GLIBC 2.38 要求不能在镜像 glibc 2.36 上启动，明确保留此可选组件限制。再分发已有技术和许可材料支持，但不代表获得律师法律意见；仍需维护完整源码/notices 同发并取得用户正式发布批准。匿名公开下载与真实远端 clone 验收仍 PENDING。历史审查可在 a2e8c4021 查阅，历史实验 payload 未改动。
 
 上游依据：[Codex LICENSE](https://raw.githubusercontent.com/openai/codex/rust-v0.144.1/LICENSE)、[Codex NOTICE](https://raw.githubusercontent.com/openai/codex/rust-v0.144.1/NOTICE)、[Debian licenses](https://www.debian.org/legal/licenses/)。Fixture 从公开上游获取；未重新分发未发现许可的原始 notebook 仓库或冒称近似镜像为历史镜像。
 
@@ -188,7 +190,7 @@ uv run --frozen --project benchmarks/chemcrow chemcrowrun report \
 | L3 新 14 题内部结果 | PASS：112 成功逻辑调用、42 artifacts、14 pair、审计与标准 schema；两次经验证恢复公开记录 |
 | GPT-4 校准 | PASS：42 有效封存调用；独立账单、配对统计和历史对照 |
 | 全工具可用性 | PARTIAL：WebSearch 缺 SERP_API_KEY，上游错误保留 |
-| 原 runtime 公开再分发 | BLOCKED_V8_LINKABLE_SOURCE_CLOSURE |
+| 原 runtime 再分发材料 | EVIDENCE_SUPPORTS_REDISTRIBUTION_WITH_COMPANIONS；待用户发布批准 |
 | 真实公开下载/远端 fresh clone | PENDING_PUBLICATION_AND_REMOTE_ACCEPTANCE |
 
 ## H. Git 与发布准备
@@ -197,4 +199,4 @@ uv run --frozen --project benchmarks/chemcrow chemcrowrun report \
 
 本地提交沿安全分支追加；[发布计划](PUBLICATION_PLAN.md)列出拟推送目标、PR 标题/正文、资产状态和批准范围。最终提交及 diff 清单见同目录的 publication-git-state.json、publication-commits.txt 和 publication-diff-stat.txt。实际 Git HEAD 的完整值以提交后只读核对为准。
 
-当前可申请批准的是 **源代码、文档、配置/schema 与本次脱敏报告的候选分支 push，以及面向 chemcrow 的正式 PR**。尚待许可适用范围审查的原始镜像及 companions 不在此次拟发布资产范围内；没有请求排行榜提交。原始日志、模型回答、数据库、私有配置和凭据不进入公开提交。
+当前可集中申请批准 **候选分支 push、面向 chemcrow 的未合并正式 PR，以及 release-assets.json 所列原始镜像和完整 source/notice companions 的 GitHub Release**。拟定 tag 为 chemcrowrun-v1.0，实际目标提交与远端状态在发布前复核；不包含 merge、公开 registry 镜像或排行榜提交。原始日志、模型回答、数据库、私有配置和凭据不进入公开提交。

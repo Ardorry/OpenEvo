@@ -1,0 +1,84 @@
+{
+  "status": "PASS_ORIGINAL_IMAGE_NATIVE_SMOKE",
+  "image": "sha256:7a0079f9cb1bce5768cff5bce3d1181811c6a231ad800cac8fb503d66852c81b",
+  "archive_sha256_before": "ad9c5ebd69b5785b94dd52dc077d93ababfa9cf8cbcbf92940f60bee48a91149",
+  "archive_sha256_after": "ad9c5ebd69b5785b94dd52dc077d93ababfa9cf8cbcbf92940f60bee48a91149",
+  "paid_calls": 0,
+  "container_network": "none",
+  "root_filesystem": "read-only",
+  "credentials_mounted": false,
+  "codex_version": "codex-cli 0.144.1",
+  "modified_bwrap_version": "bubblewrap built for Codex (ChemCrowRun relink verification)",
+  "modified_bwrap_sha256": "a620e531d886684cb88d451ff0e568f0494ba7664a1b149eac4e84f4dd22fcc5",
+  "code_mode_host": {
+    "frames": [
+      {
+        "type": "connection/ready",
+        "selectedVersion": 1,
+        "capabilities": []
+      },
+      {
+        "type": "operation/response",
+        "id": 1,
+        "result": {
+          "status": "ok",
+          "value": {
+            "type": "session/ready",
+            "sessionId": "native-smoke"
+          }
+        }
+      },
+      {
+        "type": "operation/response",
+        "id": 2,
+        "result": {
+          "status": "ok",
+          "value": {
+            "type": "execution/started",
+            "cellId": "1"
+          }
+        }
+      },
+      {
+        "type": "execute/initialResponse",
+        "id": 2,
+        "result": {
+          "status": "ok",
+          "value": {
+            "Result": {
+              "cell_id": "1",
+              "content_items": [
+                {
+                  "type": "input_text",
+                  "text": "{\"sin\":0.8414709848078965,\"cos\":0.5403023058681398,\"locale\":\"1.234,5\"}"
+                }
+              ],
+              "error_text": null
+            }
+          }
+        }
+      },
+      {
+        "type": "cell/closed",
+        "sessionId": "native-smoke",
+        "cellId": "1"
+      },
+      {
+        "type": "operation/response",
+        "id": 3,
+        "result": {
+          "status": "ok",
+          "value": {
+            "type": "session/closed",
+            "sessionId": "native-smoke"
+          }
+        }
+      }
+    ],
+    "observed_values": {
+      "sin": 0.8414709848078965,
+      "cos": 0.5403023058681398,
+      "locale": "1.234,5"
+    }
+  }
+}

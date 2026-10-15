@@ -1,6 +1,6 @@
 {
-  "review_status": "COMPLETED_WITH_DISTRIBUTION_BLOCKER",
-  "redistribution_status": "BLOCKED_V8_LINKABLE_SOURCE_CLOSURE",
+  "review_status": "COMPLETED_WITH_EVIDENCE_SUPPORTED_REDISTRIBUTION",
+  "redistribution_status": "EVIDENCE_SUPPORTS_REDISTRIBUTION_WITH_COMPANIONS",
   "publication_status": "NOT_AUTHORIZED",
   "original_archive_sha256": "ad9c5ebd69b5785b94dd52dc077d93ababfa9cf8cbcbf92940f60bee48a91149",
   "no_image_changes": true,
@@ -25,8 +25,9 @@
     "evidence": "codex-npm-origin-verification.json"
   },
   "bwrap_relink": {
-    "status": "PASS_MODIFIED_LIBRARY_RELINK",
-    "evidence": "bubblewrap-relink-verification.json"
+    "status": "PASS_CLEAN_MODIFIED_LIBRARY_RELINK_AND_ORIGINAL_CODEX_REPLACEMENT",
+    "evidence": "bubblewrap-clean-relink.json",
+    "applicability": "LGPL-2.0-or-later code statically linked in separate bwrap wrapper; source, patch, adapter, lock and relink instructions supplied"
   },
   "notice_candidate_review": {
     "count": 43,
@@ -37,7 +38,30 @@
     },
     "evidence": "runtime-license-candidate-dispositions.json"
   },
-  "v8": {
+  "blockers": [],
+  "additional_runtime_limitation": "FAILED: GLIBC_2.38 not found in image Debian 12 glibc 2.36",
+  "excluded_or_overinclusive": {
+    "livekit_soxr_webrtc": "Not reachable from conservative Cargo.lock closure rooted at codex-cli, codex-code-mode-host and codex-bwrap; retained as overinclusive source material, not asserted to be linked.",
+    "other_platform_sources": "Windows/macOS/test dependencies and notices may be retained in source companions without asserting Linux binary applicability."
+  },
+  "ready_materials": [
+    "Original archive and existing Debian/Rust/Git source companions",
+    "Supplementary exact native and pip sources, source headers, upstream notices and compiler copyright documents",
+    "Source integrity and binary-origin receipts, explicit dependency and license choices",
+    "Modified-bwrap relink verification and component obligation matrix",
+    "Additive runtime-native-link-materials.tar.gz; exact Bazel V8 archive/source/data/notices and executable audit scripts"
+  ],
+  "remaining_publication_gates": [
+    "Obtain explicit user approval for source push/PR and exact release assets",
+    "Publish original binary and required sources/notices together with equivalent access",
+    "Verify real anonymous download/import/start and actual remote fresh clone, then isolated paid reproduction"
+  ],
+  "previous_review": {
+    "commit": "a2e8c4021df508a745e9ccbcfa95553f10b7cd17",
+    "review_sha256": "c2b579489570627fbb22771f962774c83a434a98bf37847f3d2c6d12294b39d4",
+    "interpretation": "Prior GN/Clang evidence gap, not a violation finding; superseded by actual Bazel/archive/ELF evidence"
+  },
+  "previous_v8_gn_hypothesis": {
     "crate": "v8-149.2.0",
     "exact_v8_source_commit": "73d19698991616a34a00ca691a6e697dbb69e2ef",
     "exact_tree_notices_obtained": 23,
@@ -91,38 +115,41 @@
       }
     ]
   },
-  "blockers": [
+  "v8": {
+    "crate_version": "149.2.0",
+    "actual_bazel_source": "v8/v8@14.9.207.2",
+    "source_archive_sha256": "b5f95b644e6caea6a5ea578cc498cafd942dc2917de8e30627a6af77996271ee",
+    "license": "BSD-3-Clause; fdlibm SunPro; independent native/data terms retained",
+    "glibc_fork_revision": "4e21c2075193e406a92c0d1cb091a7c804fda4d9",
+    "glibc_source_spdx": "LGPL-2.1-or-later",
+    "glibc_binary_applicability": "EXCLUDED_FROM_PINNED_RELEASE_MATH_PATH",
+    "fdlibm_functions_unique_matches_per_binary": 21,
+    "full_codex_or_v8_rebuild": "NOT_PERFORMED_NOT_REQUIRED_FOR_EXCLUDED_MATH_PATH",
+    "evidence": "native-link-verification.json"
+  },
+  "closed_blockers": [
     {
       "id": "V8-LGPL-RELINK",
-      "finding": "V8 contains glibc LGPL-2.1-or-later math sources; v8_use_libm_trig_functions defaults to is_clang. Packaged executables contain Clang compiler comments, but those comments do not prove the exact linked source set or GN flags. The source/notice collection and bwrap relink test do not establish a complete linkable work for Codex/code-mode-host if this V8 path was compiled.",
-      "status": "UNRESOLVED_EVIDENCE_GAP_NOT_A_VIOLATION_FINDING",
-      "close_with": [
-        "Verify the actual V8 release build flags or linked-object provenance to determine whether the LGPL math path was included; do not infer absence from stripped symbols.",
-        "If included or not excluded, validate and package the complete corresponding source/build inputs or relinkable work for Codex/code-mode-host, with LGPL notices and modification/relink instructions. No identical-byte rebuild is required.",
-        "Finish native/data attribution against that closure, including ICU data; finding root license filenames alone is insufficient."
-      ],
-      "not_permitted_as_shortcut": [
-        "Label the entire image Apache-2.0 because its npm entry declares that license.",
-        "Treat GPL/LGPL OR alternatives as mandatory when a permissive branch is selected.",
-        "Silently remove or replace native files while retaining the historical OCI identity."
+      "status": "CLOSED_BY_ACTUAL_RELEASE_BUILD_AND_BINARY_EVIDENCE",
+      "evidence": [
+        "native-link-verification.json",
+        "bubblewrap-clean-relink.json",
+        "original-image-native-smoke.json"
       ]
     }
   ],
-  "additional_runtime_limitation": "FAILED: GLIBC_2.38 not found in image Debian 12 glibc 2.36",
-  "excluded_or_overinclusive": {
-    "livekit_soxr_webrtc": "Not reachable from conservative Cargo.lock closure rooted at codex-cli, codex-code-mode-host and codex-bwrap; retained as overinclusive source material, not asserted to be linked.",
-    "other_platform_sources": "Windows/macOS/test dependencies and notices may be retained in source companions without asserting Linux binary applicability."
+  "icu": {
+    "data_sha256": "1cf67874b5a87a8363a86fb3f81e3cbbed54d389062dab8fb52308d5cf8c8612",
+    "bytes": 10822192,
+    "actual_bazel_commit": "a86a32e67b8d1384b33f8fa48c83a6079b86f8cd",
+    "crate": "deno_core_icudata-0.77.0",
+    "match": "Whole data blob matches both original binaries, locked crate, actual Bazel ICU source data",
+    "license_sha256": "451167c55c0fa447cc2d5632714f5e3c567fe4f1e1badefab2c1333852198aca"
   },
-  "ready_materials": [
-    "Original archive and existing Debian/Rust/Git source companions",
-    "Supplementary exact native and pip sources, source headers, upstream notices and compiler copyright documents",
-    "Source integrity and binary-origin receipts, explicit dependency and license choices",
-    "Modified-bwrap relink verification and component obligation matrix"
-  ],
-  "remaining_publication_gates": [
-    "Close V8/native source applicability and relink evidence",
-    "Obtain explicit user publication approval",
-    "Publish binary and required source/notice companions together",
-    "Verify real anonymous asset download, import/start and remote fresh clone"
+  "professional_legal_opinion": "NOT_OBTAINED; evidence-supported component review, not legal clearance by counsel",
+  "human_review_items": [
+    "Confirm complete companions and licenses remain available with the binary",
+    "Confirm distribution platform/additional terms do not restrict applicable modification, relinking or debugging rights",
+    "Review bounded scope and optional zsh GLIBC limitation; do not claim exhaustive SBOM or full rebuilt Codex"
   ]
 }

@@ -34,9 +34,9 @@ archive does not certify public delivery. No force push, historical rewrite, or 
 Local review evidence on 2026-10-15: ten OCI layers, 17,480 members, 352 filename-matched notice/license candidates;
 no matches in the stated bounded scan. All 104 exact Debian source package versions were
 downloaded and a corresponding-source companion archive prepared. Matching Codex 0.144.1
-LICENSE and NOTICE were obtained from its upstream tag. Complete non-Debian/native dependency
-notice coverage remains a distribution review limitation; the automated scan does not grant
-redistribution clearance. RXN source/weights are fetched, not included in the original runtime.
+LICENSE and NOTICE were obtained from its upstream tag. The follow-up actual-link audit closes the V8/glibc applicability gap and supplies exact native/data
+notices. Redistribution is evidence-supported with the complete source/notice companions; the
+automated scan alone does not grant legal clearance. RXN source/weights are fetched, not included in the original runtime.
 
 Matching source and checksum-verified archives for all 1,193 registry dependencies in Codex's
 workspace Cargo.lock and seven exact Git dependency repositories have also been collected. This
@@ -48,3 +48,8 @@ See the [dated engineering acceptance record](../reports/chemcrowrun_acceptance_
 for actual execution, model substitution, costs, service isolation and remaining publication gates.
 The [runtime distribution review](RUNTIME_DISTRIBUTION_REVIEW.md) separates missing standalone
 filenames from actual attribution questions and lists the evidence prepared for each component.
+
+The original 53 MB supplement remains unchanged. The additive native-link companion records the
+actual Bazel V8 source/static archive, full ICU data binding, clean LGPL bwrap relink and replacement,
+and read-only original-image smoke. See [repeatable verification](RUNTIME_LINK_VERIFICATION.md).
+External publication still requires user approval; public delivery remains untested.

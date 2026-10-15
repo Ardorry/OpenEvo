@@ -1,6 +1,6 @@
 {
-  "status": "PREPARED_NOT_APPROVED_FOR_DISTRIBUTION",
-  "redistribution": "BLOCKED_V8_LINKABLE_SOURCE_CLOSURE",
+  "status": "PREPARED_AWAITING_USER_PUBLICATION_APPROVAL",
+  "redistribution": "EVIDENCE_SUPPORTS_REDISTRIBUTION_WITH_COMPANIONS",
   "assets": [
     {
       "filename": "openevo-science-runtime-0.1.1-linux-amd64.tar.gz",
@@ -9,8 +9,8 @@
     },
     {
       "filename": "runtime-manifest.json",
-      "bytes": 1661,
-      "sha256": "aaf36620713646202c8873589e173b82838d1c134de7b28383d6dfaec65d6874"
+      "bytes": 1776,
+      "sha256": "906de5422342506ea92c482d704020f6e5b29a7ecccb004855096794591337ea"
     },
     {
       "filename": "runtime-layer-audit.json",
@@ -129,8 +129,8 @@
     },
     {
       "filename": "THIRD_PARTY_NOTICES.md",
-      "bytes": 4627,
-      "sha256": "662556ee0e5bf93343c006dfc63c51e6b30a8fffd685def4ac648bf9a16d1cab"
+      "bytes": 5757,
+      "sha256": "1dff72b922a058bfa215ff8ce16750b77dea120ba7c6deed84d38d3b8e619471"
     },
     {
       "filename": "runtime-distribution-supplements.tar.gz",
@@ -144,8 +144,8 @@
     },
     {
       "filename": "runtime-distribution-review.json",
-      "bytes": 5639,
-      "sha256": "c2b579489570627fbb22771f962774c83a434a98bf37847f3d2c6d12294b39d4"
+      "bytes": 6751,
+      "sha256": "2fe03ffeb0e11288e8f9ef4183f1f61d1242a54410609b2d05fdc2014d5a3e29"
     },
     {
       "filename": "runtime-native-inventory.json",
@@ -176,6 +176,31 @@
       "filename": "bubblewrap-relink-verification.json",
       "bytes": 1999,
       "sha256": "f041b1c2e2eae9bb9b08992f036d80d351407a588d2ca42337123ef0633b7f49"
+    },
+    {
+      "filename": "runtime-native-link-materials.tar.gz",
+      "bytes": 65312493,
+      "sha256": "c546a40ec73d9b8c6d5c72b8a47bc4231708960848314f5642aa07ea3e991a0b"
+    },
+    {
+      "filename": "native-materials-index.json",
+      "bytes": 7481,
+      "sha256": "d3c579d27584f3a1015b2d54cf8bbc4c6fa55c9228883c4575ef2a32c638bba6"
+    },
+    {
+      "filename": "native-link-verification.json",
+      "bytes": 65025,
+      "sha256": "1ef24124822a8e0d6758e31c492307aea047c30ebffb958d06a463c054495e6b"
+    },
+    {
+      "filename": "bubblewrap-clean-relink.json",
+      "bytes": 5163,
+      "sha256": "61af66369454ac4db1117916726e60634d6436259514c5794cc3166e158805a7"
+    },
+    {
+      "filename": "original-image-native-smoke.json",
+      "bytes": 2263,
+      "sha256": "eb597991f922161e4d87b268af3310c2e76999a7627a655d92ef594e2f638b56"
     }
   ]
 }

@@ -9,15 +9,15 @@
   "evidence": [
     {
       "filename": "ACCEPTANCE.md",
-      "sha256": "5ff2878c2435df9f47d1c1937a6ad244dda096bf1f4d58b7bb555f12ced4b4a4"
+      "sha256": "3c1b0c34b4cac54964617f0aac18c044136442bcfbbf6b89ddafb0a4ed4b51e3"
     },
     {
       "filename": "PR_BODY.md",
-      "sha256": "890261605de5eeca1d6978d3ecd5cfcdccd00b2931cb9334112fe996b0c2eff0"
+      "sha256": "58534112105772f5b54a4d5ed53d9d29f0b61150566391e2709a48f022efa3ec"
     },
     {
       "filename": "PUBLICATION_PLAN.md",
-      "sha256": "f68e64606425e5ed492f4aab8c8a167d181132c7b031d7117a815d86f0e85cc2"
+      "sha256": "b9b0a0fcae1554c2f25e1843cc2d3f00ac9cf5d2e249b03dcd69543d20fc6259"
     },
     {
       "filename": "benchmark-tests.txt",
@@ -109,11 +109,11 @@
     },
     {
       "filename": "release-assets.json",
-      "sha256": "068c08145e963307dfb44737ebbcb92dca7e893601f7b31162408b60302c9be2"
+      "sha256": "0b06bf186a0d0da5897dff15e190d5a5b5132e729c05287e7d36a32b6199d7cb"
     },
     {
       "filename": "runtime-distribution-review.json",
-      "sha256": "c2b579489570627fbb22771f962774c83a434a98bf37847f3d2c6d12294b39d4"
+      "sha256": "2fe03ffeb0e11288e8f9ef4183f1f61d1242a54410609b2d05fdc2014d5a3e29"
     },
     {
       "filename": "runtime-layer-scan-summary.json",
@@ -125,7 +125,7 @@
     },
     {
       "filename": "runtime-manifest.json",
-      "sha256": "aaf36620713646202c8873589e173b82838d1c134de7b28383d6dfaec65d6874"
+      "sha256": "906de5422342506ea92c482d704020f6e5b29a7ecccb004855096794591337ea"
     },
     {
       "filename": "runtime-metadata-scan.json",
@@ -166,6 +166,22 @@
     {
       "filename": "tool-observation-audit.json",
       "sha256": "5f28a10ce90d1629ca3fb071d4d40a0559946cc4fc1a03c103f10edf9a04c16c"
+    },
+    {
+      "filename": "native-link-verification.json",
+      "sha256": "1ef24124822a8e0d6758e31c492307aea047c30ebffb958d06a463c054495e6b"
+    },
+    {
+      "filename": "bubblewrap-clean-relink.json",
+      "sha256": "61af66369454ac4db1117916726e60634d6436259514c5794cc3166e158805a7"
+    },
+    {
+      "filename": "original-image-native-smoke.json",
+      "sha256": "eb597991f922161e4d87b268af3310c2e76999a7627a655d92ef594e2f638b56"
+    },
+    {
+      "filename": "native-materials-index.json",
+      "sha256": "d3c579d27584f3a1015b2d54cf8bbc4c6fa55c9228883c4575ef2a32c638bba6"
     }
   ],
   "runtime_distribution_review": "runtime-distribution-review.json",
