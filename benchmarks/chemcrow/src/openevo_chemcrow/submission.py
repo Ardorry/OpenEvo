@@ -441,6 +441,14 @@ def export_submission(
             )
         )
     role_configs = _role_configs(config)
+    substitution = (
+        ModelSubstitution.model_validate(config["model_substitution"])
+        if config.get("model_substitution") is not None
+        else None
+    )
+    expected_model = substitution.actual_model if substitution else "gpt-5.5"
+    if any(role["agent"]["model_name"] != expected_model for role in role_configs.values()):
+        raise ValueError("submission export requires an explicit matching model condition")
     bindings = {
         role: SubmissionModelBinding(
             provider=provider,
