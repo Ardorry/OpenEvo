@@ -252,3 +252,22 @@ def test_audit_cli_uses_declared_isolated_ledger(tmp_path, monkeypatch):
     )
     assert cli.command_audit_run(args) == 0
     assert observed["ledger_root"] == root / "claims"
+
+
+def test_post_run_comparison_requires_complete_standardized_evidence(tmp_path):
+    from openevo_chemcrow.chemcrowrun import PACKAGE
+    from openevo_chemcrow.comparison import compare_submission
+
+    example = PACKAGE / "reproduction/examples/FORMAT_ONLY.synthetic-submission.json"
+    comparison = compare_submission(example)
+    stats = comparison["internal_blind_12_point"]
+    assert len(stats["per_task"]) == 14
+    assert stats["new_g1_g2"]["n"] == 14
+    assert comparison["paper_10_point"] == "PENDING"
+    assert comparison["raw_answers_included"] is False
+    with pytest.raises(ValueError, match="42 distinct sealed"):
+        compare_submission(example, paper_results=tmp_path)
+    incomplete = tmp_path / "invalid-submission.json"
+    incomplete.write_text("{}")
+    with pytest.raises(ValueError):
+        compare_submission(incomplete)

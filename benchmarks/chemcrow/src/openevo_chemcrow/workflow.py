@@ -218,6 +218,14 @@ def export_report(root: Path, *, smoke: bool = False) -> dict:
                     r.get("openrouter_reported_cost_usd") is None for r in receipts
                 ),
             }
+        if not smoke:
+            from .comparison import compare_submission
+
+            comparison = compare_submission(
+                root / "chemcrowrun-submission.json",
+                paper_results=root / "judge/results" if aggregate.is_file() else None,
+            )
+            write_json(root / "chemcrowrun-comparison.json", comparison)
     except (ValueError, RuntimeError, OSError) as exc:
         report["status"] = "BLOCKED"
         report["blocking_reason"] = str(exc)

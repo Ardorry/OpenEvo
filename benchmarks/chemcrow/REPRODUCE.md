@@ -131,6 +131,12 @@ aggregation, completed-run audit, submission export, schema validation, per-task
 10,000-resample bootstrap confidence intervals and an exact two-sided sign-flip test. Raw answers
 stay private. `chemcrowrun-report.json` explicitly reports missing stages; a report with missing
 pairs is BLOCKED. Only a complete 14-task PASS audit can produce `chemcrowrun-submission.json`.
+The report also writes `chemcrowrun-comparison.json`, with per-task old/new G1/G2 differences,
+paired bootstrap intervals and sign-flip tests. Cross-run tests are exploratory, unadjusted
+comparisons; model or service changes prevent causal claims. Comparison reads the immutable public
+full-v8 scores only after submission validation. Optional calibrated comparisons require all 42
+sealed Judge results. `chemcrowrun compare --submission <file> --paper-results <directory>
+--output <file>` reproduces the same offline comparison.
 
 The immutable task order is 01–10,12–15, seed 20260825. Each task starts bare S0, freezes three
 independent Reflector inputs, creates exactly one memory/skill/system artifact, injects them into

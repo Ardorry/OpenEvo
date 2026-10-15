@@ -456,6 +456,7 @@ def main(argv: list[str] | None = None) -> None:
         "experiment",
         "report",
         "judge",
+        "compare",
         "_evolution",
     }
     if argv and argv[0] not in custom and argv[0] not in {"-h", "--help"}:
@@ -498,6 +499,12 @@ def main(argv: list[str] | None = None) -> None:
     runtime.add_argument("--cache", type=Path, default=Path(".reproduction-cache/runtime"))
     runtime.add_argument("--verify-only", action="store_true")
     runtime.add_argument("--output", type=Path)
+    comparison = commands.add_parser(
+        "compare", help="Compare a completed submission with immutable historical scores"
+    )
+    comparison.add_argument("--submission", type=Path, required=True)
+    comparison.add_argument("--paper-results", type=Path)
+    comparison.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     if args.command == "init":
         print(
@@ -510,6 +517,12 @@ def main(argv: list[str] | None = None) -> None:
                 substitution_reason=args.substitution_reason,
             )
         )
+    elif args.command == "compare":
+        from .comparison import compare_submission
+
+        report = compare_submission(args.submission, paper_results=args.paper_results)
+        write_json(args.output, report)
+        print(json.dumps({"status": "COMPARISON_EXPORTED", "model_calls": 0}))
     elif args.command == "runtime":
         from .runtime_assets import install_runtime
 
