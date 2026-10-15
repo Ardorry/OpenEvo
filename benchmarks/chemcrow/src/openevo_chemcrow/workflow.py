@@ -15,7 +15,14 @@ from pathlib import Path
 import httpx
 import yaml
 
-from .chemcrowrun import PACKAGE, REPOSITORY, environment, paired_statistics, write_json
+from .chemcrowrun import (
+    PACKAGE,
+    REPOSITORY,
+    environment,
+    paired_statistics,
+    verify_workspace_binding,
+    write_json,
+)
 from .hashing import file_sha256
 from .paper_evaluator import (
     FROZEN_PAPER_TASK_IDS,
@@ -56,14 +63,13 @@ def export_report(root: Path, *, smoke: bool = False) -> dict:
         "schema_version": "chemcrowrun_report_v1",
         "display_protocol": "ChemCrowRun v1.0",
         "protocol_identity": record["protocol_identity"],
+        "model_substitution": record.get("model_substitution"),
         "run_id": record["run_id"],
         "scope": "independent_single_task_smoke" if smoke else "full_14_task_reproduction",
         "status": "BLOCKED",
         "completed_tasks": len(results),
         "missing_tasks": missing,
-        "source_commit": subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=REPOSITORY, text=True
-        ).strip(),
+        "source_commit": record.get("source_commit"),
         "config_sha256": file_sha256(config),
         "audit": "PENDING",
         "submission": "NOT_ELIGIBLE_SMOKE" if smoke else "PENDING",
@@ -71,8 +77,28 @@ def export_report(root: Path, *, smoke: bool = False) -> dict:
         "historical_results_reused": False,
         "subscription_cost_usd": None,
         "cost_limitation": "Subscription cost is not attributable from API credits. Judge receipts are separate.",
-        "server_model_snapshot": "Not guaranteed pinned by the subscription service; actual request model gpt-5.5",
+        "server_model_snapshot": "Not guaranteed pinned by the subscription service",
+        "requested_model": record["environment"]["OPENEVO_CANDIDATE_MODEL"],
         "generated_at": datetime.now(UTC).isoformat(),
+        "execution_attempts": [
+            json.loads(path.read_text())
+            for path in sorted((root / "logs").glob("execution-*.json"))
+        ],
+    }
+    completions = [
+        json.loads(path.read_text())
+        for path in sorted((root / "state/completions").glob("task_*/ses_*.json"))
+    ]
+    report["core_call_accounting"] = {
+        "terminal_records": len(completions),
+        "completed": sum(c.get("status") == "COMPLETED" for c in completions),
+        "failed": sum(c.get("status") != "COMPLETED" for c in completions),
+        "total_core_run_seconds": sum(
+            c.get("timing", {}).get("run_ms", 0) or 0 for c in completions
+        )
+        / 1000,
+        "token_count": None,
+        "limitation": "Transcript capture does not expose provider token totals; readiness canaries are not separate terminal records",
     }
     if results:
         g1 = [sum(r.final_evaluation.baseline_scores.model_dump().values()) for r in results]
@@ -87,6 +113,7 @@ def export_report(root: Path, *, smoke: bool = False) -> dict:
         return report
     suffix = ["--stop-after-task-id", ids[-1]] if smoke else []
     try:
+        verify_workspace_binding(root)
         invoke(["aggregate-run", "--config", str(config), "--no-model-calls", *suffix])
         audit = root / "runs/completed-run.audit.json"
         invoke(
@@ -187,6 +214,7 @@ def run_judge(root: Path, *, credential_file: Path, budget_usd: float, allow_pai
     if not allow_paid:
         raise PermissionError("Judge requires --allow-paid")
     root = root.resolve()
+    verify_workspace_binding(root)
     load_private_environment(credential_file)
     ceiling = paper_cost_ceiling()["list_price_ceiling_usd_total"]
     if not ceiling <= budget_usd <= 15:

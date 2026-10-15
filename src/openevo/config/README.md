@@ -35,7 +35,6 @@ falls back to `rollout.public_url` when omitted.
 | `host` | str | `0.0.0.0` |
 | `port` | int | `8080` |
 | `public_url` | str | derived from `host:port` |
-| `session_base_dir` | str? | `None`; optional private session and recovery-journal root |
 | `save_dir` | str? | `None` (no result persistence) |
 | `dispatch_poll_interval_seconds` | float | `1.0` |
 | `callback_grace_seconds` | float | `120.0` |
@@ -57,6 +56,7 @@ falls back to `rollout.public_url` when omitted.
 | field | type | default |
 |---|---|---|
 | `id` | str | hostname (must be unique) |
+| `session_base_dir` | str? | `None`; optional private session and recovery-journal root |
 | `host` / `port` | str / int | `0.0.0.0` / `8081` |
 | `public_url` | str | derived from `host:port` |
 | `model_served` | str | `""` |

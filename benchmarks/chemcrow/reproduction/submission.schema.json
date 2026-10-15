@@ -9,6 +9,41 @@
       "title": "ArtifactKind",
       "type": "string"
     },
+    "ModelSubstitution": {
+      "additionalProperties": false,
+      "properties": {
+        "actual_model": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Actual Model",
+          "type": "string"
+        },
+        "historical_model": {
+          "const": "gpt-5.5",
+          "default": "gpt-5.5",
+          "title": "Historical Model",
+          "type": "string"
+        },
+        "reason": {
+          "maxLength": 1000,
+          "minLength": 10,
+          "title": "Reason",
+          "type": "string"
+        },
+        "variant": {
+          "const": "chemcrowrun_v1_model_substitution_v1",
+          "default": "chemcrowrun_v1_model_substitution_v1",
+          "title": "Variant",
+          "type": "string"
+        }
+      },
+      "required": [
+        "actual_model",
+        "reason"
+      ],
+      "title": "ModelSubstitution",
+      "type": "object"
+    },
     "RubricScores": {
       "additionalProperties": false,
       "properties": {
@@ -268,6 +303,17 @@
           },
           "title": "Model Bindings",
           "type": "object"
+        },
+        "model_substitution": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelSubstitution"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "random_seed": {
           "title": "Random Seed",

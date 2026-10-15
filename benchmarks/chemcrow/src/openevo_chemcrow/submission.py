@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 from .hashing import canonical_sha256, file_sha256
 from .models import ArtifactKind, RubricScores, TaskItem
@@ -57,6 +57,21 @@ class SubmissionModelBinding(_StrictModel):
     capture_mode: Literal["transcript"] = "transcript"
 
 
+class ModelSubstitution(_StrictModel):
+    variant: Literal["chemcrowrun_v1_model_substitution_v1"] = (
+        "chemcrowrun_v1_model_substitution_v1"
+    )
+    historical_model: Literal["gpt-5.5"] = "gpt-5.5"
+    actual_model: str = Field(min_length=1, max_length=256)
+    reason: str = Field(min_length=10, max_length=1000)
+
+    @model_validator(mode="after")
+    def _different_model(self) -> ModelSubstitution:
+        if self.actual_model == self.historical_model:
+            raise ValueError("model substitution must identify a different model")
+        return self
+
+
 class SubmissionExecution(_StrictModel):
     source_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
     config_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -65,8 +80,16 @@ class SubmissionExecution(_StrictModel):
     completed_at: datetime
     random_seed: int
     model_bindings: dict[str, SubmissionModelBinding]
+    model_substitution: ModelSubstitution | None = None
     automatic_retry_count: Literal[0] = 0
     replacements: list[SubmissionReplacement] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler):
+        payload = handler(self)
+        if self.model_substitution is None:
+            payload.pop("model_substitution", None)
+        return payload
 
     @model_validator(mode="after")
     def _validate_execution(self) -> SubmissionExecution:
@@ -76,6 +99,11 @@ class SubmissionExecution(_StrictModel):
             raise ValueError("submission completion precedes start")
         if set(self.model_bindings) != REQUIRED_MODEL_ROLES:
             raise ValueError("submission model roles differ from protocol")
+        if self.model_substitution and any(
+            binding.model != self.model_substitution.actual_model
+            for binding in self.model_bindings.values()
+        ):
+            raise ValueError("model bindings differ from declared substitution")
         return self
 
 
@@ -180,18 +208,16 @@ class ChemCrowSubmission(_StrictModel):
     judge_protocol: Literal["chemcrow-final-blind-evaluator-v1"] = (
         "chemcrow-final-blind-evaluator-v1"
     )
-    scoring_rule: Literal["three_axes_0_to_4_sum_12_v1"] = (
-        "three_axes_0_to_4_sum_12_v1"
-    )
+    scoring_rule: Literal["three_axes_0_to_4_sum_12_v1"] = "three_axes_0_to_4_sum_12_v1"
     results: list[SubmissionTaskResult]
     aggregate: SubmissionAggregate
     evidence: SubmissionEvidence
-    human_review_status: Literal["PROVISIONAL_NOT_COMPLETED"] = (
-        "PROVISIONAL_NOT_COMPLETED"
-    )
+    human_review_status: Literal["PROVISIONAL_NOT_COMPLETED"] = "PROVISIONAL_NOT_COMPLETED"
 
     @model_validator(mode="after")
     def _validate_submission(self) -> ChemCrowSubmission:
+        if self.run_kind == "authoritative_original" and self.execution.model_substitution:
+            raise ValueError("a model substitution cannot be the authoritative original")
         expected = list(FROZEN_PAPER_TASK_IDS)
         if self.task_ids != expected or [item.task_id for item in self.results] != expected:
             raise ValueError("submission task IDs or order differ from frozen authority")
@@ -204,7 +230,9 @@ class ChemCrowSubmission(_StrictModel):
         ]
         if len(set(run_ids)) != 28:
             raise ValueError("submission Candidate run IDs are not globally unique")
-        artifact_ids = [artifact.artifact_id for item in self.results for artifact in item.artifacts]
+        artifact_ids = [
+            artifact.artifact_id for item in self.results for artifact in item.artifacts
+        ]
         if len(set(artifact_ids)) != 42:
             raise ValueError("submission artifact IDs are not globally unique")
         expected_aggregate = aggregate_submission_results(self.results)
@@ -239,7 +267,10 @@ def aggregate_submission_results(results: list[SubmissionTaskResult]) -> Submiss
         ),
         mean_delta=SubmissionScoreDelta(
             chemical_correctness=mean(
-                [e.chemical_correctness - b.chemical_correctness for b, e in zip(baseline, evolved)]
+                [
+                    e.chemical_correctness - b.chemical_correctness
+                    for b, e in zip(baseline, evolved)
+                ]
             ),
             reasoning_quality=mean(
                 [e.reasoning_quality - b.reasoning_quality for b, e in zip(baseline, evolved)]
@@ -418,6 +449,7 @@ def export_submission(
         for role, role_config in role_configs.items()
     }
     execution = SubmissionExecution(
+        model_substitution=config.get("model_substitution"),
         source_commit=source_commit,
         config_sha256=file_sha256(config_path),
         started_at=started_at,
@@ -458,7 +490,21 @@ def aggregate_submissions(submissions: list[ChemCrowSubmission]) -> dict[str, An
     if len({item.submission_id for item in submissions}) != len(submissions):
         raise ValueError("duplicate submission ID")
     compatibility = {
-        (item.schema_version, item.protocol_version, tuple(item.task_ids), item.judge_protocol)
+        (
+            item.schema_version,
+            item.protocol_version,
+            tuple(item.task_ids),
+            item.judge_protocol,
+            tuple(
+                sorted(
+                    (role, binding.provider, binding.model)
+                    for role, binding in item.execution.model_bindings.items()
+                )
+            ),
+            item.execution.model_substitution.variant
+            if item.execution.model_substitution
+            else None,
+        )
         for item in submissions
     }
     if len(compatibility) != 1:

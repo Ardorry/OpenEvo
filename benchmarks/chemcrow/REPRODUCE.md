@@ -59,8 +59,13 @@ it aside for diagnosis, then download again. No approximate rebuild is labeled a
 
 Configure your own legitimate Codex subscription authentication in `~/.codex/auth.json` using the
 provider's login mechanism. Core stages only the required credential into each managed container;
-it does not mount your working directory, chat history or benchmark fixtures. All six roles use
-`gpt-5.5` with transcript capture. The host's proxy and Docker Desktop's network may differ: verify
+it does not mount your working directory, chat history or benchmark fixtures. The historical configuration requests `gpt-5.5` for all six roles with transcript capture.
+On 2026-10-15 the current subscription catalog did not offer that model. A bounded real Core
+probe passed with `gpt-5.6-sol`. For an explicit substitution, add both flags to each `init` command:
+`--model gpt-5.6-sol --substitution-reason "Historical gpt-5.5 absent from current subscription catalog"`.
+This records `chemcrowrun_v1_model_substitution_v1` in configuration, reports and submission;
+all six roles change together. The original protocol remains available and unchanged.
+Substituted models are compared descriptively but cannot be pooled as identical model conditions. The host's proxy and Docker Desktop's network may differ: verify
 both. The GPT-4 shim requires `--use-environment-proxy`; setting only `HTTPS_PROXY` on a process
 that disables environment proxy support does not route that process through it. Both lowercase
 `https_proxy` and uppercase `HTTPS_PROXY` are recognized.
@@ -118,7 +123,8 @@ uv run --frozen --project benchmarks/chemcrow chemcrowrun report \
   --workspace outputs/chemcrowrun/reproduction-001
 ```
 
-The committed checkout must remain clean while generating the formal submission. This performs
+Every workspace pins the clean source commit, configuration, topology and environment identity.
+Keep that checkout unchanged throughout generation and export; use a new workspace after changes. This performs
 aggregation, completed-run audit, submission export, schema validation, per-task paired analysis,
 10,000-resample bootstrap confidence intervals and an exact two-sided sign-flip test. Raw answers
 stay private. `chemcrowrun-report.json` explicitly reports missing stages; a report with missing

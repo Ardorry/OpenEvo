@@ -204,17 +204,26 @@ def _bounded_task_prefix(
     return selected[: matches[0] + 1]
 
 
-def _assert_authoritative_role_models(role_configs: dict[str, dict[str, Any]]) -> None:
+def _assert_authoritative_role_models(
+    role_configs: dict[str, dict[str, Any]], substitution: dict[str, Any] | None = None
+) -> None:
+    from .submission import ModelSubstitution
+
+    expected = (
+        ModelSubstitution.model_validate(substitution).actual_model
+        if substitution is not None
+        else _AUTHORITATIVE_MODEL
+    )
     observed: dict[str, str] = {}
     for role, role_config in role_configs.items():
         agent = role_config.get("agent")
         if not isinstance(agent, dict):
             raise TypeError(f"{role} has no closed agent configuration")
         observed[role] = str(agent.get("model_name") or "")
-    wrong = sorted(role for role, model in observed.items() if model != _AUTHORITATIVE_MODEL)
+    wrong = sorted(role for role, model in observed.items() if model != expected)
     if wrong:
         raise ValueError(
-            "authoritative ChemCrow roles must all use frozen gpt-5.5: " + ", ".join(wrong)
+            f"authoritative ChemCrow roles must all use frozen {expected}: " + ", ".join(wrong)
         )
 
 
@@ -535,7 +544,7 @@ def command_preflight(args: argparse.Namespace) -> int:
         core_route_error = str(exc)
     model_identity_error = None
     try:
-        _assert_authoritative_role_models(role_configs)
+        _assert_authoritative_role_models(role_configs, config.get("model_substitution"))
     except (TypeError, ValueError) as exc:
         model_identity_error = str(exc)
     s0_hash = s0_config_hash(candidate)
@@ -744,7 +753,11 @@ def command_preflight(args: argparse.Namespace) -> int:
         "candidate_runtime_image_bound": managed_image_ok,
         "managed_runtime_image_id": managed_image_id,
         "all_codex_roles_core_managed": core_route_error is None,
-        "all_model_roles_frozen_gpt_5_5": model_identity_error is None,
+        "all_model_roles_frozen_gpt_5_5": (
+            model_identity_error is None and not config.get("model_substitution")
+        ),
+        "all_model_roles_match_declared_protocol": model_identity_error is None,
+        "model_substitution": config.get("model_substitution"),
         "codex_execution_route": CORE_MANAGED_CODEX_ROUTE,
         "host_codex_exec_forbidden": True,
         "core_route_error": core_route_error,
@@ -771,7 +784,7 @@ def command_preflight(args: argparse.Namespace) -> int:
         and docker_ok
         and checks["candidate_runtime_image_bound"]
         and checks["all_codex_roles_core_managed"]
-        and checks["all_model_roles_frozen_gpt_5_5"]
+        and checks["all_model_roles_match_declared_protocol"]
         and checks["runtime_config_resolved"]
         and checks["duplicate_authorization_valid"]
         and checks["execution_parity_valid"]
@@ -903,7 +916,8 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
                 "reflector_agent_system": reflectors["agent_system"],
                 "evolution_evaluator": config["evolution_evaluator"],
                 "final_evaluator": config["final_evaluator"],
-            }
+            },
+            config.get("model_substitution"),
         )
         reflector_configs = {
             ArtifactKind.TEXT_MEMORY: reflectors["memory"],
@@ -1492,6 +1506,7 @@ def command_recover_reflector_no_effect(args: argparse.Namespace) -> int:
     if completed_siblings:
         checkpoint_path, recovery_path, receipt = (
             reconcile_partial_reflector_batch_failure(
+                expected_model=str(config["candidate"]["agent"]["model_name"]),
                 config_path=config_path,
                 run_root=run_root,
                 ledger_root=_path(config_path, str(config["ledger_root"])),
@@ -1569,6 +1584,7 @@ def command_recover_paused_reflector_batch(args: argparse.Namespace) -> int:
         if path is not None
     }
     checkpoint_path, recovery_path, receipt = reconcile_paused_reflector_batch(
+        expected_model=str(config["candidate"]["agent"]["model_name"]),
         config_path=config_path,
         run_root=run_root,
         ledger_root=_path(config_path, str(config["ledger_root"])),

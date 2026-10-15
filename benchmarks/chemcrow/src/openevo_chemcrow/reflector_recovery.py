@@ -540,6 +540,7 @@ def reconcile_partial_reflector_batch_failure(
     failed_completion_path: Path,
     evidence_event_path: Path,
     completed_sibling_paths: dict[str, Path],
+    expected_model: str = "gpt-5.5",
 ) -> tuple[Path, Path, dict[str, Any]]:
     """Preserve completed native outputs and replace only one no-effect sibling."""
 
@@ -730,7 +731,7 @@ def reconcile_partial_reflector_batch_failure(
             or not isinstance(completion_metadata, dict)
             or completion_metadata.get("execution_route") != CORE_MANAGED_CODEX_ROUTE
             or completion_metadata.get("host_codex_exec_forbidden") is not True
-            or task_metadata.get("agent_model_name") != "gpt-5.5"
+            or task_metadata.get("agent_model_name") != expected_model
             or not isinstance(prompt_text, str)
             or not prompt_text.startswith(frozen_prompt.rstrip())
             or canonical_sha256({"prompt": frozen_prompt}) != prompt_hashes.get(kind.value)
@@ -744,7 +745,7 @@ def reconcile_partial_reflector_batch_failure(
                 original_job_id=str(row["job_id"]),
                 reflector_run_id=str(completion["task_id"]),
                 reflector_attempt_run_ids=[str(completion["task_id"])],
-                model="gpt-5.5",
+                model=expected_model,
                 system_prompt_hash=str(row["config"]["reflector_system_sha256"]),
                 prompt_hash=str(prompt_hashes[kind.value]),
                 input_evidence_hash=str(evidence_hash),
@@ -890,6 +891,7 @@ def reconcile_paused_reflector_batch(
     evidence_event_path: Path,
     core_completion_root: Path,
     completed_sibling_paths: dict[str, Path],
+    expected_model: str = "gpt-5.5",
 ) -> tuple[Path, Path, dict[str, Any]]:
     """Recover a deliberately stopped batch without replaying its completed prefix."""
 
@@ -1039,7 +1041,7 @@ def reconcile_paused_reflector_batch(
             or not isinstance(completion_metadata, dict)
             or completion_metadata.get("execution_route") != CORE_MANAGED_CODEX_ROUTE
             or completion_metadata.get("host_codex_exec_forbidden") is not True
-            or task_metadata.get("agent_model_name") != "gpt-5.5"
+            or task_metadata.get("agent_model_name") != expected_model
             or not isinstance(prompt_text, str)
             or not prompt_text.startswith(frozen_prompt.rstrip())
             or canonical_sha256({"prompt": frozen_prompt}) != prompt_hashes.get(kind.value)
@@ -1052,7 +1054,7 @@ def reconcile_paused_reflector_batch(
                 original_job_id=str(row["job_id"]),
                 reflector_run_id=str(completion["task_id"]),
                 reflector_attempt_run_ids=[str(completion["task_id"])],
-                model="gpt-5.5",
+                model=expected_model,
                 system_prompt_hash=system_prompt_hash,
                 prompt_hash=str(prompt_hashes[kind.value]),
                 input_evidence_hash=str(evidence_hash),

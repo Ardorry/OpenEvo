@@ -129,21 +129,17 @@ def _submission(*, experiment_id: str = "third-party-test") -> ChemCrowSubmissio
 
 
 def test_submission_schema_is_checked_in_without_drift() -> None:
-    expected = json.dumps(
-        ChemCrowSubmission.model_json_schema(), indent=2, sort_keys=True
-    ) + "\n"
-    assert (
-        PACKAGE_ROOT / "reproduction/submission.schema.json"
-    ).read_text(encoding="utf-8") == expected
+    expected = json.dumps(ChemCrowSubmission.model_json_schema(), indent=2, sort_keys=True) + "\n"
+    assert (PACKAGE_ROOT / "reproduction/submission.schema.json").read_text(
+        encoding="utf-8"
+    ) == expected
 
 
 def test_submission_round_trip_and_offline_aggregation() -> None:
     first = _submission(experiment_id="run-a")
     second = _submission(experiment_id="run-b")
 
-    assert ChemCrowSubmission.model_validate_json(
-        first.model_dump_json()
-    ) == first
+    assert ChemCrowSubmission.model_validate_json(first.model_dump_json()) == first
     aggregate = aggregate_submissions([first, second])
     assert aggregate["status"] == "PASS"
     assert aggregate["submission_count"] == 2
@@ -153,11 +149,37 @@ def test_submission_round_trip_and_offline_aggregation() -> None:
 def test_submission_rejects_tampering_and_duplicate_entries() -> None:
     submission = _submission()
     payload = submission.model_dump(mode="json")
-    payload["results"][0]["blind_evaluation"]["evolved_scores"][
-        "chemical_correctness"
-    ] = 0.0
+    payload["results"][0]["blind_evaluation"]["evolved_scores"]["chemical_correctness"] = 0.0
 
     with pytest.raises(ValidationError, match="aggregate differs"):
         ChemCrowSubmission.model_validate(payload)
     with pytest.raises(ValueError, match="duplicate submission ID"):
         aggregate_submissions([submission, submission])
+
+
+def test_aggregation_separates_actual_model_conditions():
+    first = _submission(experiment_id="first-model")
+    payload = _submission(experiment_id="second-model").model_dump(mode="json")
+    for binding in payload["execution"]["model_bindings"].values():
+        binding["model"] = "gpt-5.6-sol"
+    payload["execution"]["model_substitution"] = {
+        "variant": "chemcrowrun_v1_model_substitution_v1",
+        "historical_model": "gpt-5.5",
+        "actual_model": "gpt-5.6-sol",
+        "reason": "Historical model unavailable in subscription catalog",
+    }
+    payload["submission_id"] = canonical_sha256(
+        {k: v for k, v in payload.items() if k != "submission_id"}
+    )
+    second = ChemCrowSubmission.model_validate(payload)
+    with pytest.raises(ValueError, match="protocol-compatible"):
+        aggregate_submissions([first, second])
+    payload["execution"]["model_bindings"]["candidate"]["model"] = "wrong"
+    with pytest.raises(ValueError, match="declared substitution"):
+        ChemCrowSubmission.model_validate(payload)
+
+
+def test_optional_variant_preserves_original_example_payload_identity():
+    path = PACKAGE_ROOT / "reproduction/examples/FORMAT_ONLY.synthetic-submission.json"
+    original = json.loads(path.read_text())
+    assert ChemCrowSubmission.model_validate(original).model_dump(mode="json") == original

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import itertools
 import json
 import math
@@ -31,7 +32,24 @@ def write_json(path: Path, value: object) -> None:
         stream.write("\n")
 
 
-def initialize(*, run_id: str, output_root: Path, fixture_root: Path, port_base: int) -> Path:
+def initialize(
+    *,
+    run_id: str,
+    output_root: Path,
+    fixture_root: Path,
+    port_base: int,
+    model: str = "gpt-5.5",
+    substitution_reason: str | None = None,
+) -> Path:
+    from .submission import ModelSubstitution
+
+    substitution = None
+    if model != "gpt-5.5":
+        substitution = ModelSubstitution(
+            actual_model=model, reason=substitution_reason or ""
+        ).model_dump()
+    elif substitution_reason:
+        raise ValueError("a substitution reason requires a different model")
     if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,79}", run_id):
         raise ValueError("run ID must be 1-80 lowercase letters, digits, underscores or hyphens")
     if not 1024 <= port_base <= 65530:
@@ -57,12 +75,21 @@ def initialize(*, run_id: str, output_root: Path, fixture_root: Path, port_base:
         "CHEMCROW_RXN_RETRO_URL": f"http://127.0.0.1:{port_base + 3}/retro_prediction",
         "CHEMCROW_RXN_TIMEOUT_SECONDS": "600",
         **{
-            f"OPENEVO_{role}_MODEL": "gpt-5.5"
+            f"OPENEVO_{role}_MODEL": model
             for role in ("CANDIDATE", "REFLECTOR", "EVOLUTION_EVALUATOR", "FINAL_EVALUATOR")
         },
     }
     config = yaml.safe_load((PACKAGE / "configs/chemcrowrun.reproduction.yaml").read_text())
     config["task_manifest"] = str(PACKAGE / "tasks.jsonl")
+    if substitution:
+        config["model_substitution"] = substitution
+        for role in (
+            config["candidate"],
+            config["evolution_evaluator"],
+            config["final_evaluator"],
+            *config["reflectors"].values(),
+        ):
+            role["agent"]["model_name"] = model
     (root / "chemcrowrun.reproduction.yaml").write_text(yaml.safe_dump(config, sort_keys=False))
     topology = {
         "rollout": {
@@ -119,10 +146,43 @@ def initialize(*, run_id: str, output_root: Path, fixture_root: Path, port_base:
             "port_base": port_base,
             "environment": environment,
             "protocol_identity": "chemcrow_full_v8_reproduction_v1",
+            "model_substitution": substitution,
             "historical_state_imported": False,
+            "source_commit": subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=REPOSITORY, text=True
+            ).strip(),
+            "config_sha256": hashlib.sha256(
+                (root / "chemcrowrun.reproduction.yaml").read_bytes()
+            ).hexdigest(),
+            "topology_sha256": hashlib.sha256((root / "topology.yaml").read_bytes()).hexdigest(),
+            "environment_sha256": hashlib.sha256(
+                json.dumps(environment, sort_keys=True).encode()
+            ).hexdigest(),
         },
     )
     return root
+
+
+def verify_workspace_binding(root: Path) -> None:
+    """Prevent changed code/configuration from being attributed to a completed run."""
+    record = json.loads((root / "run.json").read_text())
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPOSITORY, text=True).strip()
+    dirty = subprocess.check_output(
+        ["git", "status", "--porcelain=v1"], cwd=REPOSITORY, text=True
+    ).strip()
+    if dirty or record.get("source_commit") != head:
+        raise ValueError(
+            "workspace requires its original clean source commit; use a new workspace"
+        )
+    for filename, field in (
+        ("chemcrowrun.reproduction.yaml", "config_sha256"),
+        ("topology.yaml", "topology_sha256"),
+    ):
+        if hashlib.sha256((root / filename).read_bytes()).hexdigest() != record.get(field):
+            raise ValueError(f"workspace {filename} differs from its initialized identity")
+    digest = hashlib.sha256(json.dumps(record["environment"], sort_keys=True).encode()).hexdigest()
+    if digest != record.get("environment_sha256"):
+        raise ValueError("workspace environment differs from its initialized identity")
 
 
 def environment(root: Path) -> dict[str, str]:
@@ -338,6 +398,8 @@ def main(argv: list[str] | None = None) -> None:
     init.add_argument("--output-root", type=Path, default=Path("outputs/chemcrowrun"))
     init.add_argument("--fixture-root", type=Path, required=True)
     init.add_argument("--port-base", type=int, default=18080)
+    init.add_argument("--model", default="gpt-5.5")
+    init.add_argument("--substitution-reason")
     for command in ("up", "down", "status", "experiment", "report", "judge", "_evolution"):
         p = commands.add_parser(command)
         p.add_argument("--workspace", type=Path, required=True)
@@ -370,6 +432,8 @@ def main(argv: list[str] | None = None) -> None:
                 output_root=args.output_root,
                 fixture_root=args.fixture_root,
                 port_base=args.port_base,
+                model=args.model,
+                substitution_reason=args.substitution_reason,
             )
         )
     elif args.command == "runtime":
@@ -407,6 +471,7 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "experiment":
         from .cli import build_parser
 
+        verify_workspace_binding(args.workspace)
         os.environ.update(environment(args.workspace))
         if services_status(args.workspace)["status"] != "READY":
             raise SystemExit("required services are not ready; run chemcrowrun status")
@@ -420,7 +485,30 @@ def main(argv: list[str] | None = None) -> None:
         if args.smoke:
             arguments += ["--stop-after-task-id", "chemcrow-01"]
         run = build_parser().parse_args(arguments)
-        raise SystemExit(run.function(run))
+        started = datetime.now(UTC)
+        receipt = {
+            "started_at": started.isoformat(),
+            "scope": "smoke" if args.smoke else "full",
+            "resume": args.resume,
+            "automatic_retries": 0,
+            "planned_logical_calls": 8 if args.smoke else 112,
+            "additional_readiness_calls": "Managed isolation canaries are additional subscription turns",
+            "status": "ERROR",
+        }
+        receipt_path = (
+            args.workspace / "logs" / f"execution-{started.strftime('%Y%m%dT%H%M%S%fZ')}.json"
+        )
+        write_json(receipt_path, receipt)
+        try:
+            code = run.function(run)
+            receipt["status"] = "COMPLETED" if code == 0 else "ERROR"
+            receipt["exit_code"] = code
+        finally:
+            completed = datetime.now(UTC)
+            receipt["completed_at"] = completed.isoformat()
+            receipt["elapsed_seconds"] = (completed - started).total_seconds()
+            write_json(receipt_path, receipt)
+        raise SystemExit(code)
     elif args.command == "report":
         from .workflow import export_report
 
