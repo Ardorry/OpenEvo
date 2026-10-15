@@ -46,3 +46,5 @@ separately passed historical image identity checks.
 
 See the [dated engineering acceptance record](../reports/chemcrowrun_acceptance_20261015/ACCEPTANCE.md)
 for actual execution, model substitution, costs, service isolation and remaining publication gates.
+The [runtime distribution review](RUNTIME_DISTRIBUTION_REVIEW.md) separates missing standalone
+filenames from actual attribution questions and lists the evidence prepared for each component.

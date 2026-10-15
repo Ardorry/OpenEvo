@@ -29,6 +29,10 @@
       "sha256": "e6e96a31d5cb1912d1d371fa9cfb521bb005571d67a1adf935274bac424de8ba"
     },
     {
+      "filename": "runtime-notice-review.json",
+      "sha256": "1822e7a182f8426281c575c327241b0de10ff5d62a4cfbe3c0afedfc20238bfd"
+    },
+    {
       "filename": "smoke-report.json",
       "sha256": "86f33fea84ba36f19c79b8cc28d6f0d3b8bd495787a6702b1c89c71c887f2756"
     },
