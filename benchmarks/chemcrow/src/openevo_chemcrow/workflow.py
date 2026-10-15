@@ -263,6 +263,20 @@ def run_judge(root: Path, *, credential_file: Path, budget_usd: float, allow_pai
     if not key or not proxy:
         raise ValueError("OPENROUTER_API_KEY and an explicit HTTPS proxy are required")
     with httpx.Client(proxy=proxy, trust_env=False, timeout=20) as client:
+        response = client.get("https://openrouter.ai/api/v1/models")
+        response.raise_for_status()
+        current_model = next(
+            (m for m in response.json()["data"] if m["id"] == "openai/gpt-4"), None
+        )
+        price = current_model.get("pricing", {}) if current_model else {}
+        frozen_price = paper_cost_ceiling()
+        if (
+            not current_model
+            or float(price.get("prompt", -1)) != frozen_price["input_usd_per_token"]
+            or float(price.get("completion", -1)) != frozen_price["output_usd_per_token"]
+            or current_model.get("context_length", 0) < frozen_price["model_context_tokens"]
+        ):
+            raise ValueError("current GPT-4 price/context differs from the frozen budget contract")
         response = client.get(
             "https://openrouter.ai/api/v1/credits", headers={"Authorization": f"Bearer {key}"}
         )

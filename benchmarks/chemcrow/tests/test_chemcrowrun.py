@@ -184,3 +184,43 @@ def test_service_readiness_rejects_another_workspaces_evolution(tmp_path, monkey
     assert module.services_status(root)["status"] == "READY"
     artifact_root = "/another-experiment/artifacts"
     assert module.services_status(root)["status"] == "BLOCKED"
+
+
+@pytest.mark.parametrize(
+    "price,credit,expected", [("0.001", 20, "price/context"), ("0.00003", 1, "available credit")]
+)
+def test_judge_guard_stops_before_any_paid_request(tmp_path, monkeypatch, price, credit, expected):
+    import httpx
+
+    from openevo_chemcrow import workflow
+
+    monkeypatch.setattr(workflow, "verify_workspace_binding", lambda root: None)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-credential")
+    monkeypatch.setenv("https_proxy", "http://127.0.0.1:10809")
+    credential = tmp_path / "private.env"
+    credential.write_text("# existing process credentials\n")
+    credential.chmod(0o600)
+    requests = []
+
+    def handler(request):
+        requests.append((request.method, request.url.path))
+        data = {"total_credits": credit, "total_usage": 0}
+        if request.url.path.endswith("/models"):
+            data = [
+                {
+                    "id": "openai/gpt-4",
+                    "pricing": {"prompt": price, "completion": "0.00006"},
+                    "context_length": 8191,
+                }
+            ]
+        return httpx.Response(200, json={"data": data})
+
+    original_client = httpx.Client
+    monkeypatch.setattr(
+        workflow.httpx,
+        "Client",
+        lambda **kwargs: original_client(transport=httpx.MockTransport(handler)),
+    )
+    with pytest.raises(ValueError, match=expected):
+        workflow.run_judge(tmp_path, credential_file=credential, budget_usd=12, allow_paid=True)
+    assert requests and all(method == "GET" for method, path in requests)
