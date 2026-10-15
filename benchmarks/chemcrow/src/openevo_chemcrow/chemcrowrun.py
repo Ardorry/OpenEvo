@@ -217,7 +217,22 @@ def services_status(root: Path) -> dict:
             try:
                 response = client.get(f"http://127.0.0.1:{port}{route}")
                 checks[service] = response.status_code == 200
-            except httpx.HTTPError:
+                if checks[service]:
+                    payload = response.json()
+                    if service == "evolution":
+                        checks[service] = (
+                            payload.get("db") == "ok"
+                            and payload.get("artifact_root")
+                            == record["environment"]["CHEMCROW_EVOLUTION_ARTIFACT_ROOT"]
+                        )
+                    elif service == "rollout":
+                        checks[service] = payload.get("status") == "ok"
+                    else:
+                        checks[service] = all(
+                            path in payload.get("paths", {})
+                            for path in ("/product_prediction", "/retro_prediction")
+                        )
+            except (httpx.HTTPError, ValueError, TypeError, AttributeError):
                 checks[service] = False
         try:
             response = client.get(f"http://127.0.0.1:{base}/nodes")
@@ -256,6 +271,14 @@ def services_up(root: Path, *, rxn: bool = True) -> dict:
     registry_path = root / "services.json"
     registry = json.loads(registry_path.read_text()) if registry_path.exists() else {}
     if rxn:
+        from .reproduction import prepare_or_validate_fixtures
+
+        fixture_evidence = prepare_or_validate_fixtures(
+            lock_path=PACKAGE / "reproduction/fixtures.lock.json",
+            destination_root=Path(record["fixture_root"]),
+            check_only=True,
+        )
+        write_json(root / "fixture-verification.json", fixture_evidence)
         compose = yaml.safe_load((PACKAGE / "deployment/rxn.compose.yaml").read_text())
         # Only data/code fixtures from the public source checkout are mounted.
         fixture = Path(record["fixture_root"]) / "rxn-sandbox"
@@ -312,7 +335,11 @@ def services_up(root: Path, *, rxn: bool = True) -> dict:
     }
     for name, command in commands.items():
         previous = registry.get(name)
-        if previous and process_identity(previous["pid"]) == previous["start_ticks"]:
+        if (
+            previous
+            and previous["start_ticks"] is not None
+            and process_identity(previous["pid"]) == previous["start_ticks"]
+        ):
             continue
         with (root / f"logs/{name}.log").open("a") as log:
             process = subprocess.Popen(
@@ -330,7 +357,46 @@ def services_up(root: Path, *, rxn: bool = True) -> dict:
     return report
 
 
+def collect_service_evidence(root: Path) -> dict:
+    """Collect only this workspace's services, without Docker environment secrets."""
+    report = {"captured_at": datetime.now(UTC).isoformat(), "images": []}
+    if (root / "rxn.compose.yaml").exists():
+        command = compose_command(root)
+        result = subprocess.run(
+            command + ["images", "--format", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        if result.returncode == 0:
+            try:
+                report["images"] = json.loads(result.stdout or "[]")
+            except ValueError:
+                report["image_inventory"] = "UNAVAILABLE"
+        for name, arguments in (
+            ("rxn-services.log", ["logs", "--no-color", "--timestamps"]),
+            (
+                "rxn-worker.log",
+                ["exec", "-T", "worker", "sh", "-c", "cat /app/worker.log* /app/celery.log*"],
+            ),
+        ):
+            path = root / "logs" / name
+            with path.open("w") as stream:
+                path.chmod(0o600)
+                result = subprocess.run(
+                    command + arguments, stdout=stream, stderr=stream, timeout=30, check=False
+                )
+                report[name] = "COLLECTED" if result.returncode == 0 else "UNAVAILABLE"
+    write_json(root / "service-evidence.json", report)
+    return report
+
+
 def services_down(root: Path) -> None:
+    try:
+        collect_service_evidence(root)
+    except (OSError, subprocess.SubprocessError) as exc:
+        write_json(root / "service-evidence-error.json", {"error_type": type(exc).__name__})
     path = root / "services.json"
     registry = json.loads(path.read_text()) if path.exists() else {}
     for entry in reversed(list(registry.values())):
@@ -385,6 +451,7 @@ def main(argv: list[str] | None = None) -> None:
         "up",
         "down",
         "status",
+        "logs",
         "runtime",
         "experiment",
         "report",
@@ -407,7 +474,7 @@ def main(argv: list[str] | None = None) -> None:
     init.add_argument("--port-base", type=int, default=18080)
     init.add_argument("--model", default="gpt-5.5")
     init.add_argument("--substitution-reason")
-    for command in ("up", "down", "status", "experiment", "report", "judge", "_evolution"):
+    for command in ("up", "down", "status", "logs", "experiment", "report", "judge", "_evolution"):
         p = commands.add_parser(command)
         p.add_argument("--workspace", type=Path, required=True)
         if command == "up":
@@ -462,6 +529,8 @@ def main(argv: list[str] | None = None) -> None:
         result = services_status(args.workspace)
         print(json.dumps(result))
         raise SystemExit(0 if result["status"] == "READY" else 2)
+    elif args.command == "logs":
+        print(json.dumps(collect_service_evidence(args.workspace)))
     elif args.command == "_evolution":
         # This benchmark uses the retained v1 API, including its inline native
         # worker claims. It is not the framework-locked Desktop/Daemon release.
@@ -500,7 +569,7 @@ def main(argv: list[str] | None = None) -> None:
             "automatic_retries": 0,
             "planned_logical_calls": 8 if args.smoke else 112,
             "additional_readiness_calls": "Managed isolation canaries are additional subscription turns",
-            "status": "ERROR",
+            "status": "RUNNING",
         }
         receipt_path = (
             args.workspace / "logs" / f"execution-{started.strftime('%Y%m%dT%H%M%S%fZ')}.json"
@@ -510,6 +579,10 @@ def main(argv: list[str] | None = None) -> None:
             code = run.function(run)
             receipt["status"] = "COMPLETED" if code == 0 else "ERROR"
             receipt["exit_code"] = code
+        except BaseException as exc:
+            receipt["status"] = "ERROR"
+            receipt["error_type"] = type(exc).__name__
+            raise
         finally:
             completed = datetime.now(UTC)
             receipt["completed_at"] = completed.isoformat()

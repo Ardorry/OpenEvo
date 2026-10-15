@@ -153,3 +153,34 @@ def test_workspace_rejects_changed_source_config_and_environment(tmp_path, monke
     (root / "run.json").write_text(json.dumps({**original, "source_commit": "0" * 40}))
     with pytest.raises(ValueError, match="original clean source"):
         module.verify_workspace_binding(root)
+
+
+def test_service_readiness_rejects_another_workspaces_evolution(tmp_path, monkeypatch):
+    import httpx
+
+    from openevo_chemcrow import chemcrowrun as module
+
+    root = initialize(
+        run_id="identity", output_root=tmp_path, fixture_root=tmp_path, port_base=18080
+    )
+    artifact_root = str(root / "state/artifacts")
+
+    def handler(request):
+        payload = {"status": "ok"}
+        if request.url.path == "/v1/health":
+            payload = {"db": "ok", "artifact_root": artifact_root}
+        elif request.url.path == "/nodes":
+            payload = [{"healthy": True, "node_id": "chemcrowrun-identity"}]
+        elif request.url.path == "/openapi.json":
+            payload = {"paths": {"/product_prediction": {}, "/retro_prediction": {}}}
+        return httpx.Response(200, json=payload)
+
+    original_client = httpx.Client
+    monkeypatch.setattr(
+        module.httpx,
+        "Client",
+        lambda **kwargs: original_client(transport=httpx.MockTransport(handler)),
+    )
+    assert module.services_status(root)["status"] == "READY"
+    artifact_root = "/another-experiment/artifacts"
+    assert module.services_status(root)["status"] == "BLOCKED"

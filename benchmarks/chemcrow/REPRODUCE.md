@@ -100,7 +100,9 @@ uv run --frozen --project benchmarks/chemcrow chemcrowrun down \
 and starts the three Core processes. It is safe to repeat for a service that exited. Inspect private
 `logs/*.log`, `service-health.json`, and `docker compose --project-name chemcrowrun-<run_id>
 --file outputs/chemcrowrun/<run_id>/rxn.compose.yaml logs` for diagnosis. `down` stops owned
-processes and containers without deleting datasets or evidence. See deployment notes for the
+processes and containers without deleting datasets or evidence. `chemcrowrun logs --workspace
+outputs/chemcrowrun/<run_id>` snapshots container image IDs and all RXN service/worker logs;
+`down` attempts the same collection before stopping. See deployment notes for the
 benchmark's retained v1 Core API and inline worker design.
 
 The smoke run completes the first entire pair (G1, both internal assessments, three Reflectors,
