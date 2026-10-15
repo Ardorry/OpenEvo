@@ -35,13 +35,19 @@
 | 平台/环境 | Linux amd64；Debian 12、Python 3.12.13、Codex 0.144.1、Node 22.23.1 |
 | 本地验证 | 历史锁、归档、OCI identity、Docker import、无网络只读启动：PASS；真实实验使用相同原始镜像 |
 | 匿名下载 | PENDING：两个已知 GitHub release tag 的匿名查询均返回 404；不能据此证明上游从未发布，也不能声称匿名下载成功 |
-| 再分发审查 | PENDING_LICENSE_OBLIGATION_REVIEW：原生嵌入依赖/编译器运行时 notices 的完整适用范围尚未确认 |
+| 再分发审查 | BLOCKED_V8_LINKABLE_SOURCE_CLOSURE：本轮审查完成，V8 原生链接及 LGPL 重链接材料仍缺闭环证据 |
 
 [全部 layer 扫描](runtime-layer-scan-summary.json)覆盖 10 层、17,480 个成员（含后续删除的文件）；[OCI 元数据扫描](runtime-metadata-scan.json)核验 config/hash、环境变量名称及 19 条 history 元数据。规定范围内未命中敏感文件或高置信度凭据模式。文本扫描有 2 MiB 上限，不是对任意秘密的绝对排除。352 项是文件名匹配的 license/notice 候选，不是 352 份审定许可。
 
-本地 staging 已准备 25 个候选资产与 SHA256SUMS：[资产清单](release-assets.json)。包括原始归档、180 项 Debian binary/source inventory、104/104 精确 Debian 源码包、原镜像 notices、Codex 0.144.1 对应 LICENSE/NOTICE/源码、1193 个匹配 Cargo.lock 校验和的 registry 源码包和 7 个精确 Git 依赖。最终校验清单检查通过。
+本地 staging 已准备候选资产与 SHA256SUMS（数量及哈希以更新后的清单为准）：[资产清单](release-assets.json)。包括原始归档、180 项 Debian binary/source inventory、104/104 精确 Debian 源码包、原镜像 notices、Codex 0.144.1 对应 LICENSE/NOTICE/源码、1193 个匹配 Cargo.lock 校验和的 registry 源码包和 7 个精确 Git 依赖。最终校验清单检查通过。
 
-Cargo.lock 包含多平台/开发依赖，不是 Linux 二进制精确链接 SBOM。43 个缺少独立 license 文件名的候选中，19 个源码含版权/许可文本、7 个有额外精确源码树 notices（两集合可能重叠）。这不等于 43 项违规，也不足以自动签发再分发结论。见 [notice 审查](runtime-notice-review.json)与[分发审查说明](../../docs/RUNTIME_DISTRIBUTION_REVIEW.md)。仍待审定的镜像不列入当前可批准的对外发布范围。
+本轮补充审查已核验 104 个 Debian 源码版本的 223 个源文件、Codex npm 发布包与镜像中的五个原生可执行文件及 layout manifest、pip 的 431 个源文件；这些比对全部通过。bubblewrap 使用所提供源码修改版本标识后重新链接成功；这不是历史 musl 二进制逐字节重建，也不是 V8 重链接验证。
+
+43 个原始文件名候选已逐项记录：14 个取得精确源码树许可文本，2 个含嵌入式授权文本，27 个保留声明、源码及其实际版权/许可头；文件名缺失不自动等于违规。补齐了 V8 的 23 份精确源码树许可和 22 份子模块根许可、pip 内嵌依赖许可、两版 Rust 编译器版权清单。Cargo.lock 仍不是精确 Linux 链接 SBOM。
+
+原镜像发布阻断已明确为 **V8-LGPL-RELINK**：V8 含 LGPL glibc 数学代码，其默认开关与 Clang 有关，当前尚未证明原二进制的实际链接范围及完整可重链接源码闭包。另发现附带 zsh 需要 GLIBC 2.38，不能在镜像的 glibc 2.36 上启动；这是可选组件限制，不改动已完成实验的结果。见[本轮审查结论](runtime-distribution-review.json)、[43 项处置](runtime-license-candidate-dispositions.json)、[重链接验证](bubblewrap-relink-verification.json)与[分发审查说明](../../docs/RUNTIME_DISTRIBUTION_REVIEW.md)。
+
+较早的 runtime-notice-review.json、runtime-layer-scan-summary.json 和 sealed chemcrowrun-report.json 保留当时状态，未重写；当前再分发决策以新增审查报告和更新后的 runtime-manifest.json 为准。原镜像及 companions 仍不列入可批准的发布资产。
 
 上游依据：[Codex LICENSE](https://raw.githubusercontent.com/openai/codex/rust-v0.144.1/LICENSE)、[Codex NOTICE](https://raw.githubusercontent.com/openai/codex/rust-v0.144.1/NOTICE)、[Debian licenses](https://www.debian.org/legal/licenses/)。Fixture 从公开上游获取；未重新分发未发现许可的原始 notebook 仓库或冒称近似镜像为历史镜像。
 
@@ -182,7 +188,7 @@ uv run --frozen --project benchmarks/chemcrow chemcrowrun report \
 | L3 新 14 题内部结果 | PASS：112 成功逻辑调用、42 artifacts、14 pair、审计与标准 schema；两次经验证恢复公开记录 |
 | GPT-4 校准 | PASS：42 有效封存调用；独立账单、配对统计和历史对照 |
 | 全工具可用性 | PARTIAL：WebSearch 缺 SERP_API_KEY，上游错误保留 |
-| 原 runtime 公开再分发 | PENDING_LICENSE_OBLIGATION_REVIEW |
+| 原 runtime 公开再分发 | BLOCKED_V8_LINKABLE_SOURCE_CLOSURE |
 | 真实公开下载/远端 fresh clone | PENDING_PUBLICATION_AND_REMOTE_ACCEPTANCE |
 
 ## H. Git 与发布准备

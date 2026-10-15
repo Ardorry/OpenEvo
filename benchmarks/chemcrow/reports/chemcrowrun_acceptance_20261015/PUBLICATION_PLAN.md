@@ -24,7 +24,7 @@ No PR is created by preparing this plan. The proposed PR remains unmerged pendin
 
 ## Assets withheld from this approval scope
 
-The original runtime and 24 companion assets are staged and checksummed locally. Native dependency attribution remains `PENDING_LICENSE_OBLIGATION_REVIEW`; they are **not proposed for upload now**. No GHCR/Docker Hub image, GitHub Release Asset or leaderboard submission is part of this approval request.
+The original runtime and source/notice companions are staged and checksummed locally; the current count is in release-assets.json. The completed follow-up review identifies `V8-LGPL-RELINK` and keeps redistribution at `BLOCKED_V8_LINKABLE_SOURCE_CLOSURE`; they are **not proposed for upload now**. The five native executable origin matches, Debian/pip source checks and modified-bwrap relink passed, but they do not establish a V8/Codex relink closure. No GHCR/Docker Hub image, GitHub Release Asset or leaderboard submission is part of this approval request.
 
 After distribution review and a later explicit asset approval, the manifest must contain the real public HTTPS asset URL. Anonymous download/hash/import/start and a real remote fresh clone must then be executed and recorded. Those checks are pending, not implied by the passing local experiment.
 

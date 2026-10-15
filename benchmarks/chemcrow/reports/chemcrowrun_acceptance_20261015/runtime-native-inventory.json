@@ -1,0 +1,62 @@
+{
+  "image": "sha256:7a0079f9cb1bce5768cff5bce3d1181811c6a231ad800cac8fb503d66852c81b",
+  "files": [
+    {
+      "path": "/opt/codex/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path/rg",
+      "sha256": "ebeaf56f8a25e102e9419933423738b3a2a613a444fd749d695e15eba53f71f2",
+      "bytes": 5445512,
+      "elf_dynamic": "\nDynamic section at offset 0x52fa00 contains 22 entries:\n  Tag        Type                         Name/Value\n 0x0000000000000010 (SYMBOLIC)           0x0\n 0x000000000000000c (INIT)               0x51c80\n 0x000000000000000d (FINI)               0x3dab42\n 0x0000000000000019 (INIT_ARRAY)         0x6f3428\n 0x000000000000001b (INIT_ARRAYSZ)       16 (bytes)\n 0x000000000000001a (FINI_ARRAY)         0x6f3438\n 0x000000000000001c (FINI_ARRAYSZ)       8 (bytes)\n 0x0000000000000004 (HASH)               0x1c8\n 0x000000006ffffef5 (GNU_HASH)           0x1d8\n 0x0000000000000005 (STRTAB)             0x210\n 0x0000000000000006 (SYMTAB)             0x1f8\n 0x000000000000000a (STRSZ)              1 (bytes)\n 0x000000000000000b (SYMENT)             24 (bytes)\n 0x0000000000000015 (DEBUG)              0x0\n 0x0000000000000003 (PLTGOT)             0x72fba0\n 0x0000000000000007 (RELA)               0x218\n 0x0000000000000008 (RELASZ)             334440 (bytes)\n 0x0000000000000009 (RELAENT)            24 (bytes)\n 0x0000000000000018 (BIND_NOW)           \n 0x000000006ffffffb (FLAGS_1)            Flags: NOW PIE\n 0x000000006ffffff9 (RELACOUNT)          13935\n 0x0000000000000000 (NULL)               0x0\n",
+      "elf_compiler_comment": "\nString dump of section '.comment':\n  [     0]  GCC: (GNU) 9.4.0\n  [    11]  rustc version 1.92.0-nightly (695857bc3 2025-10-21)\n  [    45]  GCC: (GNU) 9.2.0\n\n"
+    },
+    {
+      "path": "/opt/codex/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/zsh/bin/zsh",
+      "sha256": "67faaaa89242c4a332e16e508a1977cffc24bf7fca31d4411cdfd101f3831ef3",
+      "bytes": 898480,
+      "elf_dynamic": "\nDynamic section at offset 0xd4728 contains 29 entries:\n  Tag        Type                         Name/Value\n 0x0000000000000001 (NEEDED)             Shared library: [libtinfo.so.6]\n 0x0000000000000001 (NEEDED)             Shared library: [libm.so.6]\n 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]\n 0x000000000000000c (INIT)               0x17000\n 0x000000000000000d (FINI)               0xb7b4c\n 0x0000000000000019 (INIT_ARRAY)         0xd3a30\n 0x000000000000001b (INIT_ARRAYSZ)       8 (bytes)\n 0x000000000000001a (FINI_ARRAY)         0xd3a38\n 0x000000000000001c (FINI_ARRAYSZ)       8 (bytes)\n 0x000000006ffffef5 (GNU_HASH)           0x3b0\n 0x0000000000000005 (STRTAB)             0xa0a8\n 0x0000000000000006 (SYMTAB)             0x28a8\n 0x000000000000000a (STRSZ)              13252 (bytes)\n 0x000000000000000b (SYMENT)             24 (bytes)\n 0x0000000000000015 (DEBUG)              0x0\n 0x0000000000000003 (PLTGOT)             0xd4938\n 0x0000000000000002 (PLTRELSZ)           4824 (bytes)\n 0x0000000000000014 (PLTREL)             RELA\n 0x0000000000000017 (JMPREL)             0x15278\n 0x0000000000000007 (RELA)               0xdf70\n 0x0000000000000008 (RELASZ)             29448 (bytes)\n 0x0000000000000009 (RELAENT)            24 (bytes)\n 0x000000000000001e (FLAGS)              BIND_NOW\n 0x000000006ffffffb (FLAGS_1)            Flags: NOW PIE\n 0x000000006ffffffe (VERNEED)            0xde70\n 0x000000006fffffff (VERNEEDNUM)         3\n 0x000000006ffffff0 (VERSYM)             0xd46c\n 0x000000006ffffff9 (RELACOUNT)          1216\n 0x0000000000000000 (NULL)               0x0\n",
+      "elf_compiler_comment": "\nString dump of section '.comment':\n  [     0]  GCC: (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\n\n"
+    },
+    {
+      "path": "/opt/codex/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/bwrap",
+      "sha256": "77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c",
+      "bytes": 529776,
+      "elf_dynamic": "\nDynamic section at offset 0x7f780 contains 21 entries:\n  Tag        Type                         Name/Value\n 0x000000000000000c (INIT)               0x4000\n 0x000000000000000d (FINI)               0x66889\n 0x0000000000000019 (INIT_ARRAY)         0x7eae0\n 0x000000000000001b (INIT_ARRAYSZ)       16 (bytes)\n 0x000000000000001a (FINI_ARRAY)         0x7eaf0\n 0x000000000000001c (FINI_ARRAYSZ)       16 (bytes)\n 0x0000000000000004 (HASH)               0x238\n 0x000000006ffffef5 (GNU_HASH)           0x248\n 0x0000000000000005 (STRTAB)             0x280\n 0x0000000000000006 (SYMTAB)             0x268\n 0x000000000000000a (STRSZ)              1 (bytes)\n 0x000000000000000b (SYMENT)             24 (bytes)\n 0x0000000000000015 (DEBUG)              0x0\n 0x0000000000000003 (PLTGOT)             0x80910\n 0x0000000000000007 (RELA)               0x288\n 0x0000000000000008 (RELASZ)             15576 (bytes)\n 0x0000000000000009 (RELAENT)            24 (bytes)\n 0x000000000000001e (FLAGS)              BIND_NOW\n 0x000000006ffffffb (FLAGS_1)            Flags: NOW PIE\n 0x000000006ffffff9 (RELACOUNT)          649\n 0x0000000000000000 (NULL)               0x0\n",
+      "elf_compiler_comment": "\nString dump of section '.comment':\n  [     0]  GCC: (GNU) 9.4.0\n  [    11]  rustc version 1.95.0 (59807616e 2026-04-14)\n  [    3d]  clang version 19.1.7 (https://github.com/ziglang/zig-bootstrap 1c3c59435891bc9caf8cd1d3783773369d191c5f)\n  [    a6]  GCC: (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\n\n"
+    },
+    {
+      "path": "/opt/codex/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex",
+      "sha256": "a96f944d1a596dbfb7fdd84f482be5c50e34b04bb371126840d873e4ebf26902",
+      "bytes": 298520624,
+      "elf_dynamic": "\nDynamic section at offset 0x11c443c0 contains 21 entries:\n  Tag        Type                         Name/Value\n 0x000000000000000c (INIT)               0x7e4000\n 0x000000000000000d (FINI)               0xddb8275\n 0x0000000000000019 (INIT_ARRAY)         0x1173c840\n 0x000000000000001b (INIT_ARRAYSZ)       3440 (bytes)\n 0x000000000000001a (FINI_ARRAY)         0x1173d5b0\n 0x000000000000001c (FINI_ARRAYSZ)       16 (bytes)\n 0x0000000000000004 (HASH)               0x238\n 0x000000006ffffef5 (GNU_HASH)           0x248\n 0x0000000000000005 (STRTAB)             0x280\n 0x0000000000000006 (SYMTAB)             0x268\n 0x000000000000000a (STRSZ)              1 (bytes)\n 0x000000000000000b (SYMENT)             24 (bytes)\n 0x0000000000000015 (DEBUG)              0x0\n 0x0000000000000003 (PLTGOT)             0x11c44550\n 0x0000000000000007 (RELA)               0x288\n 0x0000000000000008 (RELASZ)             8270688 (bytes)\n 0x0000000000000009 (RELAENT)            24 (bytes)\n 0x000000000000001e (FLAGS)              BIND_NOW\n 0x000000006ffffffb (FLAGS_1)            Flags: NOW PIE\n 0x000000006ffffff9 (RELACOUNT)          344612\n 0x0000000000000000 (NULL)               0x0\n",
+      "elf_compiler_comment": "\nString dump of section '.comment':\n  [     0]  GCC: (GNU) 9.4.0\n  [    11]  rustc version 1.95.0 (59807616e 2026-04-14)\n  [    3d]  clang version 19.1.7 (https://github.com/ziglang/zig-bootstrap 1c3c59435891bc9caf8cd1d3783773369d191c5f)\n  [    a6]  clang version 22.1.3None\n\n"
+    },
+    {
+      "path": "/opt/codex/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex-code-mode-host",
+      "sha256": "107cc233a8d90a545ee9647c527c1161068512880f1ee4eda2415eb7d33a700b",
+      "bytes": 46131096,
+      "elf_dynamic": "\nDynamic section at offset 0x2bdc970 contains 21 entries:\n  Tag        Type                         Name/Value\n 0x000000000000000c (INIT)               0x164000\n 0x000000000000000d (FINI)               0x1aad455\n 0x0000000000000019 (INIT_ARRAY)         0x2b54700\n 0x000000000000001b (INIT_ARRAYSZ)       24 (bytes)\n 0x000000000000001a (FINI_ARRAY)         0x2b54718\n 0x000000000000001c (FINI_ARRAYSZ)       8 (bytes)\n 0x0000000000000004 (HASH)               0x238\n 0x000000006ffffef5 (GNU_HASH)           0x248\n 0x0000000000000005 (STRTAB)             0x280\n 0x0000000000000006 (SYMTAB)             0x268\n 0x000000000000000a (STRSZ)              1 (bytes)\n 0x000000000000000b (SYMENT)             24 (bytes)\n 0x0000000000000015 (DEBUG)              0x0\n 0x0000000000000003 (PLTGOT)             0x2bdcb00\n 0x0000000000000007 (RELA)               0x288\n 0x0000000000000008 (RELASZ)             1455936 (bytes)\n 0x0000000000000009 (RELAENT)            24 (bytes)\n 0x000000000000001e (FLAGS)              BIND_NOW\n 0x000000006ffffffb (FLAGS_1)            Flags: NOW PIE\n 0x000000006ffffff9 (RELACOUNT)          60664\n 0x0000000000000000 (NULL)               0x0\n",
+      "elf_compiler_comment": "\nString dump of section '.comment':\n  [     0]  GCC: (GNU) 9.4.0\n  [    11]  rustc version 1.95.0 (59807616e 2026-04-14)\n  [    3d]  clang version 22.1.3None\n\n"
+    },
+    {
+      "path": "/opt/codex/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-package.json",
+      "sha256": "aca661373fdc74d51a5a60bb3d6a258943dd326b7ab76bb01fdc18275137548d",
+      "bytes": 205,
+      "metadata": {
+        "layoutVersion": 1,
+        "version": "0.144.1",
+        "target": "x86_64-unknown-linux-musl",
+        "variant": "codex",
+        "entrypoint": "bin/codex",
+        "resourcesDir": "codex-resources",
+        "pathDir": "codex-path"
+      }
+    }
+  ],
+  "upstream_npm_match": "PASS",
+  "version_checks": {
+    "rg": "ripgrep 15.1.0 (rev af60c2de9d); PCRE2 10.45 JIT",
+    "bwrap": "bubblewrap built for Codex",
+    "zsh": "FAILED: GLIBC_2.38 not found in image Debian 12 glibc 2.36",
+    "scope": "Read-only, network-disabled container; no credentials or model calls"
+  },
+  "zsh_limitation": "Do not replace files inside the historical OCI archive. This optional binary limitation does not invalidate already observed Codex/bash experiment completion."
+}

@@ -1,5 +1,6 @@
 {
   "status": "PREPARED_NOT_APPROVED_FOR_DISTRIBUTION",
+  "redistribution": "BLOCKED_V8_LINKABLE_SOURCE_CLOSURE",
   "assets": [
     {
       "filename": "openevo-science-runtime-0.1.1-linux-amd64.tar.gz",
@@ -8,8 +9,8 @@
     },
     {
       "filename": "runtime-manifest.json",
-      "bytes": 1245,
-      "sha256": "3efeca65f5696c004ed873656bc89273585f67e51ece0edcfe86df9989a3190f"
+      "bytes": 1661,
+      "sha256": "aaf36620713646202c8873589e173b82838d1c134de7b28383d6dfaec65d6874"
     },
     {
       "filename": "runtime-layer-audit.json",
@@ -125,6 +126,56 @@
       "filename": "runtime-metadata-scan.json",
       "bytes": 2086,
       "sha256": "8dc1be8381ba06a850df701dc51e6f62e173c9a6348ed28db242fff6a415f197"
+    },
+    {
+      "filename": "THIRD_PARTY_NOTICES.md",
+      "bytes": 4627,
+      "sha256": "662556ee0e5bf93343c006dfc63c51e6b30a8fffd685def4ac648bf9a16d1cab"
+    },
+    {
+      "filename": "runtime-distribution-supplements.tar.gz",
+      "bytes": 52831506,
+      "sha256": "d008203723b3a4c2947beb03d321f9b3e9b5fcfc9513ed6d139b1e58ef79dd79"
+    },
+    {
+      "filename": "runtime-supplement-notice-index.json",
+      "bytes": 33276,
+      "sha256": "459cecb4fd173d9e9a3af91df6922ee7f8ce74d5499fc3685c60ece36ed8d5d8"
+    },
+    {
+      "filename": "runtime-distribution-review.json",
+      "bytes": 5639,
+      "sha256": "c2b579489570627fbb22771f962774c83a434a98bf37847f3d2c6d12294b39d4"
+    },
+    {
+      "filename": "runtime-native-inventory.json",
+      "bytes": 10185,
+      "sha256": "8c886987cf3179b81bd19134cd0c6c814647081fc14c1cdcc60d261db4a5327e"
+    },
+    {
+      "filename": "runtime-license-candidate-dispositions.json",
+      "bytes": 38851,
+      "sha256": "e32b7a136d738636967052b9b210dbf7f5110ce6684cc6b0151d4ad475b59957"
+    },
+    {
+      "filename": "debian-source-integrity-review.json",
+      "bytes": 75169,
+      "sha256": "97637db0f9dca13030b44a445e45ea528e137a27b603e6c115766d8a74fb53a0"
+    },
+    {
+      "filename": "pip-source-comparison.json",
+      "bytes": 257,
+      "sha256": "0cf63f215ac644eb13a53818b6f81988a152969379a176211735329064f7266d"
+    },
+    {
+      "filename": "codex-npm-origin-verification.json",
+      "bytes": 1823,
+      "sha256": "3472f178b789fd7ef151388cf2fa7c8fa5e9bd5d7504a035fbdfd0e6a347c825"
+    },
+    {
+      "filename": "bubblewrap-relink-verification.json",
+      "bytes": 1999,
+      "sha256": "f041b1c2e2eae9bb9b08992f036d80d351407a588d2ca42337123ef0633b7f49"
     }
   ]
 }

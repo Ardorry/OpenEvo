@@ -4,6 +4,6 @@ A clean local clone completed a real one-task smoke, a new 14-task G1 → three 
 
 Validation: 328 benchmark tests passed, two optional tests skipped, benchmark lint passed, L1 historical artifact verification passed, and real-run audit/submission validation passed. The immutable generation checkout and separately attributed postprocessing fixes are documented in the acceptance report. GPT-4 cost was USD 2.99460 for 42 valid calls with no retries or fallback.
 
-Limitations: WebSearch lacked SERP_API_KEY; 161 of 686 tool observations recorded errors. Public runtime redistribution review and anonymous download/actual remote fresh-clone acceptance remain pending. No runtime assets, raw model answers, private state or credentials are included. Results remain provisional LLM judgments and do not claim official ChemCrow certification.
+Limitations: WebSearch lacked SERP_API_KEY; 161 of 686 tool observations recorded errors. Runtime redistribution is blocked on V8/native linkable-source evidence after the follow-up review. Anonymous download and actual remote fresh-clone acceptance remain pending. No runtime assets, raw model answers, private state or credentials are included. Results remain provisional LLM judgments and do not claim official ChemCrow certification.
 
 Part of the local implementation record: `benchmarks/chemcrow/docs/CHEMCROWRUN_V1_WORK.md`. Full evidence: `benchmarks/chemcrow/reports/chemcrowrun_acceptance_20261015/ACCEPTANCE.md`.

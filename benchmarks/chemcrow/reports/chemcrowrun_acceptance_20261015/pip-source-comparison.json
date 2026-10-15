@@ -1,0 +1,7 @@
+{
+  "installed_version": "25.0.1",
+  "source_archive": "pypi-pip-25.0.1.tar.gz",
+  "installed_files_checked": 431,
+  "differences": [],
+  "scope": "Installed pip code excluding generated __pycache__; upstream sdist also restores omitted vendored notices"
+}

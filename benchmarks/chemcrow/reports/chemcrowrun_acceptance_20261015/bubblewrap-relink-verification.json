@@ -1,0 +1,33 @@
+{
+  "status": "PASS_MODIFIED_LIBRARY_RELINK",
+  "scope": "bwrap only; x86_64 Linux GNU verification build. This is not the original musl binary, a replacement image, or a V8 relink test.",
+  "toolchain": "rustc 1.95.0 (59807616e 2026-04-14)",
+  "original_codex_source_sha256": "c11868501ef0e67c90759deaf2c0933cd07e4bea4f47a47186ee6de046c57ef6",
+  "original_libcap_source_sha256": "de4e7e064c9ba451d5234dd46e897d7c71c96a9ebf9a0c445bc04f4742d83632",
+  "libc_crate_sha256": "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66",
+  "binary_sha256": "1460dea99cd4abb08a05bf92f9dcf973db4efd50b56318e75b2165aae0f1d767",
+  "version_stdout": "bubblewrap built for Codex (ChemCrowRun relink verification)",
+  "network_during_compile": "Cargo --offline; local verified libc source, no registry downloads",
+  "source_changes": [
+    "bubblewrap.c: dated modification notice and version banner only",
+    "Cargo.toml: isolated verification manifest using original main.rs and local libc; original build.rs disabled; native build commands reproduced explicitly"
+  ],
+  "commands": [
+    "make -C source/libcap-2.75/libcap libcap.a",
+    "gcc -O2 -D_GNU_SOURCE -Dmain=bwrap_main -Isource/wrapper -Isource/bubblewrap -Isource/libcap-2.75/libcap/include -Isource/libcap-2.75/libcap/include/uapi -c source/bubblewrap/<source>.c -o objects/<source>.c.o",
+    "ar rcs objects/libbwrap_modified.a objects/*.o",
+    "cargo rustc --offline --release --bin bwrap -- --cfg bwrap_available -L native=<relink-root>/objects -L native=<relink-root>/source/libcap-2.75/libcap -l static=bwrap_modified -l static=cap",
+    "target/release/bwrap --version"
+  ],
+  "native_source_files": [
+    "bubblewrap.c",
+    "bind-mount.c",
+    "network.c",
+    "utils.c"
+  ],
+  "limitations": [
+    "The standalone verification manifest is an adapter, not the upstream workspace manifest.",
+    "No original-binary byte reproduction is claimed.",
+    "LGPL obligations for any other native library are assessed separately."
+  ]
+}

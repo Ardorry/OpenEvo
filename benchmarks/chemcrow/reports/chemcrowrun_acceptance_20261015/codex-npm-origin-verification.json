@@ -1,0 +1,48 @@
+{
+  "metadata_url": "https://registry.npmjs.org/@openai%2fcodex/0.144.1-linux-x64",
+  "name": "@openai/codex",
+  "version": "0.144.1-linux-x64",
+  "declared_license": "Apache-2.0",
+  "tarball_url": "https://registry.npmjs.org/@openai/codex/-/codex-0.144.1-linux-x64.tgz",
+  "integrity": "sha512-HNGVI+BulrOaC/0IzBvd6EL62j7LrlbFKibrhw6hZjjCjAeUYzRB2jB4qDzXN1NfqDi6Xrvniof3kwbwab24lg==",
+  "integrity_verified": true,
+  "files": [
+    {
+      "member": "package/vendor/x86_64-unknown-linux-musl/codex-path/rg",
+      "sha256": "ebeaf56f8a25e102e9419933423738b3a2a613a444fd749d695e15eba53f71f2",
+      "bytes": 5445512,
+      "matches_image": true
+    },
+    {
+      "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/zsh/bin/zsh",
+      "sha256": "67faaaa89242c4a332e16e508a1977cffc24bf7fca31d4411cdfd101f3831ef3",
+      "bytes": 898480,
+      "matches_image": true
+    },
+    {
+      "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/bwrap",
+      "sha256": "77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c",
+      "bytes": 529776,
+      "matches_image": true
+    },
+    {
+      "member": "package/vendor/x86_64-unknown-linux-musl/bin/codex",
+      "sha256": "a96f944d1a596dbfb7fdd84f482be5c50e34b04bb371126840d873e4ebf26902",
+      "bytes": 298520624,
+      "matches_image": true
+    },
+    {
+      "member": "package/vendor/x86_64-unknown-linux-musl/bin/codex-code-mode-host",
+      "sha256": "107cc233a8d90a545ee9647c527c1161068512880f1ee4eda2415eb7d33a700b",
+      "bytes": 46131096,
+      "matches_image": true
+    },
+    {
+      "member": "package/vendor/x86_64-unknown-linux-musl/codex-package.json",
+      "sha256": "aca661373fdc74d51a5a60bb3d6a258943dd326b7ab76bb01fdc18275137548d",
+      "bytes": 205,
+      "matches_image": true
+    }
+  ],
+  "status": "PASS"
+}
