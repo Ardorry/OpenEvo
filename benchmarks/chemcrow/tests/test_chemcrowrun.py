@@ -224,3 +224,31 @@ def test_judge_guard_stops_before_any_paid_request(tmp_path, monkeypatch, price,
     with pytest.raises(ValueError, match=expected):
         workflow.run_judge(tmp_path, credential_file=credential, budget_usd=12, allow_paid=True)
     assert requests and all(method == "GET" for method, path in requests)
+
+
+def test_audit_cli_uses_declared_isolated_ledger(tmp_path, monkeypatch):
+    import argparse
+    import os
+
+    from openevo_chemcrow import cli
+    from openevo_chemcrow.chemcrowrun import environment
+
+    root = initialize(
+        run_id="audit-path", output_root=tmp_path, fixture_root=tmp_path, port_base=18080
+    )
+    monkeypatch.setattr(os, "environ", environment(root))
+    observed = {}
+
+    def audit(**kwargs):
+        observed.update(kwargs)
+        return {"status": "PASS", "task_count": 1}
+
+    monkeypatch.setattr(cli, "audit_three_artifact_run", audit)
+    args = argparse.Namespace(
+        config=root / "chemcrowrun.reproduction.yaml",
+        core_completions=root / "state/completions",
+        stop_after_task_id="chemcrow-01",
+        output=root / "audit.json",
+    )
+    assert cli.command_audit_run(args) == 0
+    assert observed["ledger_root"] == root / "claims"

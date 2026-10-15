@@ -143,6 +143,7 @@ def audit_three_artifact_run(
     expected_reflector_model: str,
     require_aggregate: bool = True,
     source_generation_run_root: Path | None = None,
+    ledger_root: Path | None = None,
 ) -> dict[str, Any]:
     if not task_ids or len(task_ids) != len(set(task_ids)):
         raise ValueError("audit task inventory must be non-empty and unique")
@@ -256,7 +257,7 @@ def audit_three_artifact_run(
             raise ValueError(f"three-artifact reset is incomplete: {pair_id}")
         reset_receipt_count += 1
 
-        claims_root = run_root / "claims" / pair_id
+        claims_root = (ledger_root if ledger_root is not None else run_root / "claims") / pair_id
         claims = {path.stem: path for path in claims_root.glob("*.json")}
         if source_generation_run_root is None:
             if set(claims) != _PHASES:
@@ -468,6 +469,7 @@ def audit_three_artifact_generation_run(
     expected_s0_hash: str,
     expected_reflector_model: str,
     require_aggregate: bool = True,
+    ledger_root: Path | None = None,
 ) -> dict[str, Any]:
     """Audit a sealed G1-plus-artifacts study without implying G2 execution."""
 
@@ -604,7 +606,7 @@ def audit_three_artifact_generation_run(
             raise ValueError(f"generation task-local reset differs: {pair_id}")
         reset_receipt_count += 1
 
-        claims_root = run_root / "claims" / pair_id
+        claims_root = (ledger_root if ledger_root is not None else run_root / "claims") / pair_id
         claims = {path.stem: path for path in claims_root.glob("*.json")}
         if set(claims) != _GENERATION_PHASES:
             raise ValueError(f"generation phase claim inventory mismatch: {pair_id}")

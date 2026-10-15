@@ -1712,6 +1712,8 @@ def command_audit_run(args: argparse.Namespace) -> int:
             else audit_three_artifact_run
         )
         audit_kwargs: dict[str, Any] = {}
+        if config.get("ledger_root"):
+            audit_kwargs["ledger_root"] = _path(config_path, str(config["ledger_root"]))
         if config.get("execution_scope") == _SEALED_GENERATION_CONTINUATION_SCOPE:
             source_generation = config.get("source_generation")
             if not isinstance(source_generation, dict):
