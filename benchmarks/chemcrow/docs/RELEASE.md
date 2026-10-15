@@ -30,3 +30,10 @@ Publication is a separate, user-approved step: push the reviewed branch, create 
 approved release assets (or approved public images), then anonymously download and verify the exact
 asset and repeat fresh-clone acceptance from the actual remote commit. A local clone or cached
 archive does not certify public delivery. No force push, historical rewrite, or runtime substitution.
+
+Local review evidence on 2026-10-15: ten OCI layers, 17,480 members, 352 notice/license files;
+no matches in the stated bounded scan. All 104 exact Debian source package versions were
+downloaded and a corresponding-source companion archive prepared. Matching Codex 0.144.1
+LICENSE and NOTICE were obtained from its upstream tag. Complete non-Debian/native dependency
+notice coverage remains a distribution review limitation; the automated scan does not grant
+redistribution clearance. RXN source/weights are fetched, not included in the original runtime.

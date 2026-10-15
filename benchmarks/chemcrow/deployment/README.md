@@ -20,8 +20,10 @@ container to reach the pair-scoped bridge; Linux Docker supports this directly.
 
 RXN is rebuilt from locked source/weights, with MCP 1.29.0 and MCPO 0.0.20 compatibility pins.
 A new build is not the historical RXN image. Record actual image IDs and package versions in the
-acceptance evidence; upstream transitive requirements currently drift until a validated build's
-constraints are captured. Do not label that drift as identical historical runtime conditions.
+acceptance evidence; the Python base is pinned by digest and both complete dependency constraints are captured
+from the 2026-10-15 functional build. The launcher stages a separate build context and installs
+with these constraints without modifying the public fixture checkout. RXN worker readiness
+requires a live Celery control ping. Do not label that drift as identical historical runtime conditions.
 
 Use `chemcrowrun up`, `status`, and `down`. Core services restart only on an explicit repeat of `up`,
 never by retrying a model task. Compose uses `unless-stopped`; state is scoped by project/run ID.

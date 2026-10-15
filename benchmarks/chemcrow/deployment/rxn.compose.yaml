@@ -21,6 +21,12 @@ services:
     restart: unless-stopped
   worker:
     build: {context: ../fixtures/rxn-sandbox/worker, dockerfile: Dockerfile}
+    healthcheck:
+      test: [CMD, celery, -A, tasks, inspect, ping, --timeout, '5']
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
     environment:
       CELERY_QUEUE: product_prediction,retro_prediction
       CELERY_BROKER_URL: amqp://ubuntu:ubuntu@broker:5672//
@@ -49,7 +55,7 @@ services:
     depends_on:
       redis: {condition: service_healthy}
       broker: {condition: service_healthy}
-      worker: {condition: service_started}
+      worker: {condition: service_healthy}
     restart: unless-stopped
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]

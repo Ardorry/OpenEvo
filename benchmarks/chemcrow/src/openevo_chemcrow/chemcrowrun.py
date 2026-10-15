@@ -10,6 +10,7 @@ import math
 import os
 import random
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -259,7 +260,13 @@ def services_up(root: Path, *, rxn: bool = True) -> dict:
         # Only data/code fixtures from the public source checkout are mounted.
         fixture = Path(record["fixture_root"]) / "rxn-sandbox"
         for service in ("worker", "mcp"):
-            compose["services"][service]["build"]["context"] = str(fixture / service)
+            build_context = root / "state/build" / service
+            shutil.copytree(fixture / service, build_context, dirs_exist_ok=True)
+            shutil.copyfile(
+                PACKAGE / f"deployment/rxn-{service}.constraints.txt",
+                build_context / "constraints.txt",
+            )
+            compose["services"][service]["build"]["context"] = str(build_context)
             compose["services"][service]["build"]["dockerfile"] = str(
                 PACKAGE / f"deployment/rxn-{service}.Dockerfile"
             )
@@ -275,7 +282,7 @@ def services_up(root: Path, *, rxn: bool = True) -> dict:
                 stdout=log,
                 stderr=log,
                 check=True,
-                timeout=1800,
+                timeout=3600,
             )
     commands = {
         "evolution": [
