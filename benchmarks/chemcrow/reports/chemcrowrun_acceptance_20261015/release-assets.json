@@ -8,8 +8,8 @@
     },
     {
       "filename": "runtime-manifest.json",
-      "bytes": 1103,
-      "sha256": "e6e96a31d5cb1912d1d371fa9cfb521bb005571d67a1adf935274bac424de8ba"
+      "bytes": 1245,
+      "sha256": "3efeca65f5696c004ed873656bc89273585f67e51ece0edcfe86df9989a3190f"
     },
     {
       "filename": "runtime-layer-audit.json",
@@ -115,6 +115,16 @@
       "filename": "notice-provenance.json",
       "bytes": 410,
       "sha256": "8d06d61c1a454e51334df645a813246f8fc0a4de8c6a120ae18465243d2a0a8e"
+    },
+    {
+      "filename": "runtime-notice-review.json",
+      "bytes": 17884,
+      "sha256": "1822e7a182f8426281c575c327241b0de10ff5d62a4cfbe3c0afedfc20238bfd"
+    },
+    {
+      "filename": "runtime-metadata-scan.json",
+      "bytes": 2086,
+      "sha256": "8dc1be8381ba06a850df701dc51e6f62e173c9a6348ed28db242fff6a415f197"
     }
   ]
 }

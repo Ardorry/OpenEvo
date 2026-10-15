@@ -27,15 +27,16 @@ run ID for every independent experiment. Results live in `outputs/chemcrowrun/<r
 
 ## Candidate status
 
-Snapshot: 2026-10-15 08:37 UTC; the next experiment check is scheduled for 10:00 UTC.
+Verified on 2026-10-15: the independent local clone completed a real single-task smoke,
+a fresh 14-task experiment, and all 42 calibrated GPT-4 evaluations. Internal scores are
+G1 **10.6286/12**, G2 **11.0143/12**; GPT-4 scores are G1 **9.6071/10**, G2 **9.5714/10**.
+Neither evaluation establishes a significant G2 improvement. Audit and submission validation pass.
+Two pre-model infrastructure failures were explicitly recovered under the existing no-effect rules;
+all original failures and recovery evidence remain recorded. The final candidate passes 328 tests
+with two optional tests skipped. See the acceptance record for source revisions and postprocessing fixes.
 
-The local candidate has passed independent-clone installation, runtime verification, service and
-chemical-tool checks, and one real end-to-end task. The fresh full experiment sealed seven tasks,
-then stopped at task08's pre-evaluator credential-isolation check. The existing no-effect recovery
-proof passed without changing sealed results or replaying G1; an explicit evaluator replacement
-and continuation have been launched. The 14-task experiment remains incomplete;
-consult the dated acceptance record for its completion and calibration status. Offline tests and
-historical scores do not stand in for new experimental results.
+WebSearch was unavailable because SERP_API_KEY was absent; 71 of 686 tool observations failed
+for this reason. Model substitution, tool availability and service versions limit comparability.
 
 The runtime archive has been verified locally. Public asset publication, anonymous download and
 fresh-clone acceptance from the actual GitHub release remain pending. Native dependency attribution

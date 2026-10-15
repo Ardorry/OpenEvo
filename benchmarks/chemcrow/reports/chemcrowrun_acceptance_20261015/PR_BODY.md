@@ -1,0 +1,9 @@
+The ChemCrow reproduction previously depended on development-era names, private state paths and manually coordinated services. This change exposes a documented ChemCrowRun v1.0 workflow with isolated workspaces, pinned runtime/chemical-service setup, budgeted calibration and audited submission export, while preserving full-v8 identities and artifact payloads.
+
+A clean local clone completed a real one-task smoke, a new 14-task G1 → three independent Reflectors → G2 experiment, and all 42 GPT-4 calibration calls. Internal G1/G2 scores are 10.6286/11.0143 out of 12; calibrated scores are 9.6071/9.5714 out of 10. Neither paired test establishes significant G2 improvement. Generation explicitly substitutes gpt-5.6-sol for unavailable historical gpt-5.5. Two proven pre-model infrastructure failures were explicitly recovered; original records are preserved and replacements are exported.
+
+Validation: 328 benchmark tests passed, two optional tests skipped, benchmark lint passed, L1 historical artifact verification passed, and real-run audit/submission validation passed. The immutable generation checkout and separately attributed postprocessing fixes are documented in the acceptance report. GPT-4 cost was USD 2.99460 for 42 valid calls with no retries or fallback.
+
+Limitations: WebSearch lacked SERP_API_KEY; 161 of 686 tool observations recorded errors. Public runtime redistribution review and anonymous download/actual remote fresh-clone acceptance remain pending. No runtime assets, raw model answers, private state or credentials are included. Results remain provisional LLM judgments and do not claim official ChemCrow certification.
+
+Part of the local implementation record: `benchmarks/chemcrow/docs/CHEMCROWRUN_V1_WORK.md`. Full evidence: `benchmarks/chemcrow/reports/chemcrowrun_acceptance_20261015/ACCEPTANCE.md`.

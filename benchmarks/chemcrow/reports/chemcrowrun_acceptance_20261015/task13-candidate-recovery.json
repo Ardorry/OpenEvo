@@ -1,0 +1,36 @@
+{
+  "attempt_ordinal": 1,
+  "authority_sha256": "7dfe0bcd491c2948491a7314c28f036eb9b1e187e28e6c2abc43ad89d27dcef0",
+  "candidate_model_call_proven_absent": true,
+  "config_sha256": "bb8803980a120d9c0e1fb8dcb531cba06e53508f9b0bb9d48892a5422cbffbbc",
+  "core_completion_sha256": "be7ce7dc1fb9583fa16ee224ab60f00209ef5ef822acf785ff5006f3b7ba246a",
+  "core_completion_status": "ERROR",
+  "core_session_id_sha256": "255b39bbc6dc8672997967d79784ce481abf870d6237288d63e10b39abe754a6",
+  "duplicate_scientific_call": false,
+  "error_category": "credential_isolation_validation_failed",
+  "infrastructure_canary_model_call_may_have_occurred": true,
+  "no_effect_predicates": {
+    "baseline_artifact_inventory_empty": true,
+    "core_route_bound": true,
+    "core_status_error": true,
+    "credential_canary_receipt_not_published": true,
+    "exact_pre_candidate_setup_error": true,
+    "host_codex_exec_forbidden": true,
+    "trajectory_has_zero_records": true,
+    "trajectory_has_zero_traces": true,
+    "workspace_result_absent": true
+  },
+  "original_claim_sha256": "be052eb192c43dd5a26a55c73271d1f8eafc49393311ca0f9d65acc55ea39c87",
+  "pair_id": "chemcrowrun-reproduction-v1-sol-20261015--chemcrow-13",
+  "phase": "baseline_candidate",
+  "recorded_before_replacement_dispatch": true,
+  "schema_version": "chemcrow_pre_candidate_no_effect_recovery_v1",
+  "source_authority_sha256": {
+    "codex_harness": "60cd5826be5f1aead033752c080e3acc9e082169f1076d1f76f2474f9234bccf"
+  },
+  "status": "VERIFIED_NO_CANDIDATE_EFFECT_REPLACEMENT_READY",
+  "task_id": "chemcrow-13",
+  "source_receipt_sha256": "0cb298a6f22a7355e7bfb1a46ce2707534e71cb76f9aabe70df4209bc53f3c36",
+  "prior_sealed_pairs_preserved": 11,
+  "offline_recovery_model_calls": 0
+}

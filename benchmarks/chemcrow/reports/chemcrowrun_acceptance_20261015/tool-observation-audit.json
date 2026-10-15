@@ -1,0 +1,449 @@
+{
+  "calls_by_tool": {
+    "ControlChemCheck": 38,
+    "ExplosiveCheck": 36,
+    "FunctionalGroups": 21,
+    "Mol2CAS": 53,
+    "MolSimilarity": 11,
+    "Name2SMILES": 88,
+    "PatentCheck": 30,
+    "ReactionPredict": 63,
+    "ReactionRetrosynthesis": 27,
+    "SMILES2Name": 36,
+    "SMILES2Weight": 68,
+    "SafetySummary": 87,
+    "SimilarityToControlChem": 8,
+    "WebSearch": 71,
+    "wikipedia": 49
+  },
+  "errors_by_tool_and_category": [
+    {
+      "category": "upstream_http_400",
+      "count": 3,
+      "tool": "ExplosiveCheck"
+    },
+    {
+      "category": "upstream_http_400",
+      "count": 3,
+      "tool": "Mol2CAS"
+    },
+    {
+      "category": "upstream_http_503",
+      "count": 2,
+      "tool": "Mol2CAS"
+    },
+    {
+      "category": "tool_input_validation",
+      "count": 4,
+      "tool": "MolSimilarity"
+    },
+    {
+      "category": "upstream_http_404",
+      "count": 10,
+      "tool": "Name2SMILES"
+    },
+    {
+      "category": "upstream_http_503",
+      "count": 5,
+      "tool": "Name2SMILES"
+    },
+    {
+      "category": "upstream_tls_eof",
+      "count": 2,
+      "tool": "Name2SMILES"
+    },
+    {
+      "category": "tool_input_validation",
+      "count": 4,
+      "tool": "PatentCheck"
+    },
+    {
+      "category": "tool_input_validation",
+      "count": 17,
+      "tool": "ReactionPredict"
+    },
+    {
+      "category": "tool_input_validation",
+      "count": 3,
+      "tool": "ReactionRetrosynthesis"
+    },
+    {
+      "category": "upstream_http_404",
+      "count": 3,
+      "tool": "SMILES2Name"
+    },
+    {
+      "category": "upstream_http_503",
+      "count": 1,
+      "tool": "SMILES2Name"
+    },
+    {
+      "category": "tool_input_validation",
+      "count": 1,
+      "tool": "SMILES2Weight"
+    },
+    {
+      "category": "upstream_http_400",
+      "count": 3,
+      "tool": "SafetySummary"
+    },
+    {
+      "category": "upstream_http_404",
+      "count": 5,
+      "tool": "SafetySummary"
+    },
+    {
+      "category": "upstream_http_503",
+      "count": 8,
+      "tool": "SafetySummary"
+    },
+    {
+      "category": "missing_serp_api_key",
+      "count": 71,
+      "tool": "WebSearch"
+    },
+    {
+      "category": "upstream_http_404",
+      "count": 16,
+      "tool": "wikipedia"
+    }
+  ],
+  "limitation": "WebSearch unavailable without SERP_API_KEY; model/server and tool availability differ from historical conditions. No results were regenerated to hide tool failures.",
+  "pair_file_inventory": [
+    {
+      "sha256": "5ca7c8b4f203cba00ce51d0d3a241990916bc924515a9b48befd7ef2ee6cc0c9",
+      "task_id": "chemcrow-01"
+    },
+    {
+      "sha256": "888e8c6e0ca07f59ff436e85343a12af6455f874125689155f8a9053a48a4c01",
+      "task_id": "chemcrow-02"
+    },
+    {
+      "sha256": "76a335e2b6547ba613a81c4c5e38a7490eab5aa80ac9e7021639cfecdfdc9136",
+      "task_id": "chemcrow-03"
+    },
+    {
+      "sha256": "4e2d10366fa91ef34a5cd22c247e6c0dfc86f8f0d97a7a604dfea5b3657938a6",
+      "task_id": "chemcrow-04"
+    },
+    {
+      "sha256": "ac417fb1909b124e6cf3db5d07b0be8325cc9c6f509f78ae5b6bff6266947a31",
+      "task_id": "chemcrow-05"
+    },
+    {
+      "sha256": "c03c344d8ab2b06ebd6d1849feae23cd395ab60933f53f5b794ba3cea59503f7",
+      "task_id": "chemcrow-06"
+    },
+    {
+      "sha256": "3aca6c54437f62bd7afe09fe884b5fa2143bed3bc51e7e07dad839cc7f01470c",
+      "task_id": "chemcrow-07"
+    },
+    {
+      "sha256": "c1730c59e8c80ec806a551b4a33af84a201964c1cdda6aac74b3e91e9d1a5c35",
+      "task_id": "chemcrow-08"
+    },
+    {
+      "sha256": "9a14792640bde7b303ddf07a23a32306e260b0c357fa4d3dfef1c8815a44f3aa",
+      "task_id": "chemcrow-09"
+    },
+    {
+      "sha256": "337dee7433bc16b269859265f66c6ee6a80203b196d67159e1041ea12d089a5e",
+      "task_id": "chemcrow-10"
+    },
+    {
+      "sha256": "fdc4f683fa6df1d8b4f60709e5c1f7134441ed8bc66e19340bf8420da12a0b12",
+      "task_id": "chemcrow-12"
+    },
+    {
+      "sha256": "c9defac3e02153550e7828882f1d5536a694751a819cce81947fe763bbbe3848",
+      "task_id": "chemcrow-13"
+    },
+    {
+      "sha256": "18c2bfa7ae127de7909ee7ce8d3641f378d7fc74b12b56591fe34b6ff8feb324",
+      "task_id": "chemcrow-14"
+    },
+    {
+      "sha256": "d226e69f8e3090e6c975d310a2a49d77e481db7811348708d8bebef5f6cee4b8",
+      "task_id": "chemcrow-15"
+    }
+  ],
+  "per_task": [
+    {
+      "baseline": {
+        "error_categories": {
+          "missing_serp_api_key": 3,
+          "tool_input_validation": 1,
+          "upstream_http_404": 2
+        },
+        "tool_errors": 6,
+        "tool_observations": 40
+      },
+      "evolved": {
+        "error_categories": {
+          "missing_serp_api_key": 5
+        },
+        "tool_errors": 5,
+        "tool_observations": 46
+      },
+      "task_id": "chemcrow-01"
+    },
+    {
+      "baseline": {
+        "error_categories": {
+          "missing_serp_api_key": 1,
+          "tool_input_validation": 2,
+          "upstream_http_400": 5,
+          "upstream_http_404": 3
+        },
+        "tool_errors": 11,
+        "tool_observations": 36
+      },
+      "evolved": {
+        "error_categories": {
+          "missing_serp_api_key": 5,
+          "tool_input_validation": 1,
+          "upstream_http_400": 3,
+          "upstream_http_404": 2
+        },
+        "tool_errors": 11,
+        "tool_observations": 27
+      },
+      "task_id": "chemcrow-02"
+    },
+    {
+      "baseline": {
+        "error_categories": {
+          "tool_input_validation": 2
+        },
+        "tool_errors": 2,
+        "tool_observations": 9
+      },
+      "evolved": {
+        "error_categories": {
+          "tool_input_validation": 3
+        },
+        "tool_errors": 3,
+        "tool_observations": 11
+      },
+      "task_id": "chemcrow-03"
+    },
+    {
+      "baseline": {
+        "error_categories": {
+          "missing_serp_api_key": 6,
+          "upstream_http_404": 2
+        },
+        "tool_errors": 8,
+        "tool_observations": 38
+      },
+      "evolved": {
+        "error_categories": {
+          "missing_serp_api_key": 4,
+          "upstream_http_404": 2
+        },
+        "tool_errors": 6,
+        "tool_observations": 25
+      },
+      "task_id": "chemcrow-04"
+    },
+    {
+      "baseline": {
+        "error_categories": {
+          "missing_serp_api_key": 4,
+          "tool_input_validation": 1,
+          "upstream_http_404": 1,
+          "upstream_tls_eof": 1
+        },
+        "tool_errors": 7,
+        "tool_observations": 29
+      },
+      "evolved": {
+        "error_categories": {
+          "missing_serp_api_key": 4,
+          "tool_input_validation": 1,
+          "upstream_http_404": 1,
+          "upstream_tls_eof": 1
+        },
+        "tool_errors": 7,
+        "tool_observations": 31
+      },
+      "task_id": "chemcrow-05"
+    },
+    {
+      "baseline": {
+        "error_categories": {
+          "tool_input_validation": 2
+        },
+        "tool_errors": 2,
+        "tool_observations": 9
+      },
+      "evolved": {
+        "error_categories": {
+          "tool_input_validation": 2
+        },
+        "tool_errors": 2,
+        "tool_observations": 7
+      },
+      "task_id": "chemcrow-06"
+    },
+    {
+      "baseline": {
+        "error_categories": {
+          "missing_serp_api_key": 2,
+          "tool_input_validation": 1
+        },
+        "tool_errors": 3,
+        "tool_observations": 18
+      },
+      "evolved": {
+        "error_categories": {
+          "missing_serp_api_key": 3,
+          "tool_input_validation": 2,
+          "upstream_http_404": 1
+        },
+        "tool_errors": 6,
+        "tool_observations": 20
+      },
+      "task_id": "chemcrow-07"
+    },
+    {
+      "baseline": {
+        "error_categories": {
+          "missing_serp_api_key": 1,
+          "tool_input_validation": 4
+        },
+        "tool_errors": 5,
+        "tool_observations": 30
+      },
+      "evolved": {
+        "error_categories": {
+          "missing_serp_api_key": 4,
+          "tool_input_validation": 1
+        },
+        "tool_errors": 5,
+        "tool_observations": 28
+      },
+      "task_id": "chemcrow-08"
+    },
+    {
+      "baseline": {
+        "error_categories": {
+          "missing_serp_api_key": 2,
+          "upstream_http_404": 1
+        },
+        "tool_errors": 3,
+        "tool_observations": 14
+      },
+      "evolved": {
+        "error_categories": {
+          "missing_serp_api_key": 1
+        },
+        "tool_errors": 1,
+        "tool_observations": 13
+      },
+      "task_id": "chemcrow-09"
+    },
+    {
+      "baseline": {
+        "error_categories": {
+          "missing_serp_api_key": 1,
+          "tool_input_validation": 1,
+          "upstream_http_404": 2
+        },
+        "tool_errors": 4,
+        "tool_observations": 12
+      },
+      "evolved": {
+        "error_categories": {
+          "missing_serp_api_key": 2,
+          "tool_input_validation": 1,
+          "upstream_http_404": 4
+        },
+        "tool_errors": 7,
+        "tool_observations": 20
+      },
+      "task_id": "chemcrow-10"
+    },
+    {
+      "baseline": {
+        "error_categories": {},
+        "tool_errors": 0,
+        "tool_observations": 0
+      },
+      "evolved": {
+        "error_categories": {},
+        "tool_errors": 0,
+        "tool_observations": 0
+      },
+      "task_id": "chemcrow-12"
+    },
+    {
+      "baseline": {
+        "error_categories": {
+          "missing_serp_api_key": 3,
+          "tool_input_validation": 1,
+          "upstream_http_404": 2
+        },
+        "tool_errors": 6,
+        "tool_observations": 34
+      },
+      "evolved": {
+        "error_categories": {
+          "missing_serp_api_key": 8,
+          "upstream_http_400": 1,
+          "upstream_http_404": 5
+        },
+        "tool_errors": 14,
+        "tool_observations": 51
+      },
+      "task_id": "chemcrow-13"
+    },
+    {
+      "baseline": {
+        "error_categories": {
+          "missing_serp_api_key": 5,
+          "tool_input_validation": 1,
+          "upstream_http_404": 1
+        },
+        "tool_errors": 7,
+        "tool_observations": 30
+      },
+      "evolved": {
+        "error_categories": {
+          "missing_serp_api_key": 5,
+          "tool_input_validation": 1,
+          "upstream_http_404": 1
+        },
+        "tool_errors": 7,
+        "tool_observations": 33
+      },
+      "task_id": "chemcrow-14"
+    },
+    {
+      "baseline": {
+        "error_categories": {
+          "missing_serp_api_key": 1,
+          "tool_input_validation": 1,
+          "upstream_http_503": 10
+        },
+        "tool_errors": 12,
+        "tool_observations": 35
+      },
+      "evolved": {
+        "error_categories": {
+          "missing_serp_api_key": 1,
+          "upstream_http_404": 4,
+          "upstream_http_503": 6
+        },
+        "tool_errors": 11,
+        "tool_observations": 40
+      },
+      "task_id": "chemcrow-15"
+    }
+  ],
+  "raw_arguments_answers_urls_included": false,
+  "schema_version": "chemcrowrun_tool_observation_audit_v1",
+  "source_commit": "1bf37ce0b386be4abccbcaed8daf5a5f34d1f54b",
+  "tool_errors": 161,
+  "tool_observations": 686
+}

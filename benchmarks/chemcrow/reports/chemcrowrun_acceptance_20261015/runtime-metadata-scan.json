@@ -1,0 +1,43 @@
+{
+  "checked_at": "2026-10-15T09:11:52.220635+00:00",
+  "status": "PASS_BOUNDED_METADATA_SCAN",
+  "config_sha256": "0e5783e7839fe06d2df14d7a431c90f0982ca2099ef33bfa4c9e5933149bf5f2",
+  "environment_variable_names": [
+    "PATH",
+    "LANG",
+    "GPG_KEY",
+    "PYTHON_VERSION",
+    "PYTHON_SHA256",
+    "DEBIAN_FRONTEND",
+    "HOME",
+    "NPM_CONFIG_PREFIX",
+    "NPM_CONFIG_UPDATE_NOTIFIER"
+  ],
+  "label_names": [
+    "io.openevo.managed-runtime"
+  ],
+  "history_entries": 19,
+  "history_command_hashes": [
+    "23d486926aefa4ebc9da3db2eaca467117aa1ff8fcae962ce138fc6566fc1a5a",
+    "1e1cdb3e2219561e1261c3d9e683c3415260b19a94dffb062cba98025e438293",
+    "e4da0a1798217968e148dfa5f730140618c1de1427f69209fd6ea0935226ce0a",
+    "7613ee46ccc4aff6a9507d48e30f95159dd4745376f072a9d2b186f0e2d9de16",
+    "05c14db99ea4a0226fc56ef424d414ceb0b3544cbd3abd9b8f6709850f955596",
+    "d8922314b0dfb818171f56a92252c3df406f9c3432cb43cafba940eae5012bfa",
+    "797a467f8bf6800b1846c3382202649228ab2c985fc2253c8c60c8f0ff7a14a0",
+    "26b3a07f54832210656bd125ad8f25ec92b14b4a0de7f9dcf66ac71761076fa1",
+    "54aecc1a7e7667294189d186c8c172eac4f8aac26f7c00408a6984a7e6676992",
+    "2c279d775ea277655ff8964879ec3b2886aa348a5bc600920a5bb6123c87794d",
+    "0c5f89f13d449b1ba0febc5e93d62df287ec29054ac78b44b32a30372f755f32",
+    "f703f2305d6321765135b33825931320c721b34531b485adb4545ea113882c8d",
+    "48a31af8f57022739351e8c65a6a8ad3e0afa8169e6add011a626943778d7e48",
+    "81c416a72e3f9b59dcee202ffb5686ab99c829230852ffb296aa562b33d6cc92",
+    "688dc99983ae0647009cdf0456a5e33799ff339a05c1f04eac1635aa4b0a9a91",
+    "2411356d9469c1535610abf8ba76aeb38cbcccac75aadafbcd4790737be25b36",
+    "50d5927e7b60da53ad2d015978f5b446e1b1108307872d4f26cf0e1f6ef5a64e",
+    "af0ea80952c88f2978f9c6689a7675f4f540781d24ae6df31af15aee8f5b6834",
+    "8dc1a5146e707f784217c84e08d844194e04d73de7630fc80b8cdf2a7321fa36"
+  ],
+  "findings": [],
+  "scope": "Exact OCI config JSON including environment, labels and history; no environment values or history command bodies published; not a proof of absence of every possible secret"
+}

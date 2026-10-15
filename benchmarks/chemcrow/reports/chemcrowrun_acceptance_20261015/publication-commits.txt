@@ -1,0 +1,18 @@
+Pre-evidence-commit local history after original remote chemcrow; final evidence commit follows.
+bda442414 feat(chemcrow): add standardized reproduction workflow
+405f7b91e docs(chemcrow): pin Docker reproduction contract
+7375f5ec4 feat(chemcrow): publish sanitized judge evidence
+67284b3cc feat(chemcrowrun): add isolated reproduction lifecycle and audited exports
+95df3151b feat(chemcrowrun): declare model substitution and bind run provenance
+2f2794c1b build(chemcrowrun): pin RXN dependencies and worker readiness
+9071aea9c fix(chemcrowrun): verify service ownership and preserve deployment logs
+2771a7196 feat(chemcrowrun): report calibrated paired statistics and billing receipts
+364085932 fix(chemcrowrun): require declared model conditions at submission export
+829cd1d62 fix(chemcrowrun): check live judge pricing before budget admission
+6791d6bbe fix(chemcrowrun): audit the configured isolated claim ledger
+1bf37ce0b feat(chemcrowrun): compare sealed results with immutable historical evidence
+6eae641d1 docs(chemcrowrun): organize candidate entrypoint and verified acceptance evidence
+c2bc9772e docs(chemcrowrun): distinguish notice evidence from distribution clearance
+f223ff793 docs(chemcrowrun): record evidence-bound task08 evaluator recovery
+7e6966b66 fix(chemcrowrun): align Judge audit path and report recorded usage
+6e03aef26 fix(chemcrowrun): export verified replacement provenance

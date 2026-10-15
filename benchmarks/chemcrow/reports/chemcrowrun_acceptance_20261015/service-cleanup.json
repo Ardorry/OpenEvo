@@ -1,0 +1,14 @@
+{
+  "status": "PASS",
+  "ports": {
+    "19480": "RELEASED",
+    "19481": "RELEASED",
+    "19482": "RELEASED",
+    "19483": "RELEASED",
+    "8110": "RELEASED",
+    "8180": "RELEASED",
+    "8400": "RELEASED"
+  },
+  "logs_collected": true,
+  "run_state_and_history_retained": true
+}

@@ -1,0 +1,505 @@
+{
+  "historical_alias": "full-v8",
+  "historical_model": "gpt-5.5",
+  "input_validation": "Submission schema and immutable historical hashes; no leaderboard certification",
+  "internal_blind_12_point": {
+    "historical_g1_g2": {
+      "bootstrap_95_ci": [
+        -0.7142857142857143,
+        1.3571428571428572
+      ],
+      "bootstrap_resamples": 10000,
+      "exact_sign_flip_p_two_sided": 0.6103515625,
+      "losses": 4,
+      "mean_delta": 0.35714285714285715,
+      "mean_g1": 9.928571428571429,
+      "mean_g2": 10.285714285714286,
+      "n": 14,
+      "seed": 20260825,
+      "test_assumption": "paired differences exchangeable under sign reversal under the null",
+      "ties": 2,
+      "wins": 8
+    },
+    "new_g1_g2": {
+      "bootstrap_95_ci": [
+        -0.5071428571428572,
+        1.1214285714285712
+      ],
+      "bootstrap_resamples": 10000,
+      "exact_sign_flip_p_two_sided": 0.43359375,
+      "losses": 3,
+      "mean_delta": 0.3857142857142856,
+      "mean_g1": 10.62857142857143,
+      "mean_g2": 11.014285714285714,
+      "n": 14,
+      "seed": 20260825,
+      "test_assumption": "paired differences exchangeable under sign reversal under the null",
+      "ties": 3,
+      "wins": 8
+    },
+    "new_minus_historical_g1": {
+      "left": "historical",
+      "right": "new",
+      "statistics": {
+        "bootstrap_95_ci": [
+          0.14285714285714285,
+          1.3214285714285714
+        ],
+        "bootstrap_resamples": 10000,
+        "exact_sign_flip_p_two_sided": 0.046875,
+        "losses": 1,
+        "mean_delta": 0.7000000000000001,
+        "mean_g1": 9.928571428571429,
+        "mean_g2": 10.62857142857143,
+        "n": 14,
+        "seed": 20260825,
+        "test_assumption": "paired differences exchangeable under sign reversal under the null",
+        "ties": 6,
+        "wins": 7
+      }
+    },
+    "new_minus_historical_g2": {
+      "left": "historical",
+      "right": "new",
+      "statistics": {
+        "bootstrap_95_ci": [
+          -0.3857142857142856,
+          1.8714285714285712
+        ],
+        "bootstrap_resamples": 10000,
+        "exact_sign_flip_p_two_sided": 0.2578125,
+        "losses": 4,
+        "mean_delta": 0.7285714285714285,
+        "mean_g1": 10.285714285714286,
+        "mean_g2": 11.014285714285714,
+        "n": 14,
+        "seed": 20260825,
+        "test_assumption": "paired differences exchangeable under sign reversal under the null",
+        "ties": 4,
+        "wins": 6
+      }
+    },
+    "per_task": [
+      {
+        "g1_change": 1.0,
+        "g2_change": -1.0,
+        "historical_g1": 8.0,
+        "historical_g2": 11.0,
+        "new_g1": 9.0,
+        "new_g2": 10.0,
+        "new_g2_minus_g1": 1.0,
+        "task_id": "chemcrow-01"
+      },
+      {
+        "g1_change": 1.0,
+        "g2_change": 0.0,
+        "historical_g1": 10.0,
+        "historical_g2": 12.0,
+        "new_g1": 11.0,
+        "new_g2": 12.0,
+        "new_g2_minus_g1": 1.0,
+        "task_id": "chemcrow-02"
+      },
+      {
+        "g1_change": 0.0,
+        "g2_change": 0.0,
+        "historical_g1": 12.0,
+        "historical_g2": 12.0,
+        "new_g1": 12.0,
+        "new_g2": 12.0,
+        "new_g2_minus_g1": 0.0,
+        "task_id": "chemcrow-03"
+      },
+      {
+        "g1_change": -1.0,
+        "g2_change": 3.0,
+        "historical_g1": 9.0,
+        "historical_g2": 8.0,
+        "new_g1": 8.0,
+        "new_g2": 11.0,
+        "new_g2_minus_g1": 3.0,
+        "task_id": "chemcrow-04"
+      },
+      {
+        "g1_change": 1.5,
+        "g2_change": 1.3999999999999986,
+        "historical_g1": 8.0,
+        "historical_g2": 9.0,
+        "new_g1": 9.5,
+        "new_g2": 10.399999999999999,
+        "new_g2_minus_g1": 0.8999999999999986,
+        "task_id": "chemcrow-05"
+      },
+      {
+        "g1_change": 0.0,
+        "g2_change": 4.0,
+        "historical_g1": 12.0,
+        "historical_g2": 8.0,
+        "new_g1": 12.0,
+        "new_g2": 12.0,
+        "new_g2_minus_g1": 0.0,
+        "task_id": "chemcrow-06"
+      },
+      {
+        "g1_change": 1.0,
+        "g2_change": 5.0,
+        "historical_g1": 9.0,
+        "historical_g2": 6.0,
+        "new_g1": 10.0,
+        "new_g2": 11.0,
+        "new_g2_minus_g1": 1.0,
+        "task_id": "chemcrow-07"
+      },
+      {
+        "g1_change": 0.3000000000000007,
+        "g2_change": 0.0,
+        "historical_g1": 11.0,
+        "historical_g2": 12.0,
+        "new_g1": 11.3,
+        "new_g2": 12.0,
+        "new_g2_minus_g1": 0.6999999999999993,
+        "task_id": "chemcrow-08"
+      },
+      {
+        "g1_change": 3.0,
+        "g2_change": -0.1999999999999993,
+        "historical_g1": 9.0,
+        "historical_g2": 12.0,
+        "new_g1": 12.0,
+        "new_g2": 11.8,
+        "new_g2_minus_g1": -0.1999999999999993,
+        "task_id": "chemcrow-09"
+      },
+      {
+        "g1_change": 0.0,
+        "g2_change": -2.0,
+        "historical_g1": 11.0,
+        "historical_g2": 12.0,
+        "new_g1": 11.0,
+        "new_g2": 10.0,
+        "new_g2_minus_g1": -1.0,
+        "task_id": "chemcrow-10"
+      },
+      {
+        "g1_change": 0.0,
+        "g2_change": 1.0,
+        "historical_g1": 12.0,
+        "historical_g2": 11.0,
+        "new_g1": 12.0,
+        "new_g2": 12.0,
+        "new_g2_minus_g1": 0.0,
+        "task_id": "chemcrow-12"
+      },
+      {
+        "g1_change": 0.0,
+        "g2_change": 2.0,
+        "historical_g1": 8.0,
+        "historical_g2": 8.0,
+        "new_g1": 8.0,
+        "new_g2": 10.0,
+        "new_g2_minus_g1": 2.0,
+        "task_id": "chemcrow-13"
+      },
+      {
+        "g1_change": 3.0,
+        "g2_change": -3.0,
+        "historical_g1": 9.0,
+        "historical_g2": 11.0,
+        "new_g1": 12.0,
+        "new_g2": 8.0,
+        "new_g2_minus_g1": -4.0,
+        "task_id": "chemcrow-14"
+      },
+      {
+        "g1_change": 0.0,
+        "g2_change": 0.0,
+        "historical_g1": 11.0,
+        "historical_g2": 12.0,
+        "new_g1": 11.0,
+        "new_g2": 12.0,
+        "new_g2_minus_g1": 1.0,
+        "task_id": "chemcrow-15"
+      }
+    ]
+  },
+  "interpretation": "Descriptive replication comparison. Model/service changes confound cross-run differences. Paired tests do not establish improvement from one task or replace human review. Multiple contrasts are exploratory and unadjusted.",
+  "model_calls": 0,
+  "model_substitution": {
+    "actual_model": "gpt-5.6-sol",
+    "historical_model": "gpt-5.5",
+    "reason": "Historical gpt-5.5 absent from current subscription catalog; unchanged Core isolation passes with gpt-5.6-sol",
+    "variant": "chemcrowrun_v1_model_substitution_v1"
+  },
+  "new_models": {
+    "candidate": {
+      "capture_mode": "transcript",
+      "model": "gpt-5.6-sol",
+      "provider": "OpenAI Codex subscription"
+    },
+    "evolution_evaluator": {
+      "capture_mode": "transcript",
+      "model": "gpt-5.6-sol",
+      "provider": "OpenAI Codex subscription"
+    },
+    "final_evaluator": {
+      "capture_mode": "transcript",
+      "model": "gpt-5.6-sol",
+      "provider": "OpenAI Codex subscription"
+    },
+    "reflector_agent_system": {
+      "capture_mode": "transcript",
+      "model": "gpt-5.6-sol",
+      "provider": "OpenAI Codex subscription"
+    },
+    "reflector_memory": {
+      "capture_mode": "transcript",
+      "model": "gpt-5.6-sol",
+      "provider": "OpenAI Codex subscription"
+    },
+    "reflector_skill_bundle": {
+      "capture_mode": "transcript",
+      "model": "gpt-5.6-sol",
+      "provider": "OpenAI Codex subscription"
+    }
+  },
+  "paper_10_point": {
+    "historical_g1_g2": {
+      "bootstrap_95_ci": [
+        -0.42857142857142855,
+        0.14285714285714285
+      ],
+      "bootstrap_resamples": 10000,
+      "exact_sign_flip_p_two_sided": 0.625,
+      "losses": 3,
+      "mean_delta": -0.14285714285714285,
+      "mean_g1": 9.357142857142858,
+      "mean_g2": 9.214285714285714,
+      "n": 14,
+      "seed": 20260825,
+      "test_assumption": "paired differences exchangeable under sign reversal under the null",
+      "ties": 10,
+      "wins": 1
+    },
+    "new_g1_g2": {
+      "bootstrap_95_ci": [
+        -0.32142857142857145,
+        0.25
+      ],
+      "bootstrap_resamples": 10000,
+      "exact_sign_flip_p_two_sided": 1.0,
+      "losses": 3,
+      "mean_delta": -0.03571428571428571,
+      "mean_g1": 9.607142857142858,
+      "mean_g2": 9.571428571428571,
+      "n": 14,
+      "seed": 20260825,
+      "test_assumption": "paired differences exchangeable under sign reversal under the null",
+      "ties": 9,
+      "wins": 2
+    },
+    "new_minus_historical_g1": {
+      "left": "historical",
+      "right": "new",
+      "statistics": {
+        "bootstrap_95_ci": [
+          -0.03571428571428571,
+          0.5357142857142857
+        ],
+        "bootstrap_resamples": 10000,
+        "exact_sign_flip_p_two_sided": 0.21875,
+        "losses": 1,
+        "mean_delta": 0.25,
+        "mean_g1": 9.357142857142858,
+        "mean_g2": 9.607142857142858,
+        "n": 14,
+        "seed": 20260825,
+        "test_assumption": "paired differences exchangeable under sign reversal under the null",
+        "ties": 8,
+        "wins": 5
+      }
+    },
+    "new_minus_historical_g2": {
+      "left": "historical",
+      "right": "new",
+      "statistics": {
+        "bootstrap_95_ci": [
+          0.0,
+          0.6428571428571429
+        ],
+        "bootstrap_resamples": 10000,
+        "exact_sign_flip_p_two_sided": 0.125,
+        "losses": 1,
+        "mean_delta": 0.35714285714285715,
+        "mean_g1": 9.214285714285714,
+        "mean_g2": 9.571428571428571,
+        "n": 14,
+        "seed": 20260825,
+        "test_assumption": "paired differences exchangeable under sign reversal under the null",
+        "ties": 7,
+        "wins": 6
+      }
+    },
+    "per_task": [
+      {
+        "g1_change": 0.5,
+        "g2_change": 0.0,
+        "historical_g1": 9.0,
+        "historical_g2": 9.0,
+        "new_g1": 9.5,
+        "new_g2": 9.0,
+        "new_g2_minus_g1": -0.5,
+        "task_id": "chemcrow-01"
+      },
+      {
+        "g1_change": 0.0,
+        "g2_change": 1.0,
+        "historical_g1": 9.0,
+        "historical_g2": 9.0,
+        "new_g1": 9.0,
+        "new_g2": 10.0,
+        "new_g2_minus_g1": 1.0,
+        "task_id": "chemcrow-02"
+      },
+      {
+        "g1_change": 0.0,
+        "g2_change": 0.0,
+        "historical_g1": 10.0,
+        "historical_g2": 10.0,
+        "new_g1": 10.0,
+        "new_g2": 10.0,
+        "new_g2_minus_g1": 0.0,
+        "task_id": "chemcrow-03"
+      },
+      {
+        "g1_change": 0.0,
+        "g2_change": 1.0,
+        "historical_g1": 9.0,
+        "historical_g2": 8.0,
+        "new_g1": 9.0,
+        "new_g2": 9.0,
+        "new_g2_minus_g1": 0.0,
+        "task_id": "chemcrow-04"
+      },
+      {
+        "g1_change": 1.0,
+        "g2_change": 1.0,
+        "historical_g1": 9.0,
+        "historical_g2": 9.0,
+        "new_g1": 10.0,
+        "new_g2": 10.0,
+        "new_g2_minus_g1": 0.0,
+        "task_id": "chemcrow-05"
+      },
+      {
+        "g1_change": 0.0,
+        "g2_change": 1.0,
+        "historical_g1": 10.0,
+        "historical_g2": 9.0,
+        "new_g1": 10.0,
+        "new_g2": 10.0,
+        "new_g2_minus_g1": 0.0,
+        "task_id": "chemcrow-06"
+      },
+      {
+        "g1_change": 1.0,
+        "g2_change": 0.0,
+        "historical_g1": 9.0,
+        "historical_g2": 9.0,
+        "new_g1": 10.0,
+        "new_g2": 9.0,
+        "new_g2_minus_g1": -1.0,
+        "task_id": "chemcrow-07"
+      },
+      {
+        "g1_change": -1.0,
+        "g2_change": 0.0,
+        "historical_g1": 10.0,
+        "historical_g2": 10.0,
+        "new_g1": 9.0,
+        "new_g2": 10.0,
+        "new_g2_minus_g1": 1.0,
+        "task_id": "chemcrow-08"
+      },
+      {
+        "g1_change": 1.0,
+        "g2_change": 1.0,
+        "historical_g1": 9.0,
+        "historical_g2": 9.0,
+        "new_g1": 10.0,
+        "new_g2": 10.0,
+        "new_g2_minus_g1": 0.0,
+        "task_id": "chemcrow-09"
+      },
+      {
+        "g1_change": 0.0,
+        "g2_change": 1.0,
+        "historical_g1": 9.0,
+        "historical_g2": 8.0,
+        "new_g1": 9.0,
+        "new_g2": 9.0,
+        "new_g2_minus_g1": 0.0,
+        "task_id": "chemcrow-10"
+      },
+      {
+        "g1_change": 0.0,
+        "g2_change": 0.0,
+        "historical_g1": 10.0,
+        "historical_g2": 10.0,
+        "new_g1": 10.0,
+        "new_g2": 10.0,
+        "new_g2_minus_g1": 0.0,
+        "task_id": "chemcrow-12"
+      },
+      {
+        "g1_change": 0.0,
+        "g2_change": 0.0,
+        "historical_g1": 9.0,
+        "historical_g2": 9.0,
+        "new_g1": 9.0,
+        "new_g2": 9.0,
+        "new_g2_minus_g1": 0.0,
+        "task_id": "chemcrow-13"
+      },
+      {
+        "g1_change": 0.0,
+        "g2_change": -1.0,
+        "historical_g1": 10.0,
+        "historical_g2": 10.0,
+        "new_g1": 10.0,
+        "new_g2": 9.0,
+        "new_g2_minus_g1": -1.0,
+        "task_id": "chemcrow-14"
+      },
+      {
+        "g1_change": 1.0,
+        "g2_change": 0.0,
+        "historical_g1": 9.0,
+        "historical_g2": 10.0,
+        "new_g1": 10.0,
+        "new_g2": 10.0,
+        "new_g2_minus_g1": 0.0,
+        "task_id": "chemcrow-15"
+      }
+    ]
+  },
+  "raw_answers_included": false,
+  "schema_version": "chemcrowrun_comparison_v1",
+  "source_commit": "1bf37ce0b386be4abccbcaed8daf5a5f34d1f54b",
+  "submission_sha256": "9d159feeb607ddb9bfead9b2795450fac224613074fecd46bdda5c136601b444",
+  "task_ids": [
+    "chemcrow-01",
+    "chemcrow-02",
+    "chemcrow-03",
+    "chemcrow-04",
+    "chemcrow-05",
+    "chemcrow-06",
+    "chemcrow-07",
+    "chemcrow-08",
+    "chemcrow-09",
+    "chemcrow-10",
+    "chemcrow-12",
+    "chemcrow-13",
+    "chemcrow-14",
+    "chemcrow-15"
+  ]
+}

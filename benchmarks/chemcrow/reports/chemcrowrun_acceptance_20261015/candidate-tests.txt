@@ -1,0 +1,16 @@
+.......s.s.............................................................. [ 21%]
+........................................................................ [ 43%]
+........................................................................ [ 65%]
+........................................................................ [ 87%]
+..........................................                               [100%]
+=============================== warnings summary ===============================
+benchmarks/chemcrow/tests/test_tool_service_routes.py:3
+  $FINAL_CLEAN_CLONE/benchmarks/chemcrow/tests/test_tool_service_routes.py:3: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient
+
+tests/test_tool_service_routes.py::test_rest_tool_bridge_records_pair_scoped_receipts
+  $FINAL_CLEAN_CLONE/benchmarks/chemcrow/.venv/lib/python3.11/site-packages/pydantic_settings/sources/utils.py:47: IncompleteFieldDefinitionWarning: Field 'lifespan' has an incomplete definition: its annotation contains an unresolved forward reference, so settings sources may fail to correctly resolve its value. Call `model_rebuild()` on the model where the field is defined, once all the referenced types are defined.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+328 passed, 2 skipped, 2 warnings in 15.46s

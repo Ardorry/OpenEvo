@@ -1,0 +1,14 @@
+{
+  "status": "PRE_EVIDENCE_COMMIT_REVIEW",
+  "checked_at": "2026-10-15T10:02:08.415056+00:00",
+  "branch": "codex/chemcrowrun-v1",
+  "reviewed_code_head": "6e03aef26bc9e9c6e89f18c04df7282f3dca7edd",
+  "normalization_base": "7375f5ec4",
+  "remote_repository": "https://github.com/Ardorry/OpenEvo.git",
+  "remote_chemcrow_head": "4bfe8f797a2026ebbcd95fb64b6ea32646c827dd",
+  "remote_candidate_branches_present": false,
+  "push_executed": false,
+  "formal_pr_created": false,
+  "assets_uploaded": false,
+  "limitation": "Evidence/README commit appended after this snapshot; recheck final HEAD and remote immediately before approved publication."
+}

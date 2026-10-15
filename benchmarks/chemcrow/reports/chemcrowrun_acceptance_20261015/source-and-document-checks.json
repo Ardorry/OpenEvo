@@ -1,10 +1,10 @@
 {
-  "checked_at": "2026-10-15T04:22:50.869571+00:00",
+  "checked_at": "2026-10-15T10:02:37.666203+00:00",
   "status": "PASS",
-  "tracked_and_untracked_source_files_checked": 1292,
-  "scope": "regular source/report files <=2 MiB compared against current authorized credential values; values and account identifiers omitted",
+  "tracked_and_untracked_source_files_checked": 1320,
+  "scope": "Regular source/report files <=2 MiB compared against authorized credential/account values and high-confidence key patterns; private path/proxy checks on public acceptance files. Values never emitted.",
   "findings": [],
-  "local_document_links_checked": 18,
+  "local_document_links_checked": 46,
   "framework_readme_preserved_verbatim": true,
   "historical_alias_hashes_verified": 7
 }

@@ -1,0 +1,17 @@
+{
+  "status": "VERIFIED_ZERO_MODEL_PREFLIGHT_REPAIR",
+  "generation_source_commit": "1bf37ce0b386be4abccbcaed8daf5a5f34d1f54b",
+  "original_audit_sha256": "151708d086d8ae15f64b02116b726764812272dd58ded15a4152419892dd5526",
+  "canonical_audit_sha256": "151708d086d8ae15f64b02116b726764812272dd58ded15a4152419892dd5526",
+  "original_function_sha256": "b7e8b42327a09072e522a297e07bcf7096939a1bb29b09cb429ef18962551516",
+  "patched_function_sha256": "b8d492673f0189ae754d04375f88e04bba4ffbb994969ad69ad60ca1cc03d255",
+  "script_sha256": "61745ec767efda444e36bfd560e957ac458844e0ff66df87bff231a8f04272d0",
+  "only_function_replacement": {
+    "before": "completed_run_audit=str(root / \"runs/completed-run.audit.json\"),",
+    "after": "completed_run_audit=str(root / \"runs/completed_run.audit.json\"),"
+  },
+  "model_calls_before_repair": 0,
+  "paid_operations_before_repair": 0,
+  "automatic_retries": 0,
+  "sealed_scientific_records_modified": false
+}

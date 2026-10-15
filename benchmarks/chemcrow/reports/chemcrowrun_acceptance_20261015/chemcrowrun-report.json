@@ -1,0 +1,389 @@
+{
+  "analysis_source_commit": "6e03aef26bc9e9c6e89f18c04df7282f3dca7edd",
+  "audit": "PASS",
+  "canonical_generation_report_preserved": true,
+  "canonical_generation_report_sha256": "d8b8fea63636a119a5d828794426e9c3122f659ebd53999be05531526eb4c3a6",
+  "completed_tasks": 14,
+  "config_sha256": "bb8803980a120d9c0e1fb8dcb531cba06e53508f9b0bb9d48892a5422cbffbbc",
+  "core_call_accounting": {
+    "completed": 112,
+    "failed": 2,
+    "limitation": "Counters are summed independently as reported, including cached/reasoning fields; do not add overlapping fields. This is not complete provider billing or canary accounting.",
+    "observed_codex_usage": {
+      "analysis_module_sha256": "e5fd7433bf0ded08aa03545274893e6015430da4fbe10bb289f1d8808ecb7eaa",
+      "completed_without_reported_usage": 0,
+      "duplicate_completion_files_skipped": 0,
+      "duplicate_transcript_attachments_skipped": 0,
+      "infrastructure_canary_usage_included": false,
+      "invalid_usage_events": 0,
+      "limitation": "Counters are summed independently as reported, including cached/reasoning fields; do not add overlapping fields. This is not complete provider billing or canary accounting.",
+      "non_json_transcript_lines": 0,
+      "observed_totals": {
+        "cached_input_tokens": 4537728,
+        "input_tokens": 5960169,
+        "output_tokens": 246044,
+        "reasoning_output_tokens": 122061
+      },
+      "provider_account_token_total": null,
+      "reported_turns": 112,
+      "schema_version": "chemcrowrun_recorded_codex_usage_v1",
+      "source_inventory_sha256": "f95275b9742d84bc1061ef692f78c7a3660087975b2bd38aa25984e5acc35f20",
+      "status": "RECORDED_TURNS_ONLY",
+      "subscription_cost_usd": null,
+      "turns_reporting_field": {
+        "cached_input_tokens": 112,
+        "input_tokens": 112,
+        "output_tokens": 112,
+        "reasoning_output_tokens": 112
+      },
+      "turns_without_usage": 0
+    },
+    "terminal_records": 114,
+    "token_count": null,
+    "total_core_run_seconds": 6871.826787996011
+  },
+  "cost_limitation": "Subscription cost is not attributable from API credits. Judge receipts are separate.",
+  "display_protocol": "ChemCrowRun v1.0",
+  "execution_attempts": [
+    {
+      "additional_readiness_calls": "Managed isolation canaries are additional subscription turns",
+      "automatic_retries": 0,
+      "completed_at": "2026-10-15T05:03:55.263663+00:00",
+      "elapsed_seconds": 3406.245302,
+      "error_type": "RuntimeError",
+      "planned_logical_calls": 112,
+      "resume": false,
+      "scope": "full",
+      "started_at": "2026-10-15T04:07:09.018361+00:00",
+      "status": "ERROR"
+    },
+    {
+      "additional_readiness_calls": "Managed isolation canaries are additional subscription turns",
+      "automatic_retries": 0,
+      "completed_at": "2026-10-15T09:00:55.118719+00:00",
+      "elapsed_seconds": 1522.190961,
+      "error_type": "ValueError",
+      "planned_logical_calls": 112,
+      "resume": true,
+      "scope": "full",
+      "started_at": "2026-10-15T08:35:32.927758+00:00",
+      "status": "ERROR"
+    },
+    {
+      "additional_readiness_calls": "Managed isolation canaries are additional subscription turns",
+      "automatic_retries": 0,
+      "completed_at": "2026-10-15T09:40:58.643612+00:00",
+      "elapsed_seconds": 2281.594516,
+      "exit_code": 0,
+      "planned_logical_calls": 112,
+      "resume": true,
+      "scope": "full",
+      "started_at": "2026-10-15T09:02:57.049096+00:00",
+      "status": "COMPLETED"
+    }
+  ],
+  "explicit_verified_replacements": [
+    {
+      "authority_sha256": "53d248214b5411b73437c9f321c8a774eee6c1619fd6f0f82cf04a3cede5520f",
+      "failed_call_id": "chemcrowrun-reproduction-v1-sol-20261015--chemcrow-08-baseline-e6eb4e87b8-evolution-eval-baseline-19be65ff92",
+      "phase": "baseline_internal_evaluator",
+      "replacement_call_id": "chemcrowrun-reproduction-v1-sol-20261015--chemcrow-08-baseline-e6eb4e87b8-evolution-eval-baseline-f0fc7ea2cd",
+      "task_id": "chemcrow-08"
+    },
+    {
+      "authority_sha256": "d96e856b9fe7b0eabb06c57ae59bb75dfe1c88f51872474714b02a2995268476",
+      "failed_call_id": "chemcrowrun-reproduction-v1-sol-20261015--chemcrow-13-baseline-294c7185f3",
+      "phase": "baseline_candidate",
+      "replacement_call_id": "chemcrowrun-reproduction-v1-sol-20261015--chemcrow-13-baseline-c80fab085c",
+      "task_id": "chemcrow-13"
+    }
+  ],
+  "generated_at": "2026-10-15T09:53:16.898155+00:00",
+  "historical_reference": {
+    "internal_blind_g1": 9.928571428571429,
+    "internal_blind_g2": 10.285714285714286,
+    "legacy_alias": "full-v8",
+    "no_significant_g2_improvement_established": true,
+    "paper_g1": 9.357142857142858,
+    "paper_g2": 9.214285714285714,
+    "provenance_manifest": "reproduction/legacy-aliases.json"
+  },
+  "historical_results_reused": false,
+  "internal_blind_statistics": {
+    "bootstrap_95_ci": [
+      -0.5071428571428572,
+      1.1214285714285712
+    ],
+    "bootstrap_resamples": 10000,
+    "exact_sign_flip_p_two_sided": 0.43359375,
+    "losses": 3,
+    "mean_delta": 0.3857142857142856,
+    "mean_g1": 10.62857142857143,
+    "mean_g2": 11.014285714285714,
+    "n": 14,
+    "seed": 20260825,
+    "test_assumption": "paired differences exchangeable under sign reversal under the null",
+    "ties": 3,
+    "wins": 8
+  },
+  "judge_accounting": {
+    "completion_tokens": 15599,
+    "list_price_cost_usd": 2.9945999999999997,
+    "prompt_tokens": 68622,
+    "receipt_count": 42,
+    "receipts_without_reported_cost": 0,
+    "reported_cost_usd": 2.9945999999999997,
+    "terminal_successes": 42
+  },
+  "missing_tasks": [],
+  "model_substitution": {
+    "actual_model": "gpt-5.6-sol",
+    "historical_model": "gpt-5.5",
+    "reason": "Historical gpt-5.5 absent from current subscription catalog; unchanged Core isolation passes with gpt-5.6-sol",
+    "variant": "chemcrowrun_v1_model_substitution_v1"
+  },
+  "paper_judge": {
+    "actual_openrouter_reported_cost_usd": 2.9946,
+    "actual_upstream_call_count": 42,
+    "automatic_provider_retries": false,
+    "claim_count": 42,
+    "current_judge_minus_notebook_grade_drift": {
+      "historical_chemcrow": 0.2857142857142865,
+      "historical_gpt4": 0.6071428571428577
+    },
+    "environment_proxy_count": 42,
+    "evolved_vs_baseline_losses": 3,
+    "evolved_vs_baseline_ties": 9,
+    "evolved_vs_baseline_wins": 2,
+    "excluded_attempt_count": 0,
+    "excluded_infrastructure_attempt_count": 0,
+    "excluded_invalid_assessment_count": 0,
+    "excluded_pre_response_attempt_count": 0,
+    "explicit_replacement_count": 0,
+    "failed_call_id_reuse": false,
+    "fallback_false_count": 42,
+    "final_evaluation_only": true,
+    "historical_gpt4_position_control_means": {
+      "baseline": 7.5,
+      "evolved": 7.392857142857143,
+      "historical_control": 9.357142857142858
+    },
+    "json_valid_count": 42,
+    "list_price_cost_usd": 2.9946,
+    "mean_evolved_minus_baseline": -0.03571428571428571,
+    "mean_evolved_minus_historical_chemcrow": 1.928571428571428,
+    "mean_historical_chemcrow_grade": 7.642857142857143,
+    "mean_openevo_baseline_grade": 9.607142857142858,
+    "mean_openevo_evolved_grade": 9.571428571428571,
+    "model": "openai/gpt-4",
+    "openai_provider_count": 42,
+    "paper_notebook_historical_grade_means": {
+      "historical_chemcrow": 7.357142857142857,
+      "historical_gpt4": 8.75
+    },
+    "plan_sha256": "431cc44a9181a5e8316637add527d63a8ff1b3afcaa76024454973c37054db0d",
+    "production_ledger_class": "production",
+    "protocol": "CHEMCROW_EVALUATORGPT_PROMPT_CALIBRATED_V2",
+    "provider_response_count": 42,
+    "pydantic_valid_count": 42,
+    "receipt_count": 42,
+    "reflector_access": false,
+    "result_count": 42,
+    "schema_version": "chemcrow_paper_evaluator_aggregate_v1",
+    "score_driven_retry": false,
+    "status": "PROVISIONAL_LLM_JUDGED_RESULT",
+    "task_count": 14,
+    "unique_claim_call_id_count": 42,
+    "unique_provider_response_id_count": 42,
+    "unique_receipt_call_id_count": 42,
+    "unique_result_call_id_count": 42,
+    "valid_result_openai_provider_count": 42,
+    "valid_target_result_count": 42
+  },
+  "paper_paired_statistics": {
+    "bootstrap_95_ci": [
+      -0.32142857142857145,
+      0.25
+    ],
+    "bootstrap_resamples": 10000,
+    "exact_sign_flip_p_two_sided": 1.0,
+    "losses": 3,
+    "mean_delta": -0.03571428571428571,
+    "mean_g1": 9.607142857142858,
+    "mean_g2": 9.571428571428571,
+    "n": 14,
+    "seed": 20260825,
+    "test_assumption": "paired differences exchangeable under sign reversal under the null",
+    "ties": 9,
+    "wins": 2
+  },
+  "paper_per_task": [
+    {
+      "g1": 9.5,
+      "g2": 9.0,
+      "task_id": "chemcrow-01"
+    },
+    {
+      "g1": 9.0,
+      "g2": 10.0,
+      "task_id": "chemcrow-02"
+    },
+    {
+      "g1": 10.0,
+      "g2": 10.0,
+      "task_id": "chemcrow-03"
+    },
+    {
+      "g1": 9.0,
+      "g2": 9.0,
+      "task_id": "chemcrow-04"
+    },
+    {
+      "g1": 10.0,
+      "g2": 10.0,
+      "task_id": "chemcrow-05"
+    },
+    {
+      "g1": 10.0,
+      "g2": 10.0,
+      "task_id": "chemcrow-06"
+    },
+    {
+      "g1": 10.0,
+      "g2": 9.0,
+      "task_id": "chemcrow-07"
+    },
+    {
+      "g1": 9.0,
+      "g2": 10.0,
+      "task_id": "chemcrow-08"
+    },
+    {
+      "g1": 10.0,
+      "g2": 10.0,
+      "task_id": "chemcrow-09"
+    },
+    {
+      "g1": 9.0,
+      "g2": 9.0,
+      "task_id": "chemcrow-10"
+    },
+    {
+      "g1": 10.0,
+      "g2": 10.0,
+      "task_id": "chemcrow-12"
+    },
+    {
+      "g1": 9.0,
+      "g2": 9.0,
+      "task_id": "chemcrow-13"
+    },
+    {
+      "g1": 10.0,
+      "g2": 9.0,
+      "task_id": "chemcrow-14"
+    },
+    {
+      "g1": 10.0,
+      "g2": 10.0,
+      "task_id": "chemcrow-15"
+    }
+  ],
+  "per_task": [
+    {
+      "g1": 9.0,
+      "g2": 10.0,
+      "task_id": "chemcrow-01"
+    },
+    {
+      "g1": 11.0,
+      "g2": 12.0,
+      "task_id": "chemcrow-02"
+    },
+    {
+      "g1": 12.0,
+      "g2": 12.0,
+      "task_id": "chemcrow-03"
+    },
+    {
+      "g1": 8.0,
+      "g2": 11.0,
+      "task_id": "chemcrow-04"
+    },
+    {
+      "g1": 9.5,
+      "g2": 10.399999999999999,
+      "task_id": "chemcrow-05"
+    },
+    {
+      "g1": 12.0,
+      "g2": 12.0,
+      "task_id": "chemcrow-06"
+    },
+    {
+      "g1": 10.0,
+      "g2": 11.0,
+      "task_id": "chemcrow-07"
+    },
+    {
+      "g1": 11.3,
+      "g2": 12.0,
+      "task_id": "chemcrow-08"
+    },
+    {
+      "g1": 12.0,
+      "g2": 11.8,
+      "task_id": "chemcrow-09"
+    },
+    {
+      "g1": 11.0,
+      "g2": 10.0,
+      "task_id": "chemcrow-10"
+    },
+    {
+      "g1": 12.0,
+      "g2": 12.0,
+      "task_id": "chemcrow-12"
+    },
+    {
+      "g1": 8.0,
+      "g2": 10.0,
+      "task_id": "chemcrow-13"
+    },
+    {
+      "g1": 12.0,
+      "g2": 8.0,
+      "task_id": "chemcrow-14"
+    },
+    {
+      "g1": 11.0,
+      "g2": 12.0,
+      "task_id": "chemcrow-15"
+    }
+  ],
+  "protocol_identity": "chemcrow_full_v8_reproduction_v1",
+  "public_delivery_status": "PENDING_PUBLICATION_AND_ANONYMOUS_DOWNLOAD",
+  "requested_model": "gpt-5.6-sol",
+  "run_id": "reproduction-v1-sol-20261015",
+  "runtime_redistribution_review": "PENDING_LICENSE_OBLIGATION_REVIEW",
+  "schema_version": "chemcrowrun_report_v1",
+  "scope": "full_14_task_reproduction",
+  "server_model_snapshot": "Not guaranteed pinned by the subscription service",
+  "source_commit": "1bf37ce0b386be4abccbcaed8daf5a5f34d1f54b",
+  "status": "CALIBRATED_EXPERIMENT_PASS",
+  "submission": "PASS",
+  "submission_sha256": "9d159feeb607ddb9bfead9b2795450fac224613074fecd46bdda5c136601b444",
+  "subscription_cost_usd": null,
+  "supplemental_export_changes": [
+    "recorded Codex usage counters",
+    "verified replacement provenance",
+    "tool error inventory and condition limitations"
+  ],
+  "tool_conditions": {
+    "details": "tool-observation-audit.json",
+    "errors": 161,
+    "missing_serp_api_key_errors": 71,
+    "observations": 686,
+    "websearch_available": false
+  }
+}
