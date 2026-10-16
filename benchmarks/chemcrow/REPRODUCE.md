@@ -1,8 +1,9 @@
 # Reproduce ChemCrowRun v1.0
 
-This guide describes the candidate workflow. Consult the acceptance report for which commands
-have actually passed. The original archive is locally verified; public anonymous asset download
-and post-publication remote-clone acceptance require an approved release and remain PENDING.
+This guide describes the workflow published on the fork's `chemcrow` branch.
+The original archive and source/license companion are listed in
+[runtime downloads](reproduction/RUNTIME_DOWNLOADS.md). A completed local paid experiment
+exists; public remote fresh-clone paid end-to-end acceptance remains PENDING.
 The [2026-10-15 acceptance record](reports/chemcrowrun_acceptance_20261015/ACCEPTANCE.md)
 separates real execution evidence from offline checks and pending steps.
 
@@ -14,9 +15,9 @@ and Codex CLI 0.144.1; do not confuse host and container versions. Allow substan
 RXN/PyTorch image builds. Core services run as local Python processes; chemistry services use Compose.
 
 ```bash
-git clone https://github.com/Ardorry/OpenEvo.git ChemCrowRun
+git clone --branch chemcrow https://github.com/Ardorry/OpenEvo.git ChemCrowRun
 cd ChemCrowRun
-git checkout <APPROVED_FULL_40_CHARACTER_RELEASE_COMMIT>
+git rev-parse HEAD  # retain this source revision with your run
 uv sync --frozen --project benchmarks/chemcrow --python 3.11.15 --extra dev
 # Install Git LFS using your platform package manager before the next command.
 git lfs version
@@ -37,11 +38,13 @@ upstream; do not bundle it in this release.
 
 ```bash
 uv run --frozen --project benchmarks/chemcrow chemcrowrun runtime \
-  --url <APPROVED_PUBLIC_HTTPS_RELEASE_ASSET_URL> \
+  --url https://github.com/Ardorry/OpenEvo/releases/download/chemcrowrun-runtime-0.1.1/openevo-science-runtime-0.1.1-linux-amd64.tar.gz \
   --output .reproduction-cache/runtime-verification.json
 ```
 
-The URL is deliberately not invented before publication. For local candidate acceptance only:
+The companion source/license package is available at the same release; it is not
+needed to execute the image, but must remain available with redistributed binaries.
+For an already downloaded archive:
 
 ```bash
 uv run --frozen --project benchmarks/chemcrow chemcrowrun runtime \

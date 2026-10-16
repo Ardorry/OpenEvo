@@ -1,0 +1,93 @@
+diff --git a/src/openevo/config/README.md b/src/openevo/config/README.md
+index ccebf1f2a..35d54ac22 100644
+--- a/src/openevo/config/README.md
++++ b/src/openevo/config/README.md
+@@ -56,6 +56,7 @@ falls back to `rollout.public_url` when omitted.
+ | field | type | default |
+ |---|---|---|
+ | `id` | str | hostname (must be unique) |
++| `session_base_dir` | str? | `None`; optional private session and recovery-journal root |
+ | `host` / `port` | str / int | `0.0.0.0` / `8081` |
+ | `public_url` | str | derived from `host:port` |
+ | `model_served` | str | `""` |
+diff --git a/src/openevo/config/topology.py b/src/openevo/config/topology.py
+index 832c07522..8b2402ac9 100644
+--- a/src/openevo/config/topology.py
++++ b/src/openevo/config/topology.py
+@@ -42,6 +42,7 @@ class GatewayNodeConfig(_StrictModel):
+     max_run_workers: int = Field(default=2, gt=0)
+     max_postrun_workers: int = Field(default=4, gt=0)
+     default_runtime: RuntimeSpec | None = None
++    session_base_dir: str | None = None
+     docker_host_path: DockerHostPathSpec | None = None
+ 
+     @model_validator(mode="before")
+diff --git a/src/openevo/gateway/README.md b/src/openevo/gateway/README.md
+index 83992fd76..2768e043d 100644
+--- a/src/openevo/gateway/README.md
++++ b/src/openevo/gateway/README.md
+@@ -31,6 +31,12 @@ prepare recipe) → **READY** (wait for a run slot) → **RUNNING** (harness set
+ run) → **POST-RUN** (build trajectory, evaluate, tear down, call back). Terminal
+ statuses are `COMPLETED`, `ERROR`, or `TIMEOUT`.
+ 
++Standalone benchmark topologies may set `gateway.nodes[].session_base_dir` to a private,
++pre-created directory. It scopes managed sessions, credential staging, cleanup journals and
++Docker ownership records to an independent workspace. Omission retains the historical defaults.
++When a verified Docker host-path mapping is configured, the existing requirement that the session
++directory equal the mapped runtime `sessions` directory still applies.
++
+ ## Main files
+ 
+ - `server.py`: the FastAPI app — the catch-all LLM proxy route, the
+diff --git a/src/openevo/gateway/server.py b/src/openevo/gateway/server.py
+index fcbda9ecf..d61945579 100644
+--- a/src/openevo/gateway/server.py
++++ b/src/openevo/gateway/server.py
+@@ -176,6 +176,7 @@ def _build_state(topology: TopologyConfig, node_id: str | None) -> GatewayState:
+         evaluators=evaluator_registry,
+         default_runtime=node.default_runtime,
+         docker_host_path=node.docker_host_path,
++        **({"session_base_dir": node.session_base_dir} if node.session_base_dir is not None else {}),
+         rollout_server_url=topology.gateway.rollout_server_url or None,
+         heartbeat_interval_seconds=topology.gateway.heartbeat_interval_seconds,
+         model_served=node.model_served,
+diff --git a/tests/gateway/test_session_workspace_isolation.py b/tests/gateway/test_session_workspace_isolation.py
+new file mode 100644
+index 000000000..fe3affcfb
+--- /dev/null
++++ b/tests/gateway/test_session_workspace_isolation.py
+@@ -0,0 +1,34 @@
++from pathlib import Path
++
++from openevo.config import TopologyConfig
++from openevo.gateway.server import _build_state
++
++
++def test_same_node_name_in_distinct_workspaces_has_distinct_recovery_roots(tmp_path: Path):
++    states = []
++    for name in ("clone-a", "clone-b"):
++        root = tmp_path / name
++        root.mkdir()
++        topology = TopologyConfig.model_validate(
++            {
++                "gateway": {
++                    "completion_persistence": {"enabled": False},
++                    "nodes": [
++                        {
++                            "id": "same-node",
++                            "host": "127.0.0.1",
++                            "port": 18081,
++                            "session_base_dir": str(root),
++                        }
++                    ],
++                },
++            }
++        )
++        states.append(_build_state(topology, "same-node"))
++    first, second = (state.node_manager for state in states)
++    assert first._session_base_dir != second._session_base_dir
++    assert first._cleanup_journal_dir != second._cleanup_journal_dir
++    assert first._docker_ownership_root != second._docker_ownership_root
++    assert first._cleanup_journal_dir.is_relative_to(tmp_path / "clone-a")
++    for state in states:
++        state.storage.close()

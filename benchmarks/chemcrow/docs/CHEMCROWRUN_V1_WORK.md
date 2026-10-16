@@ -1,5 +1,12 @@
 # ChemCrowRun v1.0 implementation record (local issue)
 
+2026-10-16 delivery update: the user supersedes the earlier independent-branch/PR/RC1
+publication plan. Publish directly to the fork's `chemcrow` branch, without a PR.
+Provide a concise delivery inventory, the Core session-directory patch and application
+instructions, the completed run's 42 evolution artifacts, and the original runtime with
+its source/license companion. Keep raw experiments and historical records unchanged.
+Do not present public delivery as completed remote paid reproduction.
+
 User-authorized scope: formal naming with immutable legacy provenance, exact historical runtime acquisition and review, isolated service lifecycle, fresh real smoke/full runs, calibrated evaluation, submission/statistics, and publication preparation.
 
 This local issue records work before implementation. External issue/PR creation and publication are deferred to the user's single final publication approval. Base: codex/chemcrow-reproducibility at 7375f5ec4. Working branch: codex/chemcrowrun-v1.

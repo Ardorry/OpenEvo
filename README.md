@@ -6,8 +6,9 @@ G1 → three independent Reflectors → G2, internal blind evaluation, and a sep
 calibrated GPT-4 Judge. It does not claim official ChemCrow endorsement or leaderboard certification.
 
 [Reproduce the experiment](REPRODUCE.md) ·
-[Engineering acceptance](benchmarks/chemcrow/reports/chemcrowrun_acceptance_20261015/ACCEPTANCE.md) ·
-[Release preparation](benchmarks/chemcrow/docs/RELEASE.md)
+[Delivery inventory](benchmarks/chemcrow/DELIVERY.md) ·
+[Results](benchmarks/chemcrow/reports/chemcrowrun_acceptance_20261015/chemcrowrun-report.json) ·
+[42 evolution artifacts](benchmarks/chemcrow/artifacts/reproduction-v1-sol-20261015/README.md)
 
 ## Start here
 
@@ -16,6 +17,8 @@ Core runs Codex inside its session containers. The host runs the orchestration s
 an authorized credential source. The OpenEvo Desktop application is not required for this benchmark.
 
 ```bash
+git clone --branch chemcrow https://github.com/Ardorry/OpenEvo.git ChemCrowRun
+cd ChemCrowRun
 uv sync --frozen --project benchmarks/chemcrow --python 3.11.15 --extra dev
 uv run --frozen --project benchmarks/chemcrow chemcrowrun --help
 ```
@@ -38,9 +41,16 @@ with two optional tests skipped. See the acceptance record for source revisions 
 WebSearch was unavailable because SERP_API_KEY was absent; 71 of 686 tool observations failed
 for this reason. Model substitution, tool availability and service versions limit comparability.
 
-The runtime archive has been verified locally. Public asset publication, anonymous download and
-fresh-clone acceptance from the actual GitHub release remain pending. Native dependency attribution
-review also remains open; the archive is not yet cleared for public distribution.
+The original runtime and its required source/license companion are distributed separately from
+Git; see [runtime downloads](benchmarks/chemcrow/reproduction/RUNTIME_DOWNLOADS.md).
+The source/license and applicable relink materials have been prepared. Public remote fresh-clone
+paid end-to-end acceptance remains pending. The optional bundled zsh requires GLIBC_2.38,
+while the original image has GLIBC_2.36; this limitation is preserved and disclosed.
+
+This fork already includes Core session-directory isolation. If using a separate upstream
+checkout, apply the [Core compatibility patch](benchmarks/chemcrow/patches/README.md) to its
+documented base. Keep the benchmark under `benchmarks/chemcrow` so its editable Core dependency
+resolves correctly. RXN/MCP build adaptations are in `benchmarks/chemcrow/deployment`.
 
 The current subscription no longer offers the historical `gpt-5.5` model. This candidate's new
 experiments explicitly declare `gpt-5.6-sol` across all six roles as a model-substitution condition.
