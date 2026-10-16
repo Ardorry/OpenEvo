@@ -13,7 +13,9 @@ Its tag points to the source revision used for this delivery. The evolving `chem
 branch can receive later documentation or adaptation fixes without changing that tag.
 
 Install the runtime with the `chemcrowrun runtime --url ...` command in
-[REPRODUCE.md](../REPRODUCE.md). Docker must be available. This imports the original
+[REPRODUCE.md](../REPRODUCE.md). For a manually downloaded archive, set `chmod 600`
+on your own regular file before using `--archive`; the URL installer handles this
+automatically. Docker must be available. This imports the original
 image; no host Codex executable or image rebuild is required. Core launches Codex
 inside the managed image. The image contains Codex 0.144.1 and retains the original
 runtime identity. Its optional zsh requires GLIBC_2.38, while the image's Debian

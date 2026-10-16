@@ -47,12 +47,15 @@ needed to execute the image, but must remain available with redistributed binari
 For an already downloaded archive:
 
 ```bash
+chmod 600 /absolute/path/openevo-science-runtime-0.1.1-linux-amd64.tar.gz
 uv run --frozen --project benchmarks/chemcrow chemcrowrun runtime \
   --archive /absolute/path/openevo-science-runtime-0.1.1-linux-amd64.tar.gz \
   --output .reproduction-cache/runtime-verification.json
 ```
 
-The installer verifies size 352236726, SHA-256
+For a manual download, use an ordinary file owned by your user, with mode 0600,
+without symlinks or hard links. The `--url` installer sets private file permissions
+automatically. The installer verifies size 352236726, SHA-256
 `ad9c5ebd69b5785b94dd52dc077d93ababfa9cf8cbcbf92940f60bee48a91149`, OCI index
 `sha256:7a0079f9cb1bce5768cff5bce3d1181811c6a231ad800cac8fb503d66852c81b`, config ID,
 platform and managed label, then imports and starts the exact image with networking disabled.
