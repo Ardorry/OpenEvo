@@ -1,11 +1,29 @@
 # ChemCrow 14-task results
 
-This table compares the published ChemCrow baselines, the OpenEvo G1/G2 run, and the
-ChemCrowRun reproduction. Scores remain on their original scales.
+This table compares the published ChemCrow baselines, the earlier OpenEvo G1/G2 run, and the
+later ChemCrowRun reproduction. Scores remain on their original scales.
+
+## How to read the run names
+
+**OpenEvo G1/G2** is the earlier run with `gpt-5.5`. **ChemCrowRun Reproduction** is the later
+run with `gpt-5.6-sol`. Within each run, G1 is the answer produced before evolution and G2 is the
+answer produced after injecting three task-local Reflector artifacts. “Reproduction G1” and
+“Reproduction G2” are therefore two stages of the same reproduction run, not two reproductions.
+
+## Evaluation protocols
+
+- **Paired blind internal judge `/12`**: for each task, G1 and G2 are randomly assigned to A/B and
+  sent together in one judge call. The judge separately scores both answers from 0–4 on chemical
+  correctness, reasoning quality and task completion. The A/B scores are then mapped back to G1
+  and G2, so one paired evaluation produces both columns.
+- **GPT-4-based evaluation `/10`**: G1 and G2 are evaluated in separate calls. In each call the
+  OpenEvo answer is Student A and the same historical no-tool GPT-4 answer is Student B. The table
+  reports Student A's grade. This is a historically calibrated compatible evaluator, not a direct
+  G1-versus-G2 call and not an official leaderboard score.
 
 ## Results
 
-| System | Candidate model | Stage | Human evaluation /10 | GPT-4 evaluation /10 | Internal evaluation /12 | Judge cost |
+| System | Candidate model | Stage | Human evaluation /10 | GPT-4-based evaluation /10 | Paired blind internal judge /12 | Judge cost |
 |---|---|---|---:|---:|---:|---:|
 | Official GPT-4 | GPT-4 | No-tool baseline | **7.696** | **8.750** | — | Not reported |
 | Official ChemCrow | GPT-4 | Tool-augmented | **8.589** | **7.357** | — | Not reported |
@@ -16,12 +34,14 @@ ChemCrowRun reproduction. Scores remain on their original scales.
 
 ## G1 to G2 change
 
-| Run | Internal G1 | Internal G2 | Internal change | GPT-4 G1 | GPT-4 G2 | GPT-4 change |
+| Run | Internal judge G1 | Internal judge G2 | Internal change | GPT-4 judge G1 | GPT-4 judge G2 | GPT-4 change |
 |---|---:|---:|---:|---:|---:|---:|
 | OpenEvo | 9.929 | 10.286 | **+0.357** | 9.357 | 9.214 | -0.143 |
 | ChemCrowRun Reproduction | **10.629** | **11.014** | **+0.386** | **9.607** | **9.571** | -0.036 |
 
-## Per-task GPT-4 evaluation
+## Per-task calibrated GPT-4 evaluation
+
+Each G1 and G2 value below comes from a separate fixed-reference judge call as described above.
 
 | Task | Official ChemCrow re-evaluation | OpenEvo G1 | OpenEvo G2 | Reproduction G1 | Reproduction G2 |
 |---|---:|---:|---:|---:|---:|
@@ -43,10 +63,13 @@ ChemCrowRun reproduction. Scores remain on their original scales.
 
 ## Interpretation
 
-The reproduction records higher absolute G1 and G2 averages than the earlier OpenEvo run.
-The two runs use different candidate model versions, so the cross-run difference is descriptive.
-Within the reproduction, internal evaluation increases from G1 to G2 and GPT-4 evaluation remains
-approximately stable. The paired tests do not establish a statistically significant G2 improvement.
+The reproduction records higher absolute G1 and G2 averages than the earlier OpenEvo run, but
+the candidate model versions differ, so that cross-run comparison is descriptive. Within both
+runs, the paired internal judge gives G2 a slightly higher mean, while the calibrated GPT-4 judge
+gives G2 a slightly lower mean. For the reproduction, both paired confidence intervals include
+zero and the tests do not establish a statistically significant G2 improvement. These results
+therefore show mixed evaluator evidence and do not by themselves prove that the evolution
+artifacts improve performance.
 
 **Pass@n** is not a primary metric for this benchmark because the tasks use continuous expert
 and judge scores rather than binary executable tests.

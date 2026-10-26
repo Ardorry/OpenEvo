@@ -29,14 +29,15 @@ Follow [REPRODUCE.md](REPRODUCE.md) for the complete workflow.
 
 ## Results
 
-| Run | Internal G1 /12 | Internal G2 /12 | GPT-4 G1 /10 | GPT-4 G2 /10 |
+| Run | Paired internal judge G1 /12 | Paired internal judge G2 /12 | GPT-4 judge G1 /10 | GPT-4 judge G2 /10 |
 |---|---:|---:|---:|---:|
 | OpenEvo G1/G2 | 9.929 | 10.286 | 9.357 | 9.214 |
 | ChemCrowRun Reproduction | 10.629 | 11.014 | 9.607 | 9.571 |
 
 The reproduction used **gpt-5.6-sol** because the historical **gpt-5.5** model was not
 available in the current subscription catalog. The model difference is retained in the
-result metadata.
+result metadata. The internal scores come from one blinded G1/G2 comparison per task; the
+GPT-4 scores come from separate fixed-reference calls. See the comparison report for details.
 
 See [the full comparison](reports/CHEMCROW_RESULTS_COMPARISON.md),
 [the reproduction results](reports/CHEMCROWRUN_RESULTS.json), and
