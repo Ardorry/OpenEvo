@@ -1,0 +1,27 @@
+rollout:
+  host: 127.0.0.1
+  port: 8280
+  public_url: http://127.0.0.1:8280
+  save_dir: /home/lhy-h/work/chemcrowrun/core-state/paper-evaluator-calibration-v1/completions
+  dispatch_poll_interval_seconds: 1.0
+  callback_grace_seconds: 120.0
+
+gateway:
+  heartbeat_interval_seconds: 15
+  rollout_server_url: http://127.0.0.1:8280
+  completion_persistence:
+    enabled: true
+    max_field_bytes: 1048576
+    queue_size: 64
+  nodes:
+    - id: chemcrow-paper-calibration-gateway-01
+      host: 127.0.0.1
+      port: 8210
+      public_url: http://127.0.0.1:8210
+      max_init_workers: 1
+      max_run_workers: 1
+      max_postrun_workers: 1
+      model_served: openai/gpt-4
+      inference:
+        engine: vllm
+        base_url: http://127.0.0.1:8500

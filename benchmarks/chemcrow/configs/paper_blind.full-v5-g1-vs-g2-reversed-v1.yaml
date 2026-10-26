@@ -1,0 +1,36 @@
+schema_version: chemcrow_paper_blind_g1_g2_config_v1
+experiment_id: chemcrow-task-local-full-v5-core-native-three-pipeline
+source_pair_protocol: chemcrow-three-isolated-core-native-artifacts-v2
+answer_order_variant: exact_per_task_inverse_of_deterministic_seeded_balanced_v1
+task_manifest: ../tasks.jsonl
+run_root: ../../../../runs/full-v5-core-native-three-pipeline
+completed_run_audit: ../reports/FULL_V5_CORE_NATIVE_COMPLETED_RUN_AUDIT.json
+plan_path: ../../../../runs/paper-evaluator-blind-v5-g1-vs-g2-reversed-v1/private/plan.json
+result_root: ../../../../runs/paper-evaluator-blind-v5-g1-vs-g2-reversed-v1/results
+shim_receipt_root: ../../../../runs/paper-evaluator-blind-v5-g1-vs-g2-reversed-v1/openrouter-receipts
+reference_42_call_aggregate: ../../../../runs/paper-evaluator-full-v5-core-native-three-pipeline-r1/results/aggregate.json
+reference_42_call_aggregate_sha256: d9562ba9941f02e9ff23bbbcc2f70cace2f065db4d1b09971e953b7ae7abc087
+reference_historical_direct_aggregate: ../../../../runs/paper-evaluator-direct-v5-g2-vs-historical-chemcrow-v1/results/aggregate.json
+reference_historical_direct_aggregate_sha256: b80cee48eedc0dd8352fbe2080355e1349c8d9c758e6a7d75ed710880193bec0
+reference_original_blind_plan: ../../../../runs/paper-evaluator-blind-v5-g1-vs-g2-balanced-v1/private/plan.json
+reference_original_blind_plan_sha256: 0f5e1b165bedd131eb318234c5030989ac983efa77c1afe035be75c834c8600d
+reference_original_blind_aggregate: ../../../../runs/paper-evaluator-blind-v5-g1-vs-g2-balanced-v1/results/aggregate.json
+reference_original_blind_aggregate_sha256: 34bba93bf10e5cb2f4ba73af8676f0ff3dcfea795ac439e259a0c293068e7215
+rollout_base_url: http://127.0.0.1:8180
+runtime:
+  backend: docker
+  profile: managed_science
+  container_user: host
+  image: sha256:7a0079f9cb1bce5768cff5bce3d1181811c6a231ad800cac8fb503d66852c81b
+  prepare:
+    - type: exec
+      command: mkdir -p /openevo/session/workspace /openevo/session/logs/agent
+  env:
+    HOME: /openevo/session/home
+    PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  network: host
+  workdir: /openevo/session/workspace
+  gpus: 0
+  allow_internet: true
+  import_path: null
+  kwargs: {}

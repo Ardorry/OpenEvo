@@ -1,0 +1,37 @@
+{
+  "schema_version": "chemcrow_three_artifact_live_preflight_report_v1",
+  "status": "PASS",
+  "generated_at": "2026-08-26 Asia/Shanghai",
+  "experiment_id": "chemcrow-task-local-readiness-three-pipeline-live-v4",
+  "task_ids": ["chemcrow-02", "chemcrow-03", "chemcrow-06"],
+  "pair_count": 3,
+  "memory_reflector_job_count": 3,
+  "skill_reflector_job_count": 3,
+  "agent_system_reflector_job_count": 3,
+  "independent_reflector_job_count": 9,
+  "artifact_registration_count": 9,
+  "unique_artifact_count": 9,
+  "artifact_type_counts": {
+    "text_memory": 3,
+    "skill_bundle": 3,
+    "agent_system": 3
+  },
+  "sibling_isolation_evidence_count": 9,
+  "core_evolved_injection_receipt_count": 3,
+  "reset_receipt_count": 3,
+  "mock_observation_count": 0,
+  "fixture_observation_count": 0,
+  "observation_source_counts": {"live": 71, "cache_replay": 6},
+  "s0_config_sha256": "8d3935a4c968d1988102ffdbb1adef8a28de80ace3bca58cd8543f0c6a92154f",
+  "aggregate_sha256": "40d96198438ae48124058cc82e1f00771d8a1af7baa0b26bd8b151a53c119867",
+  "completed_audit_sha256": "2609454bc839806b3bbd4f6354eb147c0640e4b1100df1463a6f25f1d59a6882",
+  "pair_result_sha256": {
+    "chemcrow-02": "dfc755f3f0964745abc8901c9eeb98795e11672d41f5e9646264532241bcd3e3",
+    "chemcrow-03": "5900816424fb87a9e3c830e111923e9f69ca8110e1bc2d3f71008fe2f88c9cd6",
+    "chemcrow-06": "30bbe3b6a3d2669752d2617b7d7b82be8d8e8f1ba1d509f260a26a76d45b239e"
+  },
+  "evidence_root": "/home/lhy-h/work/chemcrowrun/runs/readiness-three-pipeline-live-v4",
+  "answers_included": false,
+  "failed_preflight_pairs_reused": false,
+  "authoritative_full_run_started": false
+}

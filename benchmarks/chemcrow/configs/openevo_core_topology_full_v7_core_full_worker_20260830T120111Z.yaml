@@ -1,0 +1,39 @@
+rollout:
+  host: 127.0.0.1
+  port: 8080
+  public_url: http://127.0.0.1:8080
+  save_dir: /home/lhy-h/work/chemcrowrun/repro-state/full-v7-core-full-worker-g1-artifacts-20260830T120111Z/completions
+  dispatch_poll_interval_seconds: 1.0
+  callback_grace_seconds: 120.0
+
+gateway:
+  heartbeat_interval_seconds: 15
+  rollout_server_url: http://127.0.0.1:8080
+  completion_persistence:
+    enabled: true
+    max_field_bytes: 1048576
+    queue_size: 128
+  nodes:
+    - id: chemcrow-core-gateway-full-v7-core-full-worker-20260830T120111Z-01
+      host: 127.0.0.1
+      port: 8100
+      public_url: http://127.0.0.1:8100
+      max_init_workers: 1
+      max_run_workers: 1
+      max_postrun_workers: 1
+      model_served: subscription-codex-via-managed-runtime
+      inference:
+        engine: vllm
+        base_url: http://127.0.0.1:8999
+
+evolution:
+  enabled: true
+  backend_url: http://127.0.0.1:8200
+  context:
+    target_dir: /openevo/session/evolution
+    timeout_seconds: 10
+    fail_open: false
+  event_export:
+    enabled: false
+    timeout_seconds: 10
+    fail_open: false

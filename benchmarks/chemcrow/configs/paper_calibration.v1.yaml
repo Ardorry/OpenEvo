@@ -1,0 +1,24 @@
+schema_version: chemcrow_paper_calibration_config_v1
+historical_runs_root: ../../../../vendor/chemcrow-runs
+calibration_root: ../../../../runs/paper-evaluator-calibration-v1
+production_root: ../../../../runs/paper-evaluator-full-v4-three-pipeline
+dataset_path: ../data/paper_evaluator_historical_calibration.json
+reports_root: ../reports
+rollout_base_url: http://127.0.0.1:8280
+runtime: &paper_calibration_runtime
+  backend: docker
+  profile: managed_science
+  container_user: host
+  image: sha256:7a0079f9cb1bce5768cff5bce3d1181811c6a231ad800cac8fb503d66852c81b
+  prepare:
+    - type: exec
+      command: mkdir -p /openevo/session/workspace /openevo/session/logs/agent
+  env:
+    HOME: /openevo/session/home
+    PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  network: host
+  workdir: /openevo/session/workspace
+  gpus: 0
+  allow_internet: true
+  import_path: null
+  kwargs: {}

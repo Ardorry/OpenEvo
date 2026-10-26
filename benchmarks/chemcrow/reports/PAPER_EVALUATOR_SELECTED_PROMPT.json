@@ -1,0 +1,20 @@
+{
+  "allow_fallbacks": false,
+  "calibration_results_sha256": "abfb32541d88bb469da1db525eb7ac53594ff1a98edab8204ad8891559a2aaa5",
+  "candidate_id": "PAPER_MINIMAL",
+  "exact_prompt_recovered": false,
+  "final_label": "CALIBRATED_COMPATIBLE_HIGH",
+  "historical_agreement": "HIGH",
+  "historically_calibrated_compatible_prompt": true,
+  "instruction_template": "You are a teacher evaluating two students' answers to the same chemistry task.\n\nFor each student, give a grade from 0 to 10 based only on whether the task is addressed and whether the overall thought process is correct. Report strengths, weaknesses, a grade justification, and improvement feedback. Apply the same standard to both students.\n\nReturn one JSON object only, with exactly this structure:\n{\"student_a\":{\"grade\":0,\"strengths\":[\"...\"],\"weaknesses\":[\"...\"],\"justification\":\"...\",\"feedback\":[\"...\"]},\"student_b\":{\"grade\":0,\"strengths\":[\"...\"],\"weaknesses\":[\"...\"],\"justification\":\"...\",\"feedback\":[\"...\"]}}\n\nTASK:\n<<TASK>>\n\nSTUDENT A ANSWER:\n<<STUDENT_A>>\n\nSTUDENT B ANSWER:\n<<STUDENT_B>>\n",
+  "model": "openai/gpt-4",
+  "official_or_verbatim_prompt_claimed": false,
+  "output_schema": "DualStudentAssessment",
+  "prompt_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
+  "protocol": "CHEMCROW_EVALUATORGPT_PROMPT_CALIBRATED_V2",
+  "provider_only": [
+    "openai"
+  ],
+  "schema_version": "chemcrow_paper_evaluator_selected_prompt_v1",
+  "temperature": 0.1
+}

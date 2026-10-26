@@ -1,0 +1,369 @@
+{
+  "artifact_protocol": "chemcrow-three-isolated-core-native-artifacts-v2",
+  "continuation_audit": {
+    "agent_system_reflector_job_count": 14,
+    "aggregate_sha256": "c9b8c38965628ada8eb6a88c8cc2ca20e92b22b72a99c55aa37ce9a03e4a0e1c",
+    "answers_included": false,
+    "artifact_protocol": "chemcrow-three-isolated-core-native-artifacts-v2",
+    "artifact_registration_count": 42,
+    "artifact_type_counts": {
+      "agent_system": 14,
+      "skill_bundle": 14,
+      "text_memory": 14
+    },
+    "core_evolved_injection_receipt_count": 14,
+    "experiment_id": "chemcrow-task-local-full-v8-core-full-worker-g1-artifacts-20260830T121136Z",
+    "independent_reflector_job_count": 42,
+    "independent_reflector_run_count": 42,
+    "memory_reflector_job_count": 14,
+    "mock_or_fixture_observations": 0,
+    "observation_source_counts": {
+      "cache_replay": 113,
+      "live": 356
+    },
+    "reset_receipt_count": 14,
+    "s0_config_sha256": "777e46cef862319d93abd932bbe580e0bdb3cd97881ad5e261095f8357b00aa0",
+    "schema_version": "chemcrow_three_artifact_completed_run_audit_v1",
+    "sibling_isolation_evidence_count": 42,
+    "skill_reflector_job_count": 14,
+    "status": "PASS",
+    "task_count": 14,
+    "tool_calls": 469,
+    "tool_errors": 103,
+    "unique_artifact_count": 42,
+    "unique_reflector_job_count": 42,
+    "unique_reflector_run_count": 42
+  },
+  "generation_audit": {
+    "aggregate_sha256": "657a1df63c02829f6ccf16b396795e48a7534969e5609c2d9ba3f08f77c0f5da",
+    "answers_included": false,
+    "artifact_protocol": "chemcrow-three-isolated-core-native-artifacts-v2",
+    "artifact_registration_count": 42,
+    "artifact_type_counts": {
+      "agent_system": 14,
+      "skill_bundle": 14,
+      "text_memory": 14
+    },
+    "core_evolved_injection_receipt_count": 0,
+    "execution_scope": "g1_and_artifact_generation_only",
+    "experiment_id": "chemcrow-task-local-full-v8-core-full-worker-g1-artifacts-20260830T121136Z",
+    "final_evaluator_call_count": 0,
+    "g1_candidate_call_count": 14,
+    "g1_internal_evaluator_call_count": 14,
+    "g2_candidate_call_count": 0,
+    "g2_internal_evaluator_call_count": 0,
+    "independent_reflector_job_count": 42,
+    "independent_reflector_run_count": 42,
+    "mock_or_fixture_observations": 0,
+    "observation_source_counts": {
+      "live": 252
+    },
+    "paper_evaluator_call_count": 0,
+    "reflector_prompt_profile": "core_full_worker_v1",
+    "reset_receipt_count": 14,
+    "s0_config_sha256": "777e46cef862319d93abd932bbe580e0bdb3cd97881ad5e261095f8357b00aa0",
+    "schema_version": "chemcrow_three_artifact_generation_completed_run_audit_v1",
+    "sibling_isolation_evidence_count": 42,
+    "status": "PASS",
+    "task_count": 14,
+    "tool_calls": 252,
+    "tool_errors": 59,
+    "unique_artifact_count": 42,
+    "unique_reflector_job_count": 42,
+    "unique_reflector_run_count": 42
+  },
+  "internal_aggregate": {
+    "artifact_count": 42,
+    "artifact_protocol": "chemcrow-three-isolated-core-native-artifacts-v2",
+    "cost_metadata_available": false,
+    "mean_baseline": {
+      "chemical_correctness": 3.5714285714285716,
+      "reasoning_quality": 3.2142857142857144,
+      "task_completion": 3.142857142857143
+    },
+    "mean_delta": {
+      "chemical_correctness": 0.0,
+      "reasoning_quality": 0.21428571428571427,
+      "task_completion": 0.14285714285714285
+    },
+    "mean_evolved": {
+      "chemical_correctness": 3.5714285714285716,
+      "reasoning_quality": 3.4285714285714284,
+      "task_completion": 3.2857142857142856
+    },
+    "pairwise": {
+      "losses": 4,
+      "ties": 1,
+      "wins": 9
+    },
+    "schema_version": "chemcrow_three_artifact_aggregate_v1",
+    "status": "PROVISIONAL_LLM_JUDGED_RESULT",
+    "task_count": 14,
+    "token_metadata_available": false,
+    "tool_error_rate": 0.21961620469083157,
+    "tool_observations": 469,
+    "tool_success_rate": 0.7803837953091685,
+    "wall_time_seconds": 3455.183002816979
+  },
+  "interpretation": {
+    "audit_scope": "PASS describes the existing completed-run report and the source-hash checks made for this export. This publication did not re-execute the full run audit.",
+    "blind_winner_counts": "internal_aggregate.pairwise uses the evaluator explicit winner (9/1/4); paired_statistics.internal_blind_g2_minus_g1 uses numerical total-score differences (8/2/4).",
+    "comparison_design": "G1/G2 versus historical ChemCrow and G2 versus G1 pair scores from independent calls to the same frozen judge; they are not same-prompt direct comparisons.",
+    "cost_scope": "The USD 2.65887 amount covers only the paper-compatible GPT-4 evaluator ledger, including its excluded paid assessment. It is not total experiment cost.",
+    "internal_score_scale": "Three dimensions scored 0 through 4; reported totals range from 0 through 12.",
+    "official_historical_scoring": "Released historical notebook judgments are separate from this project calibrated re-evaluation.",
+    "paper_score_scale": "Calibrated EvaluatorGPT-compatible LLM judgment, 0 through 10.",
+    "uncertainty": "N=14. The GPT-4 G2-minus-G1 paired-bootstrap 95% interval includes zero; the result does not establish a significant improvement or degradation.",
+    "validation_limit": "No human-expert validation or official leaderboard certification is claimed. Raw per-task evidence is omitted from this publication, so these summaries cannot independently establish full run integrity."
+  },
+  "paired_statistics": {
+    "internal_blind_g2_minus_g1": {
+      "count": 14,
+      "exact_sign_test": {
+        "non_tied_count": 12,
+        "positive_count": 8,
+        "pvalue_two_sided": 0.3876953125
+      },
+      "losses": 4,
+      "mean_delta": 0.35714285714285715,
+      "median_delta": 1.0,
+      "paired_bootstrap_95_ci_mean_delta": [
+        -0.7142857142857143,
+        1.3571428571428572
+      ],
+      "ties": 2,
+      "wilcoxon_signed_rank": {
+        "pvalue_two_sided": 0.4255561164191288,
+        "statistic": 29.0,
+        "zero_method": "wilcox"
+      },
+      "wins": 8
+    },
+    "internal_evolution_g2_minus_g1": {
+      "count": 14,
+      "exact_sign_test": {
+        "non_tied_count": 7,
+        "positive_count": 5,
+        "pvalue_two_sided": 0.453125
+      },
+      "losses": 2,
+      "mean_delta": 0.14285714285714285,
+      "median_delta": 0.0,
+      "paired_bootstrap_95_ci_mean_delta": [
+        -0.42857142857142855,
+        0.6428571428571429
+      ],
+      "ties": 7,
+      "wilcoxon_signed_rank": {
+        "pvalue_two_sided": 0.7287085285558319,
+        "statistic": 12.0,
+        "zero_method": "wilcox"
+      },
+      "wins": 5
+    },
+    "paper_g2_minus_g1": {
+      "count": 14,
+      "exact_sign_test": {
+        "non_tied_count": 4,
+        "positive_count": 1,
+        "pvalue_two_sided": 0.625
+      },
+      "losses": 3,
+      "mean_delta": -0.14285714285714285,
+      "median_delta": 0.0,
+      "paired_bootstrap_95_ci_mean_delta": [
+        -0.42857142857142855,
+        0.14285714285714285
+      ],
+      "ties": 10,
+      "wilcoxon_signed_rank": {
+        "pvalue_two_sided": 0.31731050786291415,
+        "statistic": 2.5,
+        "zero_method": "wilcox"
+      },
+      "wins": 1
+    }
+  },
+  "paper_evaluator_aggregate": {
+    "actual_openrouter_reported_cost_usd": 2.65887,
+    "actual_upstream_call_count": 44,
+    "automatic_provider_retries": false,
+    "claim_count": 44,
+    "current_judge_minus_notebook_grade_drift": {
+      "historical_chemcrow": 0.14285714285714324,
+      "historical_gpt4": 0.6071428571428577
+    },
+    "environment_proxy_count": 44,
+    "evolved_vs_baseline_losses": 3,
+    "evolved_vs_baseline_ties": 10,
+    "evolved_vs_baseline_wins": 1,
+    "excluded_attempt_count": 2,
+    "excluded_infrastructure_attempt_count": 1,
+    "excluded_invalid_assessment_count": 1,
+    "excluded_pre_response_attempt_count": 1,
+    "explicit_replacement_count": 2,
+    "failed_call_id_reuse": false,
+    "fallback_false_count": 44,
+    "final_evaluation_only": true,
+    "historical_gpt4_position_control_means": {
+      "baseline": 7.928571428571429,
+      "evolved": 7.928571428571429,
+      "historical_control": 9.357142857142858
+    },
+    "json_valid_count": 42,
+    "list_price_cost_usd": 2.65887,
+    "mean_evolved_minus_baseline": -0.14285714285714285,
+    "mean_evolved_minus_historical_chemcrow": 1.7142857142857135,
+    "mean_historical_chemcrow_grade": 7.5,
+    "mean_openevo_baseline_grade": 9.357142857142858,
+    "mean_openevo_evolved_grade": 9.214285714285714,
+    "model": "openai/gpt-4",
+    "openai_provider_count": 43,
+    "paper_notebook_historical_grade_means": {
+      "historical_chemcrow": 7.357142857142857,
+      "historical_gpt4": 8.75
+    },
+    "plan_sha256": "4abf9286433df1ac51f565f56a54f2252fbe2376a46debd1d5d9cbb51540bf4c",
+    "production_ledger_class": "production",
+    "protocol": "CHEMCROW_EVALUATORGPT_PROMPT_CALIBRATED_V2",
+    "provider_response_count": 43,
+    "pydantic_valid_count": 42,
+    "receipt_count": 44,
+    "reflector_access": false,
+    "result_count": 42,
+    "schema_version": "chemcrow_paper_evaluator_aggregate_v1",
+    "score_driven_retry": false,
+    "status": "PROVISIONAL_LLM_JUDGED_RESULT",
+    "task_count": 14,
+    "unique_claim_call_id_count": 44,
+    "unique_provider_response_id_count": 43,
+    "unique_receipt_call_id_count": 44,
+    "unique_result_call_id_count": 42,
+    "valid_result_openai_provider_count": 42,
+    "valid_target_result_count": 42
+  },
+  "paper_judge_settings": {
+    "paper_allow_fallbacks": false,
+    "paper_model": "openai/gpt-4",
+    "paper_prompt_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
+    "paper_provider_only": [
+      "openai"
+    ]
+  },
+  "publication_scope": "aggregate_only_projection_of_existing_completed_run_reports",
+  "reflector_prompt_profile": "core_full_worker_v1",
+  "result_status": "PROVISIONAL_LLM_JUDGED_RESULT",
+  "schema_version": "chemcrow_full_v8_public_summary_v1",
+  "source_code_commit": "845eb3228378e08d02a9233eaa38dc5da3574fef",
+  "summary_comparisons": [
+    {
+      "comparison": "Historical ChemCrow - GPT-4",
+      "count": 14,
+      "delta": -1.3928571428571428,
+      "former_mean": 7.357142857142857,
+      "latter_mean": 8.75,
+      "losses": 13,
+      "source": "Official notebook EvaluatorGPT",
+      "ties": 0,
+      "wins": 1,
+      "wtl": "1 / 0 / 13"
+    },
+    {
+      "comparison": "Re-evaluated ChemCrow - GPT-4",
+      "count": 14,
+      "delta": -1.8571428571428572,
+      "former_mean": 7.5,
+      "latter_mean": 9.357142857142858,
+      "losses": 13,
+      "source": "Calibrated GPT-4 Judge",
+      "ties": 1,
+      "wins": 0,
+      "wtl": "0 / 1 / 13"
+    },
+    {
+      "comparison": "G1 - GPT-4",
+      "count": 14,
+      "delta": 1.4285714285714286,
+      "former_mean": 9.357142857142858,
+      "latter_mean": 7.928571428571429,
+      "losses": 1,
+      "source": "Calibrated GPT-4 Judge",
+      "ties": 1,
+      "wins": 12,
+      "wtl": "12 / 1 / 1"
+    },
+    {
+      "comparison": "G2 - GPT-4",
+      "count": 14,
+      "delta": 1.2857142857142858,
+      "former_mean": 9.214285714285714,
+      "latter_mean": 7.928571428571429,
+      "losses": 3,
+      "source": "Calibrated GPT-4 Judge",
+      "ties": 1,
+      "wins": 10,
+      "wtl": "10 / 1 / 3"
+    },
+    {
+      "comparison": "G1 - historical ChemCrow",
+      "count": 14,
+      "delta": 1.8571428571428572,
+      "former_mean": 9.357142857142858,
+      "latter_mean": 7.5,
+      "losses": 0,
+      "source": "Same judge, independent calls",
+      "ties": 3,
+      "wins": 11,
+      "wtl": "11 / 3 / 0"
+    },
+    {
+      "comparison": "G2 - historical ChemCrow",
+      "count": 14,
+      "delta": 1.7142857142857142,
+      "former_mean": 9.214285714285714,
+      "latter_mean": 7.5,
+      "losses": 1,
+      "source": "Same judge, independent calls",
+      "ties": 3,
+      "wins": 10,
+      "wtl": "10 / 3 / 1"
+    },
+    {
+      "comparison": "G2 - G1",
+      "count": 14,
+      "delta": -0.14285714285714285,
+      "former_mean": 9.214285714285714,
+      "latter_mean": 9.357142857142858,
+      "losses": 3,
+      "source": "Same calibrated judge, independent calls",
+      "ties": 10,
+      "wins": 1,
+      "wtl": "1 / 10 / 3"
+    },
+    {
+      "comparison": "G2 - G1",
+      "count": 14,
+      "delta": 0.35714285714285715,
+      "former_mean": 10.285714285714286,
+      "latter_mean": 9.928571428571429,
+      "losses": 4,
+      "source": "Internal blind evaluator /12",
+      "ties": 1,
+      "wins": 9,
+      "wtl": "9 / 1 / 4"
+    },
+    {
+      "comparison": "G2 - G1",
+      "count": 14,
+      "delta": 0.14285714285714285,
+      "former_mean": 9.928571428571429,
+      "latter_mean": 9.785714285714286,
+      "losses": 2,
+      "source": "Internal evolution evaluator /12",
+      "ties": 7,
+      "wins": 5,
+      "wtl": "5 / 7 / 2"
+    }
+  ],
+  "task_count": 14
+}

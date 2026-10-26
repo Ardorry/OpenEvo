@@ -1,0 +1,20 @@
+{
+  "schema_version": "chemcrow_paper_evaluator_no_effect_recovery_v1",
+  "status": "PROVEN_NO_PROVIDER_EFFECT",
+  "failed_call_id": "paper-v5-chemcrow-01-historical_control",
+  "failure_boundary": "PaperEvaluatorHarness.call_id_validation",
+  "failure_category": "production_call_namespace_not_accepted_by_harness",
+  "core_completion_sha256": "527f2615ebd7748e54e2a09806a8bc9f49db125c1834bfce43afee683c958a72",
+  "core_status": "ERROR",
+  "trajectory_trace_count": 0,
+  "trajectory_response_message_count": 0,
+  "workspace_result_present": false,
+  "openrouter_claim_count": 0,
+  "openrouter_receipt_count": 0,
+  "sealed_result_count": 0,
+  "provider_request_possible": false,
+  "original_plan_preserved": true,
+  "replacement_policy": "fresh plan root and fresh paper-v5r1 call namespace",
+  "credentials_included": false,
+  "prompt_or_response_included": false
+}

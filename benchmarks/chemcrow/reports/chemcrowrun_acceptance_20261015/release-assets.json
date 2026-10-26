@@ -1,0 +1,216 @@
+{
+  "status": "PREPARED_AWAITING_USER_PUBLICATION_APPROVAL",
+  "redistribution": "EVIDENCE_SUPPORTS_REDISTRIBUTION_WITH_COMPANIONS",
+  "assets": [
+    {
+      "filename": "openevo-science-runtime-0.1.1-linux-amd64.tar.gz",
+      "bytes": 352236726,
+      "sha256": "ad9c5ebd69b5785b94dd52dc077d93ababfa9cf8cbcbf92940f60bee48a91149"
+    },
+    {
+      "filename": "runtime-manifest.json",
+      "bytes": 1776,
+      "sha256": "ffd810017b3cfd1d7d9b9c6771f5b09b586b5eea0162c9ffcbdd6de353b76c17"
+    },
+    {
+      "filename": "runtime-layer-audit.json",
+      "bytes": 59110,
+      "sha256": "b20b83294c62a70329f2674711b94f69403d0781767ab0b26fc742ddc0182000"
+    },
+    {
+      "filename": "debian-packages.tsv",
+      "bytes": 7998,
+      "sha256": "37715197cba0e15d358d76996c6293aa4b0df4beb0f1b5cf73c32aa949709094"
+    },
+    {
+      "filename": "source-package-versions.txt",
+      "bytes": 2070,
+      "sha256": "1440203ba6d8cceddc751d9a0d61d8a1daba252221e3a3384e347a1932d6aaf9"
+    },
+    {
+      "filename": "source-download-status.tsv",
+      "bytes": 2590,
+      "sha256": "9220161b5bdbc914865debe8f149d6d89c44a3b28331976cb79020cbdacb76ba"
+    },
+    {
+      "filename": "debian-corresponding-sources.tar.gz",
+      "bytes": 539384622,
+      "sha256": "28c5b9683b3ffa6e74c5345550fa31d530588c7bf5aace67fe2147d50cf07dae"
+    },
+    {
+      "filename": "bundled-debian-notices.tar.gz",
+      "bytes": 549783,
+      "sha256": "309b735f9562d038ad85c86594971d5de36114703d7830d234dc14bd0ac06703"
+    },
+    {
+      "filename": "bundled-non-debian-notices.tar.gz",
+      "bytes": 74319,
+      "sha256": "c16cc7c038f66b5686479904ece2575af66112540d8b138993814b7ca9d957bf"
+    },
+    {
+      "filename": "Codex-0.144.1-LICENSE",
+      "bytes": 10926,
+      "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
+    },
+    {
+      "filename": "Codex-0.144.1-NOTICE",
+      "bytes": 242,
+      "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+    },
+    {
+      "filename": "Codex-0.144.1-Cargo.lock",
+      "bytes": 364097,
+      "sha256": "175793a40a3147db1fee08fd9db0acc59312c344b3513dd7ee316f5446d8119e"
+    },
+    {
+      "filename": "codex-rust-v0.144.1-source.tar.gz",
+      "bytes": 9533046,
+      "sha256": "c11868501ef0e67c90759deaf2c0933cd07e4bea4f47a47186ee6de046c57ef6"
+    },
+    {
+      "filename": "codex-source-provenance.json",
+      "bytes": 277,
+      "sha256": "704f4cb887a8505ec1bf5ff73a827aaea86eca418a3eb101db32ef23f961143a"
+    },
+    {
+      "filename": "codex-locked-dependencies.tar.gz",
+      "bytes": 240546851,
+      "sha256": "029746f0dd1c211e889a10dfead1058ecb7d08f2e881b2c1a84a169a479c19ae"
+    },
+    {
+      "filename": "codex-additional-notices.tar.gz",
+      "bytes": 382987,
+      "sha256": "8300b9368983abe04ebb90ef8382917bd15b756c0e49019ec3e4fbdd5a6708bc"
+    },
+    {
+      "filename": "codex-registry-license-inventory.json",
+      "bytes": 680837,
+      "sha256": "ae7567279fb366b2565f43b3ba7d295b03df42fc81268ca72865a2796bb3eff4"
+    },
+    {
+      "filename": "codex-git-license-inventory.json",
+      "bytes": 5760,
+      "sha256": "a03b1ae261d42c57f2b1d7fe90c2cdfc3c6d1a425b3b6acd68648ca6d41b1258"
+    },
+    {
+      "filename": "codex-upstream-license-supplements.json",
+      "bytes": 20026,
+      "sha256": "d5dcaf7e9102c4e315591f83844484d53ac0496a33a5602a3db99dec35185e03"
+    },
+    {
+      "filename": "codex-exact-tree-notices.json",
+      "bytes": 8631,
+      "sha256": "62c5c1f270edb9dc2a987f792ddec275a8ff2a99962f7bd146d2844d0556db79"
+    },
+    {
+      "filename": "native-notice-coverage-review.json",
+      "bytes": 5463,
+      "sha256": "7a0938a97f8049f71ed29d8ded4033d4558c18972e4e9f5b888d0831a3800bd5"
+    },
+    {
+      "filename": "non-debian-software-inventory.txt",
+      "bytes": 176,
+      "sha256": "0a3b652c6d6701a73be6cd4479f64ca49fb1053f4dff7a71d83b2e578a1904e9"
+    },
+    {
+      "filename": "notice-provenance.json",
+      "bytes": 410,
+      "sha256": "8d06d61c1a454e51334df645a813246f8fc0a4de8c6a120ae18465243d2a0a8e"
+    },
+    {
+      "filename": "runtime-notice-review.json",
+      "bytes": 17884,
+      "sha256": "1822e7a182f8426281c575c327241b0de10ff5d62a4cfbe3c0afedfc20238bfd"
+    },
+    {
+      "filename": "runtime-metadata-scan.json",
+      "bytes": 2086,
+      "sha256": "8dc1be8381ba06a850df701dc51e6f62e173c9a6348ed28db242fff6a415f197"
+    },
+    {
+      "filename": "THIRD_PARTY_NOTICES.md",
+      "bytes": 5757,
+      "sha256": "1dff72b922a058bfa215ff8ce16750b77dea120ba7c6deed84d38d3b8e619471"
+    },
+    {
+      "filename": "runtime-distribution-supplements.tar.gz",
+      "bytes": 52831506,
+      "sha256": "d008203723b3a4c2947beb03d321f9b3e9b5fcfc9513ed6d139b1e58ef79dd79"
+    },
+    {
+      "filename": "runtime-supplement-notice-index.json",
+      "bytes": 33276,
+      "sha256": "459cecb4fd173d9e9a3af91df6922ee7f8ce74d5499fc3685c60ece36ed8d5d8"
+    },
+    {
+      "filename": "runtime-distribution-review.json",
+      "bytes": 6919,
+      "sha256": "d19cd76946370849d0537a8dcc809be6e667b0156dc7bafc66a8812d571979e9"
+    },
+    {
+      "filename": "runtime-native-inventory.json",
+      "bytes": 10185,
+      "sha256": "8c886987cf3179b81bd19134cd0c6c814647081fc14c1cdcc60d261db4a5327e"
+    },
+    {
+      "filename": "runtime-license-candidate-dispositions.json",
+      "bytes": 38851,
+      "sha256": "e32b7a136d738636967052b9b210dbf7f5110ce6684cc6b0151d4ad475b59957"
+    },
+    {
+      "filename": "debian-source-integrity-review.json",
+      "bytes": 75169,
+      "sha256": "97637db0f9dca13030b44a445e45ea528e137a27b603e6c115766d8a74fb53a0"
+    },
+    {
+      "filename": "pip-source-comparison.json",
+      "bytes": 257,
+      "sha256": "0cf63f215ac644eb13a53818b6f81988a152969379a176211735329064f7266d"
+    },
+    {
+      "filename": "codex-npm-origin-verification.json",
+      "bytes": 1823,
+      "sha256": "3472f178b789fd7ef151388cf2fa7c8fa5e9bd5d7504a035fbdfd0e6a347c825"
+    },
+    {
+      "filename": "bubblewrap-relink-verification.json",
+      "bytes": 1999,
+      "sha256": "f041b1c2e2eae9bb9b08992f036d80d351407a588d2ca42337123ef0633b7f49"
+    },
+    {
+      "filename": "runtime-native-link-materials.tar.gz",
+      "bytes": 65312493,
+      "sha256": "c546a40ec73d9b8c6d5c72b8a47bc4231708960848314f5642aa07ea3e991a0b"
+    },
+    {
+      "filename": "native-materials-index.json",
+      "bytes": 7481,
+      "sha256": "d3c579d27584f3a1015b2d54cf8bbc4c6fa55c9228883c4575ef2a32c638bba6"
+    },
+    {
+      "filename": "native-link-verification.json",
+      "bytes": 65334,
+      "sha256": "3bcaeb3f0cebec8efcf7a683b9f4230cf2ddbd3d729007f36e9eb2f5d7da0da6"
+    },
+    {
+      "filename": "bubblewrap-clean-relink.json",
+      "bytes": 4945,
+      "sha256": "eab39418f103d101d0bb73ac2f4c480cf739feb801d2aa1e2ce6b4c3cbe57270"
+    },
+    {
+      "filename": "original-image-native-smoke.json",
+      "bytes": 2263,
+      "sha256": "eb9df9a314903d2e29415645473d7088c458d90113f9f5db9b09aebb41123beb"
+    },
+    {
+      "filename": "native-independent-acceptance.json",
+      "bytes": 2889,
+      "sha256": "2bf2e460ef9d20a4b64c2b65ae650af419d7f72bf400d4f85b782ad0d0c63c01"
+    },
+    {
+      "filename": "runtime-math-license-disposition.json",
+      "bytes": 4880,
+      "sha256": "03a4433daa361ccd55492c7eb92b79cd0277c466c27f70f1bc56794fedfa4136"
+    }
+  ]
+}

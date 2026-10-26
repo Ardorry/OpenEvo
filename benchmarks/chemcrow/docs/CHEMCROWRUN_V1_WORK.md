@@ -1,0 +1,34 @@
+# ChemCrowRun v1.0 implementation record (local issue)
+
+2026-10-16 delivery update: the user supersedes the earlier independent-branch/PR/RC1
+publication plan. Publish directly to the fork's `chemcrow` branch, without a PR.
+Provide a concise delivery inventory, the Core session-directory patch and application
+instructions, the completed run's 42 evolution artifacts, and the original runtime with
+its source/license companion. Keep raw experiments and historical records unchanged.
+Do not present public delivery as completed remote paid reproduction.
+
+User-authorized scope: formal naming with immutable legacy provenance, exact historical runtime acquisition and review, isolated service lifecycle, fresh real smoke/full runs, calibrated evaluation, submission/statistics, and publication preparation.
+
+This local issue records work before implementation. External issue/PR creation and publication are deferred to the user's single final publication approval. Base: codex/chemcrow-reproducibility at 7375f5ec4. Working branch: codex/chemcrowrun-v1.
+
+Acceptance: clean local clone; public fixture acquisition; verified original runtime; isolated services; genuine one-task and 14-task runs; audit and submission; publication-ready evidence. Pending steps must never be reported as passed. Do not change historical payloads, scores, protocol thresholds or raw data. No automatic generation retries.
+
+Initial observations: successful OpenRouter probe used the configured US proxy, GPT-4/OpenAI, one request, 44 tokens, USD 0.00147. It did not test Core, subscription roles or a complete Judge harness. A previous direct probe bypassed that proxy and returned a region-related 403. The original 352236726-byte runtime archive verifies against Core authority. No benchmark services were running at task start.
+
+Follow-up issue: current subscription catalog excludes historical gpt-5.5. Preserve its canonical configuration and add an explicit, validated model substitution variant across all six roles. A real managed gpt-5.6-sol probe passed unchanged credential isolation. Pin source/config/topology/environment per workspace; reject changed identity at dispatch/export. Keep original submission canonical payloads valid and prevent pooling different model conditions.
+
+Real smoke found an audit integration defect: the audit default assumed `<run_root>/claims` while the launcher uses a separately configured ledger directory. Pass that declared ledger to both native audit modes while retaining the historical default. Re-audit sealed smoke evidence without modifying it or repeating model calls; record generation and analysis commits separately.
+
+Usage evidence follow-up: real Codex `turn.completed` events expose input, cached input, output and reasoning output counters even though complete provider/account totals and subscription dollar attribution remain unavailable. Add a read-only, hashed-source usage summary and include it in future reports; preserve the running clone and scientific records. Sum each reported field independently, avoid duplicate transcript attachments, and never treat omitted canary usage as zero billing.
+
+Full-run Judge preflight found an integration spelling mismatch: the launcher writes `completed-run.audit.json`, while the frozen evaluator requires `completed_run.audit.json`. The first Judge attempt stopped before any model calls. Align future launcher output with the frozen evaluator. For the sealed source checkout, preserve the original audit and make a byte-identical canonical copy, then use the existing lower-level Judge commands with a recorded orchestration script; do not modify generation code, answers or scoring rules.
+
+Submission review found that the exporter leaves its existing `replacements` field empty even when the PASS audit records verified no-effect recoveries. Populate that field from validated terminal ledger histories, reconcile counts with the audit, and bind each replacement to the recovery receipt hash. Preserve the original export and generate a separately attributed corrected export offline; no scientific result or schema version changes.
+
+Runtime redistribution follow-up: inspect every non-Debian executable bundled with Codex (including ripgrep, patched zsh, bubblewrap and code-mode-host), match upstream build pins and notices, verify Debian source checksums, resolve the notice-candidate worksheet, and produce a component-specific release decision. Keep original image bytes and prior review snapshots; do not promote redistribution or publication gates from source availability alone.
+
+Runtime review outcome: original npm binaries and layout matched; Debian 104/104 source versions and 223 DSC-declared files passed; pip 431 source files matched. Added native/V8/compiler/pip notices and all 43 candidate dispositions. A modified bubblewrap library was rebuilt and linked with the original Rust wrapper using an isolated offline Cargo adapter. V8 LGPL math applicability and complete linkable-source evidence remain a named distribution blocker; do not replace the historical runtime or mark this review as publication clearance.
+
+V8 link audit follow-up (user request after a2e8c4021): distinguish fdlibm from LGPL glibc using exact file licenses; inspect actual upstream release archives and ELF linkage, trace the release build graph, verify applicable relink/replacement operations in isolation, and retain a reproducible audit script. Reuse passed source/image checks. Keep unverified obligations BLOCKED, preserve original OCI/scientific results, and do not publish.
+
+V8 link audit resolution: actual Codex release uses Bazel V8 14.9.207.2, not the crate's GN default. The official unstripped release archive contains fdlibm and no conditional glibc math objects/symbols; 21 complete relocation-masked functions uniquely match both original ELFs. Whole ICU data matches the locked crate, actual ICU pin and both binaries. Seven glibc files are LGPL-2.1-or-later; two local headers are BSD, while fdlibm retains SunPro/V8 BSD terms. Independent local clone 3dd92ed38 passed clean source/object/link verification, a newly installed Rust toolchain, modified bwrap relink, original-Codex PATH replacement observed with strace, and read-only/offline image smoke. The old 53 MB companion and original OCI are unchanged. Distribution is evidence-supported with all source/notices, not externally authorized or a professional legal opinion. Remaining project work is approved publication, anonymous delivery and actual remote fresh-clone paid reproduction; no additional paid calls in this review.

@@ -1,0 +1,34 @@
+{
+  "aggregate_sha256": null,
+  "answers_included": false,
+  "core_evolved_injection_receipt_count": 12,
+  "experiment_id": "chemcrow-task-local-full-v3",
+  "mock_or_fixture_observations": 0,
+  "observation_source_counts": {
+    "cache_replay": 52,
+    "live": 250
+  },
+  "s0_config_sha256": "8f7113de469c92fff55b99b62e58d4c43d5e42f2b6485affe44b247c28306a5c",
+  "schema_version": "chemcrow_sealed_subset_audit_v1",
+  "scope": "sealed_subset",
+  "status": "PASS",
+  "task_count": 12,
+  "task_ids": [
+    "chemcrow-01",
+    "chemcrow-02",
+    "chemcrow-03",
+    "chemcrow-04",
+    "chemcrow-05",
+    "chemcrow-06",
+    "chemcrow-07",
+    "chemcrow-08",
+    "chemcrow-09",
+    "chemcrow-10",
+    "chemcrow-12",
+    "chemcrow-13"
+  ],
+  "terminal_phase_claim_count": 60,
+  "tool_calls": 302,
+  "tool_errors": 60,
+  "unique_artifact_count": 12
+}

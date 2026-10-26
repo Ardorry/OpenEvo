@@ -1,0 +1,42 @@
+{
+  "call_count": 14,
+  "cost_ceiling": {
+    "authorized_max_usd": 5.0,
+    "call_count": 14,
+    "list_price_ceiling_usd_per_call": 0.28173,
+    "list_price_ceiling_usd_total": 3.94422,
+    "max_input_tokens_per_call": 6991,
+    "max_output_tokens_per_call": 1200,
+    "model_context_tokens": 8191
+  },
+  "judge_protocol": "CHEMCROW_EVALUATORGPT_PROMPT_CALIBRATED_V2",
+  "model_calls": 0,
+  "paid_operations": 0,
+  "plan_path": "/home/lhy-h/work/chemcrowrun/runs/paper-evaluator-direct-v5-g1-vs-historical-chemcrow-v1/private/plan.json",
+  "plan_sha256": "c3ab7687e7b75e4d701dacc73a5d33df444e565323ae0e4fd2c932b8b48d24e7",
+  "production_42_call_ledger_included": false,
+  "prompt_candidate_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
+  "reference_42_call_ledger_unchanged": true,
+  "schema_version": "chemcrow_paper_direct_g1_comparison_plan_v1_preflight",
+  "secret_values_included": false,
+  "status": "READY_FOR_EXPLICIT_PAID_DIRECT_COMPARISON",
+  "student_a_system": "historical_chemcrow",
+  "student_b_system": "openevo_baseline",
+  "task_count": 14,
+  "task_ids": [
+    "chemcrow-01",
+    "chemcrow-02",
+    "chemcrow-03",
+    "chemcrow-04",
+    "chemcrow-05",
+    "chemcrow-06",
+    "chemcrow-07",
+    "chemcrow-08",
+    "chemcrow-09",
+    "chemcrow-10",
+    "chemcrow-12",
+    "chemcrow-13",
+    "chemcrow-14",
+    "chemcrow-15"
+  ]
+}

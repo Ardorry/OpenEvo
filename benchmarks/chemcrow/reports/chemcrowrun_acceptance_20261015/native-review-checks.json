@@ -1,0 +1,33 @@
+{
+  "status": "PASS_PREPUBLICATION_NATIVE_REVIEW_CHECKS",
+  "checked_at": "2026-10-15T14:31:23.809575+00:00",
+  "review_base_commit": "a2e8c4021df508a745e9ccbcfa95553f10b7cd17",
+  "verified_script_commit": "3dd92ed38a8ad98eb54164b434e7ad600630850d",
+  "candidate_assets_checksum_verified": 42,
+  "asset_total_bytes": 1262304720,
+  "release_inventory_and_SHA256SUMS_verified": true,
+  "unchanged_53mb_supplement": true,
+  "original_historical_hashes_verified": 7,
+  "public_scientific_payloads_unchanged": 4,
+  "new_local_document_links_checked": 50,
+  "changed_public_file_scan_findings": [],
+  "lint_and_format": "PASS",
+  "independent_acceptance": "native-independent-acceptance.json",
+  "pytest_rerun": false,
+  "pytest_rerun_reason": "Scientific implementation unchanged; new isolated forensic/build scripts verified by actual source/object/relink/replacement/image execution and negative hash control",
+  "prior_passed_audits_reused": [
+    "Debian 104 versions / 223 source files",
+    "1193 registry source checksums and seven Git source repositories",
+    "431 installed pip file matches",
+    "Original npm native/layout matches",
+    "Bounded OCI layer/config credential scan"
+  ],
+  "redistribution_status": "EVIDENCE_SUPPORTS_REDISTRIBUTION_WITH_COMPANIONS",
+  "remaining_gates": [
+    "User publication approval",
+    "Actual anonymous public delivery",
+    "Remote fresh-clone paid experiment"
+  ],
+  "paid_calls": 0,
+  "publication_actions": []
+}

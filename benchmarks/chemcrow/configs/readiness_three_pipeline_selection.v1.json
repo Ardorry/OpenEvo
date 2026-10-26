@@ -1,0 +1,14 @@
+{
+  "schema_version": "chemcrow_three_pipeline_readiness_selection_v1",
+  "recorded_before_execution": true,
+  "recorded_at": "2026-08-26T00:05:23+08:00",
+  "experiment_id": "chemcrow-task-local-readiness-three-pipeline-v1",
+  "task_ids": ["chemcrow-02", "chemcrow-03", "chemcrow-06"],
+  "selection_basis": "fixed representative tasks explicitly authorized in the readiness goal",
+  "first_task_gate": "run chemcrow-02 alone before continuing with chemcrow-03 and chemcrow-06",
+  "phase_or_run_ids_reused": false,
+  "prior_outputs_reused": false,
+  "maximum_paid_pairs": 3,
+  "authoritative_full_batch_authorized": false,
+  "production_paper_evaluator_batch_authorized": false
+}

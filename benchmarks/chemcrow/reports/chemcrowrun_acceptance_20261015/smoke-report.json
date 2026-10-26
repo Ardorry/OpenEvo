@@ -1,0 +1,77 @@
+{
+  "analysis_source_commit": "6791d6bbed553520b759e71fb13e50778d79551e",
+  "audit": "PASS",
+  "audit_source_sha256": "21c4d54ab30757c80c80772a1de3bbc14f393638f63e685aa7744658cf8d46f9",
+  "completed_tasks": 1,
+  "config_sha256": "bb8803980a120d9c0e1fb8dcb531cba06e53508f9b0bb9d48892a5422cbffbbc",
+  "core_call_accounting": {
+    "completed": 8,
+    "failed": 0,
+    "limitation": "Transcript capture does not expose provider token totals; readiness canaries are not separate terminal records",
+    "terminal_records": 8,
+    "token_count": null,
+    "total_core_run_seconds": 842.3796886399996
+  },
+  "cost_limitation": "Subscription cost is not attributable from API credits. Judge receipts are separate.",
+  "display_protocol": "ChemCrowRun v1.0",
+  "execution_attempts": [
+    {
+      "additional_readiness_calls": "Managed isolation canaries are additional subscription turns",
+      "automatic_retries": 0,
+      "completed_at": "2026-10-15T03:54:28.208618+00:00",
+      "elapsed_seconds": 865.753952,
+      "exit_code": 0,
+      "planned_logical_calls": 8,
+      "resume": false,
+      "scope": "smoke",
+      "started_at": "2026-10-15T03:40:02.454666+00:00",
+      "status": "COMPLETED"
+    }
+  ],
+  "generated_at": "2026-10-15T03:55:30.676664+00:00",
+  "historical_results_reused": false,
+  "internal_blind_statistics": {
+    "bootstrap_95_ci": [
+      -1.0,
+      -1.0
+    ],
+    "bootstrap_resamples": 10000,
+    "exact_sign_flip_p_two_sided": 1.0,
+    "losses": 1,
+    "mean_delta": -1.0,
+    "mean_g1": 11.0,
+    "mean_g2": 10.0,
+    "n": 1,
+    "seed": 20260825,
+    "test_assumption": "paired differences exchangeable under sign reversal under the null",
+    "ties": 0,
+    "wins": 0
+  },
+  "missing_tasks": [],
+  "model_substitution": {
+    "actual_model": "gpt-5.6-sol",
+    "historical_model": "gpt-5.5",
+    "reason": "Historical gpt-5.5 absent from current subscription catalog; unchanged Core isolation passes with gpt-5.6-sol",
+    "variant": "chemcrowrun_v1_model_substitution_v1"
+  },
+  "offline_audit_fix": "Read the configured ledger instead of the legacy default path; no model replay",
+  "paper_judge": "PENDING",
+  "per_task": [
+    {
+      "g1": 11.0,
+      "g2": 10.0,
+      "task_id": "chemcrow-01"
+    }
+  ],
+  "protocol_identity": "chemcrow_full_v8_reproduction_v1",
+  "requested_model": "gpt-5.6-sol",
+  "run_id": "smoke-sol-20261015",
+  "schema_version": "chemcrowrun_report_v1",
+  "scientific_evidence_unchanged": true,
+  "scope": "independent_single_task_smoke",
+  "server_model_snapshot": "Not guaranteed pinned by the subscription service",
+  "source_commit": "95df3151b0a483694de65f83f9113f072e85ef62",
+  "status": "SMOKE_PASS",
+  "submission": "NOT_ELIGIBLE_SMOKE",
+  "subscription_cost_usd": null
+}

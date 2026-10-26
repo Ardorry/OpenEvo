@@ -1,0 +1,205 @@
+{
+  "status": "LOCAL_REAL_EXPERIMENT_AND_CALIBRATION_PASS_PUBLIC_DELIVERY_PENDING",
+  "full_experiment_source_commit": "1bf37ce0b386be4abccbcaed8daf5a5f34d1f54b",
+  "final_code_and_analysis_commit": "6e03aef26bc9e9c6e89f18c04df7282f3dca7edd",
+  "scientific_generation": "COMPLETE",
+  "calibrated_judge": "COMPLETE_42_OF_42",
+  "experiment_polling": false,
+  "polling_end_reason": "Generation and all Judge calls completed; services stopped and data retained",
+  "evidence": [
+    {
+      "filename": "ACCEPTANCE.md",
+      "sha256": "3c1b0c34b4cac54964617f0aac18c044136442bcfbbf6b89ddafb0a4ed4b51e3"
+    },
+    {
+      "filename": "PR_BODY.md",
+      "sha256": "58534112105772f5b54a4d5ed53d9d29f0b61150566391e2709a48f022efa3ec"
+    },
+    {
+      "filename": "PUBLICATION_PLAN.md",
+      "sha256": "888f99ee6ee8d58b03a2584d4a8d3e1a68018178c3028640f7fd1e9aada72298"
+    },
+    {
+      "filename": "benchmark-tests.txt",
+      "sha256": "8a95702933dd31f87a1b95fe945cf749419191897a7874b90f79482e967d8ce9"
+    },
+    {
+      "filename": "bubblewrap-relink-verification.json",
+      "sha256": "f041b1c2e2eae9bb9b08992f036d80d351407a588d2ca42337123ef0633b7f49"
+    },
+    {
+      "filename": "candidate-tests.txt",
+      "sha256": "6ac30cab2590a1098061d1c6dc30d3fec03db9630dfc46085f578a11a1aae399"
+    },
+    {
+      "filename": "chemcrowrun-comparison.json",
+      "sha256": "261673bbf68053abcd3a0337bebf6705c938e317424125a989e1f932424de3c8"
+    },
+    {
+      "filename": "chemcrowrun-report.json",
+      "sha256": "c9cd4eda11c70451d235f5fe9a11c67be874e063f6a02acf581e33427a889efe"
+    },
+    {
+      "filename": "chemcrowrun-submission.json",
+      "sha256": "9d159feeb607ddb9bfead9b2795450fac224613074fecd46bdda5c136601b444"
+    },
+    {
+      "filename": "codex-npm-origin-verification.json",
+      "sha256": "3472f178b789fd7ef151388cf2fa7c8fa5e9bd5d7504a035fbdfd0e6a347c825"
+    },
+    {
+      "filename": "completed-run-audit.json",
+      "sha256": "151708d086d8ae15f64b02116b726764812272dd58ded15a4152419892dd5526"
+    },
+    {
+      "filename": "debian-source-integrity-review.json",
+      "sha256": "97637db0f9dca13030b44a445e45ea528e137a27b603e6c115766d8a74fb53a0"
+    },
+    {
+      "filename": "export-provenance.json",
+      "sha256": "67c14d7488717490f60c36c789bcbf4ff0a6428fdf86148f11652a1e353a3eda"
+    },
+    {
+      "filename": "fixture-verification.json",
+      "sha256": "28985cb9d6a326f81d0001cfc32b3a3df8acaa89d9437e9a6ade4496765c8ac6"
+    },
+    {
+      "filename": "full-internal-report.json",
+      "sha256": "0561763b93e0c402a7d7ee8e80a48c46a539f0b7efdde3da4c30f6de7acc68db"
+    },
+    {
+      "filename": "judge-canonical-audit-repair.json",
+      "sha256": "78fbfcb840a132a84a00358955650d3d9bcfc324ec6fae0f06b9885117edad23"
+    },
+    {
+      "filename": "judge-execution.json",
+      "sha256": "d832e8fce10da2be4b88f44d7854a76882e9d5f21532405259c620f814038cb3"
+    },
+    {
+      "filename": "judge-receipts-summary.json",
+      "sha256": "859b7453115c40bff02b79b8e5b53f2e4d2e313a953b75129083b88f887b0b48"
+    },
+    {
+      "filename": "paid-probe-summary.json",
+      "sha256": "d64dba9315d800085a112e5d55074e31e8013a977e8014d1f1cdc5fd79df21ac"
+    },
+    {
+      "filename": "pip-source-comparison.json",
+      "sha256": "0cf63f215ac644eb13a53818b6f81988a152969379a176211735329064f7266d"
+    },
+    {
+      "filename": "public-runtime-discovery.json",
+      "sha256": "439f3e6327ef4d3d6bb432355c58561b01480143c85ae81f6eb97654219f4b03"
+    },
+    {
+      "filename": "publication-commits.txt",
+      "sha256": "9570a2617011e460296b8da43bc6e9815933134eb80ddf3943d53dfe900248b1"
+    },
+    {
+      "filename": "publication-diff-stat.txt",
+      "sha256": "eea5244c007149f7b64f83cf8caf2d8a004aab2b8d948ebcdbd849117cc7ff41"
+    },
+    {
+      "filename": "publication-git-state.json",
+      "sha256": "4050eac942afb8323791000c177d4a75689ca0dd7618363ef137031eb1de76d3"
+    },
+    {
+      "filename": "recorded-codex-usage.json",
+      "sha256": "3fc6085ff4c3d477e9d6b06532a442db2d26426e78861104c9b6a26286205c60"
+    },
+    {
+      "filename": "release-assets.json",
+      "sha256": "6c0ce4a79f30cb94c06fd81f0c3fc945b67ddacac3092aa938451fdb8b75bf43"
+    },
+    {
+      "filename": "runtime-distribution-review.json",
+      "sha256": "d19cd76946370849d0537a8dcc809be6e667b0156dc7bafc66a8812d571979e9"
+    },
+    {
+      "filename": "runtime-layer-scan-summary.json",
+      "sha256": "380d3781139b877b700c8c5fa1f3b7df08b2787ea1a26f4e8ffb38d8ebe24d81"
+    },
+    {
+      "filename": "runtime-license-candidate-dispositions.json",
+      "sha256": "e32b7a136d738636967052b9b210dbf7f5110ce6684cc6b0151d4ad475b59957"
+    },
+    {
+      "filename": "runtime-manifest.json",
+      "sha256": "ffd810017b3cfd1d7d9b9c6771f5b09b586b5eea0162c9ffcbdd6de353b76c17"
+    },
+    {
+      "filename": "runtime-metadata-scan.json",
+      "sha256": "8dc1be8381ba06a850df701dc51e6f62e173c9a6348ed28db242fff6a415f197"
+    },
+    {
+      "filename": "runtime-native-inventory.json",
+      "sha256": "8c886987cf3179b81bd19134cd0c6c814647081fc14c1cdcc60d261db4a5327e"
+    },
+    {
+      "filename": "runtime-notice-review.json",
+      "sha256": "1822e7a182f8426281c575c327241b0de10ff5d62a4cfbe3c0afedfc20238bfd"
+    },
+    {
+      "filename": "runtime-review-checks.json",
+      "sha256": "e6778077d41aaa7037d323d28274d7d48d8f30506790783339ffbd34954b01e9"
+    },
+    {
+      "filename": "service-cleanup.json",
+      "sha256": "03927bcd886b3a15539cadd9b784a42374b7d0ddaed1a759b9f0ff9e5d870870"
+    },
+    {
+      "filename": "smoke-report.json",
+      "sha256": "86f33fea84ba36f19c79b8cc28d6f0d3b8bd495787a6702b1c89c71c887f2756"
+    },
+    {
+      "filename": "source-and-document-checks.json",
+      "sha256": "7ddd2a410093c7236aaaece5e25322756787fd75c9a52ae19c9333117665ee1e"
+    },
+    {
+      "filename": "task08-evaluator-recovery.json",
+      "sha256": "e1e7139dd5477a12747dfcb88bc1866759e31fea099999229e5699002bfcf0c6"
+    },
+    {
+      "filename": "task13-candidate-recovery.json",
+      "sha256": "7e375cbef254d16309b9e2bdbb285dc8e9fbe8a6e1a5a896a52a7cb57e750891"
+    },
+    {
+      "filename": "tool-observation-audit.json",
+      "sha256": "5f28a10ce90d1629ca3fb071d4d40a0559946cc4fc1a03c103f10edf9a04c16c"
+    },
+    {
+      "filename": "native-link-verification.json",
+      "sha256": "3bcaeb3f0cebec8efcf7a683b9f4230cf2ddbd3d729007f36e9eb2f5d7da0da6"
+    },
+    {
+      "filename": "bubblewrap-clean-relink.json",
+      "sha256": "eab39418f103d101d0bb73ac2f4c480cf739feb801d2aa1e2ce6b4c3cbe57270"
+    },
+    {
+      "filename": "original-image-native-smoke.json",
+      "sha256": "eb9df9a314903d2e29415645473d7088c458d90113f9f5db9b09aebb41123beb"
+    },
+    {
+      "filename": "native-materials-index.json",
+      "sha256": "d3c579d27584f3a1015b2d54cf8bbc4c6fa55c9228883c4575ef2a32c638bba6"
+    },
+    {
+      "filename": "native-independent-acceptance.json",
+      "sha256": "2bf2e460ef9d20a4b64c2b65ae650af419d7f72bf400d4f85b782ad0d0c63c01"
+    },
+    {
+      "filename": "runtime-math-license-disposition.json",
+      "sha256": "03a4433daa361ccd55492c7eb92b79cd0277c466c27f70f1bc56794fedfa4136"
+    },
+    {
+      "filename": "native-review-checks.json",
+      "sha256": "b6d3c17b57e9dcfb754feaffa1265d593f4c8732742d52c2ab95f32ea2580cba"
+    },
+    {
+      "filename": "RUNTIME_RELEASE_BODY.md",
+      "sha256": "2be8afd97cea58f5eb8fed340c57ac1e9d4bc995ed9697f61019db4abbbd7174"
+    }
+  ],
+  "runtime_distribution_review": "runtime-distribution-review.json",
+  "runtime_redistribution_status": "BLOCKED_V8_LINKABLE_SOURCE_CLOSURE"
+}

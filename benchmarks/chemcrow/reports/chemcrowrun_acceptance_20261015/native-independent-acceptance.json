@@ -1,0 +1,59 @@
+{
+  "status": "PASS_LOCAL_INDEPENDENT_NATIVE_ACCEPTANCE",
+  "checked_at": "2026-10-15T14:26:19.570332+00:00",
+  "source_commit": "3dd92ed38a8ad98eb54164b434e7ad600630850d",
+  "clone_method": "git clone --no-local of committed local candidate",
+  "checkout_clean_after_tests": true,
+  "verification_script_sha256": {
+    "audit_runtime_native_links.py": "fb83d78ce362c9583d1102beccda5a1496651a6538357a6cc919c6bf84fc7b00",
+    "verify_runtime_bwrap_relink.py": "704927eb89e2829314270bdacad25123dd583aacf4d6c0f4b8fbd75e8c2e7b22",
+    "smoke_runtime_native.py": "2397b1c3f5b312b5bc9453551c495f345fc4bec4d13aad6075fdf80610dbc4e2"
+  },
+  "inputs": {
+    "assets_verified": 40,
+    "material_members_verified": 42,
+    "native_binary_origin": "Fresh docker cp from exact original image; no execution during extraction",
+    "image": "sha256:7a0079f9cb1bce5768cff5bce3d1181811c6a231ad800cac8fb503d66852c81b",
+    "scientific_state_copied": false,
+    "credentials_copied": false,
+    "download_scope": "Local candidate copies of public-origin materials; not anonymous publication acceptance"
+  },
+  "toolchain": {
+    "status": "PASS_FRESH_INSTALL",
+    "archive_sha256": {
+      "rustc-1.95.0-x86_64-unknown-linux-gnu.tar.xz": "8426a3d170a5879f5682f5fbdd024a1779b3951e7baba685af2d6dc32a6dfc15",
+      "cargo-1.95.0-x86_64-unknown-linux-gnu.tar.xz": "e74edd2cf7d0f1f1383b4f00eb90c843750bc489e2ccf7214e6476678a907425",
+      "rust-std-1.95.0-x86_64-unknown-linux-gnu.tar.xz": "047ea7098803d3500fa1072e9cee5392697e21525559e4458128a2bf874aa382"
+    },
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)"
+  },
+  "python": "3.11.15",
+  "elf_reader": "pyelftools 0.32; isolated venv",
+  "receipts": {
+    "native-link-verification.json": {
+      "status": "PASS_FDLIBM_BINARY_BINDING",
+      "sha256": "3bcaeb3f0cebec8efcf7a683b9f4230cf2ddbd3d729007f36e9eb2f5d7da0da6"
+    },
+    "bubblewrap-clean-relink.json": {
+      "status": "PASS_CLEAN_MODIFIED_LIBRARY_RELINK",
+      "sha256": "eab39418f103d101d0bb73ac2f4c480cf739feb801d2aa1e2ce6b4c3cbe57270"
+    },
+    "original-image-native-smoke.json": {
+      "status": "PASS_ORIGINAL_IMAGE_NATIVE_SMOKE",
+      "sha256": "eb9df9a314903d2e29415645473d7088c458d90113f9f5db9b09aebb41123beb"
+    }
+  },
+  "negative_control": {
+    "corrupted_source_rejected_before_workspace_creation": true,
+    "exit_code": 1
+  },
+  "original_oci_unchanged": true,
+  "base_53mb_companion_unchanged": true,
+  "source_bwrap_native_change": "Existing dated version-banner patch; original wrapper source unchanged",
+  "model_calls": 0,
+  "scientific_state_or_credentials_copied": false,
+  "full_codex_v8_rebuild": "NOT_PERFORMED; math source/harness and applicable bwrap relink tested",
+  "anonymous_asset_download": "PENDING_PUBLICATION",
+  "remote_fresh_clone_paid_reproduction": "PENDING_PUBLICATION_AND_REMOTE_ACCEPTANCE",
+  "prior_verification_build_outputs_reused": false
+}

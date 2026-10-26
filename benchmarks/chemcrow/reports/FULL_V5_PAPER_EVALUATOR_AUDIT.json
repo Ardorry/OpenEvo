@@ -1,0 +1,38 @@
+{
+  "actual_openrouter_reported_cost_usd": 2.51145,
+  "calibration_ledger_included": false,
+  "call_count": 42,
+  "call_id_prefix": "paper-v5r1",
+  "claim_count": 42,
+  "completion_tokens": 15108,
+  "credential_persisted_count": 0,
+  "fallback_false_count": 42,
+  "http_200_count": 42,
+  "json_valid_count": 42,
+  "list_price_cost_usd": 2.51145,
+  "model_counts": {
+    "openai/gpt-4": 42
+  },
+  "plan_sha256": "15fe75a0ff18053cf09577f7b874816d927f39bf8b833fab2347feb97015db4a",
+  "pre_provider_no_effect_attempts": 1,
+  "pre_provider_no_effect_recovery_sha256": "11e13ef767139465cf11d72bebe0a9fac19df680fd321b5fcdd3775ad8d62811",
+  "production_unreceipted_provider_attempts": 0,
+  "prompt_or_response_persisted_in_receipt_count": 0,
+  "prompt_sha256": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
+  "prompt_tokens": 53499,
+  "protocol": "CHEMCROW_EVALUATORGPT_PROMPT_CALIBRATED_V2",
+  "provider_counts": {
+    "OpenAI": 42
+  },
+  "pydantic_valid_count": 42,
+  "receipt_count": 42,
+  "result_count": 42,
+  "schema_version": "chemcrow_full_v5_paper_evaluator_audit_v1",
+  "source_pair_protocol": "chemcrow-three-isolated-core-native-artifacts-v2",
+  "status": "PASS",
+  "temperature_counts": {
+    "0.1": 42
+  },
+  "total_tokens": 68607,
+  "v4_paper_ledger_included": false
+}

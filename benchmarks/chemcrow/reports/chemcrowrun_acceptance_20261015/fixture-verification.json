@@ -1,0 +1,150 @@
+{
+  "check_only": true,
+  "lock_sha256": "6c6866fcc8c40ac20015dd99f7540849d5cfd0a101d9318885c9bc767d038aa2",
+  "python": "3.11.15",
+  "repositories": [
+    {
+      "commit": "500104ed9a5d479a8dc4128afc463625ade5a409",
+      "name": "chemcrow-runs",
+      "redistribution": {
+        "reason": "No license file was present at the locked commit. Fetch from the upstream public repository; do not redistribute it as part of OpenEvo.",
+        "status": "not_cleared"
+      },
+      "required_paths": [
+        {
+          "git_object": "4f6895cc8e5b57ddf9fd3feb1e16e8b94865920a",
+          "kind": "tree",
+          "path": "tasks",
+          "sha256": null,
+          "size_bytes": null
+        },
+        {
+          "git_object": "74bb314c44c1662f8c2757a20c9c66eee6f4f467",
+          "kind": "file",
+          "path": "paper_figs/nitroglycerin_safety.ipynb",
+          "sha256": "f7fb3bda6666ff90d80c1cc262754055269a6c24e2ce1bb23c879e5ca1982e10",
+          "size_bytes": null
+        }
+      ],
+      "root_tree": "e69c71b5d0a2cf161df398b3a37d18d7d803bebd",
+      "status": "VERIFIED",
+      "url": "https://github.com/ur-whitelab/chemcrow-runs.git"
+    },
+    {
+      "commit": "e7ebd5193334ac1d8dea137b635721c7cb470d33",
+      "name": "chemcrow-public",
+      "redistribution": {
+        "license": "MIT",
+        "license_path": "LICENSE",
+        "status": "allowed_with_notice"
+      },
+      "required_paths": [
+        {
+          "git_object": "94fc77c5d0f1695d3256cd17a36ea724cac69c16",
+          "kind": "file",
+          "path": "LICENSE",
+          "sha256": "80761ffdd150f7efbad6d80c98c1b1ade4aa07fd4eb091caa3bc2ec2bb374ed3",
+          "size_bytes": null
+        },
+        {
+          "git_object": "eb4389a1d348e9b30ba5056f82d29ea6d5306da1",
+          "kind": "file",
+          "path": "chemcrow/data/chem_wep_smi.csv",
+          "sha256": "29e04d2291521ea590597d63cda239133ec67fb1a83b9a773152d97c350d684d",
+          "size_bytes": null
+        }
+      ],
+      "root_tree": "225c7383b33fa26232a06c7fd323d38af242fe9b",
+      "status": "VERIFIED",
+      "url": "https://github.com/ur-whitelab/chemcrow-public.git"
+    },
+    {
+      "commit": "d56aad22564a904a2fc737460adfbf0d4c4e9ac2",
+      "name": "rxn-sandbox",
+      "redistribution": {
+        "license": "OpenMDW-1.1",
+        "license_path": "LICENSE.OpenMDW-1.1",
+        "reason": "Distribution must retain the license and applicable origin notices; users remain responsible for third-party rights. OpenEvo fetches upstream instead of vendoring the model files.",
+        "status": "allowed_with_notice_and_due_diligence"
+      },
+      "required_paths": [
+        {
+          "git_object": "ec297ac5456384786644013ec196da33b916be97",
+          "kind": "file",
+          "path": "LICENSE.OpenMDW-1.1",
+          "sha256": "2ab44b68365473c112f5092211a38f231cb23e50de68b75a13369adbd76a74df",
+          "size_bytes": null
+        },
+        {
+          "git_object": "204d3600d97800ef760fe4b8c8a613189a5b987d",
+          "kind": "tree",
+          "path": "worker",
+          "sha256": null,
+          "size_bytes": null
+        },
+        {
+          "git_object": "9143f908d584663e94bb422a8b31d9fc50c81f44",
+          "kind": "tree",
+          "path": "mcp",
+          "sha256": null,
+          "size_bytes": null
+        },
+        {
+          "git_object": null,
+          "kind": "file",
+          "path": "models/forward/Pistachio2025Q2-Forward.ckpt",
+          "sha256": "def72338009f6f82c4d64a55ed3c488cf3029e72f0a10c308d322e59257a10fe",
+          "size_bytes": 155080231
+        },
+        {
+          "git_object": null,
+          "kind": "file",
+          "path": "models/retrosynthesis/Pistachio2025Q2-Retro.ckpt",
+          "sha256": "13d7fc03a9e4637ed19e18868de84dc86cdfc7764681604157d5a9796c30ba9c",
+          "size_bytes": 155080231
+        },
+        {
+          "git_object": null,
+          "kind": "file",
+          "path": "vocab/Pistachio2025Q2.txt",
+          "sha256": "e23cb36424036dc8834cd8b9084507882206a1906e96695170edd54240bcae49",
+          "size_bytes": 3691
+        }
+      ],
+      "root_tree": "3d11b9735ffce23a927af0746a776ddc156d5b37",
+      "status": "VERIFIED",
+      "url": "https://github.com/rxn4chemistry/rxn-sandbox.git"
+    },
+    {
+      "commit": "d1ce65a180a55981be8321894f6a7f88c416236e",
+      "name": "rxn4chemistry",
+      "redistribution": {
+        "license": "MIT",
+        "license_path": "LICENSE",
+        "status": "allowed_with_notice"
+      },
+      "required_paths": [
+        {
+          "git_object": "a28ff629e4f78af5bbaaf92e7c0565d9cfa2d507",
+          "kind": "file",
+          "path": "LICENSE",
+          "sha256": "d8913e6c9df6495465d5d7157121121de32abb513eb2735a5d2f9535db44e1ba",
+          "size_bytes": null
+        },
+        {
+          "git_object": "c69eb7b6cf26769abd9bb7c8ebd1f59d398f8dd4",
+          "kind": "tree",
+          "path": "rxn4chemistry",
+          "sha256": null,
+          "size_bytes": null
+        }
+      ],
+      "root_tree": "da4690e22cefd2df21ff5c09e59fa8fae8a5d2d6",
+      "status": "VERIFIED",
+      "url": "https://github.com/rxn4chemistry/rxn4chemistry.git"
+    }
+  ],
+  "required_for": [],
+  "schema_version": "chemcrow_fixture_verification_v1",
+  "status": "PASS"
+}

@@ -1,0 +1,5 @@
+schema_version: chemcrow_paper_human_review_config_v1
+task_manifest: ../tasks.jsonl
+historical_runs_root: ../../../../vendor/chemcrow-runs
+composite_manifest: ../../../../runs/paper-composite-v1/composite.manifest.json
+output_root: ../../../../runs/paper-human-review-composite-v1

@@ -1,0 +1,1136 @@
+{
+  "schema_version": "chemcrow_submission_v1",
+  "protocol_version": "chemcrow_full_v8_reproduction_v1",
+  "submission_id": "d493a70df6f89a0a92e64bf7d79c91783fff6e17471fbd477768fffb573f5048",
+  "run_kind": "third_party_reproduction",
+  "experiment_id": "FORMAT-ONLY-SYNTHETIC-NOT-AN-EXPERIMENT",
+  "task_ids": [
+    "chemcrow-01",
+    "chemcrow-02",
+    "chemcrow-03",
+    "chemcrow-04",
+    "chemcrow-05",
+    "chemcrow-06",
+    "chemcrow-07",
+    "chemcrow-08",
+    "chemcrow-09",
+    "chemcrow-10",
+    "chemcrow-12",
+    "chemcrow-13",
+    "chemcrow-14",
+    "chemcrow-15"
+  ],
+  "execution": {
+    "source_commit": "1111111111111111111111111111111111111111",
+    "config_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "task_manifest_sha256": "8c69883d4a2424ed66f4dea0b9d0a0496129556e998902f278ad36a72d132604",
+    "started_at": "2026-01-01T00:00:00Z",
+    "completed_at": "2026-01-02T00:00:00Z",
+    "random_seed": 20260825,
+    "model_bindings": {
+      "candidate": {
+        "provider": "test-provider",
+        "model": "test-model",
+        "capture_mode": "transcript"
+      },
+      "reflector_memory": {
+        "provider": "test-provider",
+        "model": "test-model",
+        "capture_mode": "transcript"
+      },
+      "reflector_skill_bundle": {
+        "provider": "test-provider",
+        "model": "test-model",
+        "capture_mode": "transcript"
+      },
+      "reflector_agent_system": {
+        "provider": "test-provider",
+        "model": "test-model",
+        "capture_mode": "transcript"
+      },
+      "evolution_evaluator": {
+        "provider": "test-provider",
+        "model": "test-model",
+        "capture_mode": "transcript"
+      },
+      "final_evaluator": {
+        "provider": "test-provider",
+        "model": "test-model",
+        "capture_mode": "transcript"
+      }
+    },
+    "automatic_retry_count": 0,
+    "replacements": []
+  },
+  "judge_protocol": "chemcrow-final-blind-evaluator-v1",
+  "scoring_rule": "three_axes_0_to_4_sum_12_v1",
+  "results": [
+    {
+      "task_id": "chemcrow-01",
+      "pair_id": "FORMAT-ONLY-SYNTHETIC-NOT-AN-EXPERIMENT--chemcrow-01",
+      "task_prompt_sha256": "418cd1ecb8b40cebc804db52770ed17c202ac8e6c888c72c8646d862829a146c",
+      "s0_sha256": "c2e3be7270e5592bf0a824dcbade327b8b46483decf6967eb11d70668ff08928",
+      "baseline": {
+        "run_id": "baseline:chemcrow-01",
+        "answer_sha256": "08ada2cf1a5250f9631bd990e217c3d74b8ae6ee3ebe35237123d9c40f84cdeb"
+      },
+      "evolved": {
+        "run_id": "evolved:chemcrow-01",
+        "answer_sha256": "88913cc1aafb292cdf7fa181f66399034feb219158018d809f675a2cd82b0dad"
+      },
+      "baseline_internal_scores": {
+        "chemical_correctness": 3.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 3.0
+      },
+      "evolved_internal_scores": {
+        "chemical_correctness": 4.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 4.0
+      },
+      "artifacts": [
+        {
+          "artifact_type": "text_memory",
+          "artifact_id": "chemcrow-01-text_memory",
+          "artifact_sha256": "ae42c024aaad14af758b44f937470c1f7ec168225a29a06ed1a945da1891afd1",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-01:text_memory",
+          "reflector_run_id": "run:chemcrow-01:text_memory",
+          "prompt_sha256": "16d9a39666a84136169dc2fcd527bfc7a65a6b2b79ca004746dfffab9d96a38d",
+          "input_evidence_sha256": "bc3604a21505413b5006b9592c620679942e0907be2464da3a4ae48e6b907703"
+        },
+        {
+          "artifact_type": "skill_bundle",
+          "artifact_id": "chemcrow-01-skill_bundle",
+          "artifact_sha256": "a064cbd56ab7f308abc902bc094875d4ba53e4e56eaefdcfd97770838e1343bf",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-01:skill_bundle",
+          "reflector_run_id": "run:chemcrow-01:skill_bundle",
+          "prompt_sha256": "f7d38825c2bb4d05a030de6f2c5ee4b9d30d4638f90a4affb49aed4952a5fccc",
+          "input_evidence_sha256": "785d26b434ea69d52ea85066217f8eb480146cdc6dbdb87e59fdb44bdd492d9a"
+        },
+        {
+          "artifact_type": "agent_system",
+          "artifact_id": "chemcrow-01-agent_system",
+          "artifact_sha256": "4e8342f7f527809a902922739ac3563df834db5ea3b6845268a1983c24831ff5",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-01:agent_system",
+          "reflector_run_id": "run:chemcrow-01:agent_system",
+          "prompt_sha256": "aaafdc4cea64890e19cadd4dc1b31c503de8fd6bfe7a3e7d2c6ced0e8f3a25a1",
+          "input_evidence_sha256": "749591e867584c6b7ade7eae755cd8fa0f902e02aa6032d8ed7017cf7387c599"
+        }
+      ],
+      "injection_receipt_sha256": "08405163707e0cb791571d045797b965d56e44de1bfce481cc9e3267e3b44469",
+      "reset_receipt_sha256": "c89c4f38a9dccd40b4423e578c10d6dcba58f640b19571d6b367d22941b2ef2f",
+      "blind_evaluation": {
+        "baseline_scores": {
+          "chemical_correctness": 3.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 3.0
+        },
+        "evolved_scores": {
+          "chemical_correctness": 4.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 4.0
+        },
+        "winner": "evolved",
+        "confidence": 0.8,
+        "mapping_seal_sha256": "75c6ee697a460d9c41c25575c9b2606386c58dc3338bd6de5bac829e698e0ee3",
+        "provisional_llm_judged": true
+      }
+    },
+    {
+      "task_id": "chemcrow-02",
+      "pair_id": "FORMAT-ONLY-SYNTHETIC-NOT-AN-EXPERIMENT--chemcrow-02",
+      "task_prompt_sha256": "6e23eed4d244dcfe26ed15eda041bd2cead35a2b2de5eaebbe6f6be50b13cfec",
+      "s0_sha256": "c2e3be7270e5592bf0a824dcbade327b8b46483decf6967eb11d70668ff08928",
+      "baseline": {
+        "run_id": "baseline:chemcrow-02",
+        "answer_sha256": "4ead094e148a78401793fb8c7588eb36cf45dbe6e25a77c27fbe9607c025f76f"
+      },
+      "evolved": {
+        "run_id": "evolved:chemcrow-02",
+        "answer_sha256": "8b46c6e630d953f323fa95535ab49b432ee939009fe7e65005ab8e292e618ae3"
+      },
+      "baseline_internal_scores": {
+        "chemical_correctness": 3.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 3.0
+      },
+      "evolved_internal_scores": {
+        "chemical_correctness": 4.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 4.0
+      },
+      "artifacts": [
+        {
+          "artifact_type": "text_memory",
+          "artifact_id": "chemcrow-02-text_memory",
+          "artifact_sha256": "cd4b92bd046790b3455004fafb2733a24c9006a37672b4a0430a00e2597170be",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-02:text_memory",
+          "reflector_run_id": "run:chemcrow-02:text_memory",
+          "prompt_sha256": "1daef8dbdd9da99212ba5ec3968d623d48dea91ddd5effea6845c877c8873172",
+          "input_evidence_sha256": "38a3db03b69b0eda657281c44604059664c9120634d88cfbebbe077424238537"
+        },
+        {
+          "artifact_type": "skill_bundle",
+          "artifact_id": "chemcrow-02-skill_bundle",
+          "artifact_sha256": "e1f0660aceb58723cc35d5f32e55e79753de442c74a8dcfc92dd5e4d234ba626",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-02:skill_bundle",
+          "reflector_run_id": "run:chemcrow-02:skill_bundle",
+          "prompt_sha256": "cf81dc83bf38a84b550726ddacbab10ca76d58d1bbc2e8103e413bbd6c088356",
+          "input_evidence_sha256": "b3d04fb2cb969284d37631b0eba3a736d1b4f0d0ddbf049454fb577f6e1dfe0b"
+        },
+        {
+          "artifact_type": "agent_system",
+          "artifact_id": "chemcrow-02-agent_system",
+          "artifact_sha256": "1ded98c487960253f65ced6bde616920df9bc793099b320e7b67f6114af1e96b",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-02:agent_system",
+          "reflector_run_id": "run:chemcrow-02:agent_system",
+          "prompt_sha256": "1f0526af541317ea165d17d3f27b11abe7c85830a8f49917817c334ac65bb740",
+          "input_evidence_sha256": "67470d193bc64dd49f9443209c82a5e2c25c9780019468ec8bcf9422c846025d"
+        }
+      ],
+      "injection_receipt_sha256": "7f5d2386c26c0275bec042bf540544afb9cd07efb4548ac496556c7c39339509",
+      "reset_receipt_sha256": "8c50a358e1b25809b3fc0f04959fcf0953363b3f19facd30c429fecdd45dceb7",
+      "blind_evaluation": {
+        "baseline_scores": {
+          "chemical_correctness": 3.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 3.0
+        },
+        "evolved_scores": {
+          "chemical_correctness": 4.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 4.0
+        },
+        "winner": "evolved",
+        "confidence": 0.8,
+        "mapping_seal_sha256": "fcd10b78e6b6de3012edde0c185130b6ebe0bcd3ba76122b04dea4e6bf9a674a",
+        "provisional_llm_judged": true
+      }
+    },
+    {
+      "task_id": "chemcrow-03",
+      "pair_id": "FORMAT-ONLY-SYNTHETIC-NOT-AN-EXPERIMENT--chemcrow-03",
+      "task_prompt_sha256": "11c1901d94defc8ef4194b875663e4cd7ea9f456d7191c18522ebd60534fb8f5",
+      "s0_sha256": "c2e3be7270e5592bf0a824dcbade327b8b46483decf6967eb11d70668ff08928",
+      "baseline": {
+        "run_id": "baseline:chemcrow-03",
+        "answer_sha256": "356d365b6a2663083d7a503d8653c669e8da2e84551eadbe50cb633b41de10a0"
+      },
+      "evolved": {
+        "run_id": "evolved:chemcrow-03",
+        "answer_sha256": "eeda20869ed91d6e1733c072a6ece354be111c2c7895f5ec06ea90f9af01eac6"
+      },
+      "baseline_internal_scores": {
+        "chemical_correctness": 3.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 3.0
+      },
+      "evolved_internal_scores": {
+        "chemical_correctness": 4.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 4.0
+      },
+      "artifacts": [
+        {
+          "artifact_type": "text_memory",
+          "artifact_id": "chemcrow-03-text_memory",
+          "artifact_sha256": "13cb1b540959d626f6430155cfe805e51413667425eadb015f44e5d1c7b41ca1",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-03:text_memory",
+          "reflector_run_id": "run:chemcrow-03:text_memory",
+          "prompt_sha256": "fdcdeaa27b038eb306058153847ae5980dbc3d3a5a973b9fdc6ba4d8271e0fe8",
+          "input_evidence_sha256": "a73ffcd82d567903dffbfd11f687ab71e98e30731cb2bc332f50a487e9b396cb"
+        },
+        {
+          "artifact_type": "skill_bundle",
+          "artifact_id": "chemcrow-03-skill_bundle",
+          "artifact_sha256": "04a971b0b874d26a0acbac2069de186e9b01eff27dbc2b09cd5d5bb7039cb65f",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-03:skill_bundle",
+          "reflector_run_id": "run:chemcrow-03:skill_bundle",
+          "prompt_sha256": "e477ce1f51ddddda0bc037b3593ad07887c7b06a137510183e3f17f5aa28401f",
+          "input_evidence_sha256": "1151d8dafae50277a691b636dcd5b3e85c8d50e10ff8f3b4fc01bf5bed058f44"
+        },
+        {
+          "artifact_type": "agent_system",
+          "artifact_id": "chemcrow-03-agent_system",
+          "artifact_sha256": "d4384a4d2a1f3a1f95b4ec6fe2d51a8afc660d9cd66ccba62334c1f74e441d7f",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-03:agent_system",
+          "reflector_run_id": "run:chemcrow-03:agent_system",
+          "prompt_sha256": "dda8b8476e27ee323428df066dbf906bcf0415acacb52b4f4e36213f6046caae",
+          "input_evidence_sha256": "bdb93b6c9cd1c4907af87756e56baf20ec5cf81a94d479fa8753e8d927e12ba3"
+        }
+      ],
+      "injection_receipt_sha256": "2eb5a2bb68e4671637ef7a087a8657b768cea88f62097d526a87c95e2b9520ae",
+      "reset_receipt_sha256": "d02412f32aa436d58a930f5ab0aee7f89f091288b94192d178438a4554f601f1",
+      "blind_evaluation": {
+        "baseline_scores": {
+          "chemical_correctness": 3.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 3.0
+        },
+        "evolved_scores": {
+          "chemical_correctness": 4.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 4.0
+        },
+        "winner": "evolved",
+        "confidence": 0.8,
+        "mapping_seal_sha256": "6bc66d20e222c5075ef15a98dcac7c1ba0db5c967fe1b318ea0c83f134ec6427",
+        "provisional_llm_judged": true
+      }
+    },
+    {
+      "task_id": "chemcrow-04",
+      "pair_id": "FORMAT-ONLY-SYNTHETIC-NOT-AN-EXPERIMENT--chemcrow-04",
+      "task_prompt_sha256": "bfc675c52b2ba54385a2d479734d1a4bd6a8af731d5672d38854842b19b380ec",
+      "s0_sha256": "c2e3be7270e5592bf0a824dcbade327b8b46483decf6967eb11d70668ff08928",
+      "baseline": {
+        "run_id": "baseline:chemcrow-04",
+        "answer_sha256": "a259e10f3a1128eb8df9455a4533910d8e073ad3fe1327031d15d9afb1d4a23c"
+      },
+      "evolved": {
+        "run_id": "evolved:chemcrow-04",
+        "answer_sha256": "8b0a1ee21414334a10b4e487d5de437090176beb767e1b57462eee21772cf978"
+      },
+      "baseline_internal_scores": {
+        "chemical_correctness": 3.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 3.0
+      },
+      "evolved_internal_scores": {
+        "chemical_correctness": 4.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 4.0
+      },
+      "artifacts": [
+        {
+          "artifact_type": "text_memory",
+          "artifact_id": "chemcrow-04-text_memory",
+          "artifact_sha256": "b5a91ad9362d93b3a4b90b2460b73b6d32a79d8cf7e6cd862b8697ac901a9116",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-04:text_memory",
+          "reflector_run_id": "run:chemcrow-04:text_memory",
+          "prompt_sha256": "c92af1f24c4f392eb0df52b4061d3e72d99a0cf551550f50d5cdec09e4ca974b",
+          "input_evidence_sha256": "00b97c179d7f374933016080e736c6da672f7c047598caa35096c9b3b020515a"
+        },
+        {
+          "artifact_type": "skill_bundle",
+          "artifact_id": "chemcrow-04-skill_bundle",
+          "artifact_sha256": "f5524496d1eebe6e1c0e76cd4662f328ce4dc84e95b88c16cec4a1123c786b08",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-04:skill_bundle",
+          "reflector_run_id": "run:chemcrow-04:skill_bundle",
+          "prompt_sha256": "484ec04841ddb85104de79613b9320640fb9f8f520e12a77c589837ecb1479f8",
+          "input_evidence_sha256": "6d8ae418f4672572ba43e89c30bb8b635999600c51b4252097a10646720c7d02"
+        },
+        {
+          "artifact_type": "agent_system",
+          "artifact_id": "chemcrow-04-agent_system",
+          "artifact_sha256": "ba63c5414b3c8fee006916ac572c5b48404187a9ce9012f096f1a62e3b759624",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-04:agent_system",
+          "reflector_run_id": "run:chemcrow-04:agent_system",
+          "prompt_sha256": "2c05884758399434eaa4a8103847f58532be8c6d0fa58e27693bb9f3070895a8",
+          "input_evidence_sha256": "e3c934d68257cb9de069e0170e9e6f2bd02c8aa1a25efdbb6cc7d8fba358b7d7"
+        }
+      ],
+      "injection_receipt_sha256": "b152c3b929f4d48764b63f4322d0372bf5f796d1c2df5aa3d869f9a4411e350f",
+      "reset_receipt_sha256": "7e3fdd2bb1e166b6483de6e01efcec0a6300136ae8c661366fe31be6c27fda39",
+      "blind_evaluation": {
+        "baseline_scores": {
+          "chemical_correctness": 3.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 3.0
+        },
+        "evolved_scores": {
+          "chemical_correctness": 4.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 4.0
+        },
+        "winner": "evolved",
+        "confidence": 0.8,
+        "mapping_seal_sha256": "f9f9dcfb475a50378b23cafb6e9a1337b65a5d9ca88a320937a36af7e3d9afcb",
+        "provisional_llm_judged": true
+      }
+    },
+    {
+      "task_id": "chemcrow-05",
+      "pair_id": "FORMAT-ONLY-SYNTHETIC-NOT-AN-EXPERIMENT--chemcrow-05",
+      "task_prompt_sha256": "d46538dcf157e6c7961e975867c085b8766cfc321414e527f0c955e5350b159a",
+      "s0_sha256": "c2e3be7270e5592bf0a824dcbade327b8b46483decf6967eb11d70668ff08928",
+      "baseline": {
+        "run_id": "baseline:chemcrow-05",
+        "answer_sha256": "8510628d888284020c9eb508ea42640d369302bc69d92bc55ae270509edeb72c"
+      },
+      "evolved": {
+        "run_id": "evolved:chemcrow-05",
+        "answer_sha256": "e3da8375623cf71a965e7aff1b8f02f9c5f4fec66f7ba05a7114934d3e015d20"
+      },
+      "baseline_internal_scores": {
+        "chemical_correctness": 3.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 3.0
+      },
+      "evolved_internal_scores": {
+        "chemical_correctness": 4.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 4.0
+      },
+      "artifacts": [
+        {
+          "artifact_type": "text_memory",
+          "artifact_id": "chemcrow-05-text_memory",
+          "artifact_sha256": "60f9570f0799e9dcfb29a9cc453710a8be27b0d83c65c323f684d7e9b725266c",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-05:text_memory",
+          "reflector_run_id": "run:chemcrow-05:text_memory",
+          "prompt_sha256": "04f9d3708c441b5f061669eb2a1853568e76cbac92a92360995c5513baa05a62",
+          "input_evidence_sha256": "d50280289210f316fd41d6a12252d8e92936b3d1eff0c4bd02c7b004666b2926"
+        },
+        {
+          "artifact_type": "skill_bundle",
+          "artifact_id": "chemcrow-05-skill_bundle",
+          "artifact_sha256": "4cf67f12337bcdec23104b23bda0bb5526497b58caa0289094865a455723de48",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-05:skill_bundle",
+          "reflector_run_id": "run:chemcrow-05:skill_bundle",
+          "prompt_sha256": "daa70ca75a61901c75876d9ccf819a4e7168a3b3f54dcb487a1bb94e0ca92f06",
+          "input_evidence_sha256": "7701e114ab892fd47b68b6d55d75c8b4e4c74326566f52d9231d73b7e465d9fb"
+        },
+        {
+          "artifact_type": "agent_system",
+          "artifact_id": "chemcrow-05-agent_system",
+          "artifact_sha256": "5e2cbca1eca4d40a0ef65c711bd75190916ec5eb581e92f28d2b7fa1fec94d44",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-05:agent_system",
+          "reflector_run_id": "run:chemcrow-05:agent_system",
+          "prompt_sha256": "73f567bd7c17ad25bd37da4b0a88198d0a086d518f2e34d2e63229c327cce416",
+          "input_evidence_sha256": "a4f92d73d58d74c98765a56c8e8172acba95eb095bc2968352ef363b326f90bb"
+        }
+      ],
+      "injection_receipt_sha256": "122caa6be2eb09e627caa5d7e4e3d2d52b8a0318cfaf0eed4d9d4bcb400b53ae",
+      "reset_receipt_sha256": "7e981af933ea8ff867290f1f5b9a4a0e67f62e6af96d488bc4c432b2c5158724",
+      "blind_evaluation": {
+        "baseline_scores": {
+          "chemical_correctness": 3.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 3.0
+        },
+        "evolved_scores": {
+          "chemical_correctness": 4.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 4.0
+        },
+        "winner": "evolved",
+        "confidence": 0.8,
+        "mapping_seal_sha256": "a6bf4997739d018935f5e67fc58baf1f3291e3e3364a242026fccd12c0d56c5c",
+        "provisional_llm_judged": true
+      }
+    },
+    {
+      "task_id": "chemcrow-06",
+      "pair_id": "FORMAT-ONLY-SYNTHETIC-NOT-AN-EXPERIMENT--chemcrow-06",
+      "task_prompt_sha256": "6ca9dc1b82e153315f118d16c46a022402c2534af7811c0172faccc1347543e5",
+      "s0_sha256": "c2e3be7270e5592bf0a824dcbade327b8b46483decf6967eb11d70668ff08928",
+      "baseline": {
+        "run_id": "baseline:chemcrow-06",
+        "answer_sha256": "d600e26fd2de548d7c1087b62d066665fb335c5d2f04e5ae8ba65244855a54bf"
+      },
+      "evolved": {
+        "run_id": "evolved:chemcrow-06",
+        "answer_sha256": "636f112093ae78fd1f2ad9b715720c9ee68d146b744d60c007e3f7054d3a6c82"
+      },
+      "baseline_internal_scores": {
+        "chemical_correctness": 3.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 3.0
+      },
+      "evolved_internal_scores": {
+        "chemical_correctness": 4.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 4.0
+      },
+      "artifacts": [
+        {
+          "artifact_type": "text_memory",
+          "artifact_id": "chemcrow-06-text_memory",
+          "artifact_sha256": "6484d74803fc81fb50d9dd5d8973bbbec905d45ac2fc93d2756e60fc4e705cf9",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-06:text_memory",
+          "reflector_run_id": "run:chemcrow-06:text_memory",
+          "prompt_sha256": "2f867a535567d83cd0988dd407467442f5d7922161df2932db9930780a1d0f4b",
+          "input_evidence_sha256": "2d1658dd96f6d1324194c00dca7588387ec240c86f9718db65bbded76aae3e7d"
+        },
+        {
+          "artifact_type": "skill_bundle",
+          "artifact_id": "chemcrow-06-skill_bundle",
+          "artifact_sha256": "c3d7826cd35401e293d802f98b02bbfb9c8c9b6da155301e40608b1944b9beca",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-06:skill_bundle",
+          "reflector_run_id": "run:chemcrow-06:skill_bundle",
+          "prompt_sha256": "397549b062c18fa8692f4a7932b9e7637f7d22b4c55b37a56c3d23bbe1bedae3",
+          "input_evidence_sha256": "fa04d1ca103b0b962d1930fa4a11a31f51ba3dc72826fc74004f19c9ad7cfc69"
+        },
+        {
+          "artifact_type": "agent_system",
+          "artifact_id": "chemcrow-06-agent_system",
+          "artifact_sha256": "1be9614892d38abcda4d020b0224278b253c11ec4ace0aefee6073e16ea15d83",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-06:agent_system",
+          "reflector_run_id": "run:chemcrow-06:agent_system",
+          "prompt_sha256": "342f32f6dc5cb8536b20972aab500f428f0d523044a925e463823db469b83a5d",
+          "input_evidence_sha256": "a206597caeaa740a64f7352e41876c0b27df4ec8b542e7e305d6dd037eb486a8"
+        }
+      ],
+      "injection_receipt_sha256": "2eb623891e1c06b0e0c4837cc852f860210ae00ee9d9a030aa758e9b20815a01",
+      "reset_receipt_sha256": "fce177f1a0f78eee61a5f7dbeafe3690ae9c11c0b06d3dd5fac8159f7c14d879",
+      "blind_evaluation": {
+        "baseline_scores": {
+          "chemical_correctness": 3.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 3.0
+        },
+        "evolved_scores": {
+          "chemical_correctness": 4.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 4.0
+        },
+        "winner": "evolved",
+        "confidence": 0.8,
+        "mapping_seal_sha256": "fdf5b7d5002b7451c4fc7896be3b2184b612938cc7ef7861bfc8c08afb310d27",
+        "provisional_llm_judged": true
+      }
+    },
+    {
+      "task_id": "chemcrow-07",
+      "pair_id": "FORMAT-ONLY-SYNTHETIC-NOT-AN-EXPERIMENT--chemcrow-07",
+      "task_prompt_sha256": "a92bc99cdc16426c1de8457289c64051786cb95351e62f9226238de0f1be0029",
+      "s0_sha256": "c2e3be7270e5592bf0a824dcbade327b8b46483decf6967eb11d70668ff08928",
+      "baseline": {
+        "run_id": "baseline:chemcrow-07",
+        "answer_sha256": "b8a5d2c561c2b95d9bbe7b8693151b883b1e60c567bd9535d29a5ac2a9b72931"
+      },
+      "evolved": {
+        "run_id": "evolved:chemcrow-07",
+        "answer_sha256": "df835296403080d0ba75e875408865d94e7b381114cb3ab3296638c2e89d3826"
+      },
+      "baseline_internal_scores": {
+        "chemical_correctness": 3.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 3.0
+      },
+      "evolved_internal_scores": {
+        "chemical_correctness": 4.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 4.0
+      },
+      "artifacts": [
+        {
+          "artifact_type": "text_memory",
+          "artifact_id": "chemcrow-07-text_memory",
+          "artifact_sha256": "259077f5909e16734b8fcd28adacef9578a9dfe1fa866c5c5445f1e116836e30",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-07:text_memory",
+          "reflector_run_id": "run:chemcrow-07:text_memory",
+          "prompt_sha256": "aa76c38f6e469678d26914d3015fda53d227637966c1ae33357e8365937eadc7",
+          "input_evidence_sha256": "a51d9a18fa2a0a1b0ede6b7e5d366088976148f18da53750a75bd6cc843af665"
+        },
+        {
+          "artifact_type": "skill_bundle",
+          "artifact_id": "chemcrow-07-skill_bundle",
+          "artifact_sha256": "b2420f5935362ca2495c75d6b93ef966e7d7469cfedcd4111f50291096d98011",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-07:skill_bundle",
+          "reflector_run_id": "run:chemcrow-07:skill_bundle",
+          "prompt_sha256": "8e4eeb5794430132430b76599ee3f766248eba4e0cea114551186ad758e006f5",
+          "input_evidence_sha256": "0f2a2e7519e0ca52a9324199d4666fb4c98516bead247cfcb20025f38fcde1af"
+        },
+        {
+          "artifact_type": "agent_system",
+          "artifact_id": "chemcrow-07-agent_system",
+          "artifact_sha256": "ccd82773a98124b6dc358b535ecf56999db8431a838b1d75386e6581ead63da1",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-07:agent_system",
+          "reflector_run_id": "run:chemcrow-07:agent_system",
+          "prompt_sha256": "2502f46e9595f80121abec71bfe03262b09b6b1d8a1a77de5008f0d2470856f1",
+          "input_evidence_sha256": "db7aee7f7057e0fa5bee05de03db1a9af7cd9752e4661ca9f4d278474beaf245"
+        }
+      ],
+      "injection_receipt_sha256": "a6b6bcf1f8679fdf7b7c3a02425769b0e9129694a7bd90401f1ea69da6a03e96",
+      "reset_receipt_sha256": "93e91032f32f9130ab210ae78a620eb230a615a7ff152aa8d59e5caafa7b044f",
+      "blind_evaluation": {
+        "baseline_scores": {
+          "chemical_correctness": 3.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 3.0
+        },
+        "evolved_scores": {
+          "chemical_correctness": 4.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 4.0
+        },
+        "winner": "evolved",
+        "confidence": 0.8,
+        "mapping_seal_sha256": "5069e3debf085934e734bb8f8f4e6933abcb6ab4fa01c1f2c8f8e09b9ae32c88",
+        "provisional_llm_judged": true
+      }
+    },
+    {
+      "task_id": "chemcrow-08",
+      "pair_id": "FORMAT-ONLY-SYNTHETIC-NOT-AN-EXPERIMENT--chemcrow-08",
+      "task_prompt_sha256": "adc12c0e0bb76b7a8947da39c0f11f7d77d97f88334aa4f7ac90f54ab438d867",
+      "s0_sha256": "c2e3be7270e5592bf0a824dcbade327b8b46483decf6967eb11d70668ff08928",
+      "baseline": {
+        "run_id": "baseline:chemcrow-08",
+        "answer_sha256": "f6efbff092bdd01b52375ad2ce4a256546390d4a5a2e744199ec831e43ba6902"
+      },
+      "evolved": {
+        "run_id": "evolved:chemcrow-08",
+        "answer_sha256": "bfe1f6b99bb5c2c83e2bf176e4419a718d0c4ada670e55da1aba89c406d87c5c"
+      },
+      "baseline_internal_scores": {
+        "chemical_correctness": 3.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 3.0
+      },
+      "evolved_internal_scores": {
+        "chemical_correctness": 4.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 4.0
+      },
+      "artifacts": [
+        {
+          "artifact_type": "text_memory",
+          "artifact_id": "chemcrow-08-text_memory",
+          "artifact_sha256": "23bdd3d90749b724a12eb230dc45787cd33918dcc1ff75c52f0002acf836db94",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-08:text_memory",
+          "reflector_run_id": "run:chemcrow-08:text_memory",
+          "prompt_sha256": "02f26186ff2adef8127650a95a41747c1b2092b704665cc7e6f3abccd7fc9788",
+          "input_evidence_sha256": "89de30f700ce7fb86afefefbb91b3f0dfb037e4343b3a66fa3b6f2a1fd9d43a4"
+        },
+        {
+          "artifact_type": "skill_bundle",
+          "artifact_id": "chemcrow-08-skill_bundle",
+          "artifact_sha256": "fbdc64d3fe31f3e11270b261709d0e59b156c3e51596d854c58487f6695f4615",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-08:skill_bundle",
+          "reflector_run_id": "run:chemcrow-08:skill_bundle",
+          "prompt_sha256": "f090cab6747d43fea6ee9f02242db0f4e546f4c663a1a5663628eaba0fd36049",
+          "input_evidence_sha256": "65be39920f939585048a7e3d5745345255afb6962c0e9ddb83a636c7c6e2c737"
+        },
+        {
+          "artifact_type": "agent_system",
+          "artifact_id": "chemcrow-08-agent_system",
+          "artifact_sha256": "8de3278ee22c9656dff67dc8522ce0539c8584630d9d8b4f624fd85499e660cd",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-08:agent_system",
+          "reflector_run_id": "run:chemcrow-08:agent_system",
+          "prompt_sha256": "04fae600bb88e77a0dd9112f5f139290bfd49df5c63a90454da00546e520df3f",
+          "input_evidence_sha256": "87140a05ea8b24e2f064fd06ea447b27292dc323cb205b719f52dfaab444db92"
+        }
+      ],
+      "injection_receipt_sha256": "8c716484ff7dfb1291eb9c16b3543d4c3430caba4609f84d7c4f811913f6e780",
+      "reset_receipt_sha256": "5a76b403420f81e512c8b28542988d497cc1cda63caacda460fe4cb693b1e325",
+      "blind_evaluation": {
+        "baseline_scores": {
+          "chemical_correctness": 3.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 3.0
+        },
+        "evolved_scores": {
+          "chemical_correctness": 4.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 4.0
+        },
+        "winner": "evolved",
+        "confidence": 0.8,
+        "mapping_seal_sha256": "7db52c5d67b140a980718ec3d476d46335798824003350036366b711ddd5b94a",
+        "provisional_llm_judged": true
+      }
+    },
+    {
+      "task_id": "chemcrow-09",
+      "pair_id": "FORMAT-ONLY-SYNTHETIC-NOT-AN-EXPERIMENT--chemcrow-09",
+      "task_prompt_sha256": "ccaea67722072ca831375afe4deef936e4d39eeba73ad80ef91f1d69f1e03ec7",
+      "s0_sha256": "c2e3be7270e5592bf0a824dcbade327b8b46483decf6967eb11d70668ff08928",
+      "baseline": {
+        "run_id": "baseline:chemcrow-09",
+        "answer_sha256": "0c080e38b5eeba55b160751e5d6cef95c804155611950991ae43f1801227083e"
+      },
+      "evolved": {
+        "run_id": "evolved:chemcrow-09",
+        "answer_sha256": "e6037d0bbc64f98d7e475ead29b8e7df8285e64626082bc38fe7d7cd914424a8"
+      },
+      "baseline_internal_scores": {
+        "chemical_correctness": 3.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 3.0
+      },
+      "evolved_internal_scores": {
+        "chemical_correctness": 4.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 4.0
+      },
+      "artifacts": [
+        {
+          "artifact_type": "text_memory",
+          "artifact_id": "chemcrow-09-text_memory",
+          "artifact_sha256": "6b01e50aaf8da2827dec4d8819ea9485b60345fd7d6853770c67840305c5dbdc",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-09:text_memory",
+          "reflector_run_id": "run:chemcrow-09:text_memory",
+          "prompt_sha256": "7fd04b09bfbfb4de88174db06d367383caf7e200152bf66cd053fa3f4038f22b",
+          "input_evidence_sha256": "677eb5f3f4e8af881ce26659d2538cedbd0b45d4a5b8b6c91ce3dee69c4bc960"
+        },
+        {
+          "artifact_type": "skill_bundle",
+          "artifact_id": "chemcrow-09-skill_bundle",
+          "artifact_sha256": "baa19918babc657548c9d4da0c53c3adef9e515e4b5cccd1d24663c5915c531d",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-09:skill_bundle",
+          "reflector_run_id": "run:chemcrow-09:skill_bundle",
+          "prompt_sha256": "c8c8ea3023d0aebfe72aa34dfb60020b79ceb9f634733db3e7e5fbf80ff31ab4",
+          "input_evidence_sha256": "e87f47fc535d0f5b80837ca0456c4173e18eb813fd4d662d5c8cd13bc20b70f8"
+        },
+        {
+          "artifact_type": "agent_system",
+          "artifact_id": "chemcrow-09-agent_system",
+          "artifact_sha256": "f918e1dadefa581c3bd5ed7095b3364947551cc3a74484dcc59e5b681da7e7eb",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-09:agent_system",
+          "reflector_run_id": "run:chemcrow-09:agent_system",
+          "prompt_sha256": "cf340b549feac4bc3ce2cfc2d8f8e807b9a622c7a29edd016b0f4d537f2f5daf",
+          "input_evidence_sha256": "60fb63f97e5da1f9251955eb383e65d47a033537b0850bf40f37e763cd3efa59"
+        }
+      ],
+      "injection_receipt_sha256": "a17343ba5af60450157d8e45b6c5f3d4b31a8ed6cd9ef983d3a8a7fe4aadcf46",
+      "reset_receipt_sha256": "01e0eb55961b702b0003590d8ce8ade61968ef0db24708d872aca9e3c63c818c",
+      "blind_evaluation": {
+        "baseline_scores": {
+          "chemical_correctness": 3.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 3.0
+        },
+        "evolved_scores": {
+          "chemical_correctness": 4.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 4.0
+        },
+        "winner": "evolved",
+        "confidence": 0.8,
+        "mapping_seal_sha256": "9b742ee9da51e4f62ea7937c79166f288768236011b8eb0490a77c85943eeec0",
+        "provisional_llm_judged": true
+      }
+    },
+    {
+      "task_id": "chemcrow-10",
+      "pair_id": "FORMAT-ONLY-SYNTHETIC-NOT-AN-EXPERIMENT--chemcrow-10",
+      "task_prompt_sha256": "dff4bf7e1b0b8f0f729ba8da8d576b858993c89958f355899f9d4e998a5f22f6",
+      "s0_sha256": "c2e3be7270e5592bf0a824dcbade327b8b46483decf6967eb11d70668ff08928",
+      "baseline": {
+        "run_id": "baseline:chemcrow-10",
+        "answer_sha256": "24f2aabd63ef0a904175904cfc749046dd4538dffc2cf04aeba4d99c2cae5198"
+      },
+      "evolved": {
+        "run_id": "evolved:chemcrow-10",
+        "answer_sha256": "c725d2fbbc4992ac4ab7f256f0848e14c6f495a1d5175a850550602f82ba9252"
+      },
+      "baseline_internal_scores": {
+        "chemical_correctness": 3.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 3.0
+      },
+      "evolved_internal_scores": {
+        "chemical_correctness": 4.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 4.0
+      },
+      "artifacts": [
+        {
+          "artifact_type": "text_memory",
+          "artifact_id": "chemcrow-10-text_memory",
+          "artifact_sha256": "d8cdb492750f6124c7984bc7fd3349bdeb6efac19439b6cd28addf4d913a9720",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-10:text_memory",
+          "reflector_run_id": "run:chemcrow-10:text_memory",
+          "prompt_sha256": "81263e258516c38e3ed103fbb3bfabe9c813e133356db10a1f1b6e36f3f9545d",
+          "input_evidence_sha256": "9c96a615be11759841bf65fc29a323d9b60c9dec7f2cad026487de90fc5c54e3"
+        },
+        {
+          "artifact_type": "skill_bundle",
+          "artifact_id": "chemcrow-10-skill_bundle",
+          "artifact_sha256": "81cb9e55f9e26844bd910a1ae704bb6d3530d8f0b1181c731ebef9e304a20b8d",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-10:skill_bundle",
+          "reflector_run_id": "run:chemcrow-10:skill_bundle",
+          "prompt_sha256": "c0eae0e6f7179f8979f0165952e546964e4befaa733677d72496eadc605eddbd",
+          "input_evidence_sha256": "c3c831fd591e95b29f86e333c5cef5c2e8eb0b338e67a04ad854696637d54246"
+        },
+        {
+          "artifact_type": "agent_system",
+          "artifact_id": "chemcrow-10-agent_system",
+          "artifact_sha256": "4ad491faa4f9c405ffca28d9b1e5433f84b4167415a8f2c1c3ea2f0195dcb8ed",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-10:agent_system",
+          "reflector_run_id": "run:chemcrow-10:agent_system",
+          "prompt_sha256": "57fc363f5f40cfe09008913c871c7ef242c5f549fdabf024c46aba404ab2e24d",
+          "input_evidence_sha256": "82eb2fa47de9528923554e38f6cf0fe2a823cda7175ae943a0f9a40f5543436b"
+        }
+      ],
+      "injection_receipt_sha256": "2a18ee9c0ef67c1d8d59210fb818e2d6a267a76ae3b91acca040356dcc822506",
+      "reset_receipt_sha256": "19aa3238ad154c67030e6f4fd86ca28d29d3a8557d3c56c0b0706be6c08ffd7e",
+      "blind_evaluation": {
+        "baseline_scores": {
+          "chemical_correctness": 3.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 3.0
+        },
+        "evolved_scores": {
+          "chemical_correctness": 4.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 4.0
+        },
+        "winner": "evolved",
+        "confidence": 0.8,
+        "mapping_seal_sha256": "7857417d0f6d1052779dc7db8293d2e4946d1bc1947697c6e42a9e09b3ddd831",
+        "provisional_llm_judged": true
+      }
+    },
+    {
+      "task_id": "chemcrow-12",
+      "pair_id": "FORMAT-ONLY-SYNTHETIC-NOT-AN-EXPERIMENT--chemcrow-12",
+      "task_prompt_sha256": "d9a3afa349fc389a72e8ecad8b3f2e5596f6477b95c2751c6c1e6b708eadd36b",
+      "s0_sha256": "c2e3be7270e5592bf0a824dcbade327b8b46483decf6967eb11d70668ff08928",
+      "baseline": {
+        "run_id": "baseline:chemcrow-12",
+        "answer_sha256": "1b32c2a96dc59b9ceebf152e6628024d87e8aba843a844e16ab5341183166293"
+      },
+      "evolved": {
+        "run_id": "evolved:chemcrow-12",
+        "answer_sha256": "21452fccae80bca6207a52cf1f253fde20032c65a22cf26709825c338407c60c"
+      },
+      "baseline_internal_scores": {
+        "chemical_correctness": 3.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 3.0
+      },
+      "evolved_internal_scores": {
+        "chemical_correctness": 4.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 4.0
+      },
+      "artifacts": [
+        {
+          "artifact_type": "text_memory",
+          "artifact_id": "chemcrow-12-text_memory",
+          "artifact_sha256": "ffeabc41164f7c565d8bde45aa81219ee66270b4559fced0b7aebaa83fabeb2b",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-12:text_memory",
+          "reflector_run_id": "run:chemcrow-12:text_memory",
+          "prompt_sha256": "c07c93acbd8917d8ec51f12e947cb3e2223dd3d4528a02bbec29d9c2fffad482",
+          "input_evidence_sha256": "387bdb4e680a191dd88675d37e1a66acf8ce9588623b232b3f07906137ce5fd0"
+        },
+        {
+          "artifact_type": "skill_bundle",
+          "artifact_id": "chemcrow-12-skill_bundle",
+          "artifact_sha256": "515473f8ad40d7da92b54134d0ef8a6fe94172caef1772e7f99e3c4f04464d5b",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-12:skill_bundle",
+          "reflector_run_id": "run:chemcrow-12:skill_bundle",
+          "prompt_sha256": "a57ee28395c97afc72af354f91d6645f5bf489a606d7475851b608eca2fb66ce",
+          "input_evidence_sha256": "5ac6bf908d9835b931d5bbcdc9111761c005f89ebe38c5f05d6504d354b0ccff"
+        },
+        {
+          "artifact_type": "agent_system",
+          "artifact_id": "chemcrow-12-agent_system",
+          "artifact_sha256": "6fe958eb891a801083770fce0b7b8f3c902ed5e70af86e77afae4354d06b26be",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-12:agent_system",
+          "reflector_run_id": "run:chemcrow-12:agent_system",
+          "prompt_sha256": "ed64e34b6a2521e9e7dfbd6692859b67d872a1bf3e0ac7df1a99f5a2e5ed5d01",
+          "input_evidence_sha256": "d6b3486cd145566a14f5795b6ed94379cbb2e4a421c55e57cb14bde674096b0e"
+        }
+      ],
+      "injection_receipt_sha256": "0addf7bcedc958fd206ac71f8ed6c5664a331b04b9cf49c519d21a8122b63519",
+      "reset_receipt_sha256": "a9cac9206f7ef4b480e5218ea43e17bd843dcfb90b88bf7bb36ecae39f199cd7",
+      "blind_evaluation": {
+        "baseline_scores": {
+          "chemical_correctness": 3.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 3.0
+        },
+        "evolved_scores": {
+          "chemical_correctness": 4.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 4.0
+        },
+        "winner": "evolved",
+        "confidence": 0.8,
+        "mapping_seal_sha256": "d0dfb2b14af013236b4ad27e15de210ff70bcbac2623a572d708e03ef13d7efe",
+        "provisional_llm_judged": true
+      }
+    },
+    {
+      "task_id": "chemcrow-13",
+      "pair_id": "FORMAT-ONLY-SYNTHETIC-NOT-AN-EXPERIMENT--chemcrow-13",
+      "task_prompt_sha256": "d39229fd3105c4158739e1fd7a48f85588b654bf3c6672f3f2786320ab4cf54e",
+      "s0_sha256": "c2e3be7270e5592bf0a824dcbade327b8b46483decf6967eb11d70668ff08928",
+      "baseline": {
+        "run_id": "baseline:chemcrow-13",
+        "answer_sha256": "bb9a45c9a3583332b280c2e2afff32742140e702d48106bb5b005621bc744dd2"
+      },
+      "evolved": {
+        "run_id": "evolved:chemcrow-13",
+        "answer_sha256": "63b6bc2bd3db1b4b8bd16bf02ef7dd48cfe7867652ac270a0d3437afb3f38062"
+      },
+      "baseline_internal_scores": {
+        "chemical_correctness": 3.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 3.0
+      },
+      "evolved_internal_scores": {
+        "chemical_correctness": 4.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 4.0
+      },
+      "artifacts": [
+        {
+          "artifact_type": "text_memory",
+          "artifact_id": "chemcrow-13-text_memory",
+          "artifact_sha256": "d732254d8da7434674c36d5217fef87172912c3c4f5d5e06763eb827077c17b9",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-13:text_memory",
+          "reflector_run_id": "run:chemcrow-13:text_memory",
+          "prompt_sha256": "96ddc04f9c8a89152ccca636351769b6e1763700c070b8ae32d006971d35f6bd",
+          "input_evidence_sha256": "6b3d2a46f4037de963540dcd3ebcd391f43b6e8098bc9477999d6681faf7d7f0"
+        },
+        {
+          "artifact_type": "skill_bundle",
+          "artifact_id": "chemcrow-13-skill_bundle",
+          "artifact_sha256": "fe5bde757310943a9cd401a1f8dfd2017a8f03bcce6be5e48c7158d5c6694ea5",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-13:skill_bundle",
+          "reflector_run_id": "run:chemcrow-13:skill_bundle",
+          "prompt_sha256": "04a039b9516fdd4d18408b49382626a59ebe10eb0b9660287764f70cb8076c84",
+          "input_evidence_sha256": "ec6f6a90b0d9b6e40c1cfa641d60567e0d9336c96caea5e16b5521e327ca6f93"
+        },
+        {
+          "artifact_type": "agent_system",
+          "artifact_id": "chemcrow-13-agent_system",
+          "artifact_sha256": "7ab9fcea79d1417aa9d7f83204bbd3156bfb76c2637d50d990a98057b9f88d49",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-13:agent_system",
+          "reflector_run_id": "run:chemcrow-13:agent_system",
+          "prompt_sha256": "4dec3fc50b99fd742d18030ff15eb94cb1dbb67fc290b459860579adc49a1838",
+          "input_evidence_sha256": "d6e447a4d74b014ffdd06bb4c255b1aa05a46f822686a11a7ba2dd5b99ed5caa"
+        }
+      ],
+      "injection_receipt_sha256": "d1d3ebf48378a4f29bb8f6d7491e221db67d7656cc2617b83cc19f755840132e",
+      "reset_receipt_sha256": "20e50539fa3591ba93812e2a2fead5ffd8707f0807b04f287deab59ce7215982",
+      "blind_evaluation": {
+        "baseline_scores": {
+          "chemical_correctness": 3.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 3.0
+        },
+        "evolved_scores": {
+          "chemical_correctness": 4.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 4.0
+        },
+        "winner": "evolved",
+        "confidence": 0.8,
+        "mapping_seal_sha256": "a5e03937bd00fd40b41d3da2fbb728943fb6776ddc7deb419262e3c70b4bcda5",
+        "provisional_llm_judged": true
+      }
+    },
+    {
+      "task_id": "chemcrow-14",
+      "pair_id": "FORMAT-ONLY-SYNTHETIC-NOT-AN-EXPERIMENT--chemcrow-14",
+      "task_prompt_sha256": "861bceed933b1a4db4a12dfa7fa94558d7c6638d2d56b5e5f1843842bbbec33d",
+      "s0_sha256": "c2e3be7270e5592bf0a824dcbade327b8b46483decf6967eb11d70668ff08928",
+      "baseline": {
+        "run_id": "baseline:chemcrow-14",
+        "answer_sha256": "a60911435dcbc139d59fd52f2d97212e102cb357e8d7d7f39be56961a621e30b"
+      },
+      "evolved": {
+        "run_id": "evolved:chemcrow-14",
+        "answer_sha256": "e9f3c333a97bb045219dbfe0a556bd9db283942ea912987c606a337a5c653faf"
+      },
+      "baseline_internal_scores": {
+        "chemical_correctness": 3.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 3.0
+      },
+      "evolved_internal_scores": {
+        "chemical_correctness": 4.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 4.0
+      },
+      "artifacts": [
+        {
+          "artifact_type": "text_memory",
+          "artifact_id": "chemcrow-14-text_memory",
+          "artifact_sha256": "6855fb5863820a52c17e926cd68b5d346697916ea1fb8dda090a351dba31778d",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-14:text_memory",
+          "reflector_run_id": "run:chemcrow-14:text_memory",
+          "prompt_sha256": "3f358eaab9d71572e5e11775fb4308c313527f5fbd36e560e69f8c1d7585c778",
+          "input_evidence_sha256": "243393f5e11e2749d068d0d772bad70c22568dbbf54dbba495ffb6a5c768da02"
+        },
+        {
+          "artifact_type": "skill_bundle",
+          "artifact_id": "chemcrow-14-skill_bundle",
+          "artifact_sha256": "a395c348a9d28ef05857be83c49895d145f4ca71615d829d0ca7dd07031a6609",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-14:skill_bundle",
+          "reflector_run_id": "run:chemcrow-14:skill_bundle",
+          "prompt_sha256": "f0da85aee1a2500f0a20da47328a9b44b3a2b17450350897c86b46025d59c7df",
+          "input_evidence_sha256": "30e4501e83a97df723bb006c3b5e7ed7dd7922846809fa8e366dca1f6c003757"
+        },
+        {
+          "artifact_type": "agent_system",
+          "artifact_id": "chemcrow-14-agent_system",
+          "artifact_sha256": "19f2a5a39a4a92da2b45e60e341ab84d744226f125348d296132bbbf6e24700d",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-14:agent_system",
+          "reflector_run_id": "run:chemcrow-14:agent_system",
+          "prompt_sha256": "a6996895acc1588c2c33136b264f6f1a576b1c0310b2dc807f3fbbd6827cffe7",
+          "input_evidence_sha256": "bda6f78db20d39f8e4837bfca6f941de864613499024343c3ef115c5d57efe54"
+        }
+      ],
+      "injection_receipt_sha256": "3ba241ea37ffb61d6c4380d8158982e5e714202ad926051bafb8409049d44a03",
+      "reset_receipt_sha256": "739d12e641bfa0af6400ba8baf10ec41c5e1a5c72d5b0e3cafd35d9ffacac124",
+      "blind_evaluation": {
+        "baseline_scores": {
+          "chemical_correctness": 3.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 3.0
+        },
+        "evolved_scores": {
+          "chemical_correctness": 4.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 4.0
+        },
+        "winner": "evolved",
+        "confidence": 0.8,
+        "mapping_seal_sha256": "bfba17a342957cb2af0aecd0ff5b8653909e906bf9ac90369f9c82a8027ecaec",
+        "provisional_llm_judged": true
+      }
+    },
+    {
+      "task_id": "chemcrow-15",
+      "pair_id": "FORMAT-ONLY-SYNTHETIC-NOT-AN-EXPERIMENT--chemcrow-15",
+      "task_prompt_sha256": "e2d81c5c9f08f762be7ac96a908d746ee0f0e489d0efb4640312cfe691cc7ca3",
+      "s0_sha256": "c2e3be7270e5592bf0a824dcbade327b8b46483decf6967eb11d70668ff08928",
+      "baseline": {
+        "run_id": "baseline:chemcrow-15",
+        "answer_sha256": "effff03881e70b42d1b6c15d1f72cbf0c6187e2447173cbd452ff3a00239ecec"
+      },
+      "evolved": {
+        "run_id": "evolved:chemcrow-15",
+        "answer_sha256": "43a3f2a0ad78f0f1312c2b18f6d043b32d85443148dbbd50e9a35680eed9618b"
+      },
+      "baseline_internal_scores": {
+        "chemical_correctness": 3.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 3.0
+      },
+      "evolved_internal_scores": {
+        "chemical_correctness": 4.0,
+        "reasoning_quality": 3.0,
+        "task_completion": 4.0
+      },
+      "artifacts": [
+        {
+          "artifact_type": "text_memory",
+          "artifact_id": "chemcrow-15-text_memory",
+          "artifact_sha256": "4acb087226ad82ff2b97db4800e334dc8e3792ef40c33a089375363f09940a0e",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-15:text_memory",
+          "reflector_run_id": "run:chemcrow-15:text_memory",
+          "prompt_sha256": "f6c3414ce61a53931e5854a31e692647f443cd981234b7cfce31c8d44f0c48e2",
+          "input_evidence_sha256": "e4e7ffbf1430acd1913cb77a62643f560278ef4b45c57d4d292aa3ac943a4cd8"
+        },
+        {
+          "artifact_type": "skill_bundle",
+          "artifact_id": "chemcrow-15-skill_bundle",
+          "artifact_sha256": "897f36c91440ce64154fd3ab3c0130f75f5c3c65b2588e98934ac1013bc785a4",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-15:skill_bundle",
+          "reflector_run_id": "run:chemcrow-15:skill_bundle",
+          "prompt_sha256": "9c9dbc3c7086223623e1bd74f8fd3cb7da79056039834cb361b0905c1cb71ae5",
+          "input_evidence_sha256": "1feca56fa0647b803b4dd13a659759c84c400640832ef7d53e0221122c224386"
+        },
+        {
+          "artifact_type": "agent_system",
+          "artifact_id": "chemcrow-15-agent_system",
+          "artifact_sha256": "0945c1fa46d4fd8c2b95a975f594e0d32a0d97c43e7d0e246c574de951a67465",
+          "artifact_bytes": 100,
+          "reflector_job_id": "job:chemcrow-15:agent_system",
+          "reflector_run_id": "run:chemcrow-15:agent_system",
+          "prompt_sha256": "0a9b00ba0b1a82255fdbdf9ca3cebe7792955def6092fd21e0986419f2dcaabf",
+          "input_evidence_sha256": "43e5661eba63dfc542e1f903aea15612db0604d1d42b9ee542b7c2abfc559ca0"
+        }
+      ],
+      "injection_receipt_sha256": "60fb8ffc1646184253b97b649a7919ad7229326dbb230fe807e4d7ddf6227901",
+      "reset_receipt_sha256": "dcf21f9c67e8b429a28b8f6c87ee221efe852b20f1f2f801d08e51e81b983485",
+      "blind_evaluation": {
+        "baseline_scores": {
+          "chemical_correctness": 3.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 3.0
+        },
+        "evolved_scores": {
+          "chemical_correctness": 4.0,
+          "reasoning_quality": 3.0,
+          "task_completion": 4.0
+        },
+        "winner": "evolved",
+        "confidence": 0.8,
+        "mapping_seal_sha256": "dafbb7f3c1f998cecbd9a1f71653375dc29d53736bc4fdef993074fcf30ebaae",
+        "provisional_llm_judged": true
+      }
+    }
+  ],
+  "aggregate": {
+    "task_count": 14,
+    "artifact_count": 42,
+    "mean_baseline": {
+      "chemical_correctness": 3.0,
+      "reasoning_quality": 3.0,
+      "task_completion": 3.0
+    },
+    "mean_evolved": {
+      "chemical_correctness": 4.0,
+      "reasoning_quality": 3.0,
+      "task_completion": 4.0
+    },
+    "mean_delta": {
+      "chemical_correctness": 1.0,
+      "reasoning_quality": 0.0,
+      "task_completion": 1.0
+    },
+    "wins": 14,
+    "losses": 0,
+    "ties": 0
+  },
+  "evidence": {
+    "audit_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "aggregate_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+    "audit_status": "PASS",
+    "raw_answers_included": false,
+    "secrets_included": false,
+    "host_paths_included": false
+  },
+  "human_review_status": "PROVISIONAL_NOT_COMPLETED"
+}

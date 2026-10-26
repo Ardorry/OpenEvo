@@ -1,0 +1,147 @@
+{
+  "schema_version": "chemcrow_core_native_post_generation_semantic_audit_v1",
+  "created_after_pair_seal": true,
+  "fed_to_candidate_or_reflector": false,
+  "tasks": {
+    "chemcrow-02": {
+      "task_obligations": [
+        "Propose a concrete organocatalyst.",
+        "Explain how it could enhance carbon dioxide conversion in a CCU process.",
+        "Support novelty and performance claims proportionally to available evidence."
+      ],
+      "task_level": {
+        "TASK_CONFLICT": false,
+        "CONSTRAINT_AMPLIFICATION": true,
+        "UNSUPPORTED_GENERALIZATION": false,
+        "INSTRUCTION_OVERLOAD": true,
+        "POSITIVE_CORRECTION": true,
+        "EVIDENCE_DISCIPLINE": true
+      },
+      "summary": "All three native artifacts repeat conservative novelty, tool-failure, mechanism, and validation requirements. They do not block the proposal itself, but the combined injection substantially expands the response checklist and G2 becomes longer and less focused.",
+      "v4_v5_comparison": "Both mechanisms amplify novelty/evidence constraints without blocking the proposal. V5 is shorter and has fewer mechanically counted prohibition lines, but its blind total delta is one point more negative.",
+      "artifacts": {
+        "text_memory": {
+          "TASK_CONFLICT": false,
+          "CONSTRAINT_AMPLIFICATION": true,
+          "UNSUPPORTED_GENERALIZATION": false,
+          "INSTRUCTION_OVERLOAD": false,
+          "POSITIVE_CORRECTION": true,
+          "EVIDENCE_DISCIPLINE": true,
+          "reason": "Adds a useful catalytic-cycle and novelty calibration, while repeating critique that also appears in Skill and AgentSystem."
+        },
+        "skill_bundle": {
+          "TASK_CONFLICT": false,
+          "CONSTRAINT_AMPLIFICATION": true,
+          "UNSUPPORTED_GENERALIZATION": false,
+          "INSTRUCTION_OVERLOAD": true,
+          "POSITIVE_CORRECTION": true,
+          "EVIDENCE_DISCIPLINE": true,
+          "reason": "Provides a concrete workflow but expands one proposal task into a large mandatory mechanism, benchmark, and verification checklist."
+        },
+        "agent_system": {
+          "TASK_CONFLICT": false,
+          "CONSTRAINT_AMPLIFICATION": true,
+          "UNSUPPORTED_GENERALIZATION": false,
+          "INSTRUCTION_OVERLOAD": true,
+          "POSITIVE_CORRECTION": true,
+          "EVIDENCE_DISCIPLINE": true,
+          "reason": "Repeats most Skill checks as global methodology rules and adds a broad software-only safety scope, without preventing the requested proposal."
+        }
+      }
+    },
+    "chemcrow-05": {
+      "task_obligations": [
+        "Explain how acetaminophen can be made.",
+        "State where the reactants can be bought.",
+        "Give reactant cost information.",
+        "Describe safety issues."
+      ],
+      "task_level": {
+        "TASK_CONFLICT": true,
+        "CONSTRAINT_AMPLIFICATION": true,
+        "UNSUPPORTED_GENERALIZATION": true,
+        "INSTRUCTION_OVERLOAD": true,
+        "POSITIVE_CORRECTION": true,
+        "EVIDENCE_DISCIPLINE": true
+      },
+      "summary": "Each native artifact independently converts the baseline/evaluator safety framing into an explicit prohibition on practical synthesis, sourcing, and reagent cost. The three outputs reinforce the same restriction and directly conflict with three of four user obligations, although they improve hazard precision and evidence handling.",
+      "v4_v5_comparison": "The obligation conflict persists without ChemCrow role shaping. V5 contains more artifact text and more mechanically counted prohibition lines, although its blind regression is smaller than v4 in this independent pair.",
+      "artifacts": {
+        "text_memory": {
+          "TASK_CONFLICT": true,
+          "CONSTRAINT_AMPLIFICATION": true,
+          "UNSUPPORTED_GENERALIZATION": true,
+          "INSTRUCTION_OVERLOAD": false,
+          "POSITIVE_CORRECTION": true,
+          "EVIDENCE_DISCIPLINE": true,
+          "reason": "Generalizes one acetaminophen task into a rule to refuse actionable synthesis and sourcing for consumable drugs, while retaining useful GMP and hazard distinctions."
+        },
+        "skill_bundle": {
+          "TASK_CONFLICT": true,
+          "CONSTRAINT_AMPLIFICATION": true,
+          "UNSUPPORTED_GENERALIZATION": true,
+          "INSTRUCTION_OVERLOAD": true,
+          "POSITIVE_CORRECTION": true,
+          "EVIDENCE_DISCIPLINE": true,
+          "reason": "Makes refusal of procedure, vendor information, and total reagent cost an explicit workflow and verification requirement for a broad pharmaceutical class."
+        },
+        "agent_system": {
+          "TASK_CONFLICT": true,
+          "CONSTRAINT_AMPLIFICATION": true,
+          "UNSUPPORTED_GENERALIZATION": true,
+          "INSTRUCTION_OVERLOAD": true,
+          "POSITIVE_CORRECTION": true,
+          "EVIDENCE_DISCIPLINE": true,
+          "reason": "Elevates the same refusal to global trigger/action/validation rules, including a ban on supplier names and actionable cost plans."
+        }
+      }
+    },
+    "chemcrow-13": {
+      "task_obligations": [
+        "Describe an atorvastatin synthesis route.",
+        "Estimate the cost of required reactants.",
+        "Compare making versus buying.",
+        "Try another route if reactant pricing cannot be determined."
+      ],
+      "task_level": {
+        "TASK_CONFLICT": true,
+        "CONSTRAINT_AMPLIFICATION": true,
+        "UNSUPPORTED_GENERALIZATION": true,
+        "INSTRUCTION_OVERLOAD": true,
+        "POSITIVE_CORRECTION": true,
+        "EVIDENCE_DISCIPLINE": true
+      },
+      "summary": "All three native artifacts preserve a broad pharmaceutical refusal and prohibit operational synthesis, procurement, and numerical pricing. They positively recover a high-level route-class and qualitative economics, improving G2 reasoning, but still prevent full completion of the synthesis, cost, and alternate-route obligations.",
+      "v4_v5_comparison": "The obligation conflict and cross-artifact safety repetition persist, but V5 converts more critique into positive route-class/economic content and changes the blind outcome from regression to improvement.",
+      "artifacts": {
+        "text_memory": {
+          "TASK_CONFLICT": true,
+          "CONSTRAINT_AMPLIFICATION": true,
+          "UNSUPPORTED_GENERALIZATION": true,
+          "INSTRUCTION_OVERLOAD": false,
+          "POSITIVE_CORRECTION": true,
+          "EVIDENCE_DISCIPLINE": true,
+          "reason": "Adds the useful correction that refusal should not erase route-class and qualitative economics, but preserves a generalized ban on actionable manufacture and procurement."
+        },
+        "skill_bundle": {
+          "TASK_CONFLICT": true,
+          "CONSTRAINT_AMPLIFICATION": true,
+          "UNSUPPORTED_GENERALIZATION": true,
+          "INSTRUCTION_OVERLOAD": true,
+          "POSITIVE_CORRECTION": true,
+          "EVIDENCE_DISCIPLINE": true,
+          "reason": "Provides a coherent non-operational workflow yet explicitly forbids the detailed route, shopping list, vendor guidance, and numerical comparison requested."
+        },
+        "agent_system": {
+          "TASK_CONFLICT": true,
+          "CONSTRAINT_AMPLIFICATION": true,
+          "UNSUPPORTED_GENERALIZATION": true,
+          "INSTRUCTION_OVERLOAD": true,
+          "POSITIVE_CORRECTION": true,
+          "EVIDENCE_DISCIPLINE": true,
+          "reason": "Repeats the Skill boundary as global system policy and adds a prescribed five-part response structure."
+        }
+      }
+    }
+  }
+}

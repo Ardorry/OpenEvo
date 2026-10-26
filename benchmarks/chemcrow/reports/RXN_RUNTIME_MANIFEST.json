@@ -1,0 +1,94 @@
+{
+  "schema_version": "chemcrow_rxn_runtime_v1",
+  "captured_at_utc": "2026-08-25T02:10:16Z",
+  "mode": "real_local_software_service",
+  "mock": false,
+  "repositories": {
+    "rxn_sandbox": {
+      "origin": "https://github.com/rxn4chemistry/rxn-sandbox.git",
+      "branch": "main",
+      "head": "d56aad22564a904a2fc737460adfbf0d4c4e9ac2",
+      "clone_timestamp": "2026-08-25T09:37:50+08:00",
+      "worktree_clean": true
+    },
+    "rxn4chemistry": {
+      "origin": "https://github.com/rxn4chemistry/rxn4chemistry.git",
+      "branch": "main",
+      "head": "d1ce65a180a55981be8321894f6a7f88c416236e",
+      "clone_timestamp": "2026-08-25T09:37:53+08:00",
+      "worktree_clean": true
+    }
+  },
+  "git_lfs": {
+    "version": "3.7.1",
+    "source": "https://github.com/git-lfs/git-lfs/releases/tag/v3.7.1",
+    "archive_sha256": "1c0b6ee5200ca708c5cebebb18fdeb0e1c98f1af5c1a9cba205a4c0ab5a5ec08",
+    "archive_size_bytes": 5524590,
+    "installed_scope": "workspace-local"
+  },
+  "model_files": {
+    "forward": {
+      "name": "Pistachio2025Q2-Forward.ckpt",
+      "sha256": "def72338009f6f82c4d64a55ed3c488cf3029e72f0a10c308d322e59257a10fe"
+    },
+    "retrosynthesis": {
+      "name": "Pistachio2025Q2-Retro.ckpt",
+      "sha256": "13d7fc03a9e4637ed19e18868de84dc86cdfc7764681604157d5a9796c30ba9c"
+    },
+    "vocabulary": {
+      "name": "Pistachio2025Q2.txt",
+      "sha256": "e23cb36424036dc8834cd8b9084507882206a1906e96695170edd54240bcae49"
+    }
+  },
+  "images": {
+    "worker": "sha256:15ebc9fe49d38acab1acb85c112c492279e3efe7e66588242551062e3c1e2947",
+    "mcp_upstream": "sha256:71d5cd11ee5845f14f8eda3fadd849c11345a4e60e239a6dc35a58208b49eb30",
+    "mcp_compat": "sha256:6e5f5709d3f167a3d375a3014ae853c67e8e7b5fa0801d45103128172a72ee99",
+    "redis": "sha256:691577adaf11927f4bb8871d40a5dd69a5c300d4453b742e8f6383c3e6e8d2e1",
+    "rabbitmq": "sha256:e582c0bc7766f3342496d8485efb5a1df782b5ce3886ad017e2eaae442311f69"
+  },
+  "worker_packages": {
+    "python": "3.13.15",
+    "torch": "2.13.0",
+    "lightning": "2.6.5",
+    "celery": "5.3.6",
+    "rxn-chem-utils": "1.6.0",
+    "numpy": "2.5.2",
+    "rdkit": "2026.3.5"
+  },
+  "mcp_packages": {
+    "python": "3.13.15",
+    "mcp": "1.29.0",
+    "mcpo": "0.0.20",
+    "fastapi": "0.141.1",
+    "celery": "5.6.3",
+    "redis": "8.1.0",
+    "uvicorn": "0.52.4"
+  },
+  "smoke": {
+    "openapi_paths": [
+      "/product_prediction",
+      "/retro_prediction",
+      "/retro_tree_prediction"
+    ],
+    "forward": {
+      "status": "PASS",
+      "observation_source": "live",
+      "prediction_count": 3
+    },
+    "retrosynthesis": {
+      "status": "PASS_EMPTY_RESULT",
+      "observation_source": "live",
+      "prediction_count": 0,
+      "note": "Service completed successfully for the benign ethanol probe; empty predictions were preserved, not converted to synthetic success."
+    },
+    "foundation_model_calls": 0,
+    "local_rxn_model_inferences": 5,
+    "paid_operations": 0
+  },
+  "upstream_issues": [
+    "Unconstrained mcp resolved to 2.1.0 and was incompatible with mcpo 0.0.20; integration compatibility image pins mcp 1.29.0.",
+    "Worker requirements are unconstrained; exact resolved image ID and selected package versions are frozen here.",
+    "worker/tasks.py reads retrosynthesis fld from misspelled key dfl; adapter sends the documented fld and the upstream default remains 0.2."
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "call_count": 42,
+  "cost_ceiling": {
+    "call_count": 42,
+    "input_usd_per_token": 3e-05,
+    "list_price_ceiling_usd_per_call": 0.28173,
+    "list_price_ceiling_usd_total": 11.83266,
+    "max_input_tokens_per_call": 6991,
+    "max_output_tokens_per_call": 1200,
+    "model_context_tokens": 8191,
+    "output_usd_per_token": 6e-05
+  },
+  "historical_answers_extracted": true,
+  "model_calls": 0,
+  "observed_task_ids": [
+    "chemcrow-01",
+    "chemcrow-02",
+    "chemcrow-03",
+    "chemcrow-04",
+    "chemcrow-05",
+    "chemcrow-06",
+    "chemcrow-07",
+    "chemcrow-08",
+    "chemcrow-09",
+    "chemcrow-10",
+    "chemcrow-12",
+    "chemcrow-13",
+    "chemcrow-14",
+    "chemcrow-15"
+  ],
+  "openrouter_environment_presence": {
+    "CHEMCROW_PAPER_EVALUATOR_AUTHORIZATION": false,
+    "CHEMCROW_PAPER_EVALUATOR_MAX_USD": true,
+    "CHEMCROW_PAPER_EVALUATOR_MODEL": true,
+    "OPENROUTER_API_KEY": true,
+    "OPENROUTER_BASE_URL": true
+  },
+  "paid_operations": 0,
+  "plan_path": "/home/lhy-h/work/chemcrowrun/runs/paper-evaluator-full-v5-core-native-three-pipeline-r1/private/plan.json",
+  "plan_sha256": "15fe75a0ff18053cf09577f7b874816d927f39bf8b833fab2347feb97015db4a",
+  "protocol_task_ids": [
+    "chemcrow-01",
+    "chemcrow-02",
+    "chemcrow-03",
+    "chemcrow-04",
+    "chemcrow-05",
+    "chemcrow-06",
+    "chemcrow-07",
+    "chemcrow-08",
+    "chemcrow-09",
+    "chemcrow-10",
+    "chemcrow-12",
+    "chemcrow-13",
+    "chemcrow-14",
+    "chemcrow-15"
+  ],
+  "schema_version": "chemcrow_paper_evaluator_preflight_v1",
+  "secret_values_included": false,
+  "status": "READY_FOR_EXPLICIT_PAID_AUTHORIZATION"
+}

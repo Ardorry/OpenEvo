@@ -1,0 +1,1846 @@
+{
+  "per_task": [
+    {
+      "artifact_ids": [
+        "art_0d111ad819aa4f0c",
+        "art_a7ec2a17032542df",
+        "art_cbea414b75e146c9"
+      ],
+      "blind_delta": 0.0,
+      "blind_g1": 8.0,
+      "blind_g2": 8.0,
+      "blind_winner": "tie",
+      "internal_delta": 0.0,
+      "internal_g1": 8.0,
+      "internal_g2": 8.0,
+      "paper_delta": -1.0,
+      "paper_g1": 9.0,
+      "paper_g2": 8.0,
+      "reflector_job_ids": [
+        "job_7ce2ad4ff9194473",
+        "job_c243437cf6b14e40",
+        "job_c13c493146654a52"
+      ],
+      "semantic": {
+        "CONSTRAINT_AMPLIFICATION": true,
+        "EVIDENCE_DISCIPLINE": true,
+        "INSTRUCTION_OVERLOAD": true,
+        "POSITIVE_CORRECTION": true,
+        "TASK_CONFLICT": false,
+        "UNSUPPORTED_GENERALIZATION": true
+      },
+      "task_category": "synthesis_planning",
+      "task_id": "chemcrow-01",
+      "v4_paper_delta": 0.0,
+      "v4_paper_g1": 9.0,
+      "v4_paper_g2": 9.0
+    },
+    {
+      "artifact_ids": [
+        "art_ab7874c561c84431",
+        "art_67ca5f42f4d84889",
+        "art_d0d6f608ce7b429b"
+      ],
+      "blind_delta": 2.0,
+      "blind_g1": 10.0,
+      "blind_g2": 12.0,
+      "blind_winner": "evolved",
+      "internal_delta": 1.0,
+      "internal_g1": 10.0,
+      "internal_g2": 11.0,
+      "paper_delta": 0.0,
+      "paper_g1": 9.0,
+      "paper_g2": 9.0,
+      "reflector_job_ids": [
+        "job_33a33fc169604795",
+        "job_c85ec8a5a4eb4e81",
+        "job_1429bc2742704921"
+      ],
+      "semantic": {
+        "CONSTRAINT_AMPLIFICATION": true,
+        "EVIDENCE_DISCIPLINE": true,
+        "INSTRUCTION_OVERLOAD": true,
+        "POSITIVE_CORRECTION": true,
+        "TASK_CONFLICT": false,
+        "UNSUPPORTED_GENERALIZATION": false
+      },
+      "task_category": "catalyst_discovery",
+      "task_id": "chemcrow-02",
+      "v4_paper_delta": 0.0,
+      "v4_paper_g1": 9.0,
+      "v4_paper_g2": 9.0
+    },
+    {
+      "artifact_ids": [
+        "art_15095e652d294ba9",
+        "art_8690135c43584f4a",
+        "art_4016a58d2f6f4329"
+      ],
+      "blind_delta": 0.0,
+      "blind_g1": 12.0,
+      "blind_g2": 12.0,
+      "blind_winner": "tie",
+      "internal_delta": 0.0,
+      "internal_g1": 12.0,
+      "internal_g2": 12.0,
+      "paper_delta": 0.0,
+      "paper_g1": 10.0,
+      "paper_g2": 10.0,
+      "reflector_job_ids": [
+        "job_a0f43ce91d3a4e53",
+        "job_6c8f467998344667",
+        "job_af7bd82cf0714160"
+      ],
+      "semantic": {
+        "CONSTRAINT_AMPLIFICATION": true,
+        "EVIDENCE_DISCIPLINE": true,
+        "INSTRUCTION_OVERLOAD": false,
+        "POSITIVE_CORRECTION": true,
+        "TASK_CONFLICT": false,
+        "UNSUPPORTED_GENERALIZATION": false
+      },
+      "task_category": "reaction_mechanism",
+      "task_id": "chemcrow-03",
+      "v4_paper_delta": 0.0,
+      "v4_paper_g1": 10.0,
+      "v4_paper_g2": 10.0
+    },
+    {
+      "artifact_ids": [
+        "art_b2fd18b186ae40cc",
+        "art_4df98458273f4964",
+        "art_8c028fd3acc04c39"
+      ],
+      "blind_delta": 1.0,
+      "blind_g1": 8.0,
+      "blind_g2": 9.0,
+      "blind_winner": "evolved",
+      "internal_delta": 0.0,
+      "internal_g1": 8.0,
+      "internal_g2": 8.0,
+      "paper_delta": -1.0,
+      "paper_g1": 9.0,
+      "paper_g2": 8.0,
+      "reflector_job_ids": [
+        "job_c1c0311d442340ee",
+        "job_f2e770d97470434a",
+        "job_5175f4c3a96449ca"
+      ],
+      "semantic": {
+        "CONSTRAINT_AMPLIFICATION": true,
+        "EVIDENCE_DISCIPLINE": true,
+        "INSTRUCTION_OVERLOAD": true,
+        "POSITIVE_CORRECTION": true,
+        "TASK_CONFLICT": false,
+        "UNSUPPORTED_GENERALIZATION": false
+      },
+      "task_category": "synthesis_planning",
+      "task_id": "chemcrow-04",
+      "v4_paper_delta": -1.0,
+      "v4_paper_g1": 9.0,
+      "v4_paper_g2": 8.0
+    },
+    {
+      "artifact_ids": [
+        "art_4f797b6b879747c4",
+        "art_f5b11b9c93e34d11",
+        "art_feff6632b0f74463"
+      ],
+      "blind_delta": 1.0,
+      "blind_g1": 10.0,
+      "blind_g2": 11.0,
+      "blind_winner": "evolved",
+      "internal_delta": 2.0,
+      "internal_g1": 9.0,
+      "internal_g2": 11.0,
+      "paper_delta": 0.0,
+      "paper_g1": 9.0,
+      "paper_g2": 9.0,
+      "reflector_job_ids": [
+        "job_808d368c18af4311",
+        "job_bde1d943adb04420",
+        "job_8736685fae334df2"
+      ],
+      "semantic": {
+        "CONSTRAINT_AMPLIFICATION": true,
+        "EVIDENCE_DISCIPLINE": true,
+        "INSTRUCTION_OVERLOAD": true,
+        "POSITIVE_CORRECTION": true,
+        "TASK_CONFLICT": true,
+        "UNSUPPORTED_GENERALIZATION": true
+      },
+      "task_category": "synthesis_planning",
+      "task_id": "chemcrow-05",
+      "v4_paper_delta": 0.0,
+      "v4_paper_g1": 9.0,
+      "v4_paper_g2": 9.0
+    },
+    {
+      "artifact_ids": [
+        "art_20dbe2ac76354571",
+        "art_2d4bce4a58b348a9",
+        "art_32275ed39ced4699"
+      ],
+      "blind_delta": 1.0,
+      "blind_g1": 11.0,
+      "blind_g2": 12.0,
+      "blind_winner": "evolved",
+      "internal_delta": 0.0,
+      "internal_g1": 12.0,
+      "internal_g2": 12.0,
+      "paper_delta": 0.0,
+      "paper_g1": 9.0,
+      "paper_g2": 9.0,
+      "reflector_job_ids": [
+        "job_37a84fefd82f43da",
+        "job_45ec1e5cb8934282",
+        "job_0f1cd817974446d8"
+      ],
+      "semantic": {
+        "CONSTRAINT_AMPLIFICATION": true,
+        "EVIDENCE_DISCIPLINE": true,
+        "INSTRUCTION_OVERLOAD": false,
+        "POSITIVE_CORRECTION": true,
+        "TASK_CONFLICT": false,
+        "UNSUPPORTED_GENERALIZATION": false
+      },
+      "task_category": "reaction_mechanism",
+      "task_id": "chemcrow-06",
+      "v4_paper_delta": -1.0,
+      "v4_paper_g1": 10.0,
+      "v4_paper_g2": 9.0
+    },
+    {
+      "artifact_ids": [
+        "art_124ba9a4f7d649f0",
+        "art_9bca2c5a090a499e",
+        "art_e3290a2bb13b4800"
+      ],
+      "blind_delta": 1.0,
+      "blind_g1": 10.0,
+      "blind_g2": 11.0,
+      "blind_winner": "evolved",
+      "internal_delta": 0.0,
+      "internal_g1": 9.0,
+      "internal_g2": 9.0,
+      "paper_delta": 0.0,
+      "paper_g1": 9.0,
+      "paper_g2": 9.0,
+      "reflector_job_ids": [
+        "job_58239ed01be44827",
+        "job_9a7532693c3b44ea",
+        "job_5a913710e35b47d8"
+      ],
+      "semantic": {
+        "CONSTRAINT_AMPLIFICATION": true,
+        "EVIDENCE_DISCIPLINE": true,
+        "INSTRUCTION_OVERLOAD": true,
+        "POSITIVE_CORRECTION": true,
+        "TASK_CONFLICT": false,
+        "UNSUPPORTED_GENERALIZATION": false
+      },
+      "task_category": "molecular_design_and_synthesis",
+      "task_id": "chemcrow-07",
+      "v4_paper_delta": 0.0,
+      "v4_paper_g1": 9.0,
+      "v4_paper_g2": 9.0
+    },
+    {
+      "artifact_ids": [
+        "art_a9a2086d30764268",
+        "art_6fa8a55cf087418d",
+        "art_4f97b5c2946b4e6d"
+      ],
+      "blind_delta": 0.8000000000000007,
+      "blind_g1": 10.7,
+      "blind_g2": 11.5,
+      "blind_winner": "evolved",
+      "internal_delta": -1.0,
+      "internal_g1": 11.0,
+      "internal_g2": 10.0,
+      "paper_delta": 0.0,
+      "paper_g1": 9.0,
+      "paper_g2": 9.0,
+      "reflector_job_ids": [
+        "job_8d531dd701d84d3e",
+        "job_a5f3283528fd449d",
+        "job_9eeab9d3370f4a43"
+      ],
+      "semantic": {
+        "CONSTRAINT_AMPLIFICATION": true,
+        "EVIDENCE_DISCIPLINE": true,
+        "INSTRUCTION_OVERLOAD": true,
+        "POSITIVE_CORRECTION": true,
+        "TASK_CONFLICT": false,
+        "UNSUPPORTED_GENERALIZATION": false
+      },
+      "task_category": "catalyst_synthesis",
+      "task_id": "chemcrow-08",
+      "v4_paper_delta": 0.0,
+      "v4_paper_g1": 10.0,
+      "v4_paper_g2": 10.0
+    },
+    {
+      "artifact_ids": [
+        "art_0a6d74e770024871",
+        "art_5bf30f635315410a",
+        "art_a0bd224564e3470e"
+      ],
+      "blind_delta": 0.0,
+      "blind_g1": 12.0,
+      "blind_g2": 12.0,
+      "blind_winner": "tie",
+      "internal_delta": 2.0,
+      "internal_g1": 10.0,
+      "internal_g2": 12.0,
+      "paper_delta": 0.0,
+      "paper_g1": 9.0,
+      "paper_g2": 9.0,
+      "reflector_job_ids": [
+        "job_b1bdb48061db4409",
+        "job_6e6332b63c584199",
+        "job_8d9ed10d8544476a"
+      ],
+      "semantic": {
+        "CONSTRAINT_AMPLIFICATION": true,
+        "EVIDENCE_DISCIPLINE": true,
+        "INSTRUCTION_OVERLOAD": false,
+        "POSITIVE_CORRECTION": true,
+        "TASK_CONFLICT": false,
+        "UNSUPPORTED_GENERALIZATION": false
+      },
+      "task_category": "reaction_prediction_and_compatibility",
+      "task_id": "chemcrow-09",
+      "v4_paper_delta": 1.0,
+      "v4_paper_g1": 9.0,
+      "v4_paper_g2": 10.0
+    },
+    {
+      "artifact_ids": [
+        "art_5ada00f573ed495a",
+        "art_8afb32f5f55d4c68",
+        "art_32d21957eca14d52"
+      ],
+      "blind_delta": 0.0,
+      "blind_g1": 12.0,
+      "blind_g2": 12.0,
+      "blind_winner": "tie",
+      "internal_delta": 0.0,
+      "internal_g1": 10.0,
+      "internal_g2": 10.0,
+      "paper_delta": 0.0,
+      "paper_g1": 9.0,
+      "paper_g2": 9.0,
+      "reflector_job_ids": [
+        "job_4a77d690f6fc4945",
+        "job_630fd3388a5b4d1e",
+        "job_daefa21632e044f0"
+      ],
+      "semantic": {
+        "CONSTRAINT_AMPLIFICATION": true,
+        "EVIDENCE_DISCIPLINE": true,
+        "INSTRUCTION_OVERLOAD": false,
+        "POSITIVE_CORRECTION": true,
+        "TASK_CONFLICT": false,
+        "UNSUPPORTED_GENERALIZATION": false
+      },
+      "task_category": "reaction_prediction_and_property",
+      "task_id": "chemcrow-10",
+      "v4_paper_delta": -1.0,
+      "v4_paper_g1": 9.0,
+      "v4_paper_g2": 8.0
+    },
+    {
+      "artifact_ids": [
+        "art_5845f8f3cd95470c",
+        "art_07517b7cd66c4b15",
+        "art_706ddc0db2844060"
+      ],
+      "blind_delta": 0.0,
+      "blind_g1": 12.0,
+      "blind_g2": 12.0,
+      "blind_winner": "evolved",
+      "internal_delta": 0.0,
+      "internal_g1": 12.0,
+      "internal_g2": 12.0,
+      "paper_delta": 0.0,
+      "paper_g1": 10.0,
+      "paper_g2": 10.0,
+      "reflector_job_ids": [
+        "job_7d8ef0d1c86f42cc",
+        "job_7370af6ae95b4f90",
+        "job_724d5aedda8d4345"
+      ],
+      "semantic": {
+        "CONSTRAINT_AMPLIFICATION": true,
+        "EVIDENCE_DISCIPLINE": true,
+        "INSTRUCTION_OVERLOAD": false,
+        "POSITIVE_CORRECTION": true,
+        "TASK_CONFLICT": true,
+        "UNSUPPORTED_GENERALIZATION": false
+      },
+      "task_category": "molecular_similarity_and_mechanism_of_action",
+      "task_id": "chemcrow-12",
+      "v4_paper_delta": 0.0,
+      "v4_paper_g1": 10.0,
+      "v4_paper_g2": 10.0
+    },
+    {
+      "artifact_ids": [
+        "art_7a1b6e227cc9424d",
+        "art_2765d8b7ae32404a",
+        "art_bfd4d620e1084e94"
+      ],
+      "blind_delta": -1.0,
+      "blind_g1": 9.0,
+      "blind_g2": 8.0,
+      "blind_winner": "baseline",
+      "internal_delta": -1.0,
+      "internal_g1": 8.0,
+      "internal_g2": 7.0,
+      "paper_delta": 0.0,
+      "paper_g1": 8.0,
+      "paper_g2": 8.0,
+      "reflector_job_ids": [
+        "job_89b03402cb6c4a7d",
+        "job_030f4a9ee61647cb",
+        "job_f376592fe13e4914"
+      ],
+      "semantic": {
+        "CONSTRAINT_AMPLIFICATION": true,
+        "EVIDENCE_DISCIPLINE": true,
+        "INSTRUCTION_OVERLOAD": true,
+        "POSITIVE_CORRECTION": true,
+        "TASK_CONFLICT": true,
+        "UNSUPPORTED_GENERALIZATION": true
+      },
+      "task_category": "synthesis_planning",
+      "task_id": "chemcrow-13",
+      "v4_paper_delta": -4.0,
+      "v4_paper_g1": 9.0,
+      "v4_paper_g2": 5.0
+    },
+    {
+      "artifact_ids": [
+        "art_1b43e463d62f46f6",
+        "art_0985a5d032524a2e",
+        "art_defb1a9f27ea42fd"
+      ],
+      "blind_delta": 3.0,
+      "blind_g1": 9.0,
+      "blind_g2": 12.0,
+      "blind_winner": "evolved",
+      "internal_delta": 0.0,
+      "internal_g1": 9.0,
+      "internal_g2": 9.0,
+      "paper_delta": 0.0,
+      "paper_g1": 10.0,
+      "paper_g2": 10.0,
+      "reflector_job_ids": [
+        "job_10f5988501e744cd",
+        "job_eea79b7e41ba4ed9",
+        "job_16aab24a93e04267"
+      ],
+      "semantic": {
+        "CONSTRAINT_AMPLIFICATION": true,
+        "EVIDENCE_DISCIPLINE": true,
+        "INSTRUCTION_OVERLOAD": false,
+        "POSITIVE_CORRECTION": true,
+        "TASK_CONFLICT": false,
+        "UNSUPPORTED_GENERALIZATION": false
+      },
+      "task_category": "synthesis_planning",
+      "task_id": "chemcrow-14",
+      "v4_paper_delta": -2.0,
+      "v4_paper_g1": 10.0,
+      "v4_paper_g2": 8.0
+    },
+    {
+      "artifact_ids": [
+        "art_285eafffc2b74754",
+        "art_51b8759af5a64df3",
+        "art_209330b09f054524"
+      ],
+      "blind_delta": 1.0,
+      "blind_g1": 11.0,
+      "blind_g2": 12.0,
+      "blind_winner": "evolved",
+      "internal_delta": 0.0,
+      "internal_g1": 11.0,
+      "internal_g2": 11.0,
+      "paper_delta": 0.0,
+      "paper_g1": 9.0,
+      "paper_g2": 9.0,
+      "reflector_job_ids": [
+        "job_7822d259470247de",
+        "job_bb8316c842744fd9",
+        "job_70fb3119c02d448e"
+      ],
+      "semantic": {
+        "CONSTRAINT_AMPLIFICATION": true,
+        "EVIDENCE_DISCIPLINE": true,
+        "INSTRUCTION_OVERLOAD": true,
+        "POSITIVE_CORRECTION": true,
+        "TASK_CONFLICT": false,
+        "UNSUPPORTED_GENERALIZATION": false
+      },
+      "task_category": "catalyst_synthesis",
+      "task_id": "chemcrow-15",
+      "v4_paper_delta": 0.0,
+      "v4_paper_g1": 9.0,
+      "v4_paper_g2": 9.0
+    }
+  ],
+  "schema_version": "chemcrow_full_v5_core_native_experiment_analysis_v1",
+  "semantic_audit": {
+    "constraint_amplification_task_count": 14,
+    "instruction_overload_artifact_count": 16,
+    "instruction_overload_task_count": 8,
+    "task_conflict_count": 3
+  },
+  "status": "FULL_V5_CORE_NATIVE_EXPERIMENT_COMPLETE",
+  "task_count": 14,
+  "task_ids": [
+    "chemcrow-01",
+    "chemcrow-02",
+    "chemcrow-03",
+    "chemcrow-04",
+    "chemcrow-05",
+    "chemcrow-06",
+    "chemcrow-07",
+    "chemcrow-08",
+    "chemcrow-09",
+    "chemcrow-10",
+    "chemcrow-12",
+    "chemcrow-13",
+    "chemcrow-14",
+    "chemcrow-15"
+  ],
+  "v4": {
+    "artifact_mechanics": {
+      "artifact_count": 42,
+      "byte_duplicate_pair_count": 0,
+      "mean_cross_artifact_trigram_jaccard": 0.02581661791373595,
+      "near_duplicate_pair_count": 0,
+      "normalized_duplicate_pair_count": 0,
+      "prohibition_line_count": 146,
+      "tasks": {
+        "chemcrow-01": {
+          "artifacts": [
+            {
+              "artifact_id": "art_bc2ecc24fa914f9c",
+              "artifact_type": "text_memory",
+              "content_bytes": 847,
+              "content_sha256": "564d273bd13c6a3c95eb6be2cda8530d4b4f1dbcad9bf822ecfabccd25f751aa",
+              "prohibition_line_count": 0,
+              "reflector_job_id": "job_c4cb6415e1914f82",
+              "token_count": 116
+            },
+            {
+              "artifact_id": "art_1897fe31419b42ee",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 5055,
+              "content_sha256": "fb108e062a1c2885283181e1fec3121ea20dcf6f11455776a12e4230d94194cf",
+              "prohibition_line_count": 10,
+              "reflector_job_id": "job_df64fdd22df144f6",
+              "token_count": 728
+            },
+            {
+              "artifact_id": "art_a8ee4895a50048db",
+              "artifact_type": "agent_system",
+              "content_bytes": 2043,
+              "content_sha256": "d0d1656d39f8a9c3172e04aa066d6c93d35cea898f99954c3cbc517dc9f780df",
+              "prohibition_line_count": 3,
+              "reflector_job_id": "job_fb26c16b0f014eb9",
+              "token_count": 270
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.0056012374121043726,
+          "prohibition_line_count": 13,
+          "total_content_bytes": 7945,
+          "total_token_count": 1114
+        },
+        "chemcrow-02": {
+          "artifacts": [
+            {
+              "artifact_id": "art_457a33e70d4a4c75",
+              "artifact_type": "text_memory",
+              "content_bytes": 1091,
+              "content_sha256": "9acdd0db3679310ef4cee6f7359565ac3dea76e143d7a5c09e14a18425467952",
+              "prohibition_line_count": 0,
+              "reflector_job_id": "job_9332cbe45a9b45e6",
+              "token_count": 147
+            },
+            {
+              "artifact_id": "art_92c119561978466b",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 5056,
+              "content_sha256": "f7621f4d5f6fe86e67ef4ce5e4449ce2a9a3b3335507ac13dd33dc042c9367c6",
+              "prohibition_line_count": 4,
+              "reflector_job_id": "job_5306c922423a4408",
+              "token_count": 720
+            },
+            {
+              "artifact_id": "art_987129a0e9564819",
+              "artifact_type": "agent_system",
+              "content_bytes": 2091,
+              "content_sha256": "1dc52ca44c7bd3ef6d33259909b17087333b73ba21d09cc577b6aeba162e4ce0",
+              "prohibition_line_count": 3,
+              "reflector_job_id": "job_4f4ef2e8dfa14683",
+              "token_count": 277
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.028300025345630735,
+          "prohibition_line_count": 7,
+          "total_content_bytes": 8238,
+          "total_token_count": 1144
+        },
+        "chemcrow-03": {
+          "artifacts": [
+            {
+              "artifact_id": "art_399b862b33654704",
+              "artifact_type": "text_memory",
+              "content_bytes": 728,
+              "content_sha256": "2aca7298ec7d616b9d4162669d44f3b7a4d069430c40034d9038f583b3fdf1a0",
+              "prohibition_line_count": 0,
+              "reflector_job_id": "job_3fda9a0603754fdd",
+              "token_count": 89
+            },
+            {
+              "artifact_id": "art_11c7179ee9354bb5",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 2928,
+              "content_sha256": "be6521a978a382f7f087454b46eb6a5032c910701a68ddb1c646ec9f258547a8",
+              "prohibition_line_count": 2,
+              "reflector_job_id": "job_05b7a037833c4f9d",
+              "token_count": 419
+            },
+            {
+              "artifact_id": "art_ed1ea4c0c3544c81",
+              "artifact_type": "agent_system",
+              "content_bytes": 1422,
+              "content_sha256": "f30e0952351264b55d97bbe14d136ec3a141c6cdd1a684d56a5beb091f675e53",
+              "prohibition_line_count": 2,
+              "reflector_job_id": "job_265195776a0a41a2",
+              "token_count": 196
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.01737111858763244,
+          "prohibition_line_count": 4,
+          "total_content_bytes": 5078,
+          "total_token_count": 704
+        },
+        "chemcrow-04": {
+          "artifacts": [
+            {
+              "artifact_id": "art_094faea8aa954b2e",
+              "artifact_type": "text_memory",
+              "content_bytes": 1249,
+              "content_sha256": "21d09f714c6649f2509fa58c266078918b218b87491047f6a1640b9f90114c55",
+              "prohibition_line_count": 1,
+              "reflector_job_id": "job_612e4b471b3946c8",
+              "token_count": 188
+            },
+            {
+              "artifact_id": "art_a6e3c9256b8e4c69",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 4593,
+              "content_sha256": "ca115e3b14806d04693e326db9ea9d59bd210a7f6eec67b20752b69555eeb161",
+              "prohibition_line_count": 5,
+              "reflector_job_id": "job_7d0a60f882244bb0",
+              "token_count": 647
+            },
+            {
+              "artifact_id": "art_48ad2f5a2e23452e",
+              "artifact_type": "agent_system",
+              "content_bytes": 2359,
+              "content_sha256": "70bd2a90e12bc23d82f07bcfd75421794f491b568b69623dbb0e769334587aee",
+              "prohibition_line_count": 5,
+              "reflector_job_id": "job_191ed154000443cf",
+              "token_count": 313
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.004472788844059421,
+          "prohibition_line_count": 11,
+          "total_content_bytes": 8201,
+          "total_token_count": 1148
+        },
+        "chemcrow-05": {
+          "artifacts": [
+            {
+              "artifact_id": "art_57c53b899b144f71",
+              "artifact_type": "text_memory",
+              "content_bytes": 1035,
+              "content_sha256": "d400155c29fb7a97eec14cd69baea464156024ec27b25d9affaa18b96de086ed",
+              "prohibition_line_count": 2,
+              "reflector_job_id": "job_c4d0142018dc4400",
+              "token_count": 132
+            },
+            {
+              "artifact_id": "art_818b5b77ffe4435b",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 3844,
+              "content_sha256": "6ce3a5f5b82447151e1d2e4935bcb2b2f8af59e55b4fa02ede6df2e3e6ae8fe1",
+              "prohibition_line_count": 8,
+              "reflector_job_id": "job_a6ceb24d68594f8b",
+              "token_count": 514
+            },
+            {
+              "artifact_id": "art_dc7d009419ee4ad5",
+              "artifact_type": "agent_system",
+              "content_bytes": 1979,
+              "content_sha256": "a6d7cb8c6008e8a49e5d5b4f6bbaf400d3ace353adbef1a09c794885978bda2d",
+              "prohibition_line_count": 4,
+              "reflector_job_id": "job_909ecc5969da4447",
+              "token_count": 262
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.02985545719864918,
+          "prohibition_line_count": 14,
+          "total_content_bytes": 6858,
+          "total_token_count": 908
+        },
+        "chemcrow-06": {
+          "artifacts": [
+            {
+              "artifact_id": "art_5e541d0d1ca34237",
+              "artifact_type": "text_memory",
+              "content_bytes": 759,
+              "content_sha256": "10a3e8b645dadcc4021c1319f66d6157b379fb6e3c6c82d8da83506201726c3f",
+              "prohibition_line_count": 0,
+              "reflector_job_id": "job_ed53d570ab8a4427",
+              "token_count": 112
+            },
+            {
+              "artifact_id": "art_3728dfbe28cc455f",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 3116,
+              "content_sha256": "ad3b02749fd844e5ce1256baf1c6b34a4e7e0d5a6965766c0a569e9bf66d660b",
+              "prohibition_line_count": 2,
+              "reflector_job_id": "job_dd718ef67af143ed",
+              "token_count": 458
+            },
+            {
+              "artifact_id": "art_b9d1b7f979f146b2",
+              "artifact_type": "agent_system",
+              "content_bytes": 2327,
+              "content_sha256": "8d93d7e19f2d2d92a1956c6c501b1be15ba1782cbcbaed07e158adf83afd9e96",
+              "prohibition_line_count": 5,
+              "reflector_job_id": "job_2f6af93cb4df49d6",
+              "token_count": 321
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.03241554441689368,
+          "prohibition_line_count": 7,
+          "total_content_bytes": 6202,
+          "total_token_count": 891
+        },
+        "chemcrow-07": {
+          "artifacts": [
+            {
+              "artifact_id": "art_d41309415d854dec",
+              "artifact_type": "text_memory",
+              "content_bytes": 1125,
+              "content_sha256": "34d5c3e706499b9f04cb19d92f4432bd0d534cb8229d833f9a84e536b19ccc07",
+              "prohibition_line_count": 1,
+              "reflector_job_id": "job_e28699cc24404e2e",
+              "token_count": 154
+            },
+            {
+              "artifact_id": "art_41d4174295d447bd",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 4573,
+              "content_sha256": "d3a6861796287aafab5e61aed927488f8163879e3c13533c5002d5565a64005e",
+              "prohibition_line_count": 9,
+              "reflector_job_id": "job_be398becaab4458c",
+              "token_count": 609
+            },
+            {
+              "artifact_id": "art_0e0d5f15be4f4021",
+              "artifact_type": "agent_system",
+              "content_bytes": 2455,
+              "content_sha256": "61534912f9238eaa1c6dfe27a4a10b402dd3e2e72bc209567693d2172e897643",
+              "prohibition_line_count": 7,
+              "reflector_job_id": "job_135137d837454024",
+              "token_count": 330
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.01443143362807517,
+          "prohibition_line_count": 17,
+          "total_content_bytes": 8153,
+          "total_token_count": 1093
+        },
+        "chemcrow-08": {
+          "artifacts": [
+            {
+              "artifact_id": "art_56a27bd136124be3",
+              "artifact_type": "text_memory",
+              "content_bytes": 981,
+              "content_sha256": "64d4fa4610da76dc19eb755b3905d8d519327b2a9fa37997523ccd6cf0be5337",
+              "prohibition_line_count": 0,
+              "reflector_job_id": "job_e25ad89056674e94",
+              "token_count": 146
+            },
+            {
+              "artifact_id": "art_6e5d087081cc422d",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 4334,
+              "content_sha256": "54a9e4cf8fa422db0320a83afa3ed0380bb1bdd91c7bfe3a04cf0207dbc4750d",
+              "prohibition_line_count": 1,
+              "reflector_job_id": "job_08d9599dce184f53",
+              "token_count": 604
+            },
+            {
+              "artifact_id": "art_024e9fa0d13f4cff",
+              "artifact_type": "agent_system",
+              "content_bytes": 2289,
+              "content_sha256": "e0b74a4420068c43608857ecb11313c041b786099783784f3ce34ce81627bf27",
+              "prohibition_line_count": 3,
+              "reflector_job_id": "job_843bf4623b774cf0",
+              "token_count": 299
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.06032891456869348,
+          "prohibition_line_count": 4,
+          "total_content_bytes": 7604,
+          "total_token_count": 1049
+        },
+        "chemcrow-09": {
+          "artifacts": [
+            {
+              "artifact_id": "art_525fba8f25994b7a",
+              "artifact_type": "text_memory",
+              "content_bytes": 972,
+              "content_sha256": "67e5aa89a1e1401be1775141217dbd60d89a9e84dda1647f4fbd69d2fa949cb1",
+              "prohibition_line_count": 1,
+              "reflector_job_id": "job_9f5193b67cea48ef",
+              "token_count": 139
+            },
+            {
+              "artifact_id": "art_38b0719c7cca4919",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 4341,
+              "content_sha256": "9a4b5fdba9c99322159034b9f7af7a75639a20002ec6615706b437727b8e8049",
+              "prohibition_line_count": 3,
+              "reflector_job_id": "job_4c3c06247bac4bda",
+              "token_count": 626
+            },
+            {
+              "artifact_id": "art_9f5083094109418c",
+              "artifact_type": "agent_system",
+              "content_bytes": 2538,
+              "content_sha256": "56a0eba4d4fdcfbd5db0cbfc34d5796602c7b7af89abefae21e2dcf0312f1943",
+              "prohibition_line_count": 3,
+              "reflector_job_id": "job_92f590eb08b44b7c",
+              "token_count": 342
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.05426009334523097,
+          "prohibition_line_count": 7,
+          "total_content_bytes": 7851,
+          "total_token_count": 1107
+        },
+        "chemcrow-10": {
+          "artifacts": [
+            {
+              "artifact_id": "art_26647380b3ff456f",
+              "artifact_type": "text_memory",
+              "content_bytes": 1056,
+              "content_sha256": "c2059e988fb6b9404957f9a652d1410c0c636f5852aa0c43a25e3199332d1994",
+              "prohibition_line_count": 1,
+              "reflector_job_id": "job_0eec68ecad5f440a",
+              "token_count": 157
+            },
+            {
+              "artifact_id": "art_e9c517f6b36e44b5",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 4365,
+              "content_sha256": "f3a3e3d38c168883fac94d14a41a93240fe8d89377b998c3f8f023184b64890f",
+              "prohibition_line_count": 6,
+              "reflector_job_id": "job_b32cf3b873d54bb2",
+              "token_count": 655
+            },
+            {
+              "artifact_id": "art_a1622883e0124b84",
+              "artifact_type": "agent_system",
+              "content_bytes": 1696,
+              "content_sha256": "6f4c51db0346c42779393a76469e4ed300c566ac30ec9246a5d0eb59dccf5be6",
+              "prohibition_line_count": 3,
+              "reflector_job_id": "job_372a3d620fdd4049",
+              "token_count": 241
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.011592772952077777,
+          "prohibition_line_count": 10,
+          "total_content_bytes": 7117,
+          "total_token_count": 1053
+        },
+        "chemcrow-12": {
+          "artifacts": [
+            {
+              "artifact_id": "art_ddc39c0052054041",
+              "artifact_type": "text_memory",
+              "content_bytes": 543,
+              "content_sha256": "0ba1aad20e3bba15859cd8e76f878e01b22984e83a619df5f4ecdb2cbbcea0a7",
+              "prohibition_line_count": 3,
+              "reflector_job_id": "job_6d962682a36a47eb",
+              "token_count": 67
+            },
+            {
+              "artifact_id": "art_702af58a77154e24",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 2802,
+              "content_sha256": "388c8e9a63f38f96927d8489a87ddfa04483c742ed125622d37157ba1953e9d8",
+              "prohibition_line_count": 9,
+              "reflector_job_id": "job_3ea582899f5d4797",
+              "token_count": 384
+            },
+            {
+              "artifact_id": "art_e204f4485d324057",
+              "artifact_type": "agent_system",
+              "content_bytes": 1456,
+              "content_sha256": "474e36b65bbb95e99e2022d998ed36f9454f09e45218471a531caa4b2095d5c8",
+              "prohibition_line_count": 6,
+              "reflector_job_id": "job_a8cc3755885a4f39",
+              "token_count": 187
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.029666759341194494,
+          "prohibition_line_count": 18,
+          "total_content_bytes": 4801,
+          "total_token_count": 638
+        },
+        "chemcrow-13": {
+          "artifacts": [
+            {
+              "artifact_id": "art_128be8808f594fd2",
+              "artifact_type": "text_memory",
+              "content_bytes": 1052,
+              "content_sha256": "9b9f1409b9503a0d5aa2659cc1717125d2167a046e250d620bab2c0c327a1da6",
+              "prohibition_line_count": 2,
+              "reflector_job_id": "job_6d726c7067a74161",
+              "token_count": 132
+            },
+            {
+              "artifact_id": "art_2326f37887684fb9",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 5027,
+              "content_sha256": "69758156da9994ce1e094ec546bd8e1e0f403c1e99c9ef946d99bb5d4d37cd44",
+              "prohibition_line_count": 10,
+              "reflector_job_id": "job_39e069c265e8409e",
+              "token_count": 702
+            },
+            {
+              "artifact_id": "art_9322e838377b496c",
+              "artifact_type": "agent_system",
+              "content_bytes": 2234,
+              "content_sha256": "4feaf115427263ae7d10ddbe18c145480252d10aeceac2a1f2a4aff1523dd17f",
+              "prohibition_line_count": 6,
+              "reflector_job_id": "job_fb8129b73ec54ddf",
+              "token_count": 288
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.019689188470529716,
+          "prohibition_line_count": 18,
+          "total_content_bytes": 8313,
+          "total_token_count": 1122
+        },
+        "chemcrow-14": {
+          "artifacts": [
+            {
+              "artifact_id": "art_3c582ec2101f49a8",
+              "artifact_type": "text_memory",
+              "content_bytes": 1265,
+              "content_sha256": "3d9a6c7156b9278169ad8de1450066e5049f363f4fbd05d4ab4a47aa8bb66f6f",
+              "prohibition_line_count": 0,
+              "reflector_job_id": "job_d26ff6352d1944a6",
+              "token_count": 167
+            },
+            {
+              "artifact_id": "art_e5006a8d4b6246ac",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 4817,
+              "content_sha256": "c5ddd94d76e4c4df54d1d86659c2e8eb4125ae4d7de4488df9182cd2ef8f3fe3",
+              "prohibition_line_count": 5,
+              "reflector_job_id": "job_ecb14964748040bf",
+              "token_count": 685
+            },
+            {
+              "artifact_id": "art_4f362e618d33401a",
+              "artifact_type": "agent_system",
+              "content_bytes": 1818,
+              "content_sha256": "1b500053756792505881020f841b3ea57ff01ad6b0123d65b8eb5587779b038d",
+              "prohibition_line_count": 3,
+              "reflector_job_id": "job_ad688b32005e4e05",
+              "token_count": 248
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.014796038941971646,
+          "prohibition_line_count": 8,
+          "total_content_bytes": 7900,
+          "total_token_count": 1100
+        },
+        "chemcrow-15": {
+          "artifacts": [
+            {
+              "artifact_id": "art_049fd73486224a69",
+              "artifact_type": "text_memory",
+              "content_bytes": 1359,
+              "content_sha256": "4529553feba40b8f7d92b34041255d16c56f4759048e5fad5556cabac0486a38",
+              "prohibition_line_count": 0,
+              "reflector_job_id": "job_5ea0a7fa498f4535",
+              "token_count": 207
+            },
+            {
+              "artifact_id": "art_21c2fbc48edc486e",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 4415,
+              "content_sha256": "2b67e364d76a81dafba8c018f7220e50859ad859111f3cd13f6109032e87be1e",
+              "prohibition_line_count": 3,
+              "reflector_job_id": "job_b358da72a5734e52",
+              "token_count": 631
+            },
+            {
+              "artifact_id": "art_a0e68b4ad7ba4126",
+              "artifact_type": "agent_system",
+              "content_bytes": 2384,
+              "content_sha256": "36e1a21d0695e025a75b44e0aec91f44090c1e50ef79a0c7cb6ade044e773d1d",
+              "prohibition_line_count": 5,
+              "reflector_job_id": "job_bc5f4084b31e4531",
+              "token_count": 313
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.038651277739560244,
+          "prohibition_line_count": 8,
+          "total_content_bytes": 8158,
+          "total_token_count": 1151
+        }
+      },
+      "total_content_bytes": 102419,
+      "total_token_count": 14222,
+      "unique_artifact_count": 42
+    },
+    "blind_evaluator": {
+      "delta": {
+        "chemical_correctness": -0.03571428571428559,
+        "reasoning_quality": 0.1071428571428572,
+        "task_completion": -0.3571428571428572
+      },
+      "delta_total": -0.2857142857142865,
+      "g1": {
+        "chemical_correctness": 3.607142857142857,
+        "reasoning_quality": 3.607142857142857,
+        "task_completion": 3.5
+      },
+      "g1_total": 10.714285714285715,
+      "g2": {
+        "chemical_correctness": 3.5714285714285716,
+        "reasoning_quality": 3.7142857142857144,
+        "task_completion": 3.142857142857143
+      },
+      "g2_total": 10.428571428571429,
+      "paired": {
+        "bootstrap_replicates": 20000,
+        "bootstrap_seed": 20260827,
+        "limitations": "N=14 with many discrete ties; exact randomization tests and bootstrap intervals are descriptive and low-powered.",
+        "losses": 6,
+        "mean_delta": -0.2857142857142857,
+        "median_delta": 0.0,
+        "n": 14,
+        "paired_bootstrap_95_ci_mean_delta": [
+          -1.2857142857142858,
+          0.7142857142857143
+        ],
+        "sign_test_exact_two_sided_p": 1.0,
+        "ties": 3,
+        "wilcoxon_signed_rank_exact_two_sided_p": 0.6083984375,
+        "wins": 5
+      }
+    },
+    "internal_evaluator": {
+      "delta": {
+        "chemical_correctness": -0.07142857142857117,
+        "reasoning_quality": 0.0,
+        "task_completion": -0.3571428571428572
+      },
+      "delta_total": -0.4285714285714288,
+      "g1": {
+        "chemical_correctness": 3.4285714285714284,
+        "reasoning_quality": 3.4285714285714284,
+        "task_completion": 3.142857142857143
+      },
+      "g1_total": 10.0,
+      "g2": {
+        "chemical_correctness": 3.357142857142857,
+        "reasoning_quality": 3.4285714285714284,
+        "task_completion": 2.7857142857142856
+      },
+      "g2_total": 9.571428571428571,
+      "paired": {
+        "bootstrap_replicates": 20000,
+        "bootstrap_seed": 20260827,
+        "limitations": "N=14 with many discrete ties; exact randomization tests and bootstrap intervals are descriptive and low-powered.",
+        "losses": 6,
+        "mean_delta": -0.42857142857142855,
+        "median_delta": 0.0,
+        "n": 14,
+        "paired_bootstrap_95_ci_mean_delta": [
+          -1.0,
+          0.07142857142857142
+        ],
+        "sign_test_exact_two_sided_p": 0.2890625,
+        "ties": 6,
+        "wilcoxon_signed_rank_exact_two_sided_p": 0.234375,
+        "wins": 2
+      }
+    },
+    "paper_evaluator": {
+      "delta_mean": -0.5714285714285714,
+      "g1_mean": 9.357142857142858,
+      "g2_mean": 8.785714285714286,
+      "historical_control_mean": 7.5,
+      "paired": {
+        "bootstrap_replicates": 20000,
+        "bootstrap_seed": 20260827,
+        "limitations": "N=14 with many discrete ties; exact randomization tests and bootstrap intervals are descriptive and low-powered.",
+        "losses": 5,
+        "mean_delta": -0.5714285714285714,
+        "median_delta": 0.0,
+        "n": 14,
+        "paired_bootstrap_95_ci_mean_delta": [
+          -1.2142857142857142,
+          0.0
+        ],
+        "sign_test_exact_two_sided_p": 0.21875,
+        "ties": 8,
+        "wilcoxon_signed_rank_exact_two_sided_p": 0.15625,
+        "wins": 1
+      }
+    }
+  },
+  "v4_v5_delta_comparison": {
+    "blind_evaluator": {
+      "improved": 7,
+      "mean_delta_change": 0.9857142857142858,
+      "paired": {
+        "bootstrap_replicates": 20000,
+        "bootstrap_seed": 20260827,
+        "limitations": "N=14 with many discrete ties; exact randomization tests and bootstrap intervals are descriptive and low-powered.",
+        "losses": 4,
+        "mean_delta": 0.9857142857142858,
+        "median_delta": 0.40000000000000036,
+        "n": 14,
+        "paired_bootstrap_95_ci_mean_delta": [
+          -0.15714285714285708,
+          2.2714285714285714
+        ],
+        "sign_test_exact_two_sided_p": 0.548828125,
+        "ties": 3,
+        "wilcoxon_signed_rank_exact_two_sided_p": 0.2333984375,
+        "wins": 7
+      },
+      "per_task": {
+        "chemcrow-01": -1.0,
+        "chemcrow-02": 4.0,
+        "chemcrow-03": 0.0,
+        "chemcrow-04": -2.0,
+        "chemcrow-05": 4.0,
+        "chemcrow-06": 0.0,
+        "chemcrow-07": -2.0,
+        "chemcrow-08": 0.8000000000000007,
+        "chemcrow-09": -1.0,
+        "chemcrow-10": 2.0,
+        "chemcrow-12": 0.0,
+        "chemcrow-13": 1.0,
+        "chemcrow-14": 6.0,
+        "chemcrow-15": 2.0
+      },
+      "same": 3,
+      "worsened": 4
+    },
+    "internal_evaluator": {
+      "improved": 6,
+      "mean_delta_change": 0.6428571428571429,
+      "paired": {
+        "bootstrap_replicates": 20000,
+        "bootstrap_seed": 20260827,
+        "limitations": "N=14 with many discrete ties; exact randomization tests and bootstrap intervals are descriptive and low-powered.",
+        "losses": 2,
+        "mean_delta": 0.6428571428571429,
+        "median_delta": 0.0,
+        "n": 14,
+        "paired_bootstrap_95_ci_mean_delta": [
+          0.0,
+          1.2857142857142858
+        ],
+        "sign_test_exact_two_sided_p": 0.2890625,
+        "ties": 6,
+        "wilcoxon_signed_rank_exact_two_sided_p": 0.1328125,
+        "wins": 6
+      },
+      "per_task": {
+        "chemcrow-01": -1.0,
+        "chemcrow-02": 0.0,
+        "chemcrow-03": 0.0,
+        "chemcrow-04": 0.0,
+        "chemcrow-05": 2.0,
+        "chemcrow-06": 1.0,
+        "chemcrow-07": 0.0,
+        "chemcrow-08": -1.0,
+        "chemcrow-09": 3.0,
+        "chemcrow-10": 1.0,
+        "chemcrow-12": 0.0,
+        "chemcrow-13": 0.0,
+        "chemcrow-14": 1.0,
+        "chemcrow-15": 3.0
+      },
+      "same": 6,
+      "worsened": 2
+    },
+    "paper_evaluator": {
+      "improved": 4,
+      "mean_delta_change": 0.42857142857142855,
+      "paired": {
+        "bootstrap_replicates": 20000,
+        "bootstrap_seed": 20260827,
+        "limitations": "N=14 with many discrete ties; exact randomization tests and bootstrap intervals are descriptive and low-powered.",
+        "losses": 2,
+        "mean_delta": 0.42857142857142855,
+        "median_delta": 0.0,
+        "n": 14,
+        "paired_bootstrap_95_ci_mean_delta": [
+          -0.14285714285714285,
+          1.1428571428571428
+        ],
+        "sign_test_exact_two_sided_p": 0.6875,
+        "ties": 8,
+        "wilcoxon_signed_rank_exact_two_sided_p": 0.375,
+        "wins": 4
+      },
+      "per_task": {
+        "chemcrow-01": -1.0,
+        "chemcrow-02": 0.0,
+        "chemcrow-03": 0.0,
+        "chemcrow-04": 0.0,
+        "chemcrow-05": 0.0,
+        "chemcrow-06": 1.0,
+        "chemcrow-07": 0.0,
+        "chemcrow-08": 0.0,
+        "chemcrow-09": -1.0,
+        "chemcrow-10": 1.0,
+        "chemcrow-12": 0.0,
+        "chemcrow-13": 4.0,
+        "chemcrow-14": 2.0,
+        "chemcrow-15": 0.0
+      },
+      "same": 8,
+      "worsened": 2
+    }
+  },
+  "v5": {
+    "artifact_mechanics": {
+      "artifact_count": 42,
+      "byte_duplicate_pair_count": 0,
+      "mean_cross_artifact_trigram_jaccard": 0.022952413394567005,
+      "near_duplicate_pair_count": 0,
+      "normalized_duplicate_pair_count": 0,
+      "prohibition_line_count": 156,
+      "tasks": {
+        "chemcrow-01": {
+          "artifacts": [
+            {
+              "artifact_id": "art_0d111ad819aa4f0c",
+              "artifact_type": "text_memory",
+              "content_bytes": 1718,
+              "content_sha256": "5a2fded69f60b2e73f23ccea4048088ffc9a1bef8d2b5b4de15c1c0900f90b7b",
+              "prohibition_line_count": 4,
+              "reflector_job_id": "job_7ce2ad4ff9194473",
+              "token_count": 232
+            },
+            {
+              "artifact_id": "art_a7ec2a17032542df",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 3894,
+              "content_sha256": "52261d67ec1c3742fc2a853f967e39b4be255c476cca0426814506be6b2b1d27",
+              "prohibition_line_count": 4,
+              "reflector_job_id": "job_c243437cf6b14e40",
+              "token_count": 516
+            },
+            {
+              "artifact_id": "art_cbea414b75e146c9",
+              "artifact_type": "agent_system",
+              "content_bytes": 3940,
+              "content_sha256": "8850e82681de598ec1a6f6bf8552ff89762e24dc86396f5c7a568854d8cc60cb",
+              "prohibition_line_count": 6,
+              "reflector_job_id": "job_c13c493146654a52",
+              "token_count": 530
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.020165443261492704,
+          "prohibition_line_count": 14,
+          "total_content_bytes": 9552,
+          "total_token_count": 1278
+        },
+        "chemcrow-02": {
+          "artifacts": [
+            {
+              "artifact_id": "art_ab7874c561c84431",
+              "artifact_type": "text_memory",
+              "content_bytes": 1749,
+              "content_sha256": "260ec079e4ecf4c04a0745d52e73a5de37878b2666ed0d05d2371f02e0ebbdce",
+              "prohibition_line_count": 2,
+              "reflector_job_id": "job_33a33fc169604795",
+              "token_count": 239
+            },
+            {
+              "artifact_id": "art_67ca5f42f4d84889",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 2750,
+              "content_sha256": "6e24f9333aede061f7048ab31ef743fd31dae385ff8b78ea530d8187de4ade7c",
+              "prohibition_line_count": 0,
+              "reflector_job_id": "job_c85ec8a5a4eb4e81",
+              "token_count": 360
+            },
+            {
+              "artifact_id": "art_d0d6f608ce7b429b",
+              "artifact_type": "agent_system",
+              "content_bytes": 3508,
+              "content_sha256": "0d8a1f4f835b28fc1c5de10f9ba104868727e0de3ca4880623fe61fb56724039",
+              "prohibition_line_count": 3,
+              "reflector_job_id": "job_1429bc2742704921",
+              "token_count": 476
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.01100335229894459,
+          "prohibition_line_count": 5,
+          "total_content_bytes": 8007,
+          "total_token_count": 1075
+        },
+        "chemcrow-03": {
+          "artifacts": [
+            {
+              "artifact_id": "art_15095e652d294ba9",
+              "artifact_type": "text_memory",
+              "content_bytes": 1022,
+              "content_sha256": "82d9d29b94b00abedcf7d8ee7cac3677146de78c2ca353b00a44305564939ebb",
+              "prohibition_line_count": 1,
+              "reflector_job_id": "job_a0f43ce91d3a4e53",
+              "token_count": 129
+            },
+            {
+              "artifact_id": "art_8690135c43584f4a",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 2220,
+              "content_sha256": "d6b7f78e2b22275b49159acd20a84795eddb9702109576c4836cd8a3c33a3173",
+              "prohibition_line_count": 1,
+              "reflector_job_id": "job_6c8f467998344667",
+              "token_count": 309
+            },
+            {
+              "artifact_id": "art_4016a58d2f6f4329",
+              "artifact_type": "agent_system",
+              "content_bytes": 2937,
+              "content_sha256": "c475b77637fe3de90bbabb6adfe9cc609b544c4eb1cad9080d1f3499cbdcc37f",
+              "prohibition_line_count": 3,
+              "reflector_job_id": "job_af7bd82cf0714160",
+              "token_count": 393
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.01473505585624888,
+          "prohibition_line_count": 5,
+          "total_content_bytes": 6179,
+          "total_token_count": 831
+        },
+        "chemcrow-04": {
+          "artifacts": [
+            {
+              "artifact_id": "art_b2fd18b186ae40cc",
+              "artifact_type": "text_memory",
+              "content_bytes": 1531,
+              "content_sha256": "441d5f33fa341023ec9751177d486a3cd043f549b48f96a33f93fea779354836",
+              "prohibition_line_count": 3,
+              "reflector_job_id": "job_c1c0311d442340ee",
+              "token_count": 204
+            },
+            {
+              "artifact_id": "art_4df98458273f4964",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 4197,
+              "content_sha256": "d8da00f90bb0927f21b5cf3a61ef3b2b8b335b2cae423f720118943468872648",
+              "prohibition_line_count": 3,
+              "reflector_job_id": "job_f2e770d97470434a",
+              "token_count": 566
+            },
+            {
+              "artifact_id": "art_8c028fd3acc04c39",
+              "artifact_type": "agent_system",
+              "content_bytes": 3879,
+              "content_sha256": "0e0cd85202e9701c8f3f20d19f1e2aa41a668c15a11b2c1f6675b1d77ce1ec85",
+              "prohibition_line_count": 3,
+              "reflector_job_id": "job_5175f4c3a96449ca",
+              "token_count": 525
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.016709523065792403,
+          "prohibition_line_count": 9,
+          "total_content_bytes": 9607,
+          "total_token_count": 1295
+        },
+        "chemcrow-05": {
+          "artifacts": [
+            {
+              "artifact_id": "art_4f797b6b879747c4",
+              "artifact_type": "text_memory",
+              "content_bytes": 1636,
+              "content_sha256": "7e936ce4ce9dd2a5ac462612d63117100aa7da4fb0992d9dded10a5436da23cc",
+              "prohibition_line_count": 4,
+              "reflector_job_id": "job_808d368c18af4311",
+              "token_count": 218
+            },
+            {
+              "artifact_id": "art_f5b11b9c93e34d11",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 3024,
+              "content_sha256": "78602db5ca826eed1eb778f0b4b68d7dd3fa7a65ccd019c91530a54b9a3fa7ed",
+              "prohibition_line_count": 8,
+              "reflector_job_id": "job_bde1d943adb04420",
+              "token_count": 402
+            },
+            {
+              "artifact_id": "art_feff6632b0f74463",
+              "artifact_type": "agent_system",
+              "content_bytes": 3028,
+              "content_sha256": "d82bc9a1233ed5545845259a3dca1b13c4314f8a1e8cdd57106a5b2c6a1db26a",
+              "prohibition_line_count": 4,
+              "reflector_job_id": "job_8736685fae334df2",
+              "token_count": 405
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.018408649148381244,
+          "prohibition_line_count": 16,
+          "total_content_bytes": 7688,
+          "total_token_count": 1025
+        },
+        "chemcrow-06": {
+          "artifacts": [
+            {
+              "artifact_id": "art_20dbe2ac76354571",
+              "artifact_type": "text_memory",
+              "content_bytes": 1337,
+              "content_sha256": "2dc479a35c1bae5941cb8b93f4db191cdb6291c73dc13a3593defb39a0209b1f",
+              "prohibition_line_count": 3,
+              "reflector_job_id": "job_37a84fefd82f43da",
+              "token_count": 184
+            },
+            {
+              "artifact_id": "art_2d4bce4a58b348a9",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 2865,
+              "content_sha256": "6d38d8db90e8b8b029e6bfae5a5f9625eb19d4c67335568f4afe6211a502b02b",
+              "prohibition_line_count": 1,
+              "reflector_job_id": "job_45ec1e5cb8934282",
+              "token_count": 379
+            },
+            {
+              "artifact_id": "art_32275ed39ced4699",
+              "artifact_type": "agent_system",
+              "content_bytes": 2510,
+              "content_sha256": "758199d331d2d434c42543e3ade6c760233acc9a5b5d0e4a789556e0c975c4f7",
+              "prohibition_line_count": 1,
+              "reflector_job_id": "job_0f1cd817974446d8",
+              "token_count": 338
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.021079664240259234,
+          "prohibition_line_count": 5,
+          "total_content_bytes": 6712,
+          "total_token_count": 901
+        },
+        "chemcrow-07": {
+          "artifacts": [
+            {
+              "artifact_id": "art_124ba9a4f7d649f0",
+              "artifact_type": "text_memory",
+              "content_bytes": 1752,
+              "content_sha256": "b87a7e2b74a0044c219f994648452094e19487057d2c94642df35a9a54c8110a",
+              "prohibition_line_count": 3,
+              "reflector_job_id": "job_58239ed01be44827",
+              "token_count": 245
+            },
+            {
+              "artifact_id": "art_9bca2c5a090a499e",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 3949,
+              "content_sha256": "e742869cf097b9c7e6d9f912fd0a086255713b3f92d9234da9aa0320f8672348",
+              "prohibition_line_count": 8,
+              "reflector_job_id": "job_9a7532693c3b44ea",
+              "token_count": 547
+            },
+            {
+              "artifact_id": "art_e3290a2bb13b4800",
+              "artifact_type": "agent_system",
+              "content_bytes": 4614,
+              "content_sha256": "f096e219846f79a11de47ab2db72b824be696d3da7805f6b7fbe91c442119e62",
+              "prohibition_line_count": 12,
+              "reflector_job_id": "job_5a913710e35b47d8",
+              "token_count": 675
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.03858921787916888,
+          "prohibition_line_count": 23,
+          "total_content_bytes": 10315,
+          "total_token_count": 1467
+        },
+        "chemcrow-08": {
+          "artifacts": [
+            {
+              "artifact_id": "art_a9a2086d30764268",
+              "artifact_type": "text_memory",
+              "content_bytes": 2151,
+              "content_sha256": "d30980e0429afa634711a17f6dc1778de7bfa30d287fa4842d5ebd07b0651bce",
+              "prohibition_line_count": 3,
+              "reflector_job_id": "job_8d531dd701d84d3e",
+              "token_count": 293
+            },
+            {
+              "artifact_id": "art_6fa8a55cf087418d",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 3074,
+              "content_sha256": "cc58e1ebbab6e42b1f13bf3aba7e72d95d839709bd6a90803a67ccf140c37b18",
+              "prohibition_line_count": 4,
+              "reflector_job_id": "job_a5f3283528fd449d",
+              "token_count": 407
+            },
+            {
+              "artifact_id": "art_4f97b5c2946b4e6d",
+              "artifact_type": "agent_system",
+              "content_bytes": 3459,
+              "content_sha256": "6831e0bdb9d7e9054a866664018bc8070889e1d5c027474327ae80914c55be88",
+              "prohibition_line_count": 2,
+              "reflector_job_id": "job_9eeab9d3370f4a43",
+              "token_count": 485
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.029052470956085416,
+          "prohibition_line_count": 9,
+          "total_content_bytes": 8684,
+          "total_token_count": 1185
+        },
+        "chemcrow-09": {
+          "artifacts": [
+            {
+              "artifact_id": "art_0a6d74e770024871",
+              "artifact_type": "text_memory",
+              "content_bytes": 1251,
+              "content_sha256": "ba3dcc42bf283cda856e37212bac3ce997dd06c38633526a2e7525e445d0727c",
+              "prohibition_line_count": 1,
+              "reflector_job_id": "job_b1bdb48061db4409",
+              "token_count": 175
+            },
+            {
+              "artifact_id": "art_5bf30f635315410a",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 3497,
+              "content_sha256": "224f78d5a2ba1959cdb9d67d30168005e8f9ba67add41480faea57a784517361",
+              "prohibition_line_count": 2,
+              "reflector_job_id": "job_6e6332b63c584199",
+              "token_count": 483
+            },
+            {
+              "artifact_id": "art_a0bd224564e3470e",
+              "artifact_type": "agent_system",
+              "content_bytes": 3531,
+              "content_sha256": "70d30ff524a72be4244004fe2af4dae2b1a4fe0b018c5d3a61a126bd56a5101f",
+              "prohibition_line_count": 2,
+              "reflector_job_id": "job_8d9ed10d8544476a",
+              "token_count": 468
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.022922146335098596,
+          "prohibition_line_count": 5,
+          "total_content_bytes": 8279,
+          "total_token_count": 1126
+        },
+        "chemcrow-10": {
+          "artifacts": [
+            {
+              "artifact_id": "art_5ada00f573ed495a",
+              "artifact_type": "text_memory",
+              "content_bytes": 1292,
+              "content_sha256": "b717d8c8c503f38dc4c11d1a432b3e855d222ebf7876e7ac44c7343d500c387f",
+              "prohibition_line_count": 2,
+              "reflector_job_id": "job_4a77d690f6fc4945",
+              "token_count": 186
+            },
+            {
+              "artifact_id": "art_8afb32f5f55d4c68",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 3104,
+              "content_sha256": "5955867fcec8302d0ea271198998ab61b09d8820bc37c87fefa01a242c569d9e",
+              "prohibition_line_count": 2,
+              "reflector_job_id": "job_630fd3388a5b4d1e",
+              "token_count": 445
+            },
+            {
+              "artifact_id": "art_32d21957eca14d52",
+              "artifact_type": "agent_system",
+              "content_bytes": 3669,
+              "content_sha256": "5413bd8c8da3c655ebb902928e5d3c65e85346d45575dc7cb235ce3a8d179cc4",
+              "prohibition_line_count": 3,
+              "reflector_job_id": "job_daefa21632e044f0",
+              "token_count": 525
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.020208362752899642,
+          "prohibition_line_count": 7,
+          "total_content_bytes": 8065,
+          "total_token_count": 1156
+        },
+        "chemcrow-12": {
+          "artifacts": [
+            {
+              "artifact_id": "art_5845f8f3cd95470c",
+              "artifact_type": "text_memory",
+              "content_bytes": 1119,
+              "content_sha256": "178bbaf14575b4c64acfec0434a82f6fd48318ae738e5ff106e6e40a940a6e95",
+              "prohibition_line_count": 4,
+              "reflector_job_id": "job_7d8ef0d1c86f42cc",
+              "token_count": 147
+            },
+            {
+              "artifact_id": "art_07517b7cd66c4b15",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 2208,
+              "content_sha256": "0da2a7c688c97ba5bfa7b3a30dfa9eb564d9637dc5071ea1ef9cc3f3756b3ef0",
+              "prohibition_line_count": 5,
+              "reflector_job_id": "job_7370af6ae95b4f90",
+              "token_count": 292
+            },
+            {
+              "artifact_id": "art_706ddc0db2844060",
+              "artifact_type": "agent_system",
+              "content_bytes": 2146,
+              "content_sha256": "e0654fa7f6d458f2a9866d1082742ee529df0c524a7e85d194b7612601583138",
+              "prohibition_line_count": 8,
+              "reflector_job_id": "job_724d5aedda8d4345",
+              "token_count": 269
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.022060226591168595,
+          "prohibition_line_count": 17,
+          "total_content_bytes": 5473,
+          "total_token_count": 708
+        },
+        "chemcrow-13": {
+          "artifacts": [
+            {
+              "artifact_id": "art_7a1b6e227cc9424d",
+              "artifact_type": "text_memory",
+              "content_bytes": 1696,
+              "content_sha256": "1d12d6d1449df80fc426275417d301107fb78287b96439b1fd0397dc9c93eb55",
+              "prohibition_line_count": 3,
+              "reflector_job_id": "job_89b03402cb6c4a7d",
+              "token_count": 234
+            },
+            {
+              "artifact_id": "art_2765d8b7ae32404a",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 2627,
+              "content_sha256": "5498a7d11e0d0295ae7877033a27804fb0172f08dda5b26f6839c8dcfb02f721",
+              "prohibition_line_count": 6,
+              "reflector_job_id": "job_030f4a9ee61647cb",
+              "token_count": 356
+            },
+            {
+              "artifact_id": "art_bfd4d620e1084e94",
+              "artifact_type": "agent_system",
+              "content_bytes": 4103,
+              "content_sha256": "079b03d036a279385d65286a8e2f747f3b7f5f14dbb604d011b5a178467ed8a6",
+              "prohibition_line_count": 10,
+              "reflector_job_id": "job_f376592fe13e4914",
+              "token_count": 550
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.02830354356290259,
+          "prohibition_line_count": 19,
+          "total_content_bytes": 8426,
+          "total_token_count": 1140
+        },
+        "chemcrow-14": {
+          "artifacts": [
+            {
+              "artifact_id": "art_1b43e463d62f46f6",
+              "artifact_type": "text_memory",
+              "content_bytes": 1803,
+              "content_sha256": "4fde3d937b466a2483943f7710521d6ad90c3e095ea20a727da46bf7786ca871",
+              "prohibition_line_count": 5,
+              "reflector_job_id": "job_10f5988501e744cd",
+              "token_count": 256
+            },
+            {
+              "artifact_id": "art_0985a5d032524a2e",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 4636,
+              "content_sha256": "7911801c2c2b6ac7207635378ac64f28513c9151af66f80fcfd32e183051ba22",
+              "prohibition_line_count": 7,
+              "reflector_job_id": "job_eea79b7e41ba4ed9",
+              "token_count": 618
+            },
+            {
+              "artifact_id": "art_defb1a9f27ea42fd",
+              "artifact_type": "agent_system",
+              "content_bytes": 2939,
+              "content_sha256": "4ff32ff933c9fce3c4992c351e55ff554dea50a7717c3a0bb2ae1d796efbf53e",
+              "prohibition_line_count": 2,
+              "reflector_job_id": "job_16aab24a93e04267",
+              "token_count": 403
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.03038020428956799,
+          "prohibition_line_count": 14,
+          "total_content_bytes": 9378,
+          "total_token_count": 1277
+        },
+        "chemcrow-15": {
+          "artifacts": [
+            {
+              "artifact_id": "art_285eafffc2b74754",
+              "artifact_type": "text_memory",
+              "content_bytes": 1738,
+              "content_sha256": "3d715b8149e6fbc758b87f619e3240e9ce105afec67b34c7c7334969284a08dd",
+              "prohibition_line_count": 2,
+              "reflector_job_id": "job_7822d259470247de",
+              "token_count": 240
+            },
+            {
+              "artifact_id": "art_51b8759af5a64df3",
+              "artifact_type": "skill_bundle",
+              "content_bytes": 4390,
+              "content_sha256": "8906459a2847b82f13273d60c0d03f64b149638b919fd36ef6409b497d36859b",
+              "prohibition_line_count": 3,
+              "reflector_job_id": "job_bb8316c842744fd9",
+              "token_count": 593
+            },
+            {
+              "artifact_id": "art_209330b09f054524",
+              "artifact_type": "agent_system",
+              "content_bytes": 3591,
+              "content_sha256": "007916304963544a073a73b3a5fa33d2d8a9e414289f96b2d7e9011d490c97ff",
+              "prohibition_line_count": 3,
+              "reflector_job_id": "job_70fb3119c02d448e",
+              "token_count": 501
+            }
+          ],
+          "mean_cross_artifact_trigram_jaccard": 0.02771592728592732,
+          "prohibition_line_count": 8,
+          "total_content_bytes": 9719,
+          "total_token_count": 1334
+        }
+      },
+      "total_content_bytes": 116084,
+      "total_token_count": 15798,
+      "unique_artifact_count": 42
+    },
+    "blind_evaluator": {
+      "delta": {
+        "chemical_correctness": 0.1499999999999999,
+        "reasoning_quality": 0.4571428571428573,
+        "task_completion": 0.09285714285714253
+      },
+      "delta_total": 0.6999999999999993,
+      "g1": {
+        "chemical_correctness": 3.6214285714285714,
+        "reasoning_quality": 3.3857142857142857,
+        "task_completion": 3.3285714285714287
+      },
+      "g1_total": 10.335714285714285,
+      "g2": {
+        "chemical_correctness": 3.7714285714285714,
+        "reasoning_quality": 3.842857142857143,
+        "task_completion": 3.4214285714285713
+      },
+      "g2_total": 11.035714285714285,
+      "paired": {
+        "bootstrap_replicates": 20000,
+        "bootstrap_seed": 20260827,
+        "limitations": "N=14 with many discrete ties; exact randomization tests and bootstrap intervals are descriptive and low-powered.",
+        "losses": 1,
+        "mean_delta": 0.7000000000000001,
+        "median_delta": 0.9000000000000004,
+        "n": 14,
+        "paired_bootstrap_95_ci_mean_delta": [
+          0.21428571428571427,
+          1.2142857142857142
+        ],
+        "sign_test_exact_two_sided_p": 0.0390625,
+        "ties": 5,
+        "wilcoxon_signed_rank_exact_two_sided_p": 0.03125,
+        "wins": 8
+      }
+    },
+    "completed_run_audit_sha256": "f73d947d9e71244819ccf7dac0143c3c352d5ae8915b2209c0b0ee8a55f7b7b4",
+    "internal_evaluator": {
+      "delta": {
+        "chemical_correctness": 0.14285714285714324,
+        "reasoning_quality": 0.0,
+        "task_completion": 0.07142857142857162
+      },
+      "delta_total": 0.21428571428571352,
+      "g1": {
+        "chemical_correctness": 3.4285714285714284,
+        "reasoning_quality": 3.5,
+        "task_completion": 3.0
+      },
+      "g1_total": 9.928571428571429,
+      "g2": {
+        "chemical_correctness": 3.5714285714285716,
+        "reasoning_quality": 3.5,
+        "task_completion": 3.0714285714285716
+      },
+      "g2_total": 10.142857142857142,
+      "paired": {
+        "bootstrap_replicates": 20000,
+        "bootstrap_seed": 20260827,
+        "limitations": "N=14 with many discrete ties; exact randomization tests and bootstrap intervals are descriptive and low-powered.",
+        "losses": 2,
+        "mean_delta": 0.21428571428571427,
+        "median_delta": 0.0,
+        "n": 14,
+        "paired_bootstrap_95_ci_mean_delta": [
+          -0.21428571428571427,
+          0.7142857142857143
+        ],
+        "sign_test_exact_two_sided_p": 1.0,
+        "ties": 9,
+        "wilcoxon_signed_rank_exact_two_sided_p": 0.4375,
+        "wins": 3
+      }
+    },
+    "paper_audit_sha256": "a7756b6a31c45b00cfc56b3949b6d949a2614caf0cae7423902b2408e1f93b24",
+    "paper_evaluator": {
+      "actual_cost_usd": 2.51145,
+      "delta_mean": -0.14285714285714285,
+      "g1_mean": 9.142857142857142,
+      "g2_mean": 9.0,
+      "historical_control_mean": 7.571428571428571,
+      "paired": {
+        "bootstrap_replicates": 20000,
+        "bootstrap_seed": 20260827,
+        "limitations": "N=14 with many discrete ties; exact randomization tests and bootstrap intervals are descriptive and low-powered.",
+        "losses": 2,
+        "mean_delta": -0.14285714285714285,
+        "median_delta": 0.0,
+        "n": 14,
+        "paired_bootstrap_95_ci_mean_delta": [
+          -0.35714285714285715,
+          0.0
+        ],
+        "sign_test_exact_two_sided_p": 0.5,
+        "ties": 12,
+        "wilcoxon_signed_rank_exact_two_sided_p": 0.5,
+        "wins": 0
+      }
+    },
+    "semantic_audit_sha256": "ee08be11b2280aff6d9290004cd4d7f699e7dccef0f3eca57d7df3992d64d21b"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": "chemcrow_replacement_preflight_selection_v2",
+  "recorded_before_execution": true,
+  "recorded_at": "2026-08-25T10:55:22+08:00",
+  "experiment_id": "chemcrow-task-local-preflight-v3",
+  "replaces_invalidated_experiment_ids": [
+    "chemcrow-task-local-preflight-v1",
+    "chemcrow-task-local-preflight-v2"
+  ],
+  "task_ids": ["chemcrow-02", "chemcrow-03", "chemcrow-06"],
+  "selection_changed_after_outcomes": false,
+  "phase_or_run_ids_reused": false,
+  "prior_outputs_reused": false,
+  "duplicate_call_exception": {
+    "task_id": "chemcrow-02",
+    "authorized": true,
+    "reason": "User explicitly authorized continued testing and code modification until the Core-only integration fully passes after sealed engineering invalidations."
+  },
+  "authorization_text": "我授权你进行测试，修改代码，直到完全跑通，请你设置为goal开始工作，除非需要我手动配置参数或apikey，否则不要停止",
+  "maximum_paid_pairs": 3
+}

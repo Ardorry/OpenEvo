@@ -1,0 +1,17 @@
+{
+  "release_tag": "chemcrowrun-runtime-0.1.1",
+  "runtime_version": "0.1.1",
+  "platform": "linux-amd64",
+  "assets": [
+    {
+      "filename": "openevo-science-runtime-0.1.1-linux-amd64.tar.gz",
+      "bytes": 352236726,
+      "sha256": "ad9c5ebd69b5785b94dd52dc077d93ababfa9cf8cbcbf92940f60bee48a91149"
+    },
+    {
+      "filename": "chemcrowrun-runtime-sources-and-licenses.tar.gz",
+      "bytes": 908922511,
+      "sha256": "9af8e6a61692bc2b75df87393ad28bd43326e8a9c21a85715b8b8beb4b85cd65"
+    }
+  ]
+}

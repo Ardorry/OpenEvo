@@ -1,0 +1,9 @@
+schema_version: chemcrow_paper_composite_repair_config_v1
+primary_experiment_id: chemcrow-task-local-full-v3
+primary_run_root: ../../../../runs/full-v3
+repair_experiment_id: chemcrow-task-local-paper-repair-v1
+repair_run_root: ../../../../runs/paper-repair-v1
+core_completion_root: ../../../../core-state/completions
+expected_s0_hash: 8f7113de469c92fff55b99b62e58d4c43d5e42f2b6485affe44b247c28306a5c
+duplicate_authorization_receipt: ../../../../manifests/CHEMCROW_14_DUPLICATE_AUTHORIZATION.json
+composite_manifest_path: ../../../../runs/paper-composite-v1/composite.manifest.json

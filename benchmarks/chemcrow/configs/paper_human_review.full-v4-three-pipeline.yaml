@@ -1,0 +1,8 @@
+schema_version: chemcrow_paper_human_review_config_v2
+experiment_id: chemcrow-task-local-full-v4-three-pipeline
+source_pair_protocol: chemcrow-three-isolated-artifacts-v1
+task_manifest: ../tasks.jsonl
+historical_runs_root: ../../../../vendor/chemcrow-runs
+run_root: ../../../../runs/full-v4-three-pipeline
+completed_run_audit: ../../../../runs/full-v4-three-pipeline/completed_run.audit.json
+output_root: ../../../../runs/paper-human-review-full-v4-three-pipeline

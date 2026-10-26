@@ -1,0 +1,865 @@
+{
+  "scope": "All 43 prior filename flags assessed; a package declaration is distinguished from a matched upstream notice. No invented copyright lines, no blanket legal clearance. Full original archives retain metadata and source headers.",
+  "counts": {
+    "DECLARED_TERMS_SOURCE_HEADERS_RETAINED": 27,
+    "EMBEDDED_PERMISSION_TEXT_RETAINED": 2,
+    "EXACT_TREE_LICENSE_RETAINED": 14
+  },
+  "packages": [
+    {
+      "package": "allocative-0.3.6",
+      "declared_license": "Apache-2.0",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "d8cf9afc79c83d514444b55df3935d317da54b1ce3b17a133c646889cc260de8",
+      "authors_from_package_metadata": [
+        "Meta"
+      ],
+      "source_header_members": [
+        "allocative-0.3.6/build.rs",
+        "allocative-0.3.6/src/allocative_trait.rs",
+        "allocative-0.3.6/src/flamegraph.rs",
+        "allocative-0.3.6/src/global_root.rs",
+        "allocative-0.3.6/src/golden.rs",
+        "allocative-0.3.6/src/impls/anyhow.rs",
+        "allocative-0.3.6/src/impls/bumpalo.rs",
+        "allocative-0.3.6/src/impls/common.rs",
+        "allocative-0.3.6/src/impls/compact_str.rs",
+        "allocative-0.3.6/src/impls/dashmap.rs",
+        "allocative-0.3.6/src/impls/either.rs",
+        "allocative-0.3.6/src/impls/futures.rs",
+        "allocative-0.3.6/src/impls/hashbrown.rs",
+        "allocative-0.3.6/src/impls/hashbrown_util.rs",
+        "allocative-0.3.6/src/impls/indexmap.rs",
+        "allocative-0.3.6/src/impls/lock_api.rs",
+        "allocative-0.3.6/src/impls/num_bigint.rs",
+        "allocative-0.3.6/src/impls/once_cell.rs",
+        "allocative-0.3.6/src/impls/parking_lot.rs",
+        "allocative-0.3.6/src/impls/prost_types.rs",
+        "allocative-0.3.6/src/impls/serde_json.rs",
+        "allocative-0.3.6/src/impls/slab.rs",
+        "allocative-0.3.6/src/impls/smallvec.rs",
+        "allocative-0.3.6/src/impls/sorted_vector_map.rs",
+        "allocative-0.3.6/src/impls/std/any.rs",
+        "allocative-0.3.6/src/impls/std/cell.rs",
+        "allocative-0.3.6/src/impls/std/collections.rs",
+        "allocative-0.3.6/src/impls/std/function.rs",
+        "allocative-0.3.6/src/impls/std/mem.rs",
+        "allocative-0.3.6/src/impls/std/net.rs",
+        "allocative-0.3.6/src/impls/std/primitive.rs",
+        "allocative-0.3.6/src/impls/std/sync.rs",
+        "allocative-0.3.6/src/impls/std/thread.rs",
+        "allocative-0.3.6/src/impls/std/time.rs",
+        "allocative-0.3.6/src/impls/std/tuple.rs",
+        "allocative-0.3.6/src/impls/std/unsorted.rs",
+        "allocative-0.3.6/src/impls/std.rs",
+        "allocative-0.3.6/src/impls/tokio.rs",
+        "allocative-0.3.6/src/impls/triomphe.rs",
+        "allocative-0.3.6/src/impls.rs",
+        "allocative-0.3.6/src/key.rs",
+        "allocative-0.3.6/src/lib.rs",
+        "allocative-0.3.6/src/size_of.rs",
+        "allocative-0.3.6/src/test_derive/bounds.rs",
+        "allocative-0.3.6/src/test_derive/dst.rs",
+        "allocative-0.3.6/src/test_derive/skip.rs",
+        "allocative-0.3.6/src/test_derive/visit.rs",
+        "allocative-0.3.6/src/test_derive/with_flamegraph.rs",
+        "allocative-0.3.6/src/test_derive.rs",
+        "allocative-0.3.6/src/visitor.rs"
+      ],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "allocative_derive-0.3.6",
+      "declared_license": "Apache-2.0",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "614043c56c1173b800acb007b81fd0cbc0a0d7d717b71ba705fc2230d0760a23",
+      "authors_from_package_metadata": [
+        "Meta"
+      ],
+      "source_header_members": [
+        "allocative_derive-0.3.6/src/derive_allocative.rs",
+        "allocative_derive-0.3.6/src/lib.rs",
+        "allocative_derive-0.3.6/src/root.rs"
+      ],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "bech32-0.9.1",
+      "declared_license": "MIT",
+      "permissive_choice_for_review": "MIT",
+      "source_archive_sha256": "d86b93f97252c47b41663388e6d155714a9d0c398b99f1005cbc5f978b29f445",
+      "authors_from_package_metadata": [
+        "Clark Moody"
+      ],
+      "source_header_members": [
+        "bech32-0.9.1/src/lib.rs"
+      ],
+      "embedded_permission_members": [
+        "bech32-0.9.1/src/lib.rs"
+      ],
+      "exact_upstream_notices": [],
+      "disposition": "EMBEDDED_PERMISSION_TEXT_RETAINED"
+    },
+    {
+      "package": "cookie-factory-0.3.3",
+      "declared_license": "MIT",
+      "permissive_choice_for_review": "MIT",
+      "source_archive_sha256": "9885fa71e26b8ab7855e2ec7cae6e9b380edff76cd052e07c683a0319d51b3a2",
+      "authors_from_package_metadata": [
+        "Geoffroy Couprie <geo.couprie@gmail.com>",
+        "Pierre Chifflier <chifflier@wzdftpd.net>"
+      ],
+      "source_header_members": [],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "crc-catalog-2.4.0",
+      "declared_license": "MIT OR Apache-2.0",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "19d374276b40fb8bbdee95aef7c7fa6b5316ec764510eb64b8dd0e2ed0d7e7f5",
+      "authors_from_package_metadata": [
+        "Akhil Velagapudi <akhilvelagapudi@gmail.com>"
+      ],
+      "source_header_members": [
+        "crc-catalog-2.4.0/LICENSES/Apache-2.0.txt",
+        "crc-catalog-2.4.0/LICENSES/MIT.txt",
+        "crc-catalog-2.4.0/README.md"
+      ],
+      "embedded_permission_members": [
+        "crc-catalog-2.4.0/LICENSES/MIT.txt"
+      ],
+      "exact_upstream_notices": [],
+      "disposition": "EMBEDDED_PERMISSION_TEXT_RETAINED"
+    },
+    {
+      "package": "debugserver-types-0.5.0",
+      "declared_license": "MIT",
+      "permissive_choice_for_review": "MIT",
+      "source_archive_sha256": "2bf6834a70ed14e8e4e41882df27190bea150f1f6ecf461f1033f8739cd8af4a",
+      "authors_from_package_metadata": [
+        "Markus Westerlind <marwes91@gmail.com>"
+      ],
+      "source_header_members": [],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "deno_core_icudata-0.77.0",
+      "declared_license": "MIT",
+      "permissive_choice_for_review": "MIT",
+      "source_archive_sha256": "a9efff8990a82c1ae664292507e1a5c6749ddd2312898cdf9cd7cb1fd4bc64c6",
+      "authors_from_package_metadata": [
+        "the Deno authors"
+      ],
+      "source_header_members": [],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED",
+      "additional_scope": "MIT declaration covers the wrapper; bundled ICU data needs its own Unicode/ICU attribution. Exact data-to-ICU-source provenance is not established by the wrapper SPDX field."
+    },
+    {
+      "package": "difflib-0.4.0",
+      "declared_license": "MIT",
+      "permissive_choice_for_review": "MIT",
+      "source_archive_sha256": "6184e33543162437515c2e2b48714794e37845ec9851711914eec9d308f6ebe8",
+      "authors_from_package_metadata": [
+        "Dima Kudosh <dimakudosh@gmail.com>"
+      ],
+      "source_header_members": [],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "display_container-0.9.0",
+      "declared_license": "MIT OR Apache-2.0",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "0a110a75c96bedec8e65823dea00a1d710288b7a369d95fd8a0f5127639466fa",
+      "authors_from_package_metadata": [
+        "Facebook"
+      ],
+      "source_header_members": [
+        "display_container-0.9.0/src/lib.rs"
+      ],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "eventsource-stream-0.2.3",
+      "declared_license": "MIT OR Apache-2.0",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "74fef4569247a5f429d9156b9d0a2599914385dd189c539334c625d8099d90ab",
+      "authors_from_package_metadata": [
+        "Julian Popescu <jpopesculian@gmail.com>"
+      ],
+      "source_header_members": [],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "fax-0.2.6",
+      "declared_license": "MIT",
+      "permissive_choice_for_review": "MIT",
+      "source_archive_sha256": "f05de7d48f37cd6730705cbca900770cab77a89f413d23e100ad7fad7795a0ab",
+      "authors_from_package_metadata": [
+        "Sebastian K <s3bk@protonmail.com>"
+      ],
+      "source_header_members": [],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "fax_derive-0.2.0",
+      "declared_license": "MIT",
+      "permissive_choice_for_review": "MIT",
+      "source_archive_sha256": "a0aca10fb742cb43f9e7bb8467c91aa9bcb8e3ffbc6a6f7389bb93ffc920577d",
+      "authors_from_package_metadata": [
+        "Sebastian K <s3bk@protonmail.com>"
+      ],
+      "source_header_members": [],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "fxhash-0.2.1",
+      "declared_license": "Apache-2.0/MIT",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "c31b6d751ae2c7f11320402d34e41349dd1016f8d5d45e48c4312bc8625af50c",
+      "authors_from_package_metadata": [
+        "cbreeden <github@u.breeden.cc>"
+      ],
+      "source_header_members": [
+        "fxhash-0.2.1/lib.rs"
+      ],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "intl_pluralrules-7.0.2",
+      "declared_license": "Apache-2.0/MIT",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "078ea7b7c29a2b4df841a7f6ac8775ff6074020c6776d48491ce2268e068f972",
+      "authors_from_package_metadata": [
+        "Kekoa Riggin <kekoariggin@gmail.com>",
+        "Zibi Braniecki <zbraniecki@mozilla.com>"
+      ],
+      "source_header_members": [],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [
+        {
+          "url": "https://raw.githubusercontent.com/zbraniecki/pluralrules/d0715d5b7cca72e228d6e6c4de154bd30dfdd06a/intl_pluralrules/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/zbraniecki/pluralrules/d0715d5b7cca72e228d6e6c4de154bd30dfdd06a/intl_pluralrules/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ],
+      "disposition": "EXACT_TREE_LICENSE_RETAINED"
+    },
+    {
+      "package": "io_tee-0.1.1",
+      "declared_license": "MIT OR Apache-2.0",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "4b3f7cef34251886990511df1c61443aa928499d598a9473929ab5a90a527304",
+      "authors_from_package_metadata": [],
+      "source_header_members": [
+        "io_tee-0.1.1/README.md"
+      ],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "linux-keyutils-0.2.4",
+      "declared_license": "Apache-2.0 OR MIT",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "761e49ec5fd8a5a463f9b84e877c373d888935b71c6be78f3767fe2ae6bed18e",
+      "authors_from_package_metadata": [
+        "landhb <landhb@users.noreply.github.com>"
+      ],
+      "source_header_members": [
+        "linux-keyutils-0.2.4/README.md"
+      ],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "lock_free_hashtable-0.1.4",
+      "declared_license": "MIT OR Apache-2.0",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "ebf3631712f5b790675292ff827af269f5d9f920c920b77dc41d0485e3719612",
+      "authors_from_package_metadata": [],
+      "source_header_members": [
+        "lock_free_hashtable-0.1.4/examples/stress.rs",
+        "lock_free_hashtable-0.1.4/src/atomic_value.rs",
+        "lock_free_hashtable-0.1.4/src/fixed_cap.rs",
+        "lock_free_hashtable-0.1.4/src/lib.rs",
+        "lock_free_hashtable-0.1.4/src/raw.rs",
+        "lock_free_hashtable-0.1.4/src/sharded.rs"
+      ],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "opentelemetry-0.31.0",
+      "declared_license": "Apache-2.0",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "b84bcd6ae87133e903af7ef497404dda70c60d0ea14895fc8a5e6722754fc2a0",
+      "authors_from_package_metadata": [],
+      "source_header_members": [],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [
+        {
+          "url": "https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/285dc925f98403ff426acc70968f104dc820d4f2/LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ],
+      "disposition": "EXACT_TREE_LICENSE_RETAINED"
+    },
+    {
+      "package": "opentelemetry-appender-tracing-0.31.1",
+      "declared_license": "Apache-2.0",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "ef6a1ac5ca3accf562b8c306fa8483c85f4390f768185ab775f242f7fe8fdcc2",
+      "authors_from_package_metadata": [],
+      "source_header_members": [],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [
+        {
+          "archive": "open-telemetry-opentelemetry-rust-00f97c948e95beb7b2c966fcdb5f946c2a89baeb.tar.gz",
+          "member": "opentelemetry-rust-00f97c948e95beb7b2c966fcdb5f946c2a89baeb/LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "file": "notices/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4.txt"
+        }
+      ],
+      "disposition": "EXACT_TREE_LICENSE_RETAINED"
+    },
+    {
+      "package": "opentelemetry-http-0.31.0",
+      "declared_license": "Apache-2.0",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "d7a6d09a73194e6b66df7c8f1b680f156d916a1a942abf2de06823dd02b7855d",
+      "authors_from_package_metadata": [],
+      "source_header_members": [],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [
+        {
+          "url": "https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/285dc925f98403ff426acc70968f104dc820d4f2/LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ],
+      "disposition": "EXACT_TREE_LICENSE_RETAINED"
+    },
+    {
+      "package": "opentelemetry-otlp-0.31.0",
+      "declared_license": "Apache-2.0",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "7a2366db2dca4d2ad033cad11e6ee42844fd727007af5ad04a1730f4cb8163bf",
+      "authors_from_package_metadata": [],
+      "source_header_members": [],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [
+        {
+          "url": "https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/285dc925f98403ff426acc70968f104dc820d4f2/LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ],
+      "disposition": "EXACT_TREE_LICENSE_RETAINED"
+    },
+    {
+      "package": "opentelemetry-proto-0.31.0",
+      "declared_license": "Apache-2.0",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "a7175df06de5eaee9909d4805a3d07e28bb752c34cab57fa9cff549da596b30f",
+      "authors_from_package_metadata": [],
+      "source_header_members": [],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [
+        {
+          "url": "https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/285dc925f98403ff426acc70968f104dc820d4f2/LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ],
+      "disposition": "EXACT_TREE_LICENSE_RETAINED"
+    },
+    {
+      "package": "opentelemetry-semantic-conventions-0.31.0",
+      "declared_license": "Apache-2.0",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "e62e29dfe041afb8ed2a6c9737ab57db4907285d999ef8ad3a59092a36bdc846",
+      "authors_from_package_metadata": [],
+      "source_header_members": [],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [
+        {
+          "url": "https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/285dc925f98403ff426acc70968f104dc820d4f2/LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ],
+      "disposition": "EXACT_TREE_LICENSE_RETAINED"
+    },
+    {
+      "package": "opentelemetry_sdk-0.31.0",
+      "declared_license": "Apache-2.0",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "e14ae4f5991976fd48df6d843de219ca6d31b01daaab2dad5af2badeded372bd",
+      "authors_from_package_metadata": [],
+      "source_header_members": [],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [
+        {
+          "url": "https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/285dc925f98403ff426acc70968f104dc820d4f2/LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ],
+      "disposition": "EXACT_TREE_LICENSE_RETAINED"
+    },
+    {
+      "package": "pagable_derive-0.4.1",
+      "declared_license": "Apache-2.0",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "838d17166587914f4e99353766c29160462b681511f08679545a0d07a0dc9415",
+      "authors_from_package_metadata": [
+        "Meta"
+      ],
+      "source_header_members": [
+        "pagable_derive-0.4.1/src/derive_pagable.rs",
+        "pagable_derive-0.4.1/src/derive_pagable_panic.rs",
+        "pagable_derive-0.4.1/src/derive_pagable_tagged.rs",
+        "pagable_derive-0.4.1/src/lib.rs",
+        "pagable_derive-0.4.1/src/typetag.rs"
+      ],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "r-efi-5.3.0",
+      "declared_license": "MIT OR Apache-2.0 OR LGPL-2.1-or-later",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f",
+      "authors_from_package_metadata": [],
+      "source_header_members": [],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "r-efi-6.0.0",
+      "declared_license": "MIT OR Apache-2.0 OR LGPL-2.1-or-later",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf",
+      "authors_from_package_metadata": [],
+      "source_header_members": [],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "rustls-platform-verifier-android-0.1.1",
+      "declared_license": "MIT OR Apache-2.0",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f",
+      "authors_from_package_metadata": [],
+      "source_header_members": [],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "sse-stream-0.2.1",
+      "declared_license": "MIT/Apache-2.0",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "eb4dc4d33c68ec1f27d386b5610a351922656e1fdf5c05bbaad930cd1519479a",
+      "authors_from_package_metadata": [
+        "4t145 <u4t145@163.com>"
+      ],
+      "source_header_members": [],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "static_interner-0.1.2",
+      "declared_license": "MIT OR Apache-2.0",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "fab44341fbf4deae6e8d5ab450f24e1b34e0b2439d39ac0e9b5215a4e5493263",
+      "authors_from_package_metadata": [],
+      "source_header_members": [
+        "static_interner-0.1.2/src/lib.rs"
+      ],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "strong_hash-0.1.0",
+      "declared_license": "MIT OR Apache-2.0",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "0831334aea34390b6b6ec7af0a27f9ee6324ad3a69463e6b240d83d6b7bce9c9",
+      "authors_from_package_metadata": [],
+      "source_header_members": [
+        "strong_hash-0.1.0/src/impls/num_bigint.rs",
+        "strong_hash-0.1.0/src/impls/triomphe.rs",
+        "strong_hash-0.1.0/src/impls.rs",
+        "strong_hash-0.1.0/src/lib.rs"
+      ],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "strong_hash_derive-0.1.0",
+      "declared_license": "MIT OR Apache-2.0",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "ace6b48b7c4383a39bd3b966cca41bc999003aab9f690a2f355525c924296928",
+      "authors_from_package_metadata": [],
+      "source_header_members": [
+        "strong_hash_derive-0.1.0/src/lib.rs"
+      ],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "wasite-0.1.0",
+      "declared_license": "Apache-2.0 OR BSL-1.0 OR MIT",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "b8dad83b4f25e74f184f64c43b150b91efe7647395b42289f38e50566d82855b",
+      "authors_from_package_metadata": [],
+      "source_header_members": [],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [
+        {
+          "archive": "ardaku-wasite-0c72934ad329ab4670eb017581640c2d6eceb289.tar.gz",
+          "member": "wasite-0c72934ad329ab4670eb017581640c2d6eceb289/LICENSE_APACHE_2_0.txt",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "file": "notices/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt"
+        },
+        {
+          "archive": "ardaku-wasite-0c72934ad329ab4670eb017581640c2d6eceb289.tar.gz",
+          "member": "wasite-0c72934ad329ab4670eb017581640c2d6eceb289/LICENSE_BOOST_1_0.txt",
+          "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+          "file": "notices/c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566.txt"
+        },
+        {
+          "archive": "ardaku-wasite-0c72934ad329ab4670eb017581640c2d6eceb289.tar.gz",
+          "member": "wasite-0c72934ad329ab4670eb017581640c2d6eceb289/LICENSE_MIT.txt",
+          "sha256": "508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1",
+          "file": "notices/508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1.txt"
+        }
+      ],
+      "disposition": "EXACT_TREE_LICENSE_RETAINED"
+    },
+    {
+      "package": "wasm-encoder-0.244.0",
+      "declared_license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "990065f2fe63003fe337b932cfb5e3b80e0b4d0f5ff650e6985b1048f62c8319",
+      "authors_from_package_metadata": [
+        "Nick Fitzgerald <fitzgen@gmail.com>"
+      ],
+      "source_header_members": [
+        "wasm-encoder-0.244.0/README.md"
+      ],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [
+        {
+          "archive": "bytecodealliance-wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d.tar.gz",
+          "member": "wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "notices/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "archive": "bytecodealliance-wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d.tar.gz",
+          "member": "wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d/LICENSE-Apache-2.0_WITH_LLVM-exception",
+          "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+          "file": "notices/268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5.txt"
+        },
+        {
+          "archive": "bytecodealliance-wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d.tar.gz",
+          "member": "wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "file": "notices/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt"
+        }
+      ],
+      "disposition": "EXACT_TREE_LICENSE_RETAINED"
+    },
+    {
+      "package": "wasm-metadata-0.244.0",
+      "declared_license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "bb0e353e6a2fbdc176932bbaab493762eb1255a7900fe0fea1a2f96c296cc909",
+      "authors_from_package_metadata": [],
+      "source_header_members": [
+        "wasm-metadata-0.244.0/README.md"
+      ],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [
+        {
+          "archive": "bytecodealliance-wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d.tar.gz",
+          "member": "wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "notices/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "archive": "bytecodealliance-wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d.tar.gz",
+          "member": "wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d/LICENSE-Apache-2.0_WITH_LLVM-exception",
+          "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+          "file": "notices/268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5.txt"
+        },
+        {
+          "archive": "bytecodealliance-wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d.tar.gz",
+          "member": "wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "file": "notices/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt"
+        }
+      ],
+      "disposition": "EXACT_TREE_LICENSE_RETAINED"
+    },
+    {
+      "package": "wasmparser-0.244.0",
+      "declared_license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "47b807c72e1bac69382b3a6fb3dbe8ea4c0ed87ff5629b8685ae6b9a611028fe",
+      "authors_from_package_metadata": [
+        "Yury Delendik <ydelendik@mozilla.com>"
+      ],
+      "source_header_members": [
+        "wasmparser-0.244.0/src/arity.rs",
+        "wasmparser-0.244.0/src/binary_reader.rs",
+        "wasmparser-0.244.0/src/lib.rs",
+        "wasmparser-0.244.0/src/limits.rs",
+        "wasmparser-0.244.0/src/readers/core/code.rs",
+        "wasmparser-0.244.0/src/readers/core/data.rs",
+        "wasmparser-0.244.0/src/readers/core/elements.rs",
+        "wasmparser-0.244.0/src/readers/core/exports.rs",
+        "wasmparser-0.244.0/src/readers/core/functions.rs",
+        "wasmparser-0.244.0/src/readers/core/globals.rs",
+        "wasmparser-0.244.0/src/readers/core/imports.rs",
+        "wasmparser-0.244.0/src/readers/core/init.rs",
+        "wasmparser-0.244.0/src/readers/core/memories.rs",
+        "wasmparser-0.244.0/src/readers/core/names.rs",
+        "wasmparser-0.244.0/src/readers/core/operators.rs",
+        "wasmparser-0.244.0/src/readers/core/producers.rs",
+        "wasmparser-0.244.0/src/readers/core/tables.rs",
+        "wasmparser-0.244.0/src/readers/core/tags.rs",
+        "wasmparser-0.244.0/src/readers/core/types.rs",
+        "wasmparser-0.244.0/src/readers.rs",
+        "wasmparser-0.244.0/src/resources.rs",
+        "wasmparser-0.244.0/src/validator/operators.rs",
+        "wasmparser-0.244.0/src/validator.rs"
+      ],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [
+        {
+          "archive": "bytecodealliance-wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d.tar.gz",
+          "member": "wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "notices/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "archive": "bytecodealliance-wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d.tar.gz",
+          "member": "wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d/LICENSE-Apache-2.0_WITH_LLVM-exception",
+          "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+          "file": "notices/268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5.txt"
+        },
+        {
+          "archive": "bytecodealliance-wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d.tar.gz",
+          "member": "wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "file": "notices/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt"
+        }
+      ],
+      "disposition": "EXACT_TREE_LICENSE_RETAINED"
+    },
+    {
+      "package": "winapi-i686-pc-windows-gnu-0.4.0",
+      "declared_license": "MIT/Apache-2.0",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6",
+      "authors_from_package_metadata": [
+        "Peter Atashian <retep998@gmail.com>"
+      ],
+      "source_header_members": [
+        "winapi-i686-pc-windows-gnu-0.4.0/build.rs",
+        "winapi-i686-pc-windows-gnu-0.4.0/src/lib.rs"
+      ],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "winapi-x86_64-pc-windows-gnu-0.4.0",
+      "declared_license": "MIT/Apache-2.0",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f",
+      "authors_from_package_metadata": [
+        "Peter Atashian <retep998@gmail.com>"
+      ],
+      "source_header_members": [
+        "winapi-x86_64-pc-windows-gnu-0.4.0/build.rs",
+        "winapi-x86_64-pc-windows-gnu-0.4.0/src/lib.rs"
+      ],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "winsplit-0.1.0",
+      "declared_license": "MIT OR Apache-2.0",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "3ab703352da6a72f35c39a533526393725640575bb211f61987a2748323ad956",
+      "authors_from_package_metadata": [
+        "Chip Senkbeil <chip@senkbeil.org>"
+      ],
+      "source_header_members": [
+        "winsplit-0.1.0/README.md"
+      ],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "wit-component-0.244.0",
+      "declared_license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "9d66ea20e9553b30172b5e831994e35fbde2d165325bec84fc43dbf6f4eb9cb2",
+      "authors_from_package_metadata": [
+        "Peter Huene <peter@huene.dev>"
+      ],
+      "source_header_members": [],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [
+        {
+          "archive": "bytecodealliance-wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d.tar.gz",
+          "member": "wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "notices/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "archive": "bytecodealliance-wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d.tar.gz",
+          "member": "wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d/LICENSE-Apache-2.0_WITH_LLVM-exception",
+          "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+          "file": "notices/268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5.txt"
+        },
+        {
+          "archive": "bytecodealliance-wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d.tar.gz",
+          "member": "wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "file": "notices/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt"
+        }
+      ],
+      "disposition": "EXACT_TREE_LICENSE_RETAINED"
+    },
+    {
+      "package": "wit-parser-0.244.0",
+      "declared_license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "ecc8ac4bc1dc3381b7f59c34f00b67e18f910c2c0f50015669dde7def656a736",
+      "authors_from_package_metadata": [
+        "Alex Crichton <alex@alexcrichton.com>"
+      ],
+      "source_header_members": [],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [
+        {
+          "archive": "bytecodealliance-wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d.tar.gz",
+          "member": "wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "notices/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "archive": "bytecodealliance-wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d.tar.gz",
+          "member": "wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d/LICENSE-Apache-2.0_WITH_LLVM-exception",
+          "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+          "file": "notices/268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5.txt"
+        },
+        {
+          "archive": "bytecodealliance-wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d.tar.gz",
+          "member": "wasm-tools-d4e317f22c3bace76cb3205003bcc34b4929037d/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "file": "notices/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt"
+        }
+      ],
+      "disposition": "EXACT_TREE_LICENSE_RETAINED"
+    },
+    {
+      "package": "zune-core-0.4.12",
+      "declared_license": "MIT OR Apache-2.0 OR Zlib",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "3f423a2c17029964870cfaabb1f13dfab7d092a62a29a89264f4d36990ca414a",
+      "authors_from_package_metadata": [],
+      "source_header_members": [
+        "zune-core-0.4.12/src/bit_depth.rs",
+        "zune-core-0.4.12/src/bytestream/reader.rs",
+        "zune-core-0.4.12/src/bytestream/traits.rs",
+        "zune-core-0.4.12/src/bytestream/writer.rs",
+        "zune-core-0.4.12/src/bytestream.rs",
+        "zune-core-0.4.12/src/colorspace.rs",
+        "zune-core-0.4.12/src/lib.rs",
+        "zune-core-0.4.12/src/log.rs",
+        "zune-core-0.4.12/src/options/decoder.rs",
+        "zune-core-0.4.12/src/options/encoder.rs",
+        "zune-core-0.4.12/src/result.rs",
+        "zune-core-0.4.12/src/serde.rs"
+      ],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    },
+    {
+      "package": "zune-jpeg-0.4.21",
+      "declared_license": "MIT OR Apache-2.0 OR Zlib",
+      "permissive_choice_for_review": "Apache-2.0",
+      "source_archive_sha256": "29ce2c8a9384ad323cf564b67da86e21d3cfdff87908bc1223ed5c99bc792713",
+      "authors_from_package_metadata": [
+        "caleb <etemesicaleb@gmail.com>"
+      ],
+      "source_header_members": [
+        "zune-jpeg-0.4.21/src/bitstream.rs",
+        "zune-jpeg-0.4.21/src/color_convert/avx.rs",
+        "zune-jpeg-0.4.21/src/color_convert/neon64.rs",
+        "zune-jpeg-0.4.21/src/color_convert/scalar.rs",
+        "zune-jpeg-0.4.21/src/color_convert.rs",
+        "zune-jpeg-0.4.21/src/components.rs",
+        "zune-jpeg-0.4.21/src/decoder.rs",
+        "zune-jpeg-0.4.21/src/errors.rs",
+        "zune-jpeg-0.4.21/src/headers.rs",
+        "zune-jpeg-0.4.21/src/huffman.rs",
+        "zune-jpeg-0.4.21/src/idct/avx2.rs",
+        "zune-jpeg-0.4.21/src/idct/neon.rs",
+        "zune-jpeg-0.4.21/src/idct/scalar.rs",
+        "zune-jpeg-0.4.21/src/idct.rs",
+        "zune-jpeg-0.4.21/src/lib.rs",
+        "zune-jpeg-0.4.21/src/marker.rs",
+        "zune-jpeg-0.4.21/src/mcu.rs",
+        "zune-jpeg-0.4.21/src/mcu_prog.rs",
+        "zune-jpeg-0.4.21/src/misc.rs",
+        "zune-jpeg-0.4.21/src/unsafe_utils_avx2.rs",
+        "zune-jpeg-0.4.21/src/unsafe_utils_neon.rs",
+        "zune-jpeg-0.4.21/src/upsampler/scalar.rs",
+        "zune-jpeg-0.4.21/src/upsampler.rs",
+        "zune-jpeg-0.4.21/src/worker.rs"
+      ],
+      "embedded_permission_members": [],
+      "exact_upstream_notices": [],
+      "disposition": "DECLARED_TERMS_SOURCE_HEADERS_RETAINED"
+    }
+  ]
+}
