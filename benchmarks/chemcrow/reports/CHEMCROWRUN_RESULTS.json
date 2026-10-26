@@ -1,0 +1,137 @@
+{
+  "schema_version": "chemcrowrun_results_v1",
+  "name": "ChemCrowRun Reproduction",
+  "run_id": "reproduction-v1-sol-20261015",
+  "task_count": 14,
+  "model": "gpt-5.6-sol",
+  "model_substitution": {
+    "historical_model": "gpt-5.5",
+    "actual_model": "gpt-5.6-sol",
+    "reason": "The historical model was not available in the current subscription catalog."
+  },
+  "aggregate": {
+    "internal_g1_12": 10.62857142857143,
+    "internal_g2_12": 11.014285714285714,
+    "internal_delta": 0.3857142857142856,
+    "internal_bootstrap_95_ci": [
+      -0.5071428571428572,
+      1.1214285714285712
+    ],
+    "internal_sign_flip_p_two_sided": 0.43359375,
+    "calibrated_gpt4_g1_10": 9.607142857142858,
+    "calibrated_gpt4_g2_10": 9.571428571428571,
+    "calibrated_gpt4_delta": -0.03571428571428571,
+    "calibrated_gpt4_bootstrap_95_ci": [
+      -0.32142857142857145,
+      0.25
+    ],
+    "calibrated_gpt4_sign_flip_p_two_sided": 1.0,
+    "judge_calls": 42,
+    "judge_cost_usd": 2.9945999999999997
+  },
+  "per_task": [
+    {
+      "task_id": "chemcrow-01",
+      "internal_g1_12": 9.0,
+      "internal_g2_12": 10.0,
+      "calibrated_gpt4_g1_10": 9.5,
+      "calibrated_gpt4_g2_10": 9.0
+    },
+    {
+      "task_id": "chemcrow-02",
+      "internal_g1_12": 11.0,
+      "internal_g2_12": 12.0,
+      "calibrated_gpt4_g1_10": 9.0,
+      "calibrated_gpt4_g2_10": 10.0
+    },
+    {
+      "task_id": "chemcrow-03",
+      "internal_g1_12": 12.0,
+      "internal_g2_12": 12.0,
+      "calibrated_gpt4_g1_10": 10.0,
+      "calibrated_gpt4_g2_10": 10.0
+    },
+    {
+      "task_id": "chemcrow-04",
+      "internal_g1_12": 8.0,
+      "internal_g2_12": 11.0,
+      "calibrated_gpt4_g1_10": 9.0,
+      "calibrated_gpt4_g2_10": 9.0
+    },
+    {
+      "task_id": "chemcrow-05",
+      "internal_g1_12": 9.5,
+      "internal_g2_12": 10.399999999999999,
+      "calibrated_gpt4_g1_10": 10.0,
+      "calibrated_gpt4_g2_10": 10.0
+    },
+    {
+      "task_id": "chemcrow-06",
+      "internal_g1_12": 12.0,
+      "internal_g2_12": 12.0,
+      "calibrated_gpt4_g1_10": 10.0,
+      "calibrated_gpt4_g2_10": 10.0
+    },
+    {
+      "task_id": "chemcrow-07",
+      "internal_g1_12": 10.0,
+      "internal_g2_12": 11.0,
+      "calibrated_gpt4_g1_10": 10.0,
+      "calibrated_gpt4_g2_10": 9.0
+    },
+    {
+      "task_id": "chemcrow-08",
+      "internal_g1_12": 11.3,
+      "internal_g2_12": 12.0,
+      "calibrated_gpt4_g1_10": 9.0,
+      "calibrated_gpt4_g2_10": 10.0
+    },
+    {
+      "task_id": "chemcrow-09",
+      "internal_g1_12": 12.0,
+      "internal_g2_12": 11.8,
+      "calibrated_gpt4_g1_10": 10.0,
+      "calibrated_gpt4_g2_10": 10.0
+    },
+    {
+      "task_id": "chemcrow-10",
+      "internal_g1_12": 11.0,
+      "internal_g2_12": 10.0,
+      "calibrated_gpt4_g1_10": 9.0,
+      "calibrated_gpt4_g2_10": 9.0
+    },
+    {
+      "task_id": "chemcrow-12",
+      "internal_g1_12": 12.0,
+      "internal_g2_12": 12.0,
+      "calibrated_gpt4_g1_10": 10.0,
+      "calibrated_gpt4_g2_10": 10.0
+    },
+    {
+      "task_id": "chemcrow-13",
+      "internal_g1_12": 8.0,
+      "internal_g2_12": 10.0,
+      "calibrated_gpt4_g1_10": 9.0,
+      "calibrated_gpt4_g2_10": 9.0
+    },
+    {
+      "task_id": "chemcrow-14",
+      "internal_g1_12": 12.0,
+      "internal_g2_12": 8.0,
+      "calibrated_gpt4_g1_10": 10.0,
+      "calibrated_gpt4_g2_10": 9.0
+    },
+    {
+      "task_id": "chemcrow-15",
+      "internal_g1_12": 11.0,
+      "internal_g2_12": 12.0,
+      "calibrated_gpt4_g1_10": 10.0,
+      "calibrated_gpt4_g2_10": 10.0
+    }
+  ],
+  "notes": [
+    "Scores are reported on their original scales.",
+    "The calibrated GPT-4 evaluation is an LLM judge and is not an official leaderboard score.",
+    "The paired tests do not establish a statistically significant G2 improvement."
+  ]
+}

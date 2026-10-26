@@ -1,0 +1,61 @@
+services:
+  redis:
+    image: public.ecr.aws/docker/library/redis@sha256:691577adaf11927f4bb8871d40a5dd69a5c300d4453b742e8f6383c3e6e8d2e1
+    command: [redis-server, --requirepass, ubuntu]
+    healthcheck:
+      test: [CMD, redis-cli, -a, ubuntu, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+  broker:
+    image: public.ecr.aws/docker/library/rabbitmq@sha256:e582c0bc7766f3342496d8485efb5a1df782b5ce3886ad017e2eaae442311f69
+    environment:
+      RABBITMQ_DEFAULT_USER: ubuntu
+      RABBITMQ_DEFAULT_PASS: ubuntu
+    healthcheck:
+      test: [CMD, rabbitmq-diagnostics, -q, ping]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+  worker:
+    build: {context: ../fixtures/rxn-sandbox/worker, dockerfile: Dockerfile}
+    healthcheck:
+      test: [CMD, celery, -A, tasks, inspect, ping, --timeout, '5']
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+    environment:
+      CELERY_QUEUE: product_prediction,retro_prediction
+      CELERY_BROKER_URL: amqp://ubuntu:ubuntu@broker:5672//
+      CELERY_RESULT_BACKEND: redis://:ubuntu@redis:6379/0
+      CELERY_CONCURRENCY: '1'
+      CELERY_MAX_TASKS_PER_CHILD: '1'
+      RXN_LOG_LEVEL: info
+      RXN_TORCH_NUM_THREADS: '2'
+    depends_on:
+      redis: {condition: service_healthy}
+      broker: {condition: service_healthy}
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+  mcp:
+    build: {context: ../fixtures/rxn-sandbox/mcp, dockerfile: Dockerfile}
+    environment:
+      CELERY_BROKER_URL: amqp://ubuntu:ubuntu@broker:5672//
+      CELERY_RESULT_BACKEND: redis://:ubuntu@redis:6379/0
+    ports: ['127.0.0.1:18083:8000']
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/openapi.json', timeout=4)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    depends_on:
+      redis: {condition: service_healthy}
+      broker: {condition: service_healthy}
+      worker: {condition: service_healthy}
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]

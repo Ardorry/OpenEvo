@@ -11,6 +11,7 @@ import stat
 import subprocess
 import tempfile
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -25,11 +26,32 @@ from openevo.evolution.framework import canonical_digest
 from openevo.evolution.models import (
     ArtifactRegisterRequest,
     ArtifactType,
-    WorkerClaimInputArtifact,
     WorkerClaimedJob,
+    WorkerClaimInputArtifact,
 )
 
 EvolutionMethod = Callable[[WorkerClaimedJob, Path], list[ArtifactRegisterRequest]]
+
+
+@dataclass(frozen=True, slots=True)
+class CoreReflectorPromptPlan:
+    """Deterministic prompt material prepared by a built-in reflector worker."""
+
+    method_id: str
+    reflection_prompt: str
+    codex_prompt: str
+    dataset_artifact_id: str
+    record_count: int
+    reflected_record_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class CoreReflectorOutputReview:
+    """Deterministic built-in output guard result for managed external execution."""
+
+    content: str
+    audit_report: dict[str, Any]
+    repair_prompt: str | None = None
 
 _REFLECTOR_PROVIDER_OPENAI_CHAT = "openai_chat"
 _REFLECTOR_PROVIDER_CODEX_CLI = "codex_cli"
@@ -254,7 +276,9 @@ def text_memory_reflector(
             "You are a reflector for text memory. Read prior task trajectories and "
             "produce concise reusable Markdown memory. Return only memory.md content."
         ),
-        codex_prompt=_codex_cli_text_memory_reflector_prompt(reflection_prompt),
+        codex_prompt=render_codex_cli_reflector_prompt(
+            "text_memory_reflector", reflection_prompt
+        ),
         error_context="text_memory_reflector",
         temp_prefix="openevo-text-memory-reflector-",
     )
@@ -384,7 +408,9 @@ def text_memory_expel_reflector(
             "task trajectories and produce structured reusable Markdown memory. "
             "Return only memory.md content with the required sections."
         ),
-        codex_prompt=_codex_cli_text_memory_reflector_prompt(reflection_prompt),
+        codex_prompt=render_codex_cli_reflector_prompt(
+            "text_memory_reflector", reflection_prompt
+        ),
         error_context="text_memory_expel_reflector",
         temp_prefix="openevo-text-memory-expel-reflector-",
     )
@@ -535,7 +561,9 @@ def skill_bundle_reflector(
             "You are a reflector for a Codex skill bundle. Read prior task trajectories "
             "and produce the SKILL.md entrypoint. Return only SKILL.md content."
         ),
-        codex_prompt=_codex_cli_skill_bundle_reflector_prompt(reflection_prompt),
+        codex_prompt=render_codex_cli_reflector_prompt(
+            "skill_bundle_reflector", reflection_prompt
+        ),
         error_context="skill_bundle_reflector",
         temp_prefix="openevo-skill-bundle-reflector-",
     )
@@ -4070,7 +4098,7 @@ def _generate_agent_system_reflection(prompt: str, llm_config: dict[str, Any]) -
             "preserve useful existing instructions, and produce a concise Markdown "
             "agent-system instruction file. Return only the Markdown file content."
         ),
-        codex_prompt=_codex_cli_reflector_prompt(prompt),
+        codex_prompt=render_codex_cli_reflector_prompt("agent_system_reflector", prompt),
         error_context="agent_system_reflector",
         temp_prefix="openevo-agent-system-reflector-",
     )
@@ -4281,6 +4309,94 @@ def _codex_cli_skill_bundle_reflector_prompt(prompt: str) -> str:
     )
 
 
+def render_codex_cli_reflector_prompt(method_id: str, prompt: str) -> str:
+    """Render the Core-owned Codex prompt contract for a built-in reflector method."""
+
+    renderers = {
+        "text_memory_reflector": _codex_cli_text_memory_reflector_prompt,
+        "skill_bundle_reflector": _codex_cli_skill_bundle_reflector_prompt,
+        "agent_system_reflector": _codex_cli_reflector_prompt,
+    }
+    try:
+        renderer = renderers[method_id]
+    except KeyError as exc:
+        raise ValueError(f"unsupported Core reflector method: {method_id}") from exc
+    return renderer(prompt)
+
+
+def build_core_reflector_prompt_plan(
+    job: WorkerClaimedJob,
+    *,
+    isolation_preamble: str | None = None,
+) -> CoreReflectorPromptPlan:
+    """Build the same full reflection context used by a built-in Core worker.
+
+    The returned Codex prompt can be executed by a managed rollout rather than the
+    worker's local subprocess provider. This keeps prompt construction, dataset
+    parsing, prior-artifact handling, and redaction owned by Core.
+    """
+
+    dataset = _first_input_artifact(job, ArtifactType.DATASET)
+    if dataset is None:
+        raise ValueError(f"{job.method} requires an input dataset artifact")
+    manifest, records = _read_dataset_artifact(dataset)
+    reflected_records = _reflection_records(
+        records,
+        max_records=_int_config(job.config.get("max_records"), 20),
+    )
+    if job.method == "text_memory_reflector":
+        reflection_prompt = _render_text_memory_reflection_prompt(
+            job=job,
+            dataset=dataset,
+            manifest=manifest,
+            records=records,
+            reflected_records=reflected_records,
+            prior_memory_texts=_text_memory_reflector_base_texts(job),
+        )
+        reflection_prompt = _redact_generic_reflector_prompt(
+            reflection_prompt,
+            job=job,
+            manifests=[manifest],
+        )
+    elif job.method == "skill_bundle_reflector":
+        base_text, _ = _skill_bundle_reflector_base(job)
+        reflection_prompt = _render_skill_bundle_reflection_prompt(
+            job=job,
+            dataset=dataset,
+            manifest=manifest,
+            records=records,
+            reflected_records=reflected_records,
+            base_text=base_text,
+        )
+        reflection_prompt = _redact_generic_reflector_prompt(
+            reflection_prompt,
+            job=job,
+            manifests=[manifest],
+        )
+    elif job.method == "agent_system_reflector":
+        reflection_prompt = _render_agent_system_reflection_prompt(
+            job=job,
+            dataset=dataset,
+            manifest=manifest,
+            records=records,
+            reflected_records=reflected_records,
+            base_text=_agent_system_reflector_base_text(job),
+        )
+    else:
+        raise ValueError(f"unsupported Core reflector method: {job.method}")
+
+    if isolation_preamble and isolation_preamble.strip():
+        reflection_prompt = f"{isolation_preamble.strip()}\n\n{reflection_prompt}"
+    return CoreReflectorPromptPlan(
+        method_id=job.method,
+        reflection_prompt=reflection_prompt,
+        codex_prompt=render_codex_cli_reflector_prompt(job.method, reflection_prompt),
+        dataset_artifact_id=dataset.artifact_id,
+        record_count=len(records),
+        reflected_record_count=len(reflected_records),
+    )
+
+
 def _codex_cli_reflector_env(llm_config: dict[str, Any]) -> dict[str, str]:
     env = dict(os.environ)
     for key in _REFLECTOR_PROXY_ENV_VARS:
@@ -4372,6 +4488,77 @@ def _guard_generic_reflector_output(
             "findings": findings,
         },
     )
+
+
+def review_core_reflector_output(
+    job: WorkerClaimedJob,
+    *,
+    prompt_plan: CoreReflectorPromptPlan,
+    markdown: str,
+) -> CoreReflectorOutputReview:
+    """Apply the deterministic output checks used by built-in reflector workers.
+
+    Agent-system findings return the exact Core repair prompt so a caller can run
+    the repair through its managed model-execution route. Memory and skill output
+    guards are deterministic and return their final registered content directly.
+    """
+
+    dataset = _first_input_artifact(job, ArtifactType.DATASET)
+    if dataset is None:
+        raise ValueError(f"{job.method} requires an input dataset artifact")
+    manifest, _ = _read_dataset_artifact(dataset)
+    if job.method in {"text_memory_reflector", "skill_bundle_reflector"}:
+        content, audit_report = _guard_generic_reflector_output(
+            markdown,
+            job=job,
+            manifests=[manifest],
+        )
+        return CoreReflectorOutputReview(content=content, audit_report=audit_report)
+    if job.method != "agent_system_reflector":
+        raise ValueError(f"unsupported Core reflector method: {job.method}")
+
+    audit_config = _agent_system_audit_config(job)
+    if audit_config.get("enabled") is False:
+        return CoreReflectorOutputReview(
+            content=markdown,
+            audit_report={"enabled": False, "finding_count": 0},
+        )
+    forbidden_literals = _agent_system_forbidden_literals(job, [manifest])
+    findings = _audit_agent_system_markdown(
+        markdown,
+        forbidden_literals=forbidden_literals,
+    )
+    if not findings:
+        return CoreReflectorOutputReview(
+            content=markdown,
+            audit_report={"enabled": True, "finding_count": 0, "findings": []},
+        )
+    repair_context = _render_agent_system_audit_repair_prompt(
+        original_prompt=prompt_plan.reflection_prompt,
+        candidate_markdown=markdown,
+        findings=findings,
+        forbidden_literals=forbidden_literals,
+    )
+    return CoreReflectorOutputReview(
+        content=markdown,
+        audit_report={
+            "enabled": True,
+            "finding_count": len(findings),
+            "findings": findings,
+        },
+        repair_prompt=render_codex_cli_reflector_prompt(job.method, repair_context),
+    )
+
+
+def core_reflector_max_repair_attempts(job: WorkerClaimedJob) -> int:
+    """Return the built-in agent-system repair ceiling for managed execution."""
+
+    if job.method != "agent_system_reflector":
+        return 0
+    audit_config = _agent_system_audit_config(job)
+    if audit_config.get("enabled") is False:
+        return 0
+    return _int_config(audit_config.get("max_repair_attempts"), 2)
 
 
 def _require_text_memory_expel_sections(markdown: str) -> None:

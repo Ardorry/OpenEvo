@@ -31,6 +31,12 @@ prepare recipe) → **READY** (wait for a run slot) → **RUNNING** (harness set
 run) → **POST-RUN** (build trajectory, evaluate, tear down, call back). Terminal
 statuses are `COMPLETED`, `ERROR`, or `TIMEOUT`.
 
+Standalone benchmark topologies may set `gateway.nodes[].session_base_dir` to a private,
+pre-created directory. It scopes managed sessions, credential staging, cleanup journals and
+Docker ownership records to an independent workspace. Omission retains the historical defaults.
+When a verified Docker host-path mapping is configured, the existing requirement that the session
+directory equal the mapped runtime `sessions` directory still applies.
+
 ## Main files
 
 - `server.py`: the FastAPI app — the catch-all LLM proxy route, the

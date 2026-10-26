@@ -42,6 +42,7 @@ class GatewayNodeConfig(_StrictModel):
     max_run_workers: int = Field(default=2, gt=0)
     max_postrun_workers: int = Field(default=4, gt=0)
     default_runtime: RuntimeSpec | None = None
+    session_base_dir: str | None = None
     docker_host_path: DockerHostPathSpec | None = None
 
     @model_validator(mode="before")
