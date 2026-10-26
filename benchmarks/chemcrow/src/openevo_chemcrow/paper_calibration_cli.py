@@ -425,8 +425,12 @@ def prepare(config_path: Path) -> dict[str, Any]:
     _write_json(paths["dataset"], dataset)
     _write_json(paths["candidates"], candidates)
     _write_json(paths["initial_plan"], plan, private=True)
-    _write_report(paths["reports"] / "PAPER_EVALUATOR_PROMPT_ARCHAEOLOGY.md", _archaeology_report(dataset))
-    _write_report(paths["reports"] / "PAPER_EVALUATOR_HISTORICAL_EXTRACTION.md", _extraction_report(dataset))
+    _write_report(
+        paths["reports"] / "PAPER_EVALUATOR_PROMPT_ARCHAEOLOGY.md", _archaeology_report(dataset)
+    )
+    _write_report(
+        paths["reports"] / "PAPER_EVALUATOR_HISTORICAL_EXTRACTION.md", _extraction_report(dataset)
+    )
     return {
         "status": "READY_FOR_CALIBRATION_PAID_AUTHORIZATION",
         "dataset_sha256": canonical_sha256(dataset),

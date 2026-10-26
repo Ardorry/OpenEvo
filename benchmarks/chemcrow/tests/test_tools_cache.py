@@ -64,9 +64,13 @@ def test_pair_cache_replays_only_inside_pair(tmp_path):
 
     pair_a = PairObservationCache(tmp_path, pair_id="pair-a")
     first = pair_a.execute(call_id="a1", tool_name="SMILES2Weight", arguments=arguments, live=live)
-    replay = pair_a.execute(call_id="a2", tool_name="SMILES2Weight", arguments=arguments, live=live)
+    replay = pair_a.execute(
+        call_id="a2", tool_name="SMILES2Weight", arguments=arguments, live=live
+    )
     pair_b = PairObservationCache(tmp_path, pair_id="pair-b")
-    second_pair = pair_b.execute(call_id="b1", tool_name="SMILES2Weight", arguments=arguments, live=live)
+    second_pair = pair_b.execute(
+        call_id="b1", tool_name="SMILES2Weight", arguments=arguments, live=live
+    )
     assert first.source == ObservationSource.LIVE
     assert replay.source == ObservationSource.CACHE_REPLAY
     assert second_pair.source == ObservationSource.LIVE

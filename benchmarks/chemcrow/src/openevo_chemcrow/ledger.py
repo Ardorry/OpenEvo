@@ -25,7 +25,9 @@ class PhaseLedger:
         path = self._path(phase)
         if path.is_file():
             prior = json.loads(path.read_text(encoding="utf-8"))
-            if prior.get("status") == "terminal" and prior.get("authority_sha256") == canonical_sha256(authority):
+            if prior.get("status") == "terminal" and prior.get(
+                "authority_sha256"
+            ) == canonical_sha256(authority):
                 raise ValueError(f"phase already terminal: {phase}")
             raise AmbiguousPhaseClaimError(
                 f"phase {phase} has a non-terminal prior claim; provider-side effects require audit"

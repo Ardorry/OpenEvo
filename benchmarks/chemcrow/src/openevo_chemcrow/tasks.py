@@ -101,9 +101,7 @@ def extract_task(path: Path, *, runs_root: Path) -> tuple[TaskItem, dict[str, An
             "scored_task": True,
             "safety_case": number in _SAFETY_SENSITIVE_SCORED_NUMBERS,
             "safety_demonstration": False,
-            "safety_behavior_must_be_preserved": (
-                number in _SAFETY_SENSITIVE_SCORED_NUMBERS
-            ),
+            "safety_behavior_must_be_preserved": (number in _SAFETY_SENSITIVE_SCORED_NUMBERS),
         },
         "provenance": {
             "source_notebook": relative,

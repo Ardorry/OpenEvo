@@ -21,7 +21,7 @@ from .three_artifact_aggregate import aggregate_three_artifact_results
 from .three_artifact_models import THREE_ARTIFACT_ORDER, ThreeArtifactPairResult
 
 SUBMISSION_SCHEMA_VERSION = "chemcrow_submission_v1"
-PROTOCOL_VERSION = "chemcrow_full_v8_reproduction_v1"
+PROTOCOL_VERSION = "chemcrowrun_v1"
 TASK_MANIFEST_SHA256 = "8c69883d4a2424ed66f4dea0b9d0a0496129556e998902f278ad36a72d132604"
 REPRODUCTION_CONTRACT: dict[str, Any] = {
     "protocol_version": PROTOCOL_VERSION,

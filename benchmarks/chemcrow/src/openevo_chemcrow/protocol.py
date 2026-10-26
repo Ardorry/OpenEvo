@@ -89,7 +89,9 @@ class TaskLocalProtocolRunner:
         ledger_root: Path | None = None,
     ) -> None:
         if evolution_evaluator.evaluator_id == final_evaluator.evaluator_id:
-            raise ValueError("evolution_evaluator and final_evaluator must be independently configured")
+            raise ValueError(
+                "evolution_evaluator and final_evaluator must be independently configured"
+            )
         self.run_root = run_root
         self.candidate = candidate
         self.evolution = evolution
@@ -127,23 +129,39 @@ class TaskLocalProtocolRunner:
         if ledger:
             ledger.terminal(
                 "baseline_candidate",
-                {"run_id": baseline.run_id, "trajectory_sha256": canonical_sha256(baseline.model_dump(mode="json"))},
+                {
+                    "run_id": baseline.run_id,
+                    "trajectory_sha256": canonical_sha256(baseline.model_dump(mode="json")),
+                },
             )
         event_order.append("baseline")
-        if baseline.task_id != task.task_id or baseline.role != "baseline" or baseline.artifact_ids:
+        if (
+            baseline.task_id != task.task_id
+            or baseline.role != "baseline"
+            or baseline.artifact_ids
+        ):
             raise ValueError("baseline authority is invalid")
         runtime = runtime_feedback(baseline)
         event_order.append("runtime_feedback")
         if ledger:
             ledger.claim(
                 "evolution_evaluator",
-                {"task_id": task.task_id, "baseline_run_id": baseline.run_id, "evaluator_id": self.evolution_evaluator.evaluator_id},
+                {
+                    "task_id": task.task_id,
+                    "baseline_run_id": baseline.run_id,
+                    "evaluator_id": self.evolution_evaluator.evaluator_id,
+                },
             )
         evaluator_feedback = self.evolution_evaluator.evaluate(task=task, trajectory=baseline)
         if ledger:
             ledger.terminal(
                 "evolution_evaluator",
-                {"evaluator_run_id": evaluator_feedback.evaluator_run_id, "feedback_sha256": canonical_sha256(evaluator_feedback.model_dump(mode="json"))},
+                {
+                    "evaluator_run_id": evaluator_feedback.evaluator_run_id,
+                    "feedback_sha256": canonical_sha256(
+                        evaluator_feedback.model_dump(mode="json")
+                    ),
+                },
             )
         if evaluator_feedback.evaluator_role != "evolution_evaluator":
             raise ValueError("evolution evaluator returned the wrong role")
@@ -157,7 +175,11 @@ class TaskLocalProtocolRunner:
         if ledger:
             ledger.claim(
                 "reflector",
-                {"task_id": task.task_id, "baseline_run_id": baseline.run_id, "reflector_input_sha256": canonical_sha256(feedback_payload)},
+                {
+                    "task_id": task.task_id,
+                    "baseline_run_id": baseline.run_id,
+                    "reflector_input_sha256": canonical_sha256(feedback_payload),
+                },
             )
         artifact = self.evolution.evolve(
             task=task,
@@ -168,7 +190,11 @@ class TaskLocalProtocolRunner:
         if ledger:
             ledger.terminal(
                 "reflector",
-                {"reflector_run_id": artifact.reflector_run_id, "artifact_id": artifact.artifact_id, "artifact_hash": artifact.content_hash},
+                {
+                    "reflector_run_id": artifact.reflector_run_id,
+                    "artifact_id": artifact.artifact_id,
+                    "artifact_hash": artifact.content_hash,
+                },
             )
         event_order.append("reflector")
         if artifact.task_id != task.task_id or artifact.parent_baseline_run != baseline.run_id:
@@ -180,7 +206,11 @@ class TaskLocalProtocolRunner:
         if ledger:
             ledger.claim(
                 "evolved_candidate",
-                {"task_id": task.task_id, "s0_hash": self.s0_hash, "artifact_ids": [artifact.artifact_id]},
+                {
+                    "task_id": task.task_id,
+                    "s0_hash": self.s0_hash,
+                    "artifact_ids": [artifact.artifact_id],
+                },
             )
         evolved = self.candidate.run_candidate(
             task=task,
@@ -192,7 +222,10 @@ class TaskLocalProtocolRunner:
         if ledger:
             ledger.terminal(
                 "evolved_candidate",
-                {"run_id": evolved.run_id, "trajectory_sha256": canonical_sha256(evolved.model_dump(mode="json"))},
+                {
+                    "run_id": evolved.run_id,
+                    "trajectory_sha256": canonical_sha256(evolved.model_dump(mode="json")),
+                },
             )
         event_order.append("evolved")
         if evolved.task_id != task.task_id or evolved.role != "evolved":
@@ -205,13 +238,22 @@ class TaskLocalProtocolRunner:
         if ledger:
             ledger.claim(
                 "final_evaluator",
-                {"task_id": task.task_id, "baseline_run_id": baseline.run_id, "evolved_run_id": evolved.run_id, "evaluator_id": self.final_evaluator.evaluator_id},
+                {
+                    "task_id": task.task_id,
+                    "baseline_run_id": baseline.run_id,
+                    "evolved_run_id": evolved.run_id,
+                    "evaluator_id": self.final_evaluator.evaluator_id,
+                },
             )
         final = self._blind_compare(task=task, baseline=baseline, evolved=evolved, pair_id=pair_id)
         if ledger:
             ledger.terminal(
                 "final_evaluator",
-                {"mapping_seal_sha256": final.mapping_seal_sha256, "winner": final.winner, "pair_scores_sha256": canonical_sha256(final.model_dump(mode="json"))},
+                {
+                    "mapping_seal_sha256": final.mapping_seal_sha256,
+                    "winner": final.winner,
+                    "pair_scores_sha256": canonical_sha256(final.model_dump(mode="json")),
+                },
             )
         event_order.append("final_evaluator")
         if self.real_mode:
@@ -242,7 +284,9 @@ class TaskLocalProtocolRunner:
             "s0_hash_for_next_item": self.s0_hash,
         }
         reset_path = item_root / "reset.receipt.json"
-        reset_path.write_text(json.dumps(reset_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        reset_path.write_text(
+            json.dumps(reset_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
         event_order.append("reset")
         result = PairResult(
             task_id=task.task_id,
@@ -258,7 +302,9 @@ class TaskLocalProtocolRunner:
             event_order=event_order,
             reset_receipt_sha256=file_sha256(reset_path),
         )
-        (item_root / "pair.result.json").write_text(result.model_dump_json(indent=2), encoding="utf-8")
+        (item_root / "pair.result.json").write_text(
+            result.model_dump_json(indent=2), encoding="utf-8"
+        )
         self._write_human_packet(
             task=task,
             pair_id=pair_id,
@@ -280,7 +326,10 @@ class TaskLocalProtocolRunner:
         baseline_is_a = bool(rng.getrandbits(1))
         answer_a = baseline.answer if baseline_is_a else evolved.answer
         answer_b = evolved.answer if baseline_is_a else baseline.answer
-        mapping = {"A": "baseline" if baseline_is_a else "evolved", "B": "evolved" if baseline_is_a else "baseline"}
+        mapping = {
+            "A": "baseline" if baseline_is_a else "evolved",
+            "B": "evolved" if baseline_is_a else "baseline",
+        }
         mapping_seal = canonical_sha256({"pair_id": pair_id, "mapping": mapping})
         judged = self.final_evaluator.compare(task=task, answer_a=answer_a, answer_b=answer_b)
         if judged.winner not in {"A", "B", "tie"}:

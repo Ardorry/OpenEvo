@@ -114,9 +114,7 @@ class ThreeArtifactTaskLocalProtocolRunner:
         allow_verified_baseline_evaluator_replacement: bool = False,
         recovered_baseline_checkpoint: tuple[Trajectory, EvaluatorFeedback] | None = None,
         allow_verified_reflector_replacements: frozenset[str] = frozenset(),
-        recovered_reflector_outputs: dict[
-            ArtifactKind, RecoveredReflectorOutput
-        ] | None = None,
+        recovered_reflector_outputs: dict[ArtifactKind, RecoveredReflectorOutput] | None = None,
         recovered_artifact_checkpoint: ThreeArtifactBundleReceipt | None = None,
         continue_from_sealed_generation: bool = False,
         allow_verified_evolved_candidate_replacement: bool = False,
@@ -126,9 +124,9 @@ class ThreeArtifactTaskLocalProtocolRunner:
         recovered_reflector_outputs = dict(recovered_reflector_outputs or {})
         if recovered_reflector_outputs and recovered_baseline_checkpoint is None:
             raise ValueError("recovered Reflector outputs require recovered G1")
-        if {
-            _reflector_phase(kind) for kind in recovered_reflector_outputs
-        } & set(allow_verified_reflector_replacements):
+        if {_reflector_phase(kind) for kind in recovered_reflector_outputs} & set(
+            allow_verified_reflector_replacements
+        ):
             raise ValueError("completed and failed Reflector recovery phases overlap")
         if recovered_baseline_before_evaluator is not None and (
             recovered_baseline_checkpoint is not None
@@ -227,9 +225,7 @@ class ThreeArtifactTaskLocalProtocolRunner:
                 raise ValueError("recovered pre-evaluator baseline authority is invalid")
             if ledger is None:
                 raise ValueError("baseline evaluator replacement requires verified ledger")
-            evaluator_expectation = ledger.replacement_expectation(
-                "baseline_internal_evaluator"
-            )
+            evaluator_expectation = ledger.replacement_expectation("baseline_internal_evaluator")
             evaluator_activation = ledger.claim(
                 "baseline_internal_evaluator",
                 {
@@ -242,9 +238,7 @@ class ThreeArtifactTaskLocalProtocolRunner:
                 expected_replacement=evaluator_expectation,
             )
             event_order.extend(["baseline", "runtime_feedback"])
-            baseline_evaluation = self.evolution_evaluator.evaluate(
-                task=task, trajectory=baseline
-            )
+            baseline_evaluation = self.evolution_evaluator.evaluate(task=task, trajectory=baseline)
             _assert_internal_evaluation(baseline_evaluation)
             parse_receipt = confidence_parse_receipt(self.evolution_evaluator)
             ledger.terminal(

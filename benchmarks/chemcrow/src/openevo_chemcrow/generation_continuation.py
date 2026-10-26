@@ -43,11 +43,7 @@ def _regular_bytes(path: Path, *, allowed_root: Path) -> bytes:
     except ValueError as exc:
         raise ValueError(f"sealed continuation source escaped its root: {target}") from exc
     before = target.lstat()
-    if (
-        not stat.S_ISREG(before.st_mode)
-        or stat.S_ISLNK(before.st_mode)
-        or before.st_nlink != 1
-    ):
+    if not stat.S_ISREG(before.st_mode) or stat.S_ISLNK(before.st_mode) or before.st_nlink != 1:
         raise ValueError(f"sealed continuation source is not a regular file: {target}")
     payload = target.read_bytes()
     after = target.lstat()
@@ -92,11 +88,7 @@ def _artifact_content_path(*, uri: str, kind: ArtifactKind) -> Path:
 
 def _load_artifact_rows(db_path: Path, artifact_ids: list[str]) -> dict[str, dict[str, Any]]:
     before = db_path.lstat()
-    if (
-        not stat.S_ISREG(before.st_mode)
-        or stat.S_ISLNK(before.st_mode)
-        or before.st_nlink != 1
-    ):
+    if not stat.S_ISREG(before.st_mode) or stat.S_ISLNK(before.st_mode) or before.st_nlink != 1:
         raise ValueError("sealed generation Core database is not a regular file")
     placeholders = ",".join("?" for _ in artifact_ids)
     uri = f"file:{Path(os.path.abspath(db_path))}?mode=ro"
@@ -178,8 +170,7 @@ def _baseline_claim_binds_current_trajectory(
             and isinstance(attempt.get("receipt"), dict)
             and attempt["receipt"].get("schema_version")
             == "chemcrow_baseline_evaluator_no_effect_recovery_v1"
-            and attempt["receipt"].get("baseline_original_trajectory_sha256")
-            == original_sha256
+            and attempt["receipt"].get("baseline_original_trajectory_sha256") == original_sha256
             and attempt["receipt"].get("baseline_reconstructed_trajectory_sha256")
             == baseline_sha256
             and attempt["receipt"].get("candidate_redispatched") is False
@@ -260,8 +251,7 @@ def load_sealed_generation_continuation(
         or result.artifact_bundle != bundle
         or result.reset_receipt_sha256 != reset_sha256
         or bundle.prompt_profile != "core_full_worker_v1"
-        or [item.artifact_type for item in bundle.artifacts]
-        != list(THREE_ARTIFACT_ORDER)
+        or [item.artifact_type for item in bundle.artifacts] != list(THREE_ARTIFACT_ORDER)
         or boundary.get("status") != "G1_AND_ARTIFACTS_SEALED"
         or boundary.get("task_id") != task.task_id
         or boundary.get("pair_id") != pair_id
@@ -331,9 +321,7 @@ def load_sealed_generation_continuation(
         manifest_payload, manifest_sha256 = _regular_json(
             manifest_path, allowed_root=evolution_artifact_root
         )
-        content_path = _artifact_content_path(
-            uri=str(row["uri"]), kind=receipt.artifact_type
-        )
+        content_path = _artifact_content_path(uri=str(row["uri"]), kind=receipt.artifact_type)
         content = _regular_bytes(content_path, allowed_root=evolution_artifact_root)
         if (
             row.get("type") != receipt.artifact_type.value
@@ -355,10 +343,8 @@ def load_sealed_generation_continuation(
             or claim["authority"].get("task_id") != task.task_id
             or claim["authority"].get("pair_id") != pair_id
             or claim["authority"].get("parent_run_id") != baseline.run_id
-            or claim["authority"].get("artifact_type")
-            != receipt.artifact_type.value
-            or claim["authority"].get("input_evidence_hash")
-            != bundle.input_evidence_hash
+            or claim["authority"].get("artifact_type") != receipt.artifact_type.value
+            or claim["authority"].get("input_evidence_hash") != bundle.input_evidence_hash
             or claim["authority"].get("sibling_artifact_ids") != []
             or claim["authority"].get("paper_evaluator_feedback_included") is not False
             or claim["receipt"].get("artifact_id") != receipt.artifact_id
@@ -395,13 +381,9 @@ def load_sealed_generation_continuation(
         "source_reset_receipt_sha256": reset_sha256,
         "source_phase_claim_sha256_by_phase": claim_hashes,
         "baseline_run_id": baseline.run_id,
-        "baseline_trajectory_sha256": canonical_sha256(
-            baseline.model_dump(mode="json")
-        ),
+        "baseline_trajectory_sha256": canonical_sha256(baseline.model_dump(mode="json")),
         "baseline_evaluator_run_id": evaluation.evaluator_run_id,
-        "baseline_evaluation_sha256": canonical_sha256(
-            evaluation.model_dump(mode="json")
-        ),
+        "baseline_evaluation_sha256": canonical_sha256(evaluation.model_dump(mode="json")),
         "input_evidence_sha256": bundle.input_evidence_hash,
         "artifact_authority_by_type": artifact_authority,
         "prior_g2_candidate_calls": 0,

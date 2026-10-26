@@ -56,18 +56,14 @@ BLIND_RESULT_SCHEMA = "chemcrow_paper_blind_g1_g2_result_v1"
 BLIND_AGGREGATE_SCHEMA = "chemcrow_paper_blind_g1_g2_aggregate_v1"
 BLIND_PROTOCOL = "full_v5_g1_vs_g2_balanced_blind_calibrated_paper_judge_v1"
 BLIND_REVERSED_PLAN_SCHEMA = "chemcrow_paper_blind_g1_g2_reversed_plan_v1"
-BLIND_REVERSED_PROTOCOL = (
-    "full_v5_g1_vs_g2_reversed_blind_calibrated_paper_judge_v1"
-)
+BLIND_REVERSED_PROTOCOL = "full_v5_g1_vs_g2_reversed_blind_calibrated_paper_judge_v1"
 BLIND_COMPARISON = "blind_g1_vs_g2"
 BLIND_CALL_COUNT = len(FROZEN_PAPER_TASK_IDS)
 BLIND_CALL_ID_PREFIX = "paper-blind-v1"
 BLIND_REVERSED_CALL_ID_PREFIX = "paper-blind-reversed-v1"
 BLIND_RANDOMIZATION_SEED = 20260827
 BLIND_AUTHORIZATION = "I_AUTHORIZE_14_SEALED_BLIND_G1_G2_PAPER_COMPARISONS"
-BLIND_REVERSED_AUTHORIZATION = (
-    "I_AUTHORIZE_14_SEALED_REVERSED_BLIND_G1_G2_PAPER_COMPARISONS"
-)
+BLIND_REVERSED_AUTHORIZATION = "I_AUTHORIZE_14_SEALED_REVERSED_BLIND_G1_G2_PAPER_COMPARISONS"
 BLIND_MAX_AUTHORIZED_USD = 5.0
 BLIND_ORDER_ORIGINAL = "deterministic_seeded_balanced_v1"
 BLIND_ORDER_REVERSED = "exact_per_task_inverse_of_deterministic_seeded_balanced_v1"
@@ -128,8 +124,7 @@ def blind_cost_ceiling() -> dict[str, Any]:
     max_input_tokens = PAPER_EVALUATOR_CONTEXT_TOKENS - PAPER_EVALUATOR_MAX_OUTPUT_TOKENS
     per_call = (
         max_input_tokens * PAPER_EVALUATOR_INPUT_USD_PER_TOKEN
-        + PAPER_EVALUATOR_OUTPUT_USD_PER_TOKEN
-        * PAPER_EVALUATOR_MAX_OUTPUT_TOKENS
+        + PAPER_EVALUATOR_OUTPUT_USD_PER_TOKEN * PAPER_EVALUATOR_MAX_OUTPUT_TOKENS
     )
     return {
         "model_context_tokens": PAPER_EVALUATOR_CONTEXT_TOKENS,
@@ -161,9 +156,7 @@ def reversed_answer_order() -> dict[str, str]:
     """Return the exact per-task inverse of the first frozen blind round."""
     inverse = {
         task_id: (
-            "openevo_evolved"
-            if student_a_system == "openevo_baseline"
-            else "openevo_baseline"
+            "openevo_evolved" if student_a_system == "openevo_baseline" else "openevo_baseline"
         )
         for task_id, student_a_system in balanced_answer_order().items()
     }
@@ -201,10 +194,7 @@ def _blind_variant(order_variant: str) -> dict[str, str]:
 
 def blind_plan_order_variant(plan: dict[str, Any]) -> str:
     """Resolve old round-one plans and the explicit reversed-round plan."""
-    if (
-        plan.get("schema_version") == BLIND_PLAN_SCHEMA
-        and plan.get("protocol") == BLIND_PROTOCOL
-    ):
+    if plan.get("schema_version") == BLIND_PLAN_SCHEMA and plan.get("protocol") == BLIND_PROTOCOL:
         return BLIND_ORDER_ORIGINAL
     if (
         plan.get("schema_version") == BLIND_REVERSED_PLAN_SCHEMA
@@ -290,8 +280,7 @@ def build_blind_g1_g2_plan(
     if len(calls) != BLIND_CALL_COUNT or len({call.call_id for call in calls}) != len(calls):
         raise AssertionError("blind comparison requires 14 unique calls")
     order_manifest = [
-        {"task_id": call.task_id, "student_a_system": call.student_a_system}
-        for call in calls
+        {"task_id": call.task_id, "student_a_system": call.student_a_system} for call in calls
     ]
     plan = {
         "schema_version": variant["schema_version"],
@@ -314,9 +303,7 @@ def build_blind_g1_g2_plan(
         "g1_as_student_a_count": sum(
             call.student_a_system == "openevo_baseline" for call in calls
         ),
-        "g2_as_student_a_count": sum(
-            call.student_a_system == "openevo_evolved" for call in calls
-        ),
+        "g2_as_student_a_count": sum(call.student_a_system == "openevo_evolved" for call in calls),
         "reflector_access": False,
         "evolution_feedback_access": False,
         "sealed_output_only": True,
@@ -336,9 +323,7 @@ def build_blind_g1_g2_plan(
             {
                 "answer_order_variant": BLIND_ORDER_REVERSED,
                 "answer_order_method": "exact_per_task_inverse_of_round_one",
-                "reversed_from_plan_sha256": immutable_reference_hashes[
-                    "original_blind_plan"
-                ][1],
+                "reversed_from_plan_sha256": immutable_reference_hashes["original_blind_plan"][1],
                 "reversed_from_aggregate_sha256": immutable_reference_hashes[
                     "original_blind_aggregate"
                 ][1],
@@ -376,16 +361,14 @@ def validate_blind_g1_g2_plan(plan: dict[str, Any]) -> list[PaperBlindG1G2Call]:
         raise ValueError("blind G1/G2 plan authority is invalid")
     calls = [PaperBlindG1G2Call.model_validate(raw) for raw in plan.get("calls", [])]
     order_manifest = [
-        {"task_id": call.task_id, "student_a_system": call.student_a_system}
-        for call in calls
+        {"task_id": call.task_id, "student_a_system": call.student_a_system} for call in calls
     ]
     if (
         len(calls) != BLIND_CALL_COUNT
         or tuple(call.task_id for call in calls) != FROZEN_PAPER_TASK_IDS
         or len({call.call_id for call in calls}) != BLIND_CALL_COUNT
         or any(
-            call.call_id != f"{variant['call_id_prefix']}-{call.task_id}-blind"
-            for call in calls
+            call.call_id != f"{variant['call_id_prefix']}-{call.task_id}-blind" for call in calls
         )
         or plan.get("answer_order_manifest") != order_manifest
         or plan.get("answer_order_manifest_sha256") != canonical_sha256(order_manifest)
@@ -624,9 +607,7 @@ def preflight_blind_g1_g2(*, config_path: Path, output: Path) -> dict[str, Any]:
         pairs=pairs,
         expected_source_pair_protocol=str(config["source_pair_protocol"]),
         immutable_reference_hashes=references,
-        answer_order_variant=str(
-            config.get("answer_order_variant", BLIND_ORDER_ORIGINAL)
-        ),
+        answer_order_variant=str(config.get("answer_order_variant", BLIND_ORDER_ORIGINAL)),
     )
     plan_path = _path(config_path, config["plan_path"])
     plan_path.parent.mkdir(parents=True, exist_ok=True)
@@ -779,9 +760,7 @@ def _position_diagnostics(per_task: list[dict[str, Any]]) -> dict[str, Any]:
         by_g2_position[g2_position].append(delta)
         if delta == 0:
             ties += 1
-        elif (delta > 0 and g2_position == "A") or (
-            delta < 0 and g2_position == "B"
-        ):
+        elif (delta > 0 and g2_position == "A") or (delta < 0 and g2_position == "B"):
             student_a_wins += 1
         else:
             student_b_wins += 1
@@ -928,12 +907,8 @@ def combine_blind_g1_g2_rounds(
         first_delta = float(first["g2_minus_g1"])
         second_delta = float(second["g2_minus_g1"])
         preference_agreements += _delta_sign(first_delta) == _delta_sign(second_delta)
-        mean_g1 = statistics.mean(
-            [float(first["g1_grade"]), float(second["g1_grade"])]
-        )
-        mean_g2 = statistics.mean(
-            [float(first["g2_grade"]), float(second["g2_grade"])]
-        )
+        mean_g1 = statistics.mean([float(first["g1_grade"]), float(second["g1_grade"])])
+        mean_g2 = statistics.mean([float(first["g2_grade"]), float(second["g2_grade"])])
         mean_delta = mean_g2 - mean_g1
         per_task.append(
             {
@@ -974,12 +949,8 @@ def combine_blind_g1_g2_rounds(
         "reversed_round_report_sha256": file_sha256(reversed_round_path),
         "round_one_mean_delta": round_one["mean_g2_minus_g1"],
         "reversed_round_mean_delta": reversed_round["mean_g2_minus_g1"],
-        "two_order_mean_g1": statistics.mean(
-            float(row["two_order_mean_g1"]) for row in per_task
-        ),
-        "two_order_mean_g2": statistics.mean(
-            float(row["two_order_mean_g2"]) for row in per_task
-        ),
+        "two_order_mean_g1": statistics.mean(float(row["two_order_mean_g1"]) for row in per_task),
+        "two_order_mean_g2": statistics.mean(float(row["two_order_mean_g2"]) for row in per_task),
         "two_order_mean_delta": statistics.mean(deltas),
         "two_order_median_delta": statistics.median(deltas),
         "two_order_g2_wins": wins,
@@ -987,8 +958,7 @@ def combine_blind_g1_g2_rounds(
         "two_order_g1_wins": losses,
         "paired_bootstrap_95_ci_mean_delta": _bootstrap_mean_ci(deltas),
         "exact_sign_test_two_sided_p": _exact_sign_test(wins=wins, losses=losses),
-        "preference_agreement_across_orders": preference_agreements
-        / BLIND_CALL_COUNT,
+        "preference_agreement_across_orders": preference_agreements / BLIND_CALL_COUNT,
         "preference_agreement_task_count": preference_agreements,
         "student_a_mean_grade": statistics.mean(student_a_scores),
         "student_b_mean_grade": statistics.mean(student_b_scores),
@@ -1010,9 +980,7 @@ def combine_blind_g1_g2_rounds(
             "order remain too small for a definitive effect claim."
         ),
     }
-    output_json.write_text(
-        json.dumps(combined, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    output_json.write_text(json.dumps(combined, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     output_markdown.write_text(_render_two_order_markdown(combined), encoding="utf-8")
     return combined
 
@@ -1068,9 +1036,7 @@ def _render_two_order_markdown(combined: dict[str, Any]) -> str:
     return "\n".join(rows)
 
 
-def _reference_bindings(
-    config_path: Path, config: dict[str, Any]
-) -> dict[str, tuple[Path, str]]:
+def _reference_bindings(config_path: Path, config: dict[str, Any]) -> dict[str, tuple[Path, str]]:
     bindings = {
         "production_42_call_aggregate": (
             _path(config_path, config["reference_42_call_aggregate"]),
@@ -1167,9 +1133,7 @@ def main(argv: list[str] | None = None) -> None:
         return
     config_path = args.config.resolve()
     if args.command == "preflight":
-        report = preflight_blind_g1_g2(
-            config_path=config_path, output=args.output.resolve()
-        )
+        report = preflight_blind_g1_g2(config_path=config_path, output=args.output.resolve())
         print(json.dumps({"status": report["status"], "model_calls": 0}, sort_keys=True))
         return
     if args.command == "run":

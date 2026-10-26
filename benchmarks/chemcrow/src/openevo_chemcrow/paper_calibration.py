@@ -454,8 +454,7 @@ def build_prompt_candidate_manifest(*, dataset_sha256: str) -> dict[str, Any]:
 
 def validate_prompt_candidate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     if (
-        manifest.get("schema_version")
-        != "chemcrow_paper_evaluator_prompt_candidates_v1"
+        manifest.get("schema_version") != "chemcrow_paper_evaluator_prompt_candidates_v1"
         or manifest.get("protocol") != CALIBRATION_PROTOCOL
         or manifest.get("exact_prompt_recovered") is not False
         or manifest.get("candidate_count") != 3
@@ -513,9 +512,7 @@ def calibration_cost_ceiling() -> dict[str, Any]:
         "max_repeatability_calls": CALIBRATION_MAX_REPEATABILITY_CALLS,
         "max_total_calls": CALIBRATION_MAX_CALLS,
         "list_price_ceiling_usd_per_call": round(per_call, 8),
-        "list_price_ceiling_usd_initial": round(
-            per_call * CALIBRATION_MAX_INITIAL_CALLS, 8
-        ),
+        "list_price_ceiling_usd_initial": round(per_call * CALIBRATION_MAX_INITIAL_CALLS, 8),
         "list_price_ceiling_usd_repeatability": round(
             per_call * CALIBRATION_MAX_REPEATABILITY_CALLS, 8
         ),
@@ -559,9 +556,7 @@ def build_calibration_plan(
                     ),
                     task_id=task_id,
                     prompt_candidate_id=candidate_id,
-                    prompt_candidate_sha256=canonical_sha256(
-                        _CANDIDATE_TEMPLATES[candidate_id]
-                    ),
+                    prompt_candidate_sha256=canonical_sha256(_CANDIDATE_TEMPLATES[candidate_id]),
                     prompt=prompt,
                     prompt_sha256=canonical_sha256(prompt),
                     input_sha256=canonical_sha256(input_value),
@@ -648,7 +643,10 @@ def build_repeatability_plan(
     calls: list[CalibrationCall] = []
     for task_id in REPEATABILITY_TASK_IDS:
         record = by_task.get(task_id)
-        if not isinstance(record, dict) or record.get("historical_evaluator_label_available") is not True:
+        if (
+            not isinstance(record, dict)
+            or record.get("historical_evaluator_label_available") is not True
+        ):
             raise ValueError(f"repeatability task is unavailable: {task_id}")
         input_value = {
             "task": record["task_text"],
@@ -711,12 +709,14 @@ def build_repeatability_plan(
     return plan
 
 
-def assert_calibration_ledger_separation(
-    calibration_root: Path, production_root: Path
-) -> None:
+def assert_calibration_ledger_separation(calibration_root: Path, production_root: Path) -> None:
     calibration = calibration_root.resolve()
     production = production_root.resolve()
-    if calibration == production or production in calibration.parents or calibration in production.parents:
+    if (
+        calibration == production
+        or production in calibration.parents
+        or calibration in production.parents
+    ):
         raise ValueError("calibration and production ledgers must be separate non-nested roots")
     if calibration.name != "paper-evaluator-calibration-v1":
         raise ValueError("calibration ledger root has an unexpected identity")
@@ -806,7 +806,10 @@ def run_calibration_plan(
         receipt_path = shim_receipt_root / f"{call.call_id}.receipt.json"
         if result_path.exists():
             result = json.loads(result_path.read_text(encoding="utf-8"))
-            if result.get("call_id") != call.call_id or result.get("prompt_sha256") != call.prompt_sha256:
+            if (
+                result.get("call_id") != call.call_id
+                or result.get("prompt_sha256") != call.prompt_sha256
+            ):
                 raise ValueError("existing calibration result differs from frozen call")
             results.append(result)
             continue
@@ -869,17 +872,13 @@ def run_calibration_plan(
             },
             "cost": {
                 "list_price_cost_usd": receipt.get("list_price_cost_usd"),
-                "openrouter_reported_cost_usd": receipt.get(
-                    "openrouter_reported_cost_usd"
-                ),
+                "openrouter_reported_cost_usd": receipt.get("openrouter_reported_cost_usd"),
             },
             "receipt_sha256": file_sha256(receipt_path),
             "execution_route": CALIBRATION_CORE_ROUTE,
             "official_grades_in_model_request": False,
             "production_ledger_included": False,
-            "recovered_after_local_result_seal_failure": (
-                recovered_after_local_seal_failure
-            ),
+            "recovered_after_local_result_seal_failure": (recovered_after_local_seal_failure),
         }
         _exclusive_json_write(result_path, result)
         results.append(result)
@@ -1008,9 +1007,7 @@ def leave_one_task_out_selection(
     for held_out in task_ids:
         training_dataset = {
             **dataset,
-            "tasks": [
-                item for item in dataset["tasks"] if item["repo_task_id"] != held_out
-            ],
+            "tasks": [item for item in dataset["tasks"] if item["repo_task_id"] != held_out],
         }
         training_metrics = {
             candidate_id: compute_candidate_metrics(
@@ -1035,9 +1032,7 @@ def leave_one_task_out_selection(
             {
                 "held_out_task_id": held_out,
                 "selected_candidate_id": selected,
-                "held_out_pairwise_agreement": held_metrics[
-                    "pairwise_preference_agreement"
-                ],
+                "held_out_pairwise_agreement": held_metrics["pairwise_preference_agreement"],
                 "held_out_score_mae": held_metrics["score_mae"],
                 "held_out_delta_error": held_metrics["delta_mae"],
             }
@@ -1050,12 +1045,8 @@ def leave_one_task_out_selection(
         "held_out_pairwise_agreement": statistics.mean(
             fold["held_out_pairwise_agreement"] for fold in folds
         ),
-        "held_out_score_error": statistics.mean(
-            fold["held_out_score_mae"] for fold in folds
-        ),
-        "held_out_delta_error": statistics.mean(
-            fold["held_out_delta_error"] for fold in folds
-        ),
+        "held_out_score_error": statistics.mean(fold["held_out_score_mae"] for fold in folds),
+        "held_out_delta_error": statistics.mean(fold["held_out_delta_error"] for fold in folds),
         "folds": folds,
         "independent_benchmark_claimed": False,
     }
@@ -1102,8 +1093,7 @@ def analyze_calibration_results(
     total_list_cost = 0.0
     local_result_seal_recovery_count = 0
     candidate_costs = {
-        candidate_id: {"reported": 0.0, "list": 0.0}
-        for candidate_id in PROMPT_CANDIDATE_IDS
+        candidate_id: {"reported": 0.0, "list": 0.0} for candidate_id in PROMPT_CANDIDATE_IDS
     }
     for call in calls:
         path = initial_result_root / f"{call.call_id}.result.json"
@@ -1158,9 +1148,7 @@ def analyze_calibration_results(
                 "usage": result["usage"],
                 "cost": result["cost"],
                 "result_sha256": file_sha256(path),
-                "recovered_after_local_result_seal_failure": (
-                    recovered_after_local_seal_failure
-                ),
+                "recovered_after_local_result_seal_failure": (recovered_after_local_seal_failure),
             }
         )
         outputs_by_candidate[call.prompt_candidate_id].append(
@@ -1184,9 +1172,7 @@ def analyze_calibration_results(
         metric["proven_openrouter_reported_cost_usd"] = round(
             candidate_costs[candidate_id]["reported"], 8
         )
-        metric["list_price_cost_usd"] = round(
-            candidate_costs[candidate_id]["list"], 8
-        )
+        metric["list_price_cost_usd"] = round(candidate_costs[candidate_id]["list"], 8)
         metrics[candidate_id] = metric
     bootstrap = {
         candidate_id: bootstrap_confidence_intervals(
@@ -1196,9 +1182,7 @@ def analyze_calibration_results(
     }
     selection = select_prompt_candidate(metrics)
     selected_id = selection["selected_candidate_id"]
-    loo = leave_one_task_out_selection(
-        dataset=dataset, outputs_by_candidate=outputs_by_candidate
-    )
+    loo = leave_one_task_out_selection(dataset=dataset, outputs_by_candidate=outputs_by_candidate)
     repeatability = _repeatability_analysis(
         selected_candidate_id=selected_id,
         primary_rows=rows,
@@ -1305,12 +1289,11 @@ def _repeatability_analysis(
     calls = validate_calibration_plan(repeatability_plan)
     if repeatability_plan.get("selected_candidate_id") != selected_candidate_id:
         raise ValueError("repeatability plan selected candidate differs")
-    by_task: dict[str, list[tuple[float, float]]] = {task_id: [] for task_id in REPEATABILITY_TASK_IDS}
+    by_task: dict[str, list[tuple[float, float]]] = {
+        task_id: [] for task_id in REPEATABILITY_TASK_IDS
+    }
     for row in primary_rows:
-        if (
-            row["prompt_candidate_id"] == selected_candidate_id
-            and row["task_id"] in by_task
-        ):
+        if row["prompt_candidate_id"] == selected_candidate_id and row["task_id"] in by_task:
             by_task[row["task_id"]].append(
                 (row["current_student_a_grade"], row["current_student_b_grade"])
             )
@@ -1495,13 +1478,23 @@ def _paired_metric_records(
 
 
 def _metrics_from_records(records: list[dict[str, float]]) -> dict[str, Any]:
-    official_scores = [value for record in records for value in (record["official_a"], record["official_b"])]
-    current_scores = [value for record in records for value in (record["current_a"], record["current_b"])]
-    errors = [current - official for current, official in zip(current_scores, official_scores, strict=True)]
+    official_scores = [
+        value for record in records for value in (record["official_a"], record["official_b"])
+    ]
+    current_scores = [
+        value for record in records for value in (record["current_a"], record["current_b"])
+    ]
+    errors = [
+        current - official
+        for current, official in zip(current_scores, official_scores, strict=True)
+    ]
     abs_errors = [abs(value) for value in errors]
     official_deltas = [record["official_a"] - record["official_b"] for record in records]
     current_deltas = [record["current_a"] - record["current_b"] for record in records]
-    delta_errors = [current - official for current, official in zip(current_deltas, official_deltas, strict=True)]
+    delta_errors = [
+        current - official
+        for current, official in zip(current_deltas, official_deltas, strict=True)
+    ]
     labels = ("a_wins", "tie", "b_wins")
     confusion = {official: {current: 0 for current in labels} for official in labels}
     agreements = 0

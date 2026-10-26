@@ -81,7 +81,9 @@ def _another_task(task_item: TaskItem) -> TaskItem:
     body = task_item.model_dump(mode="json")
     body["task_id"] = "chemcrow-test-02"
     body["prompt"] = "A second independent chemistry task."
-    body["sanitized_item_sha256"] = canonical_sha256({"task_id": body["task_id"], "prompt": body["prompt"]})
+    body["sanitized_item_sha256"] = canonical_sha256(
+        {"task_id": body["task_id"], "prompt": body["prompt"]}
+    )
     return TaskItem.model_validate(body)
 
 

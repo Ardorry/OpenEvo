@@ -146,9 +146,7 @@ def test_reversed_plan_has_fresh_namespace_and_binds_original_round(tmp_path):
     assert authority["authorization"] != BLIND_AUTHORIZATION
     assert authority["call_id_prefix"] == BLIND_REVERSED_CALL_ID_PREFIX
     assert all(call.call_id.startswith(f"{BLIND_REVERSED_CALL_ID_PREFIX}-") for call in calls)
-    assert all(
-        call.student_a_system == reversed_answer_order()[call.task_id] for call in calls
-    )
+    assert all(call.student_a_system == reversed_answer_order()[call.task_id] for call in calls)
 
 
 def test_reversed_plan_requires_original_round_hash_bindings(tmp_path):
@@ -322,11 +320,7 @@ def test_two_order_combination_requires_inverse_positions_and_averages(tmp_path)
         rows = []
         original_order = balanced_answer_order()
         for task_id in FROZEN_PAPER_TASK_IDS:
-            g1_position = (
-                "A"
-                if original_order[task_id] == "openevo_baseline"
-                else "B"
-            )
+            g1_position = "A" if original_order[task_id] == "openevo_baseline" else "B"
             if reversed_round:
                 g1_position = "B" if g1_position == "A" else "A"
             rows.append(

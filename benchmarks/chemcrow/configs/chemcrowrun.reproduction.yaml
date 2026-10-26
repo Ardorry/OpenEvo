@@ -8,7 +8,7 @@ task_ids: all
 feedback_mode: F2
 random_seed: 20260825
 reproduction_contract:
-  protocol_version: chemcrow_full_v8_reproduction_v1
+  protocol_version: chemcrowrun_v1
   task_manifest_sha256: 8c69883d4a2424ed66f4dea0b9d0a0496129556e998902f278ad36a72d132604
   task_count: 14
   random_seed: 20260825
@@ -70,7 +70,7 @@ candidate:
     strategy: agent_transcript
     config: {}
   metadata:
-    policy_version: chemcrow-full-v8-reproduction-v1
+    policy_version: chemcrowrun-v1
     rollout_step: 0
 reflectors:
   memory:

@@ -19,13 +19,9 @@ THREE_ARTIFACT_ORDER = (
 )
 
 LEGACY_THREE_ARTIFACT_BUNDLE_PROTOCOL = "chemcrow_three_isolated_artifacts_v1"
-CORE_NATIVE_THREE_ARTIFACT_BUNDLE_PROTOCOL = (
-    "chemcrow_three_isolated_core_native_artifacts_v2"
-)
+CORE_NATIVE_THREE_ARTIFACT_BUNDLE_PROTOCOL = "chemcrow_three_isolated_core_native_artifacts_v2"
 LEGACY_THREE_ARTIFACT_PROTOCOL_LABEL = "chemcrow-three-isolated-artifacts-v1"
-CORE_NATIVE_THREE_ARTIFACT_PROTOCOL_LABEL = (
-    "chemcrow-three-isolated-core-native-artifacts-v2"
-)
+CORE_NATIVE_THREE_ARTIFACT_PROTOCOL_LABEL = "chemcrow-three-isolated-core-native-artifacts-v2"
 CORE_ROLE_WRAPPER_PROMPT_PROFILE = "core_role_wrapper_v1"
 CORE_FULL_WORKER_PROMPT_PROFILE = "core_full_worker_v1"
 
@@ -128,10 +124,7 @@ class RecoveredReflectorOutput(BaseModel):
 
     @model_validator(mode="after")
     def _validate_recovered_output(self) -> RecoveredReflectorOutput:
-        if (
-            not self.content.strip()
-            or self.reflector_attempt_run_ids != [self.reflector_run_id]
-        ):
+        if not self.content.strip() or self.reflector_attempt_run_ids != [self.reflector_run_id]:
             raise ValueError("recovered Reflector output lineage is invalid")
         return self
 
@@ -157,9 +150,7 @@ class ThreeArtifactBundleReceipt(BaseModel):
     near_duplicate_pairs: list[dict[str, object]] = Field(default_factory=list)
     baseline_answer_copy: list[dict[str, object]] = Field(default_factory=list)
     # Historical v1 read compatibility only; v2 does not emit this field.
-    responsibility_violations: list[dict[str, object]] = Field(
-        default_factory=list
-    )
+    responsibility_violations: list[dict[str, object]] = Field(default_factory=list)
 
     @model_serializer(mode="wrap")
     def _serialize_protocol_fields(self, serializer):
@@ -369,8 +360,7 @@ class ThreeArtifactGenerationResult(BaseModel):
         if self.baseline_internal_evaluation.evaluator_role != "evolution_evaluator":
             raise ValueError("generation study used the wrong evaluator role")
         if any(
-            item.consumed_by_evolved_run_id is not None
-            for item in self.artifact_bundle.artifacts
+            item.consumed_by_evolved_run_id is not None for item in self.artifact_bundle.artifacts
         ):
             raise ValueError("generation-only artifacts cannot name a G2 consumer")
         expected_order = [

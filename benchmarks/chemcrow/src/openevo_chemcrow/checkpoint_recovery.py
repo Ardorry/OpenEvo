@@ -71,9 +71,7 @@ def _require_zero_tool_candidate(payload: dict[str, Any], *, pair_cache_root: Pa
                 continue
             item = event.get("item") if isinstance(event, dict) else None
             if isinstance(item, dict) and item.get("type") == "command_execution":
-                raise ValueError(
-                    "checkpoint recovery does not support Candidate shell executions"
-                )
+                raise ValueError("checkpoint recovery does not support Candidate shell executions")
 
 
 def reconcile_completed_baseline_evaluator_checkpoint(
@@ -184,9 +182,7 @@ def reconcile_completed_baseline_evaluator_checkpoint(
         declared_tool_bridge=False,
         polling_retries=0,
     )
-    baseline_evaluation, confidence_receipt = parse_evolution_feedback_result(
-        evaluator_result
-    )
+    baseline_evaluation, confidence_receipt = parse_evolution_feedback_result(evaluator_result)
 
     checkpoint = {
         "schema_version": "chemcrow_completed_call_checkpoint_v1",
@@ -207,15 +203,12 @@ def reconcile_completed_baseline_evaluator_checkpoint(
     repo_root = repository_root or Path(__file__).resolve().parents[4]
     source_paths = {
         "compatible_evaluation": (
-            repo_root
-            / "benchmarks/chemcrow/src/openevo_chemcrow/compatible_evaluation.py"
+            repo_root / "benchmarks/chemcrow/src/openevo_chemcrow/compatible_evaluation.py"
         ),
         "original_evaluation_prompt": (
             repo_root / "benchmarks/chemcrow/src/openevo_chemcrow/evaluation.py"
         ),
-        "runtime_normalizer": (
-            repo_root / "benchmarks/chemcrow/src/openevo_chemcrow/runtime.py"
-        ),
+        "runtime_normalizer": (repo_root / "benchmarks/chemcrow/src/openevo_chemcrow/runtime.py"),
     }
     if any(not path.is_file() for path in source_paths.values()):
         raise ValueError("checkpoint recovery source authority is absent")
@@ -229,21 +222,13 @@ def reconcile_completed_baseline_evaluator_checkpoint(
         "checkpoint_sha256": file_sha256(checkpoint_path),
         "baseline_core_completion_sha256": file_sha256(baseline_completion_path),
         "evaluator_core_completion_sha256": file_sha256(evaluator_completion_path),
-        "baseline_core_session_id_sha256": text_sha256(
-            str(baseline_completion["session_id"])
-        ),
-        "evaluator_core_session_id_sha256": text_sha256(
-            str(evaluator_completion["session_id"])
-        ),
-        "baseline_original_trajectory_sha256": baseline_receipt.get(
-            "trajectory_sha256"
-        ),
+        "baseline_core_session_id_sha256": text_sha256(str(baseline_completion["session_id"])),
+        "evaluator_core_session_id_sha256": text_sha256(str(evaluator_completion["session_id"])),
+        "baseline_original_trajectory_sha256": baseline_receipt.get("trajectory_sha256"),
         "baseline_reconstructed_trajectory_sha256": canonical_sha256(
             baseline.model_dump(mode="json")
         ),
-        "evaluator_feedback_sha256": canonical_sha256(
-            baseline_evaluation.model_dump(mode="json")
-        ),
+        "evaluator_feedback_sha256": canonical_sha256(baseline_evaluation.model_dump(mode="json")),
         "confidence_parse_receipt": confidence_receipt,
         "candidate_redispatched": False,
         "evaluator_redispatched": False,
@@ -312,16 +297,12 @@ def load_completed_baseline_evaluator_checkpoint(
     ):
         raise ValueError("completed-call checkpoint claim inventory differs")
     evaluator_claim_receipt = claims["baseline_internal_evaluator"].get("receipt")
-    if (
-        not isinstance(evaluator_claim_receipt, dict)
-        or evaluator_claim_receipt.get("checkpoint_recovery_receipt_sha256")
-        != file_sha256(recovery_path)
-    ):
+    if not isinstance(evaluator_claim_receipt, dict) or evaluator_claim_receipt.get(
+        "checkpoint_recovery_receipt_sha256"
+    ) != file_sha256(recovery_path):
         raise ValueError("completed-call checkpoint claim binding differs")
     baseline = Trajectory.model_validate(checkpoint.get("baseline"))
-    evaluation = EvaluatorFeedback.model_validate(
-        checkpoint.get("baseline_internal_evaluation")
-    )
+    evaluation = EvaluatorFeedback.model_validate(checkpoint.get("baseline_internal_evaluation"))
     if (
         baseline.task_id != task.task_id
         or baseline.role != "baseline"

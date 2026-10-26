@@ -80,8 +80,12 @@ class NativeEvolutionEngine:
                 "observable_trajectory": baseline.model_dump(mode="json"),
                 "transcript": json.dumps(
                     {
-                        "tool_calls": [item.model_dump(mode="json") for item in baseline.tool_calls],
-                        "observations": [item.model_dump(mode="json") for item in baseline.observations],
+                        "tool_calls": [
+                            item.model_dump(mode="json") for item in baseline.tool_calls
+                        ],
+                        "observations": [
+                            item.model_dump(mode="json") for item in baseline.observations
+                        ],
                     },
                     ensure_ascii=True,
                     sort_keys=True,
@@ -105,7 +109,11 @@ class NativeEvolutionEngine:
                         "session_id": baseline.run_id,
                         "task_id": task.task_id,
                         "status": baseline.status,
-                        "trajectory": {"status": baseline.status, "metadata": {}, "traces": [trace]},
+                        "trajectory": {
+                            "status": baseline.status,
+                            "metadata": {},
+                            "traces": [trace],
+                        },
                         "metadata": {"evolution_feedback": feedback_payload},
                     },
                     "evolution_feedback": feedback_payload,
@@ -156,7 +164,9 @@ class NativeEvolutionEngine:
         try:
             store.heartbeat_job(
                 job.job_id,
-                WorkerHeartbeatRequest(lease_id=claim.job.lease_id, progress=0.0, message="claimed"),
+                WorkerHeartbeatRequest(
+                    lease_id=claim.job.lease_id, progress=0.0, message="claimed"
+                ),
             )
             reflector_prompt = self._reflector_prompt(
                 task=task,
@@ -178,7 +188,9 @@ class NativeEvolutionEngine:
                 mcp_url=None,
             )
             if reflected.status != "COMPLETED" or not reflected.answer.strip():
-                raise RuntimeError("Core-managed Reflector did not return a completed non-empty artifact")
+                raise RuntimeError(
+                    "Core-managed Reflector did not return a completed non-empty artifact"
+                )
             draft, content_path = self._artifact_draft(
                 job_id=job.job_id,
                 dataset_artifact_id=dataset.artifact_id,
@@ -190,7 +202,9 @@ class NativeEvolutionEngine:
             )
             drafts = [draft]
             if len(drafts) != 1 or str(drafts[0].type) != self.artifact_kind.value:
-                raise RuntimeError("native Reflector did not produce exactly one requested artifact")
+                raise RuntimeError(
+                    "native Reflector did not produce exactly one requested artifact"
+                )
             completed = store.complete_job(
                 job.job_id,
                 WorkerCompleteRequest(
@@ -203,7 +217,9 @@ class NativeEvolutionEngine:
             try:
                 store.fail_job(
                     job.job_id,
-                    WorkerFailRequest(lease_id=claim.job.lease_id, error=str(exc), retryable=False),
+                    WorkerFailRequest(
+                        lease_id=claim.job.lease_id, error=str(exc), retryable=False
+                    ),
                 )
             except Exception as cleanup_exc:  # noqa: BLE001 - preserve the primary failure
                 exc.add_note(f"Core fail_job cleanup failed: {cleanup_exc}")
@@ -274,7 +290,9 @@ class NativeEvolutionEngine:
         reflector_run_id: str,
     ) -> tuple[ArtifactRegisterRequest, Path]:
         if len(content.encode("utf-8")) > 256 * 1024:
-            raise RuntimeError("Core-managed Reflector output exceeds the task-local artifact limit")
+            raise RuntimeError(
+                "Core-managed Reflector output exceeds the task-local artifact limit"
+            )
         method = _METHODS[self.artifact_kind]
         output_root = artifact_root / "workers" / job_id / method
         if self.artifact_kind is ArtifactKind.TEXT_MEMORY:

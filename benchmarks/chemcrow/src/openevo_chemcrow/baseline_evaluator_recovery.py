@@ -195,10 +195,14 @@ def reconcile_baseline_evaluator_no_effect_failure(
 
     failure = json.loads(evaluator_completion_path.read_text(encoding="utf-8"))
     evaluator_run_id = failure.get("task_id")
-    if not isinstance(evaluator_run_id, str) or re.fullmatch(
-        rf"{re.escape(baseline_run_id)}-evolution-eval-baseline-[0-9a-f]{{10}}",
-        evaluator_run_id,
-    ) is None:
+    if (
+        not isinstance(evaluator_run_id, str)
+        or re.fullmatch(
+            rf"{re.escape(baseline_run_id)}-evolution-eval-baseline-[0-9a-f]{{10}}",
+            evaluator_run_id,
+        )
+        is None
+    ):
         raise ValueError("failed evaluator Core task identity differs")
     trajectory = failure.get("trajectory")
     metadata = failure.get("metadata")
@@ -228,12 +232,8 @@ def reconcile_baseline_evaluator_no_effect_failure(
         and "status" not in credential_contract,
     }
     if set(no_effect_predicates.values()) != {True}:
-        failed_keys = sorted(
-            key for key, value in no_effect_predicates.items() if not value
-        )
-        raise ValueError(
-            "baseline evaluator no-effect proof failed: " + ", ".join(failed_keys)
-        )
+        failed_keys = sorted(key for key, value in no_effect_predicates.items() if not value)
+        raise ValueError("baseline evaluator no-effect proof failed: " + ", ".join(failed_keys))
     session_id = failure.get("session_id")
     if not isinstance(session_id, str) or not session_id:
         raise ValueError("failed evaluator Core session identity is absent")
@@ -249,15 +249,17 @@ def reconcile_baseline_evaluator_no_effect_failure(
     }
     checkpoint_path = recovery_root / _CHECKPOINT_NAME
     checkpoint_serialized = json.dumps(checkpoint, indent=2, sort_keys=True) + "\n"
-    if checkpoint_path.exists() and checkpoint_path.read_text(encoding="utf-8") != checkpoint_serialized:
+    if (
+        checkpoint_path.exists()
+        and checkpoint_path.read_text(encoding="utf-8") != checkpoint_serialized
+    ):
         raise ValueError("existing baseline-before-evaluator checkpoint differs")
     checkpoint_path.write_text(checkpoint_serialized, encoding="utf-8")
 
     repo_root = repository_root or Path(__file__).resolve().parents[4]
     source_paths = {
         "baseline_evaluator_recovery": Path(__file__),
-        "runtime_normalizer": repo_root
-        / "benchmarks/chemcrow/src/openevo_chemcrow/runtime.py",
+        "runtime_normalizer": repo_root / "benchmarks/chemcrow/src/openevo_chemcrow/runtime.py",
     }
     receipt = {
         "schema_version": "chemcrow_baseline_evaluator_no_effect_recovery_v1",
@@ -267,18 +269,12 @@ def reconcile_baseline_evaluator_no_effect_failure(
         "phase": "baseline_internal_evaluator",
         "attempt_ordinal": 1,
         "authority_sha256": evaluator_claim["authority_sha256"],
-        "original_claim_sha256": file_sha256(
-            claim_paths["baseline_internal_evaluator"]
-        ),
+        "original_claim_sha256": file_sha256(claim_paths["baseline_internal_evaluator"]),
         "config_sha256": file_sha256(config_path),
         "checkpoint_sha256": file_sha256(checkpoint_path),
         "baseline_core_completion_sha256": file_sha256(baseline_completion_path),
-        "baseline_core_session_id_sha256": text_sha256(
-            str(baseline_completion["session_id"])
-        ),
-        "baseline_original_trajectory_sha256": baseline_receipt.get(
-            "trajectory_sha256"
-        ),
+        "baseline_core_session_id_sha256": text_sha256(str(baseline_completion["session_id"])),
+        "baseline_original_trajectory_sha256": baseline_receipt.get("trajectory_sha256"),
         "baseline_reconstructed_trajectory_sha256": canonical_sha256(
             baseline.model_dump(mode="json")
         ),
@@ -329,13 +325,11 @@ def load_baseline_before_evaluator_checkpoint(
     checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     if (
-        checkpoint.get("schema_version")
-        != "chemcrow_baseline_before_evaluator_checkpoint_v1"
+        checkpoint.get("schema_version") != "chemcrow_baseline_before_evaluator_checkpoint_v1"
         or checkpoint.get("status") != "READY_FOR_EVALUATOR_REPLACEMENT"
         or checkpoint.get("pair_id") != pair_id
         or checkpoint.get("task_id") != task.task_id
-        or receipt.get("schema_version")
-        != "chemcrow_baseline_evaluator_no_effect_recovery_v1"
+        or receipt.get("schema_version") != "chemcrow_baseline_evaluator_no_effect_recovery_v1"
         or receipt.get("checkpoint_sha256") != file_sha256(checkpoint_path)
         or receipt.get("candidate_redispatched") is not False
         or receipt.get("evaluator_model_call_proven_absent") is not True
@@ -348,11 +342,8 @@ def load_baseline_before_evaluator_checkpoint(
     if (
         set(claims) != {"baseline_candidate", "baseline_internal_evaluator"}
         or claims["baseline_candidate"].get("status") != "terminal"
-        or claims["baseline_internal_evaluator"].get("status")
-        != "replacement_ready"
-        or claims["baseline_internal_evaluator"].get("authority", {}).get(
-            "evaluator_id"
-        )
+        or claims["baseline_internal_evaluator"].get("status") != "replacement_ready"
+        or claims["baseline_internal_evaluator"].get("authority", {}).get("evaluator_id")
         != expected_evaluator_id
     ):
         raise ValueError("baseline evaluator recovery claim inventory differs")

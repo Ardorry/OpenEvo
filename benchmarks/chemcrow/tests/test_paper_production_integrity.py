@@ -838,7 +838,7 @@ def _write_zero_cost_provider_failure(
     (receipt_root / f"{call.call_id}.receipt.json").write_text(
         json.dumps(receipt, sort_keys=True), encoding="utf-8"
     )
-    session_id = "sk-openevo-provider-failure"
+    session_id = "fake-session-provider-failure"
     task_root = core_root / f"task_{call.call_id}"
     completion_dir = task_root / "sessions" / session_id / "completions"
     completion_dir.mkdir(parents=True)
@@ -970,13 +970,13 @@ def _write_pre_response_402_failure(
     task_root.mkdir(parents=True)
     session = {
         "task_id": call.call_id,
-        "session_id": "sk-openevo-http-402",
+        "session_id": "fake-session-http-402",
         "status": "ERROR",
         "error": "step 0 exited with code 1",
         "trajectory": {"traces": [{}]},
         "workspace_result": None,
     }
-    (task_root / "ses_sk-openevo-http-402.json").write_text(
+    (task_root / "ses_fake-session-http-402.json").write_text(
         json.dumps(session, sort_keys=True), encoding="utf-8"
     )
     assert not (result_root / f"{call.call_id}.result.json").exists()
@@ -1137,15 +1137,18 @@ def test_paper_invalid_structured_assessment_authorizes_fresh_call_id(tmp_path):
     assert authority.original_openrouter_reported_cost_usd == 0.006
     assert authority.no_valid_result_predicates.valid_score_not_observed is True
     assert authority.replacement_call_id == f"{failed.call_id}-replacement-01"
-    assert load_paper_replacement_authority(
-        authority_path=authority_path,
-        plan_path=fixture["plan_path"],
-        result_root=fixture["result_root"],
-        receipt_root=fixture["receipt_root"],
-        source_run_root=fixture["source_run_root"],
-        completed_run_audit=fixture["completed_run_audit"],
-        core_completion_root=fixture["core_root"],
-    ) == authority
+    assert (
+        load_paper_replacement_authority(
+            authority_path=authority_path,
+            plan_path=fixture["plan_path"],
+            result_root=fixture["result_root"],
+            receipt_root=fixture["receipt_root"],
+            source_run_root=fixture["source_run_root"],
+            completed_run_audit=fixture["completed_run_audit"],
+            core_completion_root=fixture["core_root"],
+        )
+        == authority
+    )
 
 
 def test_paper_second_replacement_authority_accepts_pre_response_http_402(tmp_path):
@@ -1196,15 +1199,18 @@ def test_paper_second_replacement_authority_accepts_pre_response_http_402(tmp_pa
     assert second_authority.original_response_id is None
     assert second_authority.core_completion_relative_path is None
     assert second_authority.no_valid_result_predicates.upstream_http_402 is True
-    assert load_paper_replacement_authority(
-        authority_path=second_authority_path,
-        plan_path=fixture["plan_path"],
-        result_root=fixture["result_root"],
-        receipt_root=fixture["receipt_root"],
-        source_run_root=fixture["source_run_root"],
-        completed_run_audit=fixture["completed_run_audit"],
-        core_completion_root=fixture["core_root"],
-    ) == second_authority
+    assert (
+        load_paper_replacement_authority(
+            authority_path=second_authority_path,
+            plan_path=fixture["plan_path"],
+            result_root=fixture["result_root"],
+            receipt_root=fixture["receipt_root"],
+            source_run_root=fixture["source_run_root"],
+            completed_run_audit=fixture["completed_run_audit"],
+            core_completion_root=fixture["core_root"],
+        )
+        == second_authority
+    )
 
 
 def test_paper_replacement_audit_reports_42_results_and_43_attempts(tmp_path):

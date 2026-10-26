@@ -71,12 +71,8 @@ def _job_rows(db_path: Path, *, evidence_hash: str) -> list[dict[str, Any]]:
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
         columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(jobs)")}
-        created_at_expression = (
-            "created_at" if "created_at" in columns else "'' AS created_at"
-        )
-        updated_at_expression = (
-            "updated_at" if "updated_at" in columns else "'' AS updated_at"
-        )
+        created_at_expression = "created_at" if "created_at" in columns else "'' AS created_at"
+        updated_at_expression = "updated_at" if "updated_at" in columns else "'' AS updated_at"
         rows = conn.execute(
             f"""
             SELECT job_id, method, state, lease_id, error, config_json,
@@ -105,20 +101,14 @@ def _latest_failed_job_batch(
     ``updated_at`` retain the historical ``created_at`` behavior.
     """
 
-    latest_updated_at = max(
-        (str(row.get("updated_at", "")) for row in job_rows), default=""
-    )
+    latest_updated_at = max((str(row.get("updated_at", "")) for row in job_rows), default="")
     timestamp_field = "updated_at" if latest_updated_at else "created_at"
     latest_timestamp = (
         latest_updated_at
         if latest_updated_at
         else max((str(row.get("created_at", "")) for row in job_rows), default="")
     )
-    latest = [
-        row
-        for row in job_rows
-        if str(row.get(timestamp_field, "")) == latest_timestamp
-    ]
+    latest = [row for row in job_rows if str(row.get(timestamp_field, "")) == latest_timestamp]
     historical = [row for row in job_rows if row not in latest]
     return latest, historical
 
@@ -346,8 +336,7 @@ def reconcile_reflector_no_effect_failure(
     methods = {str(row["method"]) for row in job_rows}
     expected_methods = set(_REFLECTOR_PHASE_METHODS.values())
     all_job_artifacts_absent = all(
-        _job_artifact_count(evolution_db_path, job_id=str(row["job_id"])) == 0
-        for row in job_rows
+        _job_artifact_count(evolution_db_path, job_id=str(row["job_id"])) == 0 for row in job_rows
     )
     other_jobs_terminal_no_effect = all(
         row["job_id"] == failed_job_id
@@ -378,9 +367,7 @@ def reconcile_reflector_no_effect_failure(
             lease_id=str(failed_row["lease_id"]),
             failure_kind=failure_kind,
         )
-    elif not (
-        failed_row["state"] == "failed" and failed_row["error"] == _BATCH_ABORT_JOB_ERROR
-    ):
+    elif not (failed_row["state"] == "failed" and failed_row["error"] == _BATCH_ABORT_JOB_ERROR):
         raise ValueError("failed Reflector job terminal state differs")
 
     checkpoint = {
@@ -419,8 +406,7 @@ def reconcile_reflector_no_effect_failure(
                 "matching_core_job_absent_or_batch_aborted": (
                     method not in methods
                     or all(
-                        row["state"] == "failed"
-                        and row["error"] == _BATCH_ABORT_JOB_ERROR
+                        row["state"] == "failed" and row["error"] == _BATCH_ABORT_JOB_ERROR
                         for row in job_rows
                         if row["method"] == method
                     )
@@ -505,9 +491,7 @@ def _baseline_evidence_matches_claims(
         isinstance(attempt, dict)
         and attempt.get("receipt", {}).get("schema_version")
         == "chemcrow_baseline_evaluator_no_effect_recovery_v1"
-        and attempt.get("receipt", {}).get(
-            "baseline_reconstructed_trajectory_sha256"
-        )
+        and attempt.get("receipt", {}).get("baseline_reconstructed_trajectory_sha256")
         == reconstructed_sha256
         and attempt.get("receipt", {}).get("candidate_redispatched") is False
         for attempt in failed_attempts
@@ -569,9 +553,7 @@ def reconcile_partial_reflector_batch_failure(
 
     evidence_event = _read_json(evidence_event_path)
     session_result = evidence_event.get("payload", {}).get("session_result", {})
-    event_metadata = (
-        session_result.get("metadata", {}) if isinstance(session_result, dict) else {}
-    )
+    event_metadata = session_result.get("metadata", {}) if isinstance(session_result, dict) else {}
     evidence = event_metadata.get("input_evidence")
     evidence_hash = event_metadata.get("input_evidence_sha256")
     if not isinstance(evidence, dict) or canonical_sha256(evidence) != evidence_hash:
@@ -583,8 +565,7 @@ def reconcile_partial_reflector_batch_failure(
     }:
         raise ValueError("partial Reflector task authority differs")
     if {
-        claims[phase].get("authority", {}).get("input_evidence_hash")
-        for phase in ordered_phases
+        claims[phase].get("authority", {}).get("input_evidence_hash") for phase in ordered_phases
     } != {evidence_hash}:
         raise ValueError("partial Reflector claims do not share frozen evidence")
     baseline = Trajectory.model_validate(evidence.get("baseline"))
@@ -603,17 +584,11 @@ def reconcile_partial_reflector_batch_failure(
             evaluator_claim=claims["baseline_internal_evaluator"],
         )
         or evaluation.evaluator_role != "evolution_evaluator"
-        or claims["baseline_internal_evaluator"].get("authority", {}).get(
-            "evaluator_id"
-        )
+        or claims["baseline_internal_evaluator"].get("authority", {}).get("evaluator_id")
         != expected_evaluator_id
-        or claims["baseline_internal_evaluator"].get("receipt", {}).get(
-            "evaluator_run_id"
-        )
+        or claims["baseline_internal_evaluator"].get("receipt", {}).get("evaluator_run_id")
         != evaluation.evaluator_run_id
-        or claims["baseline_internal_evaluator"].get("receipt", {}).get(
-            "feedback_sha256"
-        )
+        or claims["baseline_internal_evaluator"].get("receipt", {}).get("feedback_sha256")
         != canonical_sha256(evaluation.model_dump(mode="json"))
     ):
         raise ValueError("partial Reflector recovered G1 authority differs")
@@ -622,8 +597,7 @@ def reconcile_partial_reflector_batch_failure(
     job_rows, historical_job_rows = _latest_failed_job_batch(all_job_rows)
     if (
         len(job_rows) != 3
-        or {row["method"] for row in job_rows}
-        != set(_REFLECTOR_PHASE_METHODS.values())
+        or {row["method"] for row in job_rows} != set(_REFLECTOR_PHASE_METHODS.values())
         or any(row["state"] != "failed" for row in job_rows)
         or any(_job_artifact_count(evolution_db_path, job_id=row["job_id"]) for row in job_rows)
         or any(row["state"] != "failed" for row in historical_job_rows)
@@ -652,8 +626,7 @@ def reconcile_partial_reflector_batch_failure(
         "completion_status_error": failure.get("status") == "ERROR",
         "exact_credential_isolation_error": failure.get("error")
         == _CREDENTIAL_ISOLATION_VALIDATION_ERROR,
-        "zero_trajectory_traces": isinstance(trajectory, dict)
-        and trajectory.get("traces") == [],
+        "zero_trajectory_traces": isinstance(trajectory, dict) and trajectory.get("traces") == [],
         "zero_transcript_records": isinstance(trajectory_metadata, dict)
         and trajectory_metadata.get("record_count") == 0,
         "workspace_result_absent": failure.get("workspace_result") is None,
@@ -662,26 +635,20 @@ def reconcile_partial_reflector_batch_failure(
         and metadata.get("host_codex_exec_forbidden") is True,
         "run_id_matches_failed_phase": isinstance(failure.get("task_id"), str)
         and failure["task_id"].startswith(f"{pair_id}-{failed_phase}-core-baseline-"),
-        "failed_job_artifacts_absent": _job_artifact_count(
-            evolution_db_path, job_id=failed_job_id
-        )
+        "failed_job_artifacts_absent": _job_artifact_count(evolution_db_path, job_id=failed_job_id)
         == 0,
         "credential_canary_receipt_not_published": isinstance(credential, dict)
         and "status" not in credential,
     }
     if set(no_effect_predicates.values()) != {True}:
-        failed_keys = sorted(
-            key for key, value in no_effect_predicates.items() if not value
-        )
+        failed_keys = sorted(key for key, value in no_effect_predicates.items() if not value)
         raise ValueError(f"partial Reflector no-effect proof failed: {failed_keys}")
 
     core_completion_root = failed_completion_path.parent.parent
     later_completion_inventory = {
         phase: sorted(
             path.resolve()
-            for path in core_completion_root.glob(
-                f"task_{pair_id}-{phase}-core*/ses_*.json"
-            )
+            for path in core_completion_root.glob(f"task_{pair_id}-{phase}-core*/ses_*.json")
             if path.is_file()
         )
         for phase in replacement_phases[1:]
@@ -717,8 +684,8 @@ def reconcile_partial_reflector_batch_failure(
         kind = _PHASE_KINDS[phase]
         frozen_prompt = (prompt_root / f"{kind.value}.md").read_text(encoding="utf-8")
         completion_metadata = completion.get("metadata")
-        task_metadata = completion.get("trajectory", {}).get("metadata", {}).get(
-            "task_metadata", {}
+        task_metadata = (
+            completion.get("trajectory", {}).get("metadata", {}).get("task_metadata", {})
         )
         method, filename = _PHASE_CONTENT_PATHS[phase]
         output_path = evolution_artifact_root / "workers" / str(row["job_id"]) / method / filename
@@ -757,10 +724,7 @@ def reconcile_partial_reflector_batch_failure(
         completion_hashes[phase] = file_sha256(completion_path)
 
     replacement_attempt_ordinals = {
-        phase: verified_no_effect_attempt_count(
-            claims[phase], pair_id=pair_id, phase=phase
-        )
-        + 1
+        phase: verified_no_effect_attempt_count(claims[phase], pair_id=pair_id, phase=phase) + 1
         for phase in replacement_phases
     }
     if len(set(replacement_attempt_ordinals.values())) != 1:
@@ -774,9 +738,7 @@ def reconcile_partial_reflector_batch_failure(
         "baseline": baseline.model_dump(mode="json"),
         "baseline_internal_evaluation": evaluation.model_dump(mode="json"),
         "input_evidence_sha256": evidence_hash,
-        "recovered_outputs": [
-            output.model_dump(mode="json") for output in recovered_outputs
-        ],
+        "recovered_outputs": [output.model_dump(mode="json") for output in recovered_outputs],
         "replacement_phases": replacement_phases,
     }
     recovery_root = run_root / "recovery" / pair_id
@@ -861,8 +823,7 @@ def reconcile_partial_reflector_batch_failure(
         "completed_sibling_model_calls_redispatched": False,
         "model_calls_during_reconciliation": 0,
         "phase_receipt_sha256": {
-            phase: canonical_sha256(receipt)
-            for phase, receipt in sorted(phase_receipts.items())
+            phase: canonical_sha256(receipt) for phase, receipt in sorted(phase_receipts.items())
         },
     }
     recovery_path = recovery_root / (
@@ -917,9 +878,7 @@ def reconcile_paused_reflector_batch(
 
     evidence_event = _read_json(evidence_event_path)
     session_result = evidence_event.get("payload", {}).get("session_result", {})
-    event_metadata = (
-        session_result.get("metadata", {}) if isinstance(session_result, dict) else {}
-    )
+    event_metadata = session_result.get("metadata", {}) if isinstance(session_result, dict) else {}
     evidence = event_metadata.get("input_evidence")
     evidence_hash = event_metadata.get("input_evidence_sha256")
     if not isinstance(evidence, dict) or canonical_sha256(evidence) != evidence_hash:
@@ -931,8 +890,7 @@ def reconcile_paused_reflector_batch(
     }:
         raise ValueError("paused Reflector task authority differs")
     if {
-        claims[phase].get("authority", {}).get("input_evidence_hash")
-        for phase in ordered_phases
+        claims[phase].get("authority", {}).get("input_evidence_hash") for phase in ordered_phases
     } != {evidence_hash}:
         raise ValueError("paused Reflector claims do not share frozen evidence")
     baseline = Trajectory.model_validate(evidence.get("baseline"))
@@ -951,17 +909,11 @@ def reconcile_paused_reflector_batch(
             evaluator_claim=claims["baseline_internal_evaluator"],
         )
         or evaluation.evaluator_role != "evolution_evaluator"
-        or claims["baseline_internal_evaluator"].get("authority", {}).get(
-            "evaluator_id"
-        )
+        or claims["baseline_internal_evaluator"].get("authority", {}).get("evaluator_id")
         != expected_evaluator_id
-        or claims["baseline_internal_evaluator"].get("receipt", {}).get(
-            "evaluator_run_id"
-        )
+        or claims["baseline_internal_evaluator"].get("receipt", {}).get("evaluator_run_id")
         != evaluation.evaluator_run_id
-        or claims["baseline_internal_evaluator"].get("receipt", {}).get(
-            "feedback_sha256"
-        )
+        or claims["baseline_internal_evaluator"].get("receipt", {}).get("feedback_sha256")
         != canonical_sha256(evaluation.model_dump(mode="json"))
     ):
         raise ValueError("paused Reflector recovered G1 authority differs")
@@ -969,13 +921,11 @@ def reconcile_paused_reflector_batch(
     job_rows = _job_rows(evolution_db_path, evidence_hash=str(evidence_hash))
     if (
         len(job_rows) != 3
-        or {row["method"] for row in job_rows}
-        != set(_REFLECTOR_PHASE_METHODS.values())
+        or {row["method"] for row in job_rows} != set(_REFLECTOR_PHASE_METHODS.values())
         or any(row["state"] != "running" for row in job_rows)
         or any(not isinstance(row["lease_id"], str) for row in job_rows)
         or any(
-            _job_artifact_count(evolution_db_path, job_id=str(row["job_id"]))
-            for row in job_rows
+            _job_artifact_count(evolution_db_path, job_id=str(row["job_id"])) for row in job_rows
         )
     ):
         raise ValueError("paused Reflector Core job inventory differs")
@@ -1012,9 +962,7 @@ def reconcile_paused_reflector_batch(
         traces = completion.get("trajectory", {}).get("traces", [])
         trace = traces[0] if isinstance(traces, list) and len(traces) == 1 else None
         prompt_messages = trace.get("prompt_messages", []) if isinstance(trace, dict) else []
-        response_messages = (
-            trace.get("response_messages", []) if isinstance(trace, dict) else []
-        )
+        response_messages = trace.get("response_messages", []) if isinstance(trace, dict) else []
         prompt_text = (
             prompt_messages[0].get("content")
             if len(prompt_messages) == 1 and isinstance(prompt_messages[0], dict)
@@ -1028,8 +976,8 @@ def reconcile_paused_reflector_batch(
         kind = _PHASE_KINDS[phase]
         frozen_prompt = (prompt_root / f"{kind.value}.md").read_text(encoding="utf-8")
         completion_metadata = completion.get("metadata")
-        task_metadata = completion.get("trajectory", {}).get("metadata", {}).get(
-            "task_metadata", {}
+        task_metadata = (
+            completion.get("trajectory", {}).get("metadata", {}).get("task_metadata", {})
         )
         content = _strict_reflector_markdown(str(response_text or ""))
         system_prompt_hash = str(row["config"].get("reflector_system_sha256", ""))
@@ -1101,9 +1049,7 @@ def reconcile_paused_reflector_batch(
         "baseline": baseline.model_dump(mode="json"),
         "baseline_internal_evaluation": evaluation.model_dump(mode="json"),
         "input_evidence_sha256": evidence_hash,
-        "recovered_outputs": [
-            output.model_dump(mode="json") for output in recovered_outputs
-        ],
+        "recovered_outputs": [output.model_dump(mode="json") for output in recovered_outputs],
         "replacement_phases": replacement_phases,
     }
     recovery_root = run_root / "recovery" / pair_id
@@ -1118,10 +1064,7 @@ def reconcile_paused_reflector_batch(
     for phase in replacement_phases:
         claim_path = claims_root / f"{phase}.json"
         attempt_ordinal = (
-            verified_no_effect_attempt_count(
-                claims[phase], pair_id=pair_id, phase=phase
-            )
-            + 1
+            verified_no_effect_attempt_count(claims[phase], pair_id=pair_id, phase=phase) + 1
         )
         row = rows_by_method[_REFLECTOR_PHASE_METHODS[phase]]
         phase_receipts[phase] = {
@@ -1177,8 +1120,7 @@ def reconcile_paused_reflector_batch(
         "preserved_model_call_phases": completed_phases,
         "replacement_phases": replacement_phases,
         "phase_receipt_sha256": {
-            phase: canonical_sha256(receipt)
-            for phase, receipt in sorted(phase_receipts.items())
+            phase: canonical_sha256(receipt) for phase, receipt in sorted(phase_receipts.items())
         },
         "baseline_redispatched": False,
         "baseline_evaluator_redispatched": False,
@@ -1240,12 +1182,15 @@ def load_partial_reflector_boundary_checkpoint(
     task: TaskItem,
     expected_candidate_config_sha256: str,
     expected_evaluator_id: str,
-) -> tuple[
-    Trajectory,
-    EvaluatorFeedback,
-    frozenset[str],
-    dict[ArtifactKind, RecoveredReflectorOutput],
-] | None:
+) -> (
+    tuple[
+        Trajectory,
+        EvaluatorFeedback,
+        frozenset[str],
+        dict[ArtifactKind, RecoveredReflectorOutput],
+    ]
+    | None
+):
     recovery_root = run_root / "recovery" / pair_id
     recovery_paths = _latest_partial_reflector_recovery_paths(recovery_root)
     if recovery_paths is None:
@@ -1254,8 +1199,7 @@ def load_partial_reflector_boundary_checkpoint(
     checkpoint = _read_json(checkpoint_path)
     receipt = _read_json(recovery_path)
     if (
-        checkpoint.get("schema_version")
-        != "chemcrow_partial_reflector_boundary_checkpoint_v1"
+        checkpoint.get("schema_version") != "chemcrow_partial_reflector_boundary_checkpoint_v1"
         or checkpoint.get("status") != "READY_FOR_PARTIAL_REFLECTOR_RESUME"
         or checkpoint.get("pair_id") != pair_id
         or checkpoint.get("task_id") != task.task_id
@@ -1283,18 +1227,16 @@ def load_partial_reflector_boundary_checkpoint(
         )
         or any(claims[phase].get("status") != "claimed" for phase in recovered_phases)
         or any(
-            not VerifiedReplacementPhaseLedger(
-                ledger_root, pair_id=pair_id
-            ).replacement_ready(phase)
+            not VerifiedReplacementPhaseLedger(ledger_root, pair_id=pair_id).replacement_ready(
+                phase
+            )
             for phase in replacement_phases
         )
         or recovered_phases | set(replacement_phases) != set(_REFLECTOR_PHASE_METHODS)
     ):
         raise ValueError("partial Reflector recovery claim states differ")
     baseline = Trajectory.model_validate(checkpoint.get("baseline"))
-    evaluation = EvaluatorFeedback.model_validate(
-        checkpoint.get("baseline_internal_evaluation")
-    )
+    evaluation = EvaluatorFeedback.model_validate(checkpoint.get("baseline_internal_evaluation"))
     if (
         baseline.task_id != task.task_id
         or baseline.status != "COMPLETED"
@@ -1302,9 +1244,7 @@ def load_partial_reflector_boundary_checkpoint(
         or baseline.artifact_ids
         or baseline.candidate_config_sha256 != expected_candidate_config_sha256
         or evaluation.evaluator_role != "evolution_evaluator"
-        or claims["baseline_internal_evaluator"].get("authority", {}).get(
-            "evaluator_id"
-        )
+        or claims["baseline_internal_evaluator"].get("authority", {}).get("evaluator_id")
         != expected_evaluator_id
     ):
         raise ValueError("partial Reflector recovery semantic authority differs")

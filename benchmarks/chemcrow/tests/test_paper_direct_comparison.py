@@ -106,9 +106,7 @@ def test_direct_plan_is_exactly_14_frozen_same_call_comparisons(tmp_path, runs_r
     assert len({call.prompt_sha256 for call in calls}) == 14
 
 
-def test_direct_g1_plan_is_exactly_14_frozen_non_reversed_comparisons(
-    tmp_path, runs_root
-):
+def test_direct_g1_plan_is_exactly_14_frozen_non_reversed_comparisons(tmp_path, runs_root):
     reference = tmp_path / "reference-42-aggregate.json"
     reference.write_text('{"sealed":true}\n', encoding="utf-8")
     tasks = _tasks()
@@ -133,15 +131,9 @@ def test_direct_g1_plan_is_exactly_14_frozen_non_reversed_comparisons(
     assert all(call.student_b_system == "openevo_baseline" for call in calls)
     assert all(call.baseline_output_id == f"baseline-{call.task_id}" for call in calls)
     assert all(call.evolved_output_id is None for call in calls)
-    assert all(
-        call.call_id.startswith(f"{DIRECT_G1_CALL_ID_PREFIX}-chemcrow-")
-        for call in calls
-    )
+    assert all(call.call_id.startswith(f"{DIRECT_G1_CALL_ID_PREFIX}-chemcrow-") for call in calls)
     assert {call.call_id for call in calls}.isdisjoint(
-        {
-            f"{DIRECT_CALL_ID_PREFIX}-{task_id}-direct"
-            for task_id in FROZEN_PAPER_TASK_IDS
-        }
+        {f"{DIRECT_CALL_ID_PREFIX}-{task_id}-direct" for task_id in FROZEN_PAPER_TASK_IDS}
     )
 
 

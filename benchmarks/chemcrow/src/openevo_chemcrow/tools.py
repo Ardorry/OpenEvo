@@ -289,7 +289,11 @@ TOOL_INVENTORY: tuple[dict[str, Any], ...] = (
         "determinism": "model-dependent",
         "dependencies": ["rxn4chemistry for hosted path", "HTTP for local path"],
         "service": "IBM RXN or RXN-Sandbox/local endpoint",
-        "environment_variables": ["RXN4CHEM_API_KEY", "RXN4CHEM_PROJECT_ID", "CHEMCROW_RXN_PREDICT_URL"],
+        "environment_variables": [
+            "RXN4CHEM_API_KEY",
+            "RXN4CHEM_PROJECT_ID",
+            "CHEMCROW_RXN_PREDICT_URL",
+        ],
         "paper_only_absent": False,
         "safe": True,
         "human_setup": True,
@@ -305,7 +309,11 @@ TOOL_INVENTORY: tuple[dict[str, Any], ...] = (
         "determinism": "model-dependent",
         "dependencies": ["rxn4chemistry for hosted path", "HTTP for local path"],
         "service": "IBM RXN or RXN-Sandbox/local endpoint",
-        "environment_variables": ["RXN4CHEM_API_KEY", "RXN4CHEM_PROJECT_ID", "CHEMCROW_RXN_RETRO_URL"],
+        "environment_variables": [
+            "RXN4CHEM_API_KEY",
+            "RXN4CHEM_PROJECT_ID",
+            "CHEMCROW_RXN_RETRO_URL",
+        ],
         "paper_only_absent": False,
         "safe": True,
         "human_setup": True,
@@ -351,7 +359,9 @@ def _rdkit() -> tuple[Any, Any, Any]:
         from rdkit import Chem, DataStructs
         from rdkit.Chem import AllChem, rdMolDescriptors
     except ImportError as exc:
-        raise ToolUnavailableError("rdkit is not installed in the locked tool environment") from exc
+        raise ToolUnavailableError(
+            "rdkit is not installed in the locked tool environment"
+        ) from exc
     return Chem, DataStructs, (AllChem, rdMolDescriptors)
 
 
@@ -381,7 +391,9 @@ class ChemCrowToolRegistry:
         self.mode = mode
         self.fixtures = fixtures or {}
 
-    def execute(self, tool_name: str, arguments: dict[str, Any], *, call_id: str) -> ToolObservation:
+    def execute(
+        self, tool_name: str, arguments: dict[str, Any], *, call_id: str
+    ) -> ToolObservation:
         started = time.monotonic()
         if self.mode == "mock":
             fixture_key = canonical_sha256({"tool_name": tool_name, "arguments": arguments})
@@ -400,7 +412,14 @@ class ChemCrowToolRegistry:
             error = None
         except (ToolUnavailableError, ToolInputError):
             raise
-        except (httpx.HTTPError, ImportError, KeyError, RuntimeError, TypeError, ValueError) as exc:
+        except (
+            httpx.HTTPError,
+            ImportError,
+            KeyError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
             result = None
             error = f"{type(exc).__name__}: {exc}"
         return ToolObservation(
@@ -473,7 +492,9 @@ class ChemCrowToolRegistry:
         molecules = [Chem.MolFromSmiles(part) for part in parts]
         if any(item is None for item in molecules):
             raise ToolInputError("invalid SMILES string")
-        fingerprints = [AllChem.GetMorganGenerator(radius=2, fpSize=2048).GetFingerprint(m) for m in molecules]
+        fingerprints = [
+            AllChem.GetMorganGenerator(radius=2, fpSize=2048).GetFingerprint(m) for m in molecules
+        ]
         return {"tanimoto": DataStructs.TanimotoSimilarity(*fingerprints)}
 
     def _weight(self, query: str) -> dict[str, Any]:
@@ -553,7 +574,11 @@ class ChemCrowToolRegistry:
         except ImportError as exc:
             raise ToolUnavailableError("molbloom is not installed") from exc
         _molecule(query)
-        return {"surechembl_membership": bool(molbloom.buy(query, canonicalize=True, catalog="surechembl"))}
+        return {
+            "surechembl_membership": bool(
+                molbloom.buy(query, canonicalize=True, catalog="surechembl")
+            )
+        }
 
     def _controlled_rows(self) -> list[tuple[str, str]]:
         path = self.controlled_chemicals_csv
@@ -573,7 +598,10 @@ class ChemCrowToolRegistry:
         for _, smiles in self._controlled_rows():
             other = Chem.MolFromSmiles(smiles)
             if other is not None:
-                maximum = max(maximum, DataStructs.TanimotoSimilarity(target, generator.GetFingerprint(other)))
+                maximum = max(
+                    maximum,
+                    DataStructs.TanimotoSimilarity(target, generator.GetFingerprint(other)),
+                )
         return {"maximum_similarity": maximum, "high_similarity": maximum > 0.35}
 
     def _control_check(self, query: str) -> dict[str, Any]:
@@ -603,9 +631,7 @@ class ChemCrowToolRegistry:
         strings = _all_strings(data)
         needles = ("hazard", "toxic", "warning", "danger", "environment", "explos")
         evidence = [
-            item[:500]
-            for item in strings
-            if any(needle in item.lower() for needle in needles)
+            item[:500] for item in strings if any(needle in item.lower() for needle in needles)
         ][:40]
         return {
             "cid": cid,

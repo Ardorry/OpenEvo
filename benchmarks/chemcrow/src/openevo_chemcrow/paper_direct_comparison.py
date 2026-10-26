@@ -54,17 +54,11 @@ from .three_artifact_models import ThreeArtifactPairResult, three_artifact_proto
 DIRECT_COMPARISON_SCHEMA = "chemcrow_paper_direct_comparison_plan_v1"
 DIRECT_COMPARISON_RESULT_SCHEMA = "chemcrow_paper_direct_comparison_result_v1"
 DIRECT_COMPARISON_AGGREGATE_SCHEMA = "chemcrow_paper_direct_comparison_aggregate_v1"
-DIRECT_COMPARISON_PROTOCOL = (
-    "historical_chemcrow_vs_full_v5_g2_direct_calibrated_paper_judge_v1"
-)
+DIRECT_COMPARISON_PROTOCOL = "historical_chemcrow_vs_full_v5_g2_direct_calibrated_paper_judge_v1"
 DIRECT_COMPARISON = "g2_vs_historical_chemcrow"
 DIRECT_G1_COMPARISON_SCHEMA = "chemcrow_paper_direct_g1_comparison_plan_v1"
-DIRECT_G1_COMPARISON_RESULT_SCHEMA = (
-    "chemcrow_paper_direct_g1_comparison_result_v1"
-)
-DIRECT_G1_COMPARISON_AGGREGATE_SCHEMA = (
-    "chemcrow_paper_direct_g1_comparison_aggregate_v1"
-)
+DIRECT_G1_COMPARISON_RESULT_SCHEMA = "chemcrow_paper_direct_g1_comparison_result_v1"
+DIRECT_G1_COMPARISON_AGGREGATE_SCHEMA = "chemcrow_paper_direct_g1_comparison_aggregate_v1"
 DIRECT_G1_COMPARISON_PROTOCOL = (
     "historical_chemcrow_vs_full_v5_g1_direct_calibrated_paper_judge_v1"
 )
@@ -73,9 +67,7 @@ DIRECT_CALL_COUNT = len(FROZEN_PAPER_TASK_IDS)
 DIRECT_CALL_ID_PREFIX = "paper-direct-v1"
 DIRECT_G1_CALL_ID_PREFIX = "paper-direct-g1-v1"
 DIRECT_AUTHORIZATION = "I_AUTHORIZE_14_SEALED_DIRECT_PAPER_COMPARISONS"
-DIRECT_G1_AUTHORIZATION = (
-    "I_AUTHORIZE_14_SEALED_G1_VS_CHEMCROW_DIRECT_PAPER_COMPARISONS"
-)
+DIRECT_G1_AUTHORIZATION = "I_AUTHORIZE_14_SEALED_G1_VS_CHEMCROW_DIRECT_PAPER_COMPARISONS"
 DIRECT_MAX_AUTHORIZED_USD = 5.0
 DIRECT_BOOTSTRAP_SEED = 20260827
 DIRECT_BOOTSTRAP_REPLICATES = 20_000
@@ -92,9 +84,7 @@ class PaperDirectComparisonCall(BaseModel):
 
     call_id: str
     task_id: str
-    comparison: Literal[
-        "g2_vs_historical_chemcrow", "g1_vs_historical_chemcrow"
-    ]
+    comparison: Literal["g2_vs_historical_chemcrow", "g1_vs_historical_chemcrow"]
     student_a_system: Literal["historical_chemcrow"]
     student_b_system: Literal["openevo_evolved", "openevo_baseline"]
     prompt: str
@@ -219,9 +209,7 @@ def build_direct_comparison_plan(
     expected_source_pair_protocol: str,
     reference_42_call_aggregate: Path,
     expected_reference_42_call_aggregate_sha256: str,
-    student_b_system: Literal["openevo_evolved", "openevo_baseline"] = (
-        DIRECT_TARGET_G2
-    ),
+    student_b_system: Literal["openevo_evolved", "openevo_baseline"] = (DIRECT_TARGET_G2),
 ) -> dict[str, Any]:
     """Freeze 14 direct comparisons before any paid request is dispatched."""
     if [task.task_id for task in tasks] != list(FROZEN_PAPER_TASK_IDS):
@@ -336,8 +324,7 @@ def validate_direct_comparison_plan(plan: dict[str, Any]) -> list[PaperDirectCom
         or tuple(call.task_id for call in calls) != FROZEN_PAPER_TASK_IDS
         or len({call.call_id for call in calls}) != DIRECT_CALL_COUNT
         or any(
-            call.call_id != f"{variant['call_id_prefix']}-{call.task_id}-direct"
-            for call in calls
+            call.call_id != f"{variant['call_id_prefix']}-{call.task_id}-direct" for call in calls
         )
         or any(call.student_b_system != student_b_system for call in calls)
         or any(call.comparison != variant["comparison"] for call in calls)
@@ -373,9 +360,7 @@ def run_direct_comparison_plan(
     ceiling = float(plan["cost_ceiling"]["list_price_ceiling_usd_total"])
     if budget < ceiling or budget > DIRECT_MAX_AUTHORIZED_USD:
         raise PermissionError("direct-comparison budget is outside the frozen authorized range")
-    if file_sha256(reference_42_call_aggregate) != plan[
-        "reference_42_call_aggregate_sha256"
-    ]:
+    if file_sha256(reference_42_call_aggregate) != plan["reference_42_call_aggregate_sha256"]:
         raise ValueError("reference 42-call aggregate changed before direct execution")
     result_root.mkdir(parents=True, exist_ok=True)
     _assert_dedicated_core_node(rollout_base_url)
@@ -452,9 +437,7 @@ def aggregate_direct_comparison_results(
     plan_sha256: str,
     reference_42_call_aggregate: Path,
     expected_reference_sha256: str,
-    student_b_system: Literal["openevo_evolved", "openevo_baseline"] = (
-        DIRECT_TARGET_G2
-    ),
+    student_b_system: Literal["openevo_evolved", "openevo_baseline"] = (DIRECT_TARGET_G2),
     protocol: str = DIRECT_COMPARISON_PROTOCOL,
     aggregate_schema: str = DIRECT_COMPARISON_AGGREGATE_SCHEMA,
 ) -> dict[str, Any]:
@@ -511,11 +494,7 @@ def aggregate_direct_comparison_results(
                 grade_key: target_grade,
                 delta_key: delta,
                 "winner": (
-                    target_label
-                    if delta > 0
-                    else "historical_chemcrow"
-                    if delta < 0
-                    else "tie"
+                    target_label if delta > 0 else "historical_chemcrow" if delta < 0 else "tie"
                 ),
                 "assessment_sha256": result["assessment_sha256"],
                 "receipt_sha256": file_sha256(receipt_path),
@@ -555,9 +534,7 @@ def aggregate_direct_comparison_results(
         "actual_openrouter_reported_cost_usd": round(sum(costs), 8),
         "plan_sha256": plan_sha256,
         "reference_42_call_aggregate_sha256_before": expected_reference_sha256,
-        "reference_42_call_aggregate_sha256_after": file_sha256(
-            reference_42_call_aggregate
-        ),
+        "reference_42_call_aggregate_sha256_after": file_sha256(reference_42_call_aggregate),
         "reference_42_call_ledger_unchanged": (
             file_sha256(reference_42_call_aggregate) == expected_reference_sha256
         ),
@@ -584,18 +561,14 @@ def audit_direct_comparison(
     student_b_system = direct_plan_target_system(plan)
     variant = _direct_variant(student_b_system)
     results = [
-        _validate_existing_direct_result(
-            result_root / f"{call.call_id}.result.json", call
-        )
+        _validate_existing_direct_result(result_root / f"{call.call_id}.result.json", call)
         for call in calls
     ]
     aggregate = aggregate_direct_comparison_results(
         results=results,
         receipt_root=receipt_root,
         plan_sha256=file_sha256(plan_path),
-        reference_42_call_aggregate=_path(
-            config_path, config["reference_42_call_aggregate"]
-        ),
+        reference_42_call_aggregate=_path(config_path, config["reference_42_call_aggregate"]),
         expected_reference_sha256=str(config["reference_42_call_aggregate_sha256"]),
         student_b_system=student_b_system,
         protocol=str(plan["protocol"]),
@@ -665,9 +638,7 @@ def preflight_direct_comparison(*, config_path: Path, output: Path) -> dict[str,
         pairs=pairs,
         historical=historical,
         expected_source_pair_protocol=str(config["source_pair_protocol"]),
-        reference_42_call_aggregate=_path(
-            config_path, config["reference_42_call_aggregate"]
-        ),
+        reference_42_call_aggregate=_path(config_path, config["reference_42_call_aggregate"]),
         expected_reference_42_call_aggregate_sha256=str(
             config["reference_42_call_aggregate_sha256"]
         ),
@@ -769,10 +740,7 @@ def _render_markdown(audit: dict[str, Any]) -> str:
         f"- calls: `{audit['call_count']}/14`",
         f"- historical ChemCrow mean: `{audit['mean_historical_chemcrow_grade']:.3f}`",
         f"- {display_label} mean: `{audit[f'mean_{grade_key}']:.3f}`",
-        (
-            f"- {short_label} minus historical ChemCrow: "
-            f"`{audit[f'mean_{delta_key}']:+.3f}`"
-        ),
+        (f"- {short_label} minus historical ChemCrow: `{audit[f'mean_{delta_key}']:+.3f}`"),
         (
             f"- {short_label} wins/ties/historical wins: "
             f"`{audit[wins_key]}/{audit['ties']}/"
@@ -782,10 +750,7 @@ def _render_markdown(audit: dict[str, Any]) -> str:
         f"- exact sign-test p: `{audit['exact_sign_test_two_sided_p']:.6f}`",
         f"- proven cost: `${audit['actual_openrouter_reported_cost_usd']:.5f}`",
         f"- answer order: historical ChemCrow = Student A; {display_label} = Student B",
-        (
-            "- original 42-call ledger unchanged: "
-            f"`{audit['reference_42_call_ledger_unchanged']}`"
-        ),
+        (f"- original 42-call ledger unchanged: `{audit['reference_42_call_ledger_unchanged']}`"),
         "",
         (
             f"| task | historical ChemCrow | {display_label} | "
@@ -859,9 +824,7 @@ def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     config_path = args.config.resolve()
     if args.command == "preflight":
-        report = preflight_direct_comparison(
-            config_path=config_path, output=args.output.resolve()
-        )
+        report = preflight_direct_comparison(config_path=config_path, output=args.output.resolve())
         print(json.dumps({"status": report["status"], "model_calls": 0}, sort_keys=True))
         return
     if args.command == "run":
@@ -872,9 +835,7 @@ def main(argv: list[str] | None = None) -> None:
             runtime=dict(config["runtime"]),
             result_root=_path(config_path, config["result_root"]),
             shim_receipt_root=_path(config_path, config["shim_receipt_root"]),
-            reference_42_call_aggregate=_path(
-                config_path, config["reference_42_call_aggregate"]
-            ),
+            reference_42_call_aggregate=_path(config_path, config["reference_42_call_aggregate"]),
             allow_paid=args.allow_paid,
         )
         print(

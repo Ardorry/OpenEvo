@@ -28,9 +28,7 @@ def _baseline_completion(run_id: str) -> dict:
             "traces": [
                 {
                     "prompt_messages": [{"role": "user", "content": "task"}],
-                    "response_messages": [
-                        {"role": "assistant", "content": "preserved G1 answer"}
-                    ],
+                    "response_messages": [{"role": "assistant", "content": "preserved G1 answer"}],
                     "metadata": {"transcript": ""},
                 }
             ],
@@ -58,7 +56,9 @@ def _evaluator_failure(run_id: str) -> dict:
     }
 
 
-def test_reconcile_baseline_evaluator_failure_preserves_g1(tmp_path, task_item, core_candidate_config):
+def test_reconcile_baseline_evaluator_failure_preserves_g1(
+    tmp_path, task_item, core_candidate_config
+):
     experiment_id = "experiment"
     pair_id = f"{experiment_id}--{task_item.task_id}"
     baseline_run_id = f"{pair_id}-baseline-0123456789"
@@ -115,11 +115,14 @@ def test_reconcile_baseline_evaluator_failure_preserves_g1(tmp_path, task_item, 
     assert receipt["candidate_redispatched"] is False
     assert receipt["evaluator_model_call_proven_absent"] is True
     assert receipt["baseline_tool_receipt_count"] == 0
-    assert load_baseline_before_evaluator_checkpoint(
-        run_root=tmp_path / "run",
-        ledger_root=ledger_root,
-        pair_id=pair_id,
-        task=task_item,
-        expected_candidate_config_sha256=s0_config_hash(core_candidate_config),
-        expected_evaluator_id=evaluator_id,
-    ) == baseline
+    assert (
+        load_baseline_before_evaluator_checkpoint(
+            run_root=tmp_path / "run",
+            ledger_root=ledger_root,
+            pair_id=pair_id,
+            task=task_item,
+            expected_candidate_config_sha256=s0_config_hash(core_candidate_config),
+            expected_evaluator_id=evaluator_id,
+        )
+        == baseline
+    )

@@ -1,4 +1,4 @@
-"""Post-run comparison of sealed submissions against immutable public full-v8 scores."""
+"""Compare a completed ChemCrowRun submission with the published OpenEvo G1/G2 run."""
 
 from __future__ import annotations
 
@@ -6,28 +6,18 @@ import json
 from pathlib import Path
 
 from .chemcrowrun import PACKAGE, paired_statistics
-from .hashing import file_sha256
 from .paper_evaluator import FROZEN_PAPER_TASK_IDS, PaperEvaluationResult
 from .submission import validate_submission_file
 
 
 def compare_submission(submission_path: Path, *, paper_results: Path | None = None) -> dict:
     submission = validate_submission_file(submission_path)
-    aliases = json.loads((PACKAGE / "reproduction/legacy-aliases.json").read_text())
-
-    def historical(name):
-        relative = f"reports/full_v8_public_20260831/{name}"
-        path = PACKAGE / relative
-        if file_sha256(path) != aliases["immutable_files"][relative]:
-            raise ValueError("historical comparison evidence differs from immutable identity")
-        return json.loads(path.read_text())
-
-    legacy = historical("per_task_evidence.json")
+    legacy = json.loads((PACKAGE / "reports/OPEN_EVO_HISTORICAL_RESULTS.json").read_text())
     ids = list(FROZEN_PAPER_TASK_IDS)
-    if legacy["task_ids"] != ids or [r["task_id"] for r in legacy["results"]] != ids:
+    if legacy["task_ids"] != ids or [r["task_id"] for r in legacy["per_task"]] != ids:
         raise ValueError("historical task order differs")
-    old_g1 = [sum(r["blind_evaluation"]["baseline_scores"].values()) for r in legacy["results"]]
-    old_g2 = [sum(r["blind_evaluation"]["evolved_scores"].values()) for r in legacy["results"]]
+    old_g1 = [r["internal_g1_12"] for r in legacy["per_task"]]
+    old_g2 = [r["internal_g2_12"] for r in legacy["per_task"]]
     new_g1 = [
         sum(r.blind_evaluation.baseline_scores.model_dump().values()) for r in submission.results
     ]
@@ -66,10 +56,9 @@ def compare_submission(submission_path: Path, *, paper_results: Path | None = No
 
     report = {
         "schema_version": "chemcrowrun_comparison_v1",
-        "submission_sha256": file_sha256(submission_path),
         "source_commit": submission.execution.source_commit,
         "task_ids": ids,
-        "historical_alias": "full-v8",
+        "historical_reference": "OpenEvo G1/G2",
         "historical_model": "gpt-5.5",
         "new_models": {
             role: binding.model_dump()
@@ -83,7 +72,7 @@ def compare_submission(submission_path: Path, *, paper_results: Path | None = No
         "model_calls": 0,
         "raw_answers_included": False,
         "interpretation": "Descriptive replication comparison. Model/service changes confound cross-run differences. Paired tests do not establish improvement from one task or replace human review. Multiple contrasts are exploratory and unadjusted.",
-        "input_validation": "Submission schema and immutable historical hashes; no leaderboard certification",
+        "input_validation": "Submission schema and fixed historical score table; no leaderboard certification",
     }
     if paper_results is not None:
         records = [
@@ -98,17 +87,9 @@ def compare_submission(submission_path: Path, *, paper_results: Path | None = No
         }
         if len(records) != 42 or set(grades) != expected:
             raise ValueError("calibrated comparison requires all 42 distinct sealed assessments")
-        old = historical("paper_judge_evidence.json")
-        if [r["task_id"] for r in old["results"]] != ids:
-            raise ValueError("historical paper task order differs")
-        old_grades = {
-            (r["task_id"], c["comparison"]): c["student_a_grade"]
-            for r in old["results"]
-            for c in r["comparisons"]
-        }
         report["paper_10_point"] = compare(
-            [old_grades[(t, "baseline")] for t in ids],
-            [old_grades[(t, "evolved")] for t in ids],
+            [r["calibrated_gpt4_g1_10"] for r in legacy["per_task"]],
+            [r["calibrated_gpt4_g2_10"] for r in legacy["per_task"]],
             [grades[(t, "baseline")] for t in ids],
             [grades[(t, "evolved")] for t in ids],
         )

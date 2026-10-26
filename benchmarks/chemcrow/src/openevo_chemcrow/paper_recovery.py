@@ -35,9 +35,7 @@ from .paper_evaluator import (
 )
 
 PAPER_REPLACEMENT_SCHEMA = "chemcrow_paper_failed_attempt_replacement_v1"
-PAPER_INVALID_ASSESSMENT_REPLACEMENT_SCHEMA = (
-    "chemcrow_paper_invalid_assessment_replacement_v2"
-)
+PAPER_INVALID_ASSESSMENT_REPLACEMENT_SCHEMA = "chemcrow_paper_invalid_assessment_replacement_v2"
 PAPER_PRE_RESPONSE_REPLACEMENT_SCHEMA = "chemcrow_paper_pre_response_replacement_v3"
 PAPER_REPLACEMENT_STATUS = "SEALED_FAILED_ATTEMPT_REPLACEMENT_READY"
 
@@ -130,17 +128,17 @@ class PaperReplacementAuthority(BaseModel):
         hashes = tuple(
             value
             for value in (
-            self.plan_sha256,
-            self.source_completed_run_audit_sha256,
-            self.source_aggregate_sha256,
-            self.original_call_sha256,
-            self.prompt_sha256,
-            self.original_claim_sha256,
-            self.original_receipt_sha256,
-            self.original_response_sha256,
-            self.core_session_sha256,
-            self.core_completion_sha256,
-            self.invalid_assessment_error_types_sha256,
+                self.plan_sha256,
+                self.source_completed_run_audit_sha256,
+                self.source_aggregate_sha256,
+                self.original_call_sha256,
+                self.prompt_sha256,
+                self.original_claim_sha256,
+                self.original_receipt_sha256,
+                self.original_response_sha256,
+                self.core_session_sha256,
+                self.core_completion_sha256,
+                self.invalid_assessment_error_types_sha256,
             )
             if value is not None
         )
@@ -731,8 +729,7 @@ def _validate_failed_attempt_evidence(
     traces = trajectory.get("traces") if isinstance(trajectory, dict) else None
     provider_failure_session = (
         session.get("task_id") == original.call_id
-        and
-        session.get("status") == "ERROR"
+        and session.get("status") == "ERROR"
         and isinstance(session.get("error"), str)
         and bool(session["error"])
         and traces == []
@@ -875,8 +872,7 @@ def _validate_failed_attempt_evidence(
     usage = response.get("usage")
     provider_failure_response = (
         choice.get("finish_reason") == "error"
-        and
-        isinstance(choice_error, dict)
+        and isinstance(choice_error, dict)
         and choice_error.get("code") == 502
         and isinstance(error_metadata, dict)
         and error_metadata.get("error_type") == "provider_unavailable"
@@ -903,8 +899,7 @@ def _validate_failed_attempt_evidence(
         and usage["prompt_tokens"] > 0
         and isinstance(usage.get("completion_tokens"), int)
         and usage["completion_tokens"] > 0
-        and usage.get("total_tokens")
-        == usage["prompt_tokens"] + usage["completion_tokens"]
+        and usage.get("total_tokens") == usage["prompt_tokens"] + usage["completion_tokens"]
         and usage.get("prompt_tokens") == receipt.get("prompt_tokens")
         and usage.get("completion_tokens") == receipt.get("completion_tokens")
         and usage.get("total_tokens") == receipt.get("total_tokens")
@@ -943,17 +938,13 @@ def _validate_failed_attempt_evidence(
     provider_failure = provider_failure_response
     return {
         "failure_class": (
-            "zero_cost_provider_failure"
-            if provider_failure
-            else "invalid_structured_assessment"
+            "zero_cost_provider_failure" if provider_failure else "invalid_structured_assessment"
         ),
         "original_claim_sha256": claim_sha256,
         "original_receipt_sha256": receipt_sha256,
         "original_response_sha256": receipt["response_sha256"],
         "original_response_id": receipt["response_id"],
-        "original_openrouter_reported_cost_usd": float(
-            receipt["openrouter_reported_cost_usd"]
-        ),
+        "original_openrouter_reported_cost_usd": float(receipt["openrouter_reported_cost_usd"]),
         "original_list_price_cost_usd": float(receipt["list_price_cost_usd"]),
         "core_session_relative_path": session_relative.as_posix(),
         "core_session_sha256": session_sha256,

@@ -131,9 +131,7 @@ def run_paper_evaluation_plan(
         calls=calls,
         result_root=result_root,
         shim_receipt_root=shim_receipt_root,
-        extra_call_ids={
-            authority.replacement_call_id for authority in replacement_authorities
-        },
+        extra_call_ids={authority.replacement_call_id for authority in replacement_authorities},
     )
     _assert_dedicated_core_node(rollout_base_url)
 

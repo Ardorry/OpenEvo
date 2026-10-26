@@ -54,9 +54,10 @@ def reconcile_pre_candidate_no_effect_failure(
 
     completion = json.loads(core_completion_path.read_text(encoding="utf-8"))
     core_task_id = completion.get("task_id")
-    if not isinstance(core_task_id, str) or re.fullmatch(
-        rf"{re.escape(pair_id)}-baseline-[0-9a-f]{{10}}", core_task_id
-    ) is None:
+    if (
+        not isinstance(core_task_id, str)
+        or re.fullmatch(rf"{re.escape(pair_id)}-baseline-[0-9a-f]{{10}}", core_task_id) is None
+    ):
         raise ValueError("Core completion task identity differs")
     trajectory = completion.get("trajectory")
     metadata = completion.get("metadata")

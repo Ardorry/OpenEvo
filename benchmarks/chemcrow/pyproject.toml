@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "openevo-chemcrow"
 version = "0.1.0"
-description = "Leakage-closed ChemCrow task and tool environment for task-local OpenEvo evolution."
+description = "ChemCrow benchmark reproduction and evaluation for OpenEvo."
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
 dependencies = [

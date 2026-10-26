@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -163,8 +162,7 @@ def test_prompt_candidates_are_frozen_before_results(runs_root):
     assert manifest["bootstrap_seed"] == BOOTSTRAP_SEED
     assert validate_prompt_candidate_manifest(manifest) == manifest
     assert {
-        item["candidate_id"]: item["prompt_candidate_sha256"]
-        for item in manifest["candidates"]
+        item["candidate_id"]: item["prompt_candidate_sha256"] for item in manifest["candidates"]
     } == {
         "CURRENT_V1": "7b51dcfb3cb45dc1d3f2702e65ada7d260e5c76427dd06ef6743d44f4c63674a",
         "PAPER_MINIMAL": "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767",
@@ -173,9 +171,7 @@ def test_prompt_candidates_are_frozen_before_results(runs_root):
         ),
     }
     current = manifest["candidates"][0]
-    assert current["rendered_example_sha256"] == canonical_sha256(
-        current["rendered_example"]
-    )
+    assert current["rendered_example_sha256"] == canonical_sha256(current["rendered_example"])
 
     mutated = json.loads(json.dumps(manifest))
     mutated["candidates"][1]["instruction_template"] += " Tune this score."
@@ -212,9 +208,7 @@ def test_calibration_cost_and_authorization_are_isolated(tmp_path, monkeypatch):
     assert_calibration_ledger_separation(calibration, production)
     with pytest.raises(ValueError, match="separate"):
         assert_calibration_ledger_separation(production / "child", production)
-    monkeypatch.setenv(
-        "CHEMCROW_PAPER_EVALUATOR_AUTHORIZATION", PAPER_EVALUATOR_AUTHORIZATION
-    )
+    monkeypatch.setenv("CHEMCROW_PAPER_EVALUATOR_AUTHORIZATION", PAPER_EVALUATOR_AUTHORIZATION)
     monkeypatch.delenv("CHEMCROW_PAPER_CALIBRATION_AUTHORIZATION", raising=False)
     manifest = build_prompt_candidate_manifest(dataset_sha256="d" * 64)
     call = CalibrationCall(
@@ -311,29 +305,3 @@ def test_selected_prompt_hash_binding():
             prompt_sha256="0" * 64,
             exact_prompt_recovered=False,
         )
-
-
-def test_completed_v5_production_matrix_binds_selected_prompt_and_sealed_outputs():
-    report = (
-        Path(__file__).resolve().parents[1]
-        / "reports"
-        / "PAPER_COMPARISON_MATRIX.json"
-    )
-    matrix = json.loads(report.read_text(encoding="utf-8"))
-
-    assert matrix["protocol"] == "CHEMCROW_EVALUATORGPT_PROMPT_CALIBRATED_V2"
-    assert matrix["prompt_candidate_id"] == "PAPER_MINIMAL"
-    assert matrix["prompt_candidate_sha256"] == (
-        "aa32cbc3190a53512bb121b167bcd68fb10cd92a5f07d30f68edcdda27ea0767"
-    )
-    assert matrix["status"] == "COMPLETE_FULL_V5_CORE_NATIVE"
-    assert matrix["source_pair_protocol"] == (
-        "chemcrow-three-isolated-core-native-artifacts-v2"
-    )
-    assert matrix["call_count"] == len(matrix["calls"]) == 42
-    assert len({call["call_id"] for call in matrix["calls"]}) == 42
-    assert all(call["prompt_sha256"] for call in matrix["calls"])
-    assert all(call["source_output_sha256"] for call in matrix["calls"])
-    assert all(call["sealed_result_present"] is True for call in matrix["calls"])
-    assert matrix["all_prompt_hashes_frozen"] is True
-    assert matrix["production_ledger_complete"] is True

@@ -146,7 +146,7 @@ def initialize(
             "fixture_root": str(fixture_root),
             "port_base": port_base,
             "environment": environment,
-            "protocol_identity": "chemcrow_full_v8_reproduction_v1",
+            "protocol_identity": "chemcrowrun_v1",
             "model_substitution": substitution,
             "historical_state_imported": False,
             "source_commit": subprocess.check_output(
@@ -490,15 +490,6 @@ def main(argv: list[str] | None = None) -> None:
             p.add_argument("--env-file", type=Path, required=True)
             p.add_argument("--budget-usd", type=float, required=True)
             p.add_argument("--allow-paid", action="store_true", required=True)
-    runtime = commands.add_parser(
-        "runtime", help="Verify/download and load the original OCI archive"
-    )
-    source = runtime.add_mutually_exclusive_group(required=True)
-    source.add_argument("--archive", type=Path)
-    source.add_argument("--url")
-    runtime.add_argument("--cache", type=Path, default=Path(".reproduction-cache/runtime"))
-    runtime.add_argument("--verify-only", action="store_true")
-    runtime.add_argument("--output", type=Path)
     comparison = commands.add_parser(
         "compare", help="Compare a completed submission with immutable historical scores"
     )
@@ -523,15 +514,6 @@ def main(argv: list[str] | None = None) -> None:
         report = compare_submission(args.submission, paper_results=args.paper_results)
         write_json(args.output, report)
         print(json.dumps({"status": "COMPARISON_EXPORTED", "model_calls": 0}))
-    elif args.command == "runtime":
-        from .runtime_assets import install_runtime
-
-        result = install_runtime(
-            archive=args.archive, url=args.url, cache=args.cache, load=not args.verify_only
-        )
-        if args.output:
-            write_json(args.output, result)
-        print(json.dumps(result, indent=2))
     elif args.command == "up":
         result = services_up(args.workspace, rxn=not args.without_rxn)
         print(json.dumps(result))

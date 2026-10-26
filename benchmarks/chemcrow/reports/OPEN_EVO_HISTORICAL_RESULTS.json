@@ -1,0 +1,128 @@
+{
+  "schema_version": "chemcrowrun_historical_results_v1",
+  "name": "OpenEvo G1/G2",
+  "model": "gpt-5.5",
+  "task_ids": [
+    "chemcrow-01",
+    "chemcrow-02",
+    "chemcrow-03",
+    "chemcrow-04",
+    "chemcrow-05",
+    "chemcrow-06",
+    "chemcrow-07",
+    "chemcrow-08",
+    "chemcrow-09",
+    "chemcrow-10",
+    "chemcrow-12",
+    "chemcrow-13",
+    "chemcrow-14",
+    "chemcrow-15"
+  ],
+  "aggregate": {
+    "internal_g1_12": 9.928571428571429,
+    "internal_g2_12": 10.285714285714286,
+    "calibrated_gpt4_g1_10": 9.357142857142858,
+    "calibrated_gpt4_g2_10": 9.214285714285714,
+    "judge_cost_usd": 2.65887
+  },
+  "per_task": [
+    {
+      "task_id": "chemcrow-01",
+      "internal_g1_12": 8.0,
+      "internal_g2_12": 11.0,
+      "calibrated_gpt4_g1_10": 9.0,
+      "calibrated_gpt4_g2_10": 9.0
+    },
+    {
+      "task_id": "chemcrow-02",
+      "internal_g1_12": 10.0,
+      "internal_g2_12": 12.0,
+      "calibrated_gpt4_g1_10": 9.0,
+      "calibrated_gpt4_g2_10": 9.0
+    },
+    {
+      "task_id": "chemcrow-03",
+      "internal_g1_12": 12.0,
+      "internal_g2_12": 12.0,
+      "calibrated_gpt4_g1_10": 10.0,
+      "calibrated_gpt4_g2_10": 10.0
+    },
+    {
+      "task_id": "chemcrow-04",
+      "internal_g1_12": 9.0,
+      "internal_g2_12": 8.0,
+      "calibrated_gpt4_g1_10": 9.0,
+      "calibrated_gpt4_g2_10": 8.0
+    },
+    {
+      "task_id": "chemcrow-05",
+      "internal_g1_12": 8.0,
+      "internal_g2_12": 9.0,
+      "calibrated_gpt4_g1_10": 9.0,
+      "calibrated_gpt4_g2_10": 9.0
+    },
+    {
+      "task_id": "chemcrow-06",
+      "internal_g1_12": 12.0,
+      "internal_g2_12": 8.0,
+      "calibrated_gpt4_g1_10": 10.0,
+      "calibrated_gpt4_g2_10": 9.0
+    },
+    {
+      "task_id": "chemcrow-07",
+      "internal_g1_12": 9.0,
+      "internal_g2_12": 6.0,
+      "calibrated_gpt4_g1_10": 9.0,
+      "calibrated_gpt4_g2_10": 9.0
+    },
+    {
+      "task_id": "chemcrow-08",
+      "internal_g1_12": 11.0,
+      "internal_g2_12": 12.0,
+      "calibrated_gpt4_g1_10": 10.0,
+      "calibrated_gpt4_g2_10": 10.0
+    },
+    {
+      "task_id": "chemcrow-09",
+      "internal_g1_12": 9.0,
+      "internal_g2_12": 12.0,
+      "calibrated_gpt4_g1_10": 9.0,
+      "calibrated_gpt4_g2_10": 9.0
+    },
+    {
+      "task_id": "chemcrow-10",
+      "internal_g1_12": 11.0,
+      "internal_g2_12": 12.0,
+      "calibrated_gpt4_g1_10": 9.0,
+      "calibrated_gpt4_g2_10": 8.0
+    },
+    {
+      "task_id": "chemcrow-12",
+      "internal_g1_12": 12.0,
+      "internal_g2_12": 11.0,
+      "calibrated_gpt4_g1_10": 10.0,
+      "calibrated_gpt4_g2_10": 10.0
+    },
+    {
+      "task_id": "chemcrow-13",
+      "internal_g1_12": 8.0,
+      "internal_g2_12": 8.0,
+      "calibrated_gpt4_g1_10": 9.0,
+      "calibrated_gpt4_g2_10": 9.0
+    },
+    {
+      "task_id": "chemcrow-14",
+      "internal_g1_12": 9.0,
+      "internal_g2_12": 11.0,
+      "calibrated_gpt4_g1_10": 10.0,
+      "calibrated_gpt4_g2_10": 10.0
+    },
+    {
+      "task_id": "chemcrow-15",
+      "internal_g1_12": 11.0,
+      "internal_g2_12": 12.0,
+      "calibrated_gpt4_g1_10": 9.0,
+      "calibrated_gpt4_g2_10": 10.0
+    }
+  ]
+}

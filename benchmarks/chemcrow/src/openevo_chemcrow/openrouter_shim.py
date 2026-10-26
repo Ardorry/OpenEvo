@@ -893,9 +893,7 @@ def main(argv: list[str] | None = None) -> None:
                     authority_path=authority_path,
                 )
                 authorities.append(authority)
-            if len({authority.original_call_id for authority in authorities}) != len(
-                authorities
-            ):
+            if len({authority.original_call_id for authority in authorities}) != len(authorities):
                 raise SystemExit("paper replacement authorities are not unique")
             ordered = sorted(authorities, key=lambda item: item.original_plan_ordinal)
             if any(

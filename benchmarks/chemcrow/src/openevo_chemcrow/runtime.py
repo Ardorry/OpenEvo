@@ -32,12 +32,18 @@ def assert_core_managed_codex_config(candidate: dict[str, Any]) -> None:
     runtime = candidate.get("runtime")
     agent = candidate.get("agent")
     builder = candidate.get("builder")
-    if not isinstance(runtime, dict) or not isinstance(agent, dict) or not isinstance(builder, dict):
+    if (
+        not isinstance(runtime, dict)
+        or not isinstance(agent, dict)
+        or not isinstance(builder, dict)
+    ):
         raise TypeError(
             "Codex execution requires explicit Core-managed runtime, agent, and builder configs"
         )
     if runtime.get("backend") != "docker" or runtime.get("container_user") != "host":
-        raise ValueError("Codex execution requires the OpenEvo Core managed Docker host-user runtime")
+        raise ValueError(
+            "Codex execution requires the OpenEvo Core managed Docker host-user runtime"
+        )
     require_immutable_managed_runtime_image(
         profile=runtime.get("profile"),
         image=runtime.get("image"),
@@ -122,7 +128,7 @@ def build_task_request(
             "ReactionRetrosynthesis.\n"
             "Invoke a tool from the shell using exactly: curl -fsS -X POST "
             "'<BASE_URL>/tool/<TOOL_NAME>' -H 'Content-Type: application/json' "
-            "--data '{\"query\":\"<QUERY>\"}'. Treat returned JSON as the tool observation. "
+            '--data \'{"query":"<QUERY>"}\'. Treat returned JSON as the tool observation. '
             "Unavailable tools fail explicitly. Do not simulate tool results. Do not use Codex "
             "built-in web search, browsing, or any external evidence path outside this declared "
             "ChemCrow bridge."
@@ -298,8 +304,7 @@ def _message_content(message: dict[str, Any]) -> str:
         return content
     if isinstance(content, list):
         return "\n".join(
-            str(item.get("text", "")) if isinstance(item, dict) else str(item)
-            for item in content
+            str(item.get("text", "")) if isinstance(item, dict) else str(item) for item in content
         )
     return str(content or "")
 
@@ -340,7 +345,9 @@ def _normalize_rollout(
             for raw_call in message.get("tool_calls", []) or []:
                 if not isinstance(raw_call, dict):
                     continue
-                function = raw_call.get("function") if isinstance(raw_call.get("function"), dict) else {}
+                function = (
+                    raw_call.get("function") if isinstance(raw_call.get("function"), dict) else {}
+                )
                 raw_arguments = function.get("arguments", {})
                 if isinstance(raw_arguments, str):
                     try:
@@ -352,7 +359,9 @@ def _normalize_rollout(
                     ToolCall(
                         call_id=call_id,
                         tool_name=str(function.get("name") or raw_call.get("name") or "unknown"),
-                        arguments=raw_arguments if isinstance(raw_arguments, dict) else {"value": raw_arguments},
+                        arguments=raw_arguments
+                        if isinstance(raw_arguments, dict)
+                        else {"value": raw_arguments},
                     )
                 )
         for message in trace.get("prompt_messages", []):
@@ -370,7 +379,9 @@ def _normalize_rollout(
             observations.append(
                 ToolObservation(
                     call_id=call_id,
-                    tool_name=str(message.get("name") or (matching.tool_name if matching else "unknown")),
+                    tool_name=str(
+                        message.get("name") or (matching.tool_name if matching else "unknown")
+                    ),
                     canonical_arguments_sha256=canonical_sha256(arguments),
                     result=_message_content(message),
                     source=source,
@@ -459,10 +470,16 @@ def _audit_declared_tool_surface(traces: list[Any], *, receipt_count: int) -> No
             if item.get("type") == "web_search":
                 builtin_web_search_ids.add(item_id)
             command = item.get("command")
-            if item.get("type") == "command_execution" and isinstance(command, str) and "/tool/" in command:
+            if (
+                item.get("type") == "command_execution"
+                and isinstance(command, str)
+                and "/tool/" in command
+            ):
                 bridge_execution_ids.add(item_id)
     if builtin_web_search_ids:
-        raise OpenEvoRolloutError("undeclared built-in web search was observed in Candidate runtime")
+        raise OpenEvoRolloutError(
+            "undeclared built-in web search was observed in Candidate runtime"
+        )
     # One Codex shell item may intentionally batch multiple curl calls (for
     # example, several reaction candidates in a single script). Receipt
     # cardinality therefore tracks HTTP tool invocations, not transcript shell

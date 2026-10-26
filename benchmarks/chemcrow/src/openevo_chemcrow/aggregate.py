@@ -16,8 +16,18 @@ def aggregate_results(results: list[PairResult]) -> dict[str, Any]:
     baseline = [item.final_evaluation.baseline_scores for item in results]
     evolved = [item.final_evaluation.evolved_scores for item in results]
     winners = Counter(item.final_evaluation.winner for item in results)
-    observations = [obs for item in results for run in (item.baseline, item.evolved) for obs in run.observations]
-    tool_calls = [call for item in results for run in (item.baseline, item.evolved) for call in run.tool_calls]
+    observations = [
+        obs
+        for item in results
+        for run in (item.baseline, item.evolved)
+        for obs in run.observations
+    ]
+    tool_calls = [
+        call
+        for item in results
+        for run in (item.baseline, item.evolved)
+        for call in run.tool_calls
+    ]
     errors = [obs for obs in observations if obs.error]
     return {
         "schema_version": "chemcrow_aggregate_v1",
@@ -34,16 +44,34 @@ def aggregate_results(results: list[PairResult]) -> dict[str, Any]:
             "task_completion": mean([x.task_completion for x in evolved]),
         },
         "mean_delta": {
-            "chemical_correctness": mean([item.final_evaluation.delta_chemical_correctness for item in results]),
-            "reasoning_quality": mean([item.final_evaluation.delta_reasoning_quality for item in results]),
-            "task_completion": mean([item.final_evaluation.delta_task_completion for item in results]),
+            "chemical_correctness": mean(
+                [item.final_evaluation.delta_chemical_correctness for item in results]
+            ),
+            "reasoning_quality": mean(
+                [item.final_evaluation.delta_reasoning_quality for item in results]
+            ),
+            "task_completion": mean(
+                [item.final_evaluation.delta_task_completion for item in results]
+            ),
         },
-        "pairwise": {"wins": winners["evolved"], "losses": winners["baseline"], "ties": winners["tie"]},
+        "pairwise": {
+            "wins": winners["evolved"],
+            "losses": winners["baseline"],
+            "ties": winners["tie"],
+        },
         "tool_calls": len(tool_calls),
         "tool_observations": len(observations),
-        "tool_success_rate": (len(observations) - len(errors)) / len(observations) if observations else None,
+        "tool_success_rate": (len(observations) - len(errors)) / len(observations)
+        if observations
+        else None,
         "tool_error_rate": len(errors) / len(observations) if observations else None,
-        "wall_time_seconds": sum(item.baseline.wall_time_seconds + item.evolved.wall_time_seconds for item in results),
-        "token_metadata_available": any(run.token_metadata for item in results for run in (item.baseline, item.evolved)),
-        "cost_metadata_available": any(run.cost_metadata for item in results for run in (item.baseline, item.evolved)),
+        "wall_time_seconds": sum(
+            item.baseline.wall_time_seconds + item.evolved.wall_time_seconds for item in results
+        ),
+        "token_metadata_available": any(
+            run.token_metadata for item in results for run in (item.baseline, item.evolved)
+        ),
+        "cost_metadata_available": any(
+            run.cost_metadata for item in results for run in (item.baseline, item.evolved)
+        ),
     }

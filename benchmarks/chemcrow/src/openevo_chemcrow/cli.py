@@ -71,11 +71,7 @@ from .reflector_recovery import (
     reconcile_reflector_no_effect_failure,
 )
 from .replacement_ledger import VerifiedReplacementPhaseLedger
-from .reproduction import (
-    check_reproduction_environment,
-    prepare_or_validate_fixtures,
-    verify_publication,
-)
+from .reproduction import prepare_or_validate_fixtures
 from .runtime import (
     CORE_MANAGED_CODEX_ROUTE,
     OpenEvoRolloutPort,
@@ -234,7 +230,7 @@ def _assert_reproduction_contract(
     if contract is None:
         return
     if not isinstance(contract, dict) or contract != REPRODUCTION_CONTRACT:
-        raise ValueError("reproduction contract differs from ChemCrow full-v8 authority")
+        raise ValueError("reproduction contract differs from ChemCrowRun v1")
     if (
         config.get("schema_version") != "chemcrow_experiment_v8"
         or config.get("artifact_protocol") != _CORE_NATIVE_THREE_ARTIFACT_PROTOCOL
@@ -246,7 +242,7 @@ def _assert_reproduction_contract(
         or selected_task_ids != list(FROZEN_PAPER_TASK_IDS)
         or file_sha256(manifest_path) != TASK_MANIFEST_SHA256
     ):
-        raise ValueError("portable full-v8 reproduction configuration differs")
+        raise ValueError("ChemCrowRun v1 reproduction configuration differs")
 
 
 def command_extract(args: argparse.Namespace) -> int:
@@ -415,9 +411,7 @@ def _prepare_sealed_generation_continuation(
     expected_evaluator_id: str,
     evolution_db_path: Path,
     evolution_artifact_root: Path,
-) -> dict[
-    str, tuple[Trajectory, EvaluatorFeedback, ThreeArtifactBundleReceipt, dict[str, Any]]
-]:
+) -> dict[str, tuple[Trajectory, EvaluatorFeedback, ThreeArtifactBundleReceipt, dict[str, Any]]]:
     source = config.get("source_generation")
     if not isinstance(source, dict):
         raise TypeError("sealed generation continuation source is absent")
@@ -425,18 +419,14 @@ def _prepare_sealed_generation_continuation(
     source_config = _resolve_env(_load_yaml(source_config_path))
     source_run_root = _path(config_path, str(source["run_root"]))
     source_ledger_root = _path(config_path, str(source["ledger_root"]))
-    source_completed_run_audit = _path(
-        config_path, str(source["completed_run_audit"])
-    )
+    source_completed_run_audit = _path(config_path, str(source["completed_run_audit"]))
     if (
         file_sha256(source_config_path) != source.get("config_sha256")
         or source_config.get("execution_scope") != "g1_and_artifact_generation_only"
         or source_config.get("experiment_id") != config.get("experiment_id")
         or source.get("experiment_id") != config.get("experiment_id")
-        or _path(source_config_path, str(source_config["run_root"]))
-        != source_run_root
-        or _path(source_config_path, str(source_config["ledger_root"]))
-        != source_ledger_root
+        or _path(source_config_path, str(source_config["run_root"])) != source_run_root
+        or _path(source_config_path, str(source_config["ledger_root"])) != source_ledger_root
         or s0_config_hash(source_config["candidate"]) != expected_s0_hash
         or source_run_root == run_root
         or source_ledger_root == ledger_root
@@ -461,9 +451,7 @@ def _prepare_sealed_generation_continuation(
             source_run_root=source_run_root,
             source_ledger_root=source_ledger_root,
             source_completed_run_audit=source_completed_run_audit,
-            expected_source_audit_sha256=str(
-                source["completed_run_audit_sha256"]
-            ),
+            expected_source_audit_sha256=str(source["completed_run_audit_sha256"]),
             expected_source_aggregate_sha256=str(source["aggregate_sha256"]),
             source_experiment_id=str(source["experiment_id"]),
             task=item,
@@ -722,22 +710,16 @@ def command_preflight(args: argparse.Namespace) -> int:
         "artifact_protocol": config.get("artifact_protocol", "legacy_single_artifact_v1"),
         "three_isolated_reflector_configs": three_artifact_protocol,
         "execution_scope": config.get("execution_scope", "full_g1_g2_pair"),
-        "reflector_prompt_profile": config.get(
-            "reflector_prompt_profile", "core_role_wrapper_v1"
-        ),
+        "reflector_prompt_profile": config.get("reflector_prompt_profile", "core_role_wrapper_v1"),
         "reflector_prompt_profile_valid": config.get(
             "reflector_prompt_profile", "core_role_wrapper_v1"
         )
         in {"core_role_wrapper_v1", "core_full_worker_v1"},
         "generation_only_g2_disabled": config.get("execution_scope")
         == "g1_and_artifact_generation_only",
-        "sealed_generation_continuation_source_valid": (
-            continuation_source_error is None
-        ),
+        "sealed_generation_continuation_source_valid": (continuation_source_error is None),
         "sealed_generation_continuation_source_error": continuation_source_error,
-        "sealed_generation_continuation_receipt_count": (
-            continuation_source_receipt_count
-        ),
+        "sealed_generation_continuation_receipt_count": (continuation_source_receipt_count),
         "artifact_protocol_execution_allowed": config.get("artifact_protocol")
         != _LEGACY_CUSTOM_THREE_ARTIFACT_PROTOCOL,
         "historical_answer_fields_absent": all(
@@ -948,9 +930,7 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
             separation_policy=ArtifactSeparationPolicy.model_validate(
                 config.get("artifact_separation", {})
             ),
-            prompt_profile=str(
-                config.get("reflector_prompt_profile", "core_role_wrapper_v1")
-            ),
+            prompt_profile=str(config.get("reflector_prompt_profile", "core_role_wrapper_v1")),
         )
         runner = ThreeArtifactTaskLocalProtocolRunner(
             run_root=run_root,
@@ -1008,8 +988,10 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
     results: list[PairResult | ThreeArtifactPairResult | ThreeArtifactGenerationResult] = []
     for item in selected:
         pair_id = f"{config['experiment_id']}--{item.task_id}"
-        result_path = run_root / pair_id / (
-            "artifact.study.result.json" if generation_only else "pair.result.json"
+        result_path = (
+            run_root
+            / pair_id
+            / ("artifact.study.result.json" if generation_only else "pair.result.json")
         )
         if result_path.is_file():
             result = (
@@ -1065,15 +1047,13 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
             elif three_artifact_protocol and ledger.replacement_ready(
                 "baseline_internal_evaluator"
             ):
-                recovered_baseline_before_evaluator = (
-                    load_baseline_before_evaluator_checkpoint(
-                        run_root=run_root,
-                        ledger_root=ledger_root,
-                        pair_id=pair_id,
-                        task=item,
-                        expected_candidate_config_sha256=candidate.config_sha256,
-                        expected_evaluator_id=runner.evolution_evaluator.evaluator_id,
-                    )
+                recovered_baseline_before_evaluator = load_baseline_before_evaluator_checkpoint(
+                    run_root=run_root,
+                    ledger_root=ledger_root,
+                    pair_id=pair_id,
+                    task=item,
+                    expected_candidate_config_sha256=candidate.config_sha256,
+                    expected_evaluator_id=runner.evolution_evaluator.evaluator_id,
                 )
                 if recovered_baseline_before_evaluator is None:
                     raise AmbiguousPhaseClaimError(
@@ -1111,15 +1091,13 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
                     recovered_baseline_checkpoint = (baseline, evaluation)
                     allow_verified_evolved_candidate_replacement = True
                 else:
-                    partial_reflector_checkpoint = (
-                        load_partial_reflector_boundary_checkpoint(
-                            run_root=run_root,
-                            ledger_root=ledger_root,
-                            pair_id=pair_id,
-                            task=item,
-                            expected_candidate_config_sha256=candidate.config_sha256,
-                            expected_evaluator_id=runner.evolution_evaluator.evaluator_id,
-                        )
+                    partial_reflector_checkpoint = load_partial_reflector_boundary_checkpoint(
+                        run_root=run_root,
+                        ledger_root=ledger_root,
+                        pair_id=pair_id,
+                        task=item,
+                        expected_candidate_config_sha256=candidate.config_sha256,
+                        expected_evaluator_id=runner.evolution_evaluator.evaluator_id,
                     )
                     if partial_reflector_checkpoint is not None:
                         (
@@ -1151,7 +1129,9 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
                                     pair_id=pair_id,
                                     task=item,
                                     expected_candidate_config_sha256=(candidate.config_sha256),
-                                    expected_evaluator_id=(runner.evolution_evaluator.evaluator_id),
+                                    expected_evaluator_id=(
+                                        runner.evolution_evaluator.evaluator_id
+                                    ),
                                 )
                             )
                 if recovered_baseline_checkpoint is None:
@@ -1178,9 +1158,7 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
                         pair_id=pair_id,
                         mcp_url=mcp_url,
                         allow_verified_baseline_replacement=(allow_verified_baseline_replacement),
-                        recovered_baseline_before_evaluator=(
-                            recovered_baseline_before_evaluator
-                        ),
+                        recovered_baseline_before_evaluator=(recovered_baseline_before_evaluator),
                         allow_verified_baseline_evaluator_replacement=(
                             allow_verified_baseline_evaluator_replacement
                         ),
@@ -1190,9 +1168,7 @@ def command_run(args: argparse.Namespace, *, resume: bool) -> int:
                         ),
                         recovered_reflector_outputs=recovered_reflector_outputs,
                         recovered_artifact_checkpoint=recovered_artifact_checkpoint,
-                        continue_from_sealed_generation=(
-                            continue_from_sealed_generation
-                        ),
+                        continue_from_sealed_generation=(continue_from_sealed_generation),
                         allow_verified_evolved_candidate_replacement=(
                             allow_verified_evolved_candidate_replacement
                         ),
@@ -1248,33 +1224,6 @@ def command_fixture_prepare(args: argparse.Namespace) -> int:
         args.output.resolve().write_text(rendered, encoding="utf-8")
     print(rendered, end="")
     return 0
-
-
-def command_verify_publication(args: argparse.Namespace) -> int:
-    payload = verify_publication(args.package_root.resolve())
-    rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    if args.output:
-        args.output.resolve().parent.mkdir(parents=True, exist_ok=True)
-        args.output.resolve().write_text(rendered, encoding="utf-8")
-    print(rendered, end="")
-    return 0
-
-
-def command_reproduction_check(args: argparse.Namespace) -> int:
-    payload = check_reproduction_environment(
-        package_root=args.package_root.resolve(),
-        config_path=args.config.resolve(),
-        fixture_lock_path=args.fixture_lock.resolve(),
-        fixture_root=args.fixture_root.resolve(),
-        toolchain_lock_path=args.toolchain_lock.resolve(),
-        runtime_archive=(args.runtime_archive.resolve() if args.runtime_archive else None),
-    )
-    rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    if args.output:
-        args.output.resolve().parent.mkdir(parents=True, exist_ok=True)
-        args.output.resolve().write_text(rendered, encoding="utf-8")
-    print(rendered, end="")
-    return 0 if payload["status"] == "READY" else 2
 
 
 def _iso_datetime(value: str) -> datetime:
@@ -1447,19 +1396,17 @@ def command_recover_baseline_evaluator_no_effect(args: argparse.Namespace) -> in
     )
     evaluator = CompatibleOpenEvoEvolutionEvaluator(evaluator_port)
     run_root = _path(config_path, str(config["run_root"]))
-    checkpoint_path, receipt_path, _, receipt = (
-        reconcile_baseline_evaluator_no_effect_failure(
-            config_path=config_path,
-            run_root=run_root,
-            ledger_root=_path(config_path, str(config["ledger_root"])),
-            cache_root=_path(config_path, str(config["cache_root"])),
-            experiment_id=str(config["experiment_id"]),
-            task=tasks[args.task_id],
-            candidate_config=config["candidate"],
-            evaluator_id=evaluator.evaluator_id,
-            baseline_completion_path=args.baseline_completion.resolve(),
-            evaluator_completion_path=args.evaluator_completion.resolve(),
-        )
+    checkpoint_path, receipt_path, _, receipt = reconcile_baseline_evaluator_no_effect_failure(
+        config_path=config_path,
+        run_root=run_root,
+        ledger_root=_path(config_path, str(config["ledger_root"])),
+        cache_root=_path(config_path, str(config["cache_root"])),
+        experiment_id=str(config["experiment_id"]),
+        task=tasks[args.task_id],
+        candidate_config=config["candidate"],
+        evaluator_id=evaluator.evaluator_id,
+        baseline_completion_path=args.baseline_completion.resolve(),
+        evaluator_completion_path=args.evaluator_completion.resolve(),
     )
     print(
         json.dumps(
@@ -1504,26 +1451,22 @@ def command_recover_reflector_no_effect(args: argparse.Namespace) -> int:
         if path is not None
     }
     if completed_siblings:
-        checkpoint_path, recovery_path, receipt = (
-            reconcile_partial_reflector_batch_failure(
-                expected_model=str(config["candidate"]["agent"]["model_name"]),
-                config_path=config_path,
-                run_root=run_root,
-                ledger_root=_path(config_path, str(config["ledger_root"])),
-                experiment_id=str(config["experiment_id"]),
-                task=tasks[args.task_id],
-                expected_candidate_config_sha256=s0_config_hash(config["candidate"]),
-                expected_evaluator_id=evaluator.evaluator_id,
-                evolution_db_path=_path(config_path, str(store_config["db_path"])),
-                evolution_artifact_root=_path(
-                    config_path, str(store_config["artifact_root"])
-                ),
-                failed_phase=args.phase,
-                failed_job_id=args.job_id,
-                failed_completion_path=args.core_completion.resolve(),
-                evidence_event_path=args.evidence_event.resolve(),
-                completed_sibling_paths=completed_siblings,
-            )
+        checkpoint_path, recovery_path, receipt = reconcile_partial_reflector_batch_failure(
+            expected_model=str(config["candidate"]["agent"]["model_name"]),
+            config_path=config_path,
+            run_root=run_root,
+            ledger_root=_path(config_path, str(config["ledger_root"])),
+            experiment_id=str(config["experiment_id"]),
+            task=tasks[args.task_id],
+            expected_candidate_config_sha256=s0_config_hash(config["candidate"]),
+            expected_evaluator_id=evaluator.evaluator_id,
+            evolution_db_path=_path(config_path, str(store_config["db_path"])),
+            evolution_artifact_root=_path(config_path, str(store_config["artifact_root"])),
+            failed_phase=args.phase,
+            failed_job_id=args.job_id,
+            failed_completion_path=args.core_completion.resolve(),
+            evidence_event_path=args.evidence_event.resolve(),
+            completed_sibling_paths=completed_siblings,
         )
     else:
         checkpoint_path, recovery_path, receipt = reconcile_reflector_no_effect_failure(
@@ -2193,21 +2136,6 @@ def build_parser() -> argparse.ArgumentParser:
     fixtures.add_argument("--output", type=Path)
     fixtures.add_argument("--no-model-calls", action="store_true", required=True)
     fixtures.set_defaults(function=command_fixture_prepare)
-    publication = commands.add_parser("verify-publication")
-    publication.add_argument("--package-root", type=Path, required=True)
-    publication.add_argument("--output", type=Path)
-    publication.add_argument("--no-model-calls", action="store_true", required=True)
-    publication.set_defaults(function=command_verify_publication)
-    reproduction_check = commands.add_parser("reproduction-check")
-    reproduction_check.add_argument("--package-root", type=Path, required=True)
-    reproduction_check.add_argument("--config", type=Path, required=True)
-    reproduction_check.add_argument("--fixture-lock", type=Path, required=True)
-    reproduction_check.add_argument("--fixture-root", type=Path, required=True)
-    reproduction_check.add_argument("--toolchain-lock", type=Path, required=True)
-    reproduction_check.add_argument("--runtime-archive", type=Path)
-    reproduction_check.add_argument("--output", type=Path)
-    reproduction_check.add_argument("--no-model-calls", action="store_true", required=True)
-    reproduction_check.set_defaults(function=command_reproduction_check)
     export = commands.add_parser("export-submission")
     export.add_argument("--config", type=Path, required=True)
     export.add_argument("--audit", type=Path, required=True)
@@ -2296,9 +2224,7 @@ def build_parser() -> argparse.ArgumentParser:
     evaluator_recovery.add_argument("--baseline-completion", type=Path, required=True)
     evaluator_recovery.add_argument("--evaluator-completion", type=Path, required=True)
     evaluator_recovery.add_argument("--no-model-calls", action="store_true", required=True)
-    evaluator_recovery.set_defaults(
-        function=command_recover_baseline_evaluator_no_effect
-    )
+    evaluator_recovery.set_defaults(function=command_recover_baseline_evaluator_no_effect)
     reflector_recovery = commands.add_parser("recover-reflector-no-effect")
     reflector_recovery.add_argument("--config", type=Path, required=True)
     reflector_recovery.add_argument("--task-id", required=True)
@@ -2319,12 +2245,8 @@ def build_parser() -> argparse.ArgumentParser:
     paused_reflector_recovery.add_argument("--completed-memory", type=Path)
     paused_reflector_recovery.add_argument("--completed-skill-bundle", type=Path)
     paused_reflector_recovery.add_argument("--completed-agent-system", type=Path)
-    paused_reflector_recovery.add_argument(
-        "--no-model-calls", action="store_true", required=True
-    )
-    paused_reflector_recovery.set_defaults(
-        function=command_recover_paused_reflector_batch
-    )
+    paused_reflector_recovery.add_argument("--no-model-calls", action="store_true", required=True)
+    paused_reflector_recovery.set_defaults(function=command_recover_paused_reflector_batch)
     evolved_recovery = commands.add_parser("recover-evolved-candidate-no-effect")
     evolved_recovery.add_argument("--config", type=Path, required=True)
     evolved_recovery.add_argument("--task-id", required=True)

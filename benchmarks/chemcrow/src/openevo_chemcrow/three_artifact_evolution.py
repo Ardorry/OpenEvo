@@ -298,8 +298,7 @@ class ThreeIsolatedEvolutionEngine:
                     kind: None for kind in THREE_ARTIFACT_ORDER
                 }
                 prompt_hashes = {
-                    kind: canonical_sha256({"prompt": prompt})
-                    for kind, prompt in prompts.items()
+                    kind: canonical_sha256({"prompt": prompt}) for kind, prompt in prompts.items()
                 }
                 if len(set(prompt_hashes.values())) != 3:
                     raise ValueError("three Reflector prompts are not independent")
@@ -503,8 +502,7 @@ class ThreeIsolatedEvolutionEngine:
             or recovered.system_prompt_hash
             != _core_reflector_contract_hash(kind, self.prompt_profile)
             or recovered.model != str(rollout.candidate["agent"]["model_name"])
-            or canonical_sha256({"content": recovered.content})
-            != recovered.content_hash
+            or canonical_sha256({"content": recovered.content}) != recovered.content_hash
         ):
             raise ValueError("recovered Reflector output authority differs")
         raw_content = _strict_reflector_markdown(recovered.content)
@@ -513,9 +511,10 @@ class ThreeIsolatedEvolutionEngine:
             prompt_plan=prompt_plan,
             markdown=raw_content,
         )
-        if review.repair_prompt is not None or _strict_reflector_markdown(
-            review.content
-        ) != raw_content:
+        if (
+            review.repair_prompt is not None
+            or _strict_reflector_markdown(review.content) != raw_content
+        ):
             raise ValueError("recovered Reflector output no longer passes Core review")
         output_audit = {
             **review.audit_report,
@@ -654,9 +653,7 @@ class ThreeIsolatedEvolutionEngine:
                     "reflector_execution_route": CORE_MANAGED_CODEX_ROUTE,
                     "reflector_config_sha256": rollout.config_sha256,
                     **(
-                        {"reflector_prompt_sha256": prompt_hash}
-                        if prompt_hash is not None
-                        else {}
+                        {"reflector_prompt_sha256": prompt_hash} if prompt_hash is not None else {}
                     ),
                     "reflector_system_sha256": _core_reflector_contract_hash(
                         kind, self.prompt_profile
@@ -677,9 +674,7 @@ class ThreeIsolatedEvolutionEngine:
                 # add two managed repair invocations, so keep every sibling lease
                 # valid across the complete frozen batch.
                 lease_seconds=(
-                    10_800
-                    if self.prompt_profile == CORE_FULL_WORKER_PROMPT_PROFILE
-                    else 3_600
+                    10_800 if self.prompt_profile == CORE_FULL_WORKER_PROMPT_PROFILE else 3_600
                 ),
             )
         )
@@ -714,9 +709,7 @@ class ThreeIsolatedEvolutionEngine:
         rollout = self.reflector_rollouts[kind]
         current_prompt = prompt
         max_repairs = (
-            core_reflector_max_repair_attempts(prepared.job)
-            if prompt_plan is not None
-            else 0
+            core_reflector_max_repair_attempts(prepared.job) if prompt_plan is not None else 0
         )
         attempt_run_ids: list[str] = []
         output_audit: dict[str, object] = {}
@@ -798,9 +791,7 @@ class ThreeIsolatedEvolutionEngine:
             draft=draft,
             generation_time_seconds=elapsed,
             reflector_attempt_run_ids=(
-                attempt_run_ids
-                if self.prompt_profile == CORE_FULL_WORKER_PROMPT_PROFILE
-                else []
+                attempt_run_ids if self.prompt_profile == CORE_FULL_WORKER_PROMPT_PROFILE else []
             ),
             output_audit=output_audit,
         )
@@ -841,9 +832,7 @@ class ThreeIsolatedEvolutionEngine:
     ) -> tuple[dict[ArtifactKind, str], dict[ArtifactKind, str]] | None:
         prompt_root = self.run_root / pair_id / "reflector_prompts"
         receipt_path = prompt_root / "freeze.receipt.json"
-        prompt_paths = {
-            kind: prompt_root / f"{kind.value}.md" for kind in THREE_ARTIFACT_ORDER
-        }
+        prompt_paths = {kind: prompt_root / f"{kind.value}.md" for kind in THREE_ARTIFACT_ORDER}
         existing = [receipt_path.exists(), *(path.exists() for path in prompt_paths.values())]
         if not any(existing):
             return None
@@ -863,8 +852,7 @@ class ThreeIsolatedEvolutionEngine:
         }:
             raise ValueError("frozen Reflector prompt hash inventory differs")
         prompts = {
-            kind: prompt_paths[kind].read_text(encoding="utf-8")
-            for kind in THREE_ARTIFACT_ORDER
+            kind: prompt_paths[kind].read_text(encoding="utf-8") for kind in THREE_ARTIFACT_ORDER
         }
         hashes = {kind: str(raw_hashes[kind.value]) for kind in THREE_ARTIFACT_ORDER}
         if any(

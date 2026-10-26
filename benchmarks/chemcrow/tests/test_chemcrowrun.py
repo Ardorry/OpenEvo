@@ -39,15 +39,6 @@ def test_statistics_rejects_missing_nonfinite_or_unpaired():
             paired_statistics(a, b)
 
 
-def test_canonical_config_preserves_legacy_protocol():
-    import yaml
-
-    package = Path(__file__).parents[1]
-    legacy = yaml.safe_load((package / "configs/full-v8.reproduction.example.yaml").read_text())
-    canonical = yaml.safe_load((package / "configs/chemcrowrun.reproduction.yaml").read_text())
-    assert canonical == legacy
-
-
 def test_incomplete_workspace_never_exports_a_submission(tmp_path, monkeypatch):
     from openevo_chemcrow.workflow import export_report
 
@@ -62,18 +53,6 @@ def test_incomplete_workspace_never_exports_a_submission(tmp_path, monkeypatch):
     assert report["status"] == "BLOCKED"
     assert len(report["missing_tasks"]) == 14
     assert not (root / "chemcrowrun-submission.json").exists()
-
-
-def test_runtime_rejects_credential_url_before_network(tmp_path):
-    from openevo_chemcrow.runtime_assets import install_runtime
-
-    for url in (
-        "http://example.com/runtime",
-        "https://key@example.com/runtime",
-        "https://example.com/runtime?token=secret",
-    ):
-        with pytest.raises(ValueError):
-            install_runtime(archive=None, url=url, cache=tmp_path)
 
 
 def test_private_environment_is_literal_and_rejects_public_file(tmp_path, monkeypatch):
@@ -297,3 +276,14 @@ def test_post_run_comparison_requires_complete_standardized_evidence(tmp_path):
     incomplete.write_text("{}")
     with pytest.raises(ValueError):
         compare_submission(incomplete)
+
+
+def test_canonical_config_defines_current_protocol():
+    import yaml
+
+    package = Path(__file__).parents[1]
+    config = yaml.safe_load((package / "configs/chemcrowrun.reproduction.yaml").read_text())
+    assert config["execution_scope"] == "full_g1_g2_pair"
+    assert config["artifact_protocol"] == "three_isolated_core_native_v2"
+    assert config["task_ids"] == "all"
+    assert set(config["reflectors"]) == {"memory", "skill_bundle", "agent_system"}

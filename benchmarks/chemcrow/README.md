@@ -1,35 +1,43 @@
 # ChemCrowRun
 
-**ChemCrowRun v1.0** is an independent reproduction and evaluation implementation of the
-ChemCrow benchmark on OpenEvo. It runs 14 tasks with isolated G1 → three native Reflectors →
-G2, internal blind evaluation, and a separate calibrated GPT-4 Judge. It is not the original
-ChemCrow agent, an official leaderboard, or an endorsed certification.
+ChemCrowRun is an independent reproduction of the 14-task ChemCrow benchmark on OpenEvo.
+It evaluates a baseline generation (G1), creates three task-local evolution artifacts, and
+evaluates a second generation (G2) with those artifacts. The three artifact types are text
+memory, skill bundle, and agent system.
 
-Start with [REPRODUCE.md](REPRODUCE.md). The public entry point is `chemcrowrun`; the
-`openevo-chemcrow` command and Python package remain compatible. Run data live under
-`outputs/chemcrowrun/<run_id>/`; reports and submissions use `chemcrowrun-report.json` and
-`chemcrowrun-submission.json`.
+This directory contains:
 
-```bash
-uv sync --frozen --project benchmarks/chemcrow --python 3.11.15 --extra dev
+- the ChemCrow adapter and **chemcrowrun** command;
+- the 14-task protocol and model configuration;
+- RXN/MCP container configuration;
+- reproducible installation and execution instructions;
+- the published G1/G2 result table and machine-readable scores;
+- the 42 evolution artifacts produced by the reproduction run;
+- the result submission schema.
+
+ChemCrowRun is an OpenEvo benchmark contribution. It is separate from the original ChemCrow
+agent and does not represent official ChemCrow leaderboard certification.
+
+## Quick start
+
+~~~bash
+uv sync --frozen --project benchmarks/chemcrow --python 3.11 --extra dev
 uv run --frozen --project benchmarks/chemcrow chemcrowrun --help
-```
+~~~
 
-The reproduction guide covers public fixtures, the original locked runtime archive, isolated
-services, a real single-task smoke run, a fresh 14-task run, budgeted evaluation, and audited
-exports. Source availability and offline test success do **not** demonstrate successful live
-reproduction. Anonymous runtime asset download and remote fresh-clone acceptance remain pending
-until an approved release is actually published and tested.
+Follow [REPRODUCE.md](REPRODUCE.md) for the complete workflow.
 
-Historical full-v8 remains the immutable reference experiment. Its identities and file hashes
-are mapped in [legacy-aliases.json](reproduction/legacy-aliases.json); no historical payload or
-hash is renamed or regenerated. [Historical published results](reports/full_v8_public_20260831/README.md)
-report internal blind G1 9.9286/12 and G2 10.2857/12, calibrated GPT-4 G1 9.3571/10 and
-G2 9.2143/10. They do not establish statistically significant G2 improvement and are not new-run
-results. The [artifact archive](artifacts/README.md) holds 84 original text artifacts across two
-experiments, with 42 belonging to full-v8.
+## Results
 
-See also [publication provenance](PUBLICATION.md), [release preparation](docs/RELEASE.md),
-[service architecture](deployment/README.md), and [submission schema](reproduction/submission.schema.json).
-The historical machine protocol identifier `chemcrow_full_v8_reproduction_v1` remains stable;
-ChemCrowRun v1.0 is its public name, not a changed scoring protocol.
+| Run | Internal G1 /12 | Internal G2 /12 | GPT-4 G1 /10 | GPT-4 G2 /10 |
+|---|---:|---:|---:|---:|
+| OpenEvo G1/G2 | 9.929 | 10.286 | 9.357 | 9.214 |
+| ChemCrowRun Reproduction | 10.629 | 11.014 | 9.607 | 9.571 |
+
+The reproduction used **gpt-5.6-sol** because the historical **gpt-5.5** model was not
+available in the current subscription catalog. The model difference is retained in the
+result metadata.
+
+See [the full comparison](reports/CHEMCROW_RESULTS_COMPARISON.md),
+[the reproduction results](reports/CHEMCROWRUN_RESULTS.json), and
+[the evolution artifacts](artifacts/reproduction-v1-sol-20261015/README.md).

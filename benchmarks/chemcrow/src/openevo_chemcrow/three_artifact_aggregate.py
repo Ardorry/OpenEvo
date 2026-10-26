@@ -123,9 +123,7 @@ def aggregate_three_artifact_generation_results(
         ),
         "artifact_count": len(artifacts),
         "unique_artifact_count": len({artifact.artifact_id for artifact in artifacts}),
-        "unique_reflector_job_count": len(
-            {artifact.reflector_job_id for artifact in artifacts}
-        ),
+        "unique_reflector_job_count": len({artifact.reflector_job_id for artifact in artifacts}),
         "g2_candidate_call_count": 0,
         "g2_internal_evaluator_call_count": 0,
         "final_evaluator_call_count": 0,
@@ -135,9 +133,7 @@ def aggregate_three_artifact_generation_results(
             "task_completion": mean([score.task_completion for score in scores]),
             "total": mean(
                 [
-                    score.chemical_correctness
-                    + score.reasoning_quality
-                    + score.task_completion
+                    score.chemical_correctness + score.reasoning_quality + score.task_completion
                     for score in scores
                 ]
             ),

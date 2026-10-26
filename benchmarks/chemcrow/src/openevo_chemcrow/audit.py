@@ -186,9 +186,7 @@ def _core_injection_receipt(
     if not isinstance(receipt, dict):
         raise TypeError(f"Core runtime readback receipt is missing: {trajectory.run_id}")
     artifact_ids = [
-        item.get("artifact_id")
-        for item in receipt.get("artifacts", [])
-        if isinstance(item, dict)
+        item.get("artifact_id") for item in receipt.get("artifacts", []) if isinstance(item, dict)
     ]
     expected = [] if role == "baseline" else [expected_artifact_id]
     if artifact_ids != expected:
@@ -205,5 +203,7 @@ def _core_injection_receipt(
                 continue
             item = event.get("item") if isinstance(event, dict) else None
             if isinstance(item, dict) and item.get("type") == "web_search":
-                raise ValueError(f"undeclared built-in web search entered run: {trajectory.run_id}")
+                raise ValueError(
+                    f"undeclared built-in web search entered run: {trajectory.run_id}"
+                )
     return receipt

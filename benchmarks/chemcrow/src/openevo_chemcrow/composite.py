@@ -32,7 +32,10 @@ def audit_paper_composite_repair(
     stopped = primary_run_root / "STOPPED_BY_USER.json"
     if not stopped.is_file():
         raise ValueError("primary source is not bound to its user-stop receipt")
-    if any((repair_run_root / marker).exists() for marker in ("STOPPED_BY_USER.json", "INVALIDATED.json")):
+    if any(
+        (repair_run_root / marker).exists()
+        for marker in ("STOPPED_BY_USER.json", "INVALIDATED.json")
+    ):
         raise ValueError("repair source is stopped or invalidated")
     authorization = validate_duplicate_authorization_receipt(
         path=duplicate_authorization_receipt,
@@ -94,9 +97,7 @@ def audit_paper_composite_repair(
         "primary_experiment_id": primary_experiment_id,
         "repair_experiment_id": repair_experiment_id,
         "primary_stop_receipt_sha256": file_sha256(stopped),
-        "duplicate_authorization_receipt_sha256": file_sha256(
-            duplicate_authorization_receipt
-        ),
+        "duplicate_authorization_receipt_sha256": file_sha256(duplicate_authorization_receipt),
         "duplicate_authorization": authorization,
         "primary_subset_audit": primary_audit,
         "repair_completed_run_audit": repair_audit,
@@ -119,9 +120,7 @@ def audit_paper_composite_repair(
     }
 
 
-def load_composite_pairs(
-    *, manifest_path: Path, task_ids: list[str]
-) -> dict[str, PairResult]:
+def load_composite_pairs(*, manifest_path: Path, task_ids: list[str]) -> dict[str, PairResult]:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if (
         manifest.get("schema_version") != "chemcrow_paper_composite_manifest_v1"
@@ -152,8 +151,7 @@ def validate_repair_execution_parity(path: Path) -> dict[str, Any]:
     if (
         payload.get("schema_version") != "chemcrow_paper_repair_execution_parity_v1"
         or payload.get("status") != "PASS"
-        or payload.get("scientific_execution_module_hashes_equal_to_reference")
-        is not True
+        or payload.get("scientific_execution_module_hashes_equal_to_reference") is not True
         or payload.get("scientific_runtime_dependency_versions_unchanged") is not True
     ):
         raise ValueError("paper repair execution parity receipt is invalid")
@@ -172,10 +170,9 @@ def validate_repair_execution_parity(path: Path) -> dict[str, Any]:
     config_root = repo_root / "benchmarks" / "chemcrow" / "configs"
     full_path = config_root / "full.v3.yaml"
     repair_path = config_root / "paper_repair.v1.yaml"
-    if (
-        file_sha256(full_path) != payload.get("full_v3_config_sha256")
-        or file_sha256(repair_path) != payload.get("paper_repair_config_sha256")
-    ):
+    if file_sha256(full_path) != payload.get("full_v3_config_sha256") or file_sha256(
+        repair_path
+    ) != payload.get("paper_repair_config_sha256"):
         raise ValueError("paper repair experiment config drift")
     full = yaml.safe_load(full_path.read_text(encoding="utf-8"))
     repair = yaml.safe_load(repair_path.read_text(encoding="utf-8"))

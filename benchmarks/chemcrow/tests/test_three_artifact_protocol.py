@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import pytest
-import yaml
 
 from openevo_chemcrow.cli import _assert_authoritative_role_models, _bounded_task_prefix
 from openevo_chemcrow.feedback import reflector_feedback_payload, runtime_feedback
@@ -348,39 +347,6 @@ def test_authoritative_roles_reject_silent_model_substitution():
         _assert_authoritative_role_models(roles)
 
 
-def test_full_v4_config_is_fresh_and_three_pipeline(monkeypatch):
-    monkeypatch.setenv("OPENEVO_ROLLOUT_BASE_URL", "http://127.0.0.1:8080")
-    for name in (
-        "OPENEVO_CANDIDATE_MODEL",
-        "OPENEVO_REFLECTOR_MODEL",
-        "OPENEVO_EVOLUTION_EVALUATOR_MODEL",
-        "OPENEVO_FINAL_EVALUATOR_MODEL",
-    ):
-        monkeypatch.setenv(name, "gpt-5.5")
-    path = Path(__file__).resolve().parents[1] / "configs" / "full.v4-three-pipeline.yaml"
-    config = yaml.safe_load(path.read_text(encoding="utf-8"))
-    assert config["experiment_id"] == "chemcrow-task-local-full-v4-three-pipeline"
-    assert config["task_ids"] == "all"
-    assert config["artifact_protocol"] == "three_isolated_v1"
-    assert set(config["reflectors"]) == {"memory", "skill_bundle", "agent_system"}
-    assert "prior_run_root" not in config
-    assert "duplicate_authorization_receipt" not in config
-    assert config["run_root"].endswith("runs/full-v4-three-pipeline")
-
-
-def test_core_native_v2_config_has_fresh_identity_and_no_custom_responsibility_policy():
-    path = (
-        Path(__file__).resolve().parents[1] / "configs" / "full.v5-core-native-three-pipeline.yaml"
-    )
-    config = yaml.safe_load(path.read_text(encoding="utf-8"))
-    assert config["experiment_id"] == "chemcrow-task-local-full-v5-core-native-three-pipeline"
-    assert config["artifact_protocol"] == "three_isolated_core_native_v2"
-    assert config["run_root"].endswith("runs/full-v5-core-native-three-pipeline")
-    assert config["cache_root"].endswith("caches/full-v5-core-native-three-pipeline")
-    assert "responsibility_policy_version" not in config["artifact_separation"]
-    assert "minimum_tokens_for_responsibility_check" not in config["artifact_separation"]
-
-
 def test_legacy_v1_and_core_native_v2_have_distinct_protocol_identity():
     legacy = ThreeArtifactBundleReceipt.model_fields["protocol"].annotation
     assert "chemcrow_three_isolated_artifacts_v1" in str(legacy)
@@ -478,9 +444,7 @@ def test_generation_only_scope_seals_g1_and_artifacts_without_g2(tmp_path, task_
     assert (root / "artifact.study.result.json").is_file()
 
 
-def test_sealed_generation_continuation_runs_only_g2_and_evaluators(
-    tmp_path, task_item
-):
+def test_sealed_generation_continuation_runs_only_g2_and_evaluators(tmp_path, task_item):
     source_evolution = FakeThreeEvolution()
     source_internal = FakeInternalEvaluator()
     source_runner = ThreeArtifactTaskLocalProtocolRunner(
@@ -530,9 +494,7 @@ def test_sealed_generation_continuation_runs_only_g2_and_evaluators(
     assert continuation_internal.roles == ["evolved"]
     claim_names = {
         path.name
-        for path in (tmp_path / "continuation-claims" / "sealed-generation").glob(
-            "*.json"
-        )
+        for path in (tmp_path / "continuation-claims" / "sealed-generation").glob("*.json")
     }
     assert claim_names == {
         "evolved_candidate.json",
@@ -960,16 +922,11 @@ def test_full_core_worker_prompts_are_frozen_from_claimed_datasets(tmp_path, tas
         for prompt in (memory_prompt, skill_prompt, system_prompt)
     )
     assert all(
-        "EVIDENCE JSON" not in prompt
-        for prompt in (memory_prompt, skill_prompt, system_prompt)
+        "EVIDENCE JSON" not in prompt for prompt in (memory_prompt, skill_prompt, system_prompt)
     )
     freeze = json.loads(
         (
-            tmp_path
-            / "runs"
-            / "pair-full-worker"
-            / "reflector_prompts"
-            / "freeze.receipt.json"
+            tmp_path / "runs" / "pair-full-worker" / "reflector_prompts" / "freeze.receipt.json"
         ).read_text()
     )
     assert freeze["prompts_frozen_before_first_invocation"] is True

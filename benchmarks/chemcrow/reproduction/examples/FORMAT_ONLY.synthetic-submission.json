@@ -1,7 +1,7 @@
 {
   "schema_version": "chemcrow_submission_v1",
-  "protocol_version": "chemcrow_full_v8_reproduction_v1",
-  "submission_id": "d493a70df6f89a0a92e64bf7d79c91783fff6e17471fbd477768fffb573f5048",
+  "protocol_version": "chemcrowrun_v1",
+  "submission_id": "ae201f4bbfcf0b51d26c89ea6e5d00135959883352b9e9079bbeee092756084c",
   "run_kind": "third_party_reproduction",
   "experiment_id": "FORMAT-ONLY-SYNTHETIC-NOT-AN-EXPERIMENT",
   "task_ids": [

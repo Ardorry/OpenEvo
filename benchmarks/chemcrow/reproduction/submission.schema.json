@@ -572,8 +572,8 @@
       "type": "string"
     },
     "protocol_version": {
-      "const": "chemcrow_full_v8_reproduction_v1",
-      "default": "chemcrow_full_v8_reproduction_v1",
+      "const": "chemcrowrun_v1",
+      "default": "chemcrowrun_v1",
       "title": "Protocol Version",
       "type": "string"
     },

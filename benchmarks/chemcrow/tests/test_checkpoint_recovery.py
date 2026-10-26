@@ -182,9 +182,7 @@ def test_checkpoint_recovery_rejects_candidate_shell_execution(
             _completion(
                 run_id=baseline_run_id,
                 answer="answer",
-                transcript=json.dumps(
-                    {"item": {"type": "command_execution", "command": "true"}}
-                ),
+                transcript=json.dumps({"item": {"type": "command_execution", "command": "true"}}),
             )
         ),
         encoding="utf-8",
@@ -197,9 +195,7 @@ def test_checkpoint_recovery_rejects_candidate_shell_execution(
     ledger_root = tmp_path / "claims"
     ledger = PhaseLedger(ledger_root, pair_id=pair_id)
     ledger.claim("baseline_candidate", {"task_id": task_item.task_id})
-    ledger.terminal(
-        "baseline_candidate", {"run_id": baseline_run_id, "trajectory_sha256": "x"}
-    )
+    ledger.terminal("baseline_candidate", {"run_id": baseline_run_id, "trajectory_sha256": "x"})
     ledger.claim(
         "baseline_internal_evaluator",
         {

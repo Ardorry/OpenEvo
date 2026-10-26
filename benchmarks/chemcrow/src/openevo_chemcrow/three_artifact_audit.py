@@ -265,20 +265,14 @@ def audit_three_artifact_run(
         else:
             expected_continuation_phases = _PHASES - _GENERATION_PHASES
             if set(claims) != expected_continuation_phases:
-                raise ValueError(
-                    f"continuation phase claim inventory mismatch: {pair_id}"
-                )
+                raise ValueError(f"continuation phase claim inventory mismatch: {pair_id}")
             source_claim_root = source_generation_run_root / "claims" / pair_id
-            source_claims = {
-                path.stem: path for path in source_claim_root.glob("*.json")
-            }
+            source_claims = {path.stem: path for path in source_claim_root.glob("*.json")}
             if set(source_claims) != _GENERATION_PHASES:
                 raise ValueError(f"source generation claim inventory mismatch: {pair_id}")
             claims = {**source_claims, **claims}
             continuation_receipt = json.loads(
-                (item_root / "continuation.source.receipt.json").read_text(
-                    encoding="utf-8"
-                )
+                (item_root / "continuation.source.receipt.json").read_text(encoding="utf-8")
             )
             if (
                 continuation_receipt.get("schema_version")
@@ -325,9 +319,7 @@ def audit_three_artifact_run(
                 },
             )
             verified_pre_candidate_no_effect_attempts += pre_candidate_no_effect_attempts
-            verified_baseline_evaluator_no_effect_attempts += (
-                baseline_evaluator_no_effect_attempts
-            )
+            verified_baseline_evaluator_no_effect_attempts += baseline_evaluator_no_effect_attempts
             verified_reflector_no_effect_attempts += reflector_no_effect_attempts
             verified_evolved_candidate_no_effect_attempts += evolved_candidate_no_effect_attempts
             phase_receipt = claim.get("receipt")
@@ -564,8 +556,7 @@ def audit_three_artifact_generation_run(
         boundary_path = item_root / "generation.boundary.receipt.json"
         boundary = json.loads(boundary_path.read_text(encoding="utf-8"))
         if (
-            boundary.get("schema_version")
-            != "chemcrow_g1_artifact_generation_boundary_v1"
+            boundary.get("schema_version") != "chemcrow_g1_artifact_generation_boundary_v1"
             or boundary.get("status") != "G1_AND_ARTIFACTS_SEALED"
             or boundary.get("task_id") != task_id
             or boundary.get("pair_id") != pair_id
@@ -577,8 +568,7 @@ def audit_three_artifact_generation_run(
             or boundary.get("feedback_sha256") != file_sha256(item_root / "feedback.json")
             or boundary.get("artifact_bundle_sha256")
             != file_sha256(item_root / "artifacts.receipt.json")
-            or boundary.get("artifact_ids_by_type")
-            != result.artifact_bundle.artifact_id_by_type()
+            or boundary.get("artifact_ids_by_type") != result.artifact_bundle.artifact_id_by_type()
         ):
             raise ValueError(f"generation boundary authority differs: {pair_id}")
 
@@ -620,8 +610,7 @@ def audit_three_artifact_generation_run(
             if (
                 claim.get("status") != "terminal"
                 or claim.get("phase") != phase
-                or canonical_sha256(claim.get("authority"))
-                != claim.get("authority_sha256")
+                or canonical_sha256(claim.get("authority")) != claim.get("authority_sha256")
                 or canonical_sha256(claim.get("receipt")) != claim.get("receipt_sha256")
             ):
                 raise ValueError(f"generation terminal claim differs: {pair_id}/{phase}")
@@ -638,14 +627,11 @@ def audit_three_artifact_generation_run(
             elif phase == "baseline_internal_evaluator":
                 verified_baseline_evaluator_no_effect_attempts += attempt_count
                 receipt = claim.get("receipt", {})
-                if (
-                    receipt.get("evaluator_run_id")
-                    != result.baseline_internal_evaluation.evaluator_run_id
-                    or receipt.get("feedback_sha256")
-                    != canonical_sha256(
-                        result.baseline_internal_evaluation.model_dump(mode="json")
-                    )
-                ):
+                if receipt.get(
+                    "evaluator_run_id"
+                ) != result.baseline_internal_evaluation.evaluator_run_id or receipt.get(
+                    "feedback_sha256"
+                ) != canonical_sha256(result.baseline_internal_evaluation.model_dump(mode="json")):
                     raise ValueError(f"generation evaluator claim differs: {pair_id}")
                 confidence_receipt = receipt.get("confidence_parse_receipt")
                 if confidence_receipt is not None:
@@ -676,11 +662,14 @@ def audit_three_artifact_generation_run(
                     raise ValueError(f"generation Reflector claim differs: {pair_id}/{phase}")
                 sibling_isolation_evidence_count += 1
 
-        if _audit_core_completion(
-            core_completion_root=core_completion_root,
-            run_id=result.baseline.run_id,
-            expected_by_type={},
-        ) is not None:
+        if (
+            _audit_core_completion(
+                core_completion_root=core_completion_root,
+                run_id=result.baseline.run_id,
+                expected_by_type={},
+            )
+            is not None
+        ):
             raise ValueError(f"generation baseline was not bare S0: {pair_id}")
         forbidden_completion_names = [
             path.parent.name
@@ -711,8 +700,7 @@ def audit_three_artifact_generation_run(
         aggregate_path = run_root / "aggregate.json"
         aggregate = json.loads(aggregate_path.read_text(encoding="utf-8"))
         if (
-            aggregate.get("schema_version")
-            != "chemcrow_three_artifact_generation_aggregate_v1"
+            aggregate.get("schema_version") != "chemcrow_three_artifact_generation_aggregate_v1"
             or aggregate.get("status") != "G1_AND_ARTIFACT_GENERATION_COMPLETE"
             or aggregate.get("task_count") != len(task_ids)
             or aggregate.get("artifact_count") != len(task_ids) * 3
@@ -765,13 +753,9 @@ def audit_three_artifact_generation_run(
         "verified_baseline_evaluator_no_effect_attempt_count": (
             verified_baseline_evaluator_no_effect_attempts
         ),
-        "verified_reflector_no_effect_attempt_count": (
-            verified_reflector_no_effect_attempts
-        ),
+        "verified_reflector_no_effect_attempt_count": (verified_reflector_no_effect_attempts),
         "verified_evolved_candidate_no_effect_attempt_count": 0,
-        "confidence_transport_adaptation_count": (
-            confidence_transport_adaptation_count
-        ),
+        "confidence_transport_adaptation_count": (confidence_transport_adaptation_count),
     }
 
 

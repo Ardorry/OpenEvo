@@ -137,7 +137,9 @@ def build_server(
 
     @server.custom_route("/health", methods=["GET"])
     async def health(_: Request) -> JSONResponse:
-        return JSONResponse({"status": "ok", "pair_id": pair_id, "tool_count": len(_EXPOSED_TOOLS)})
+        return JSONResponse(
+            {"status": "ok", "pair_id": pair_id, "tool_count": len(_EXPOSED_TOOLS)}
+        )
 
     @server.custom_route("/receipts", methods=["GET"])
     async def receipt_list(_: Request) -> JSONResponse:
@@ -167,6 +169,7 @@ def build_server(
                 error=exc,
             )
             return JSONResponse(payload, status_code=422)
+
     return server
 
 

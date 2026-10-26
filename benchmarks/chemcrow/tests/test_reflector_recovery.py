@@ -603,12 +603,8 @@ def test_paused_reflector_batch_preserves_completed_prefix_and_replaces_suffix(
     assert replacements == {"reflector_skill_bundle", "reflector_agent_system"}
     assert outputs[ArtifactKind.TEXT_MEMORY].content == memory_content
     memory_claim = json.loads((ledger_root / pair_id / "reflector_memory.json").read_text())
-    skill_claim = json.loads(
-        (ledger_root / pair_id / "reflector_skill_bundle.json").read_text()
-    )
-    system_claim = json.loads(
-        (ledger_root / pair_id / "reflector_agent_system.json").read_text()
-    )
+    skill_claim = json.loads((ledger_root / pair_id / "reflector_skill_bundle.json").read_text())
+    system_claim = json.loads((ledger_root / pair_id / "reflector_agent_system.json").read_text())
     assert memory_claim["status"] == "claimed"
     assert skill_claim["status"] == "replacement_ready"
     assert system_claim["status"] == "replacement_ready"

@@ -173,9 +173,7 @@ def test_compatible_evaluator_reports_incomplete_core_call_before_json_parse(tas
     )
 
     with pytest.raises(RuntimeError, match="did not complete"):
-        CompatibleOpenEvoEvolutionEvaluator(rollout).evaluate(
-            task=task_item, trajectory=baseline
-        )
+        CompatibleOpenEvoEvolutionEvaluator(rollout).evaluate(task=task_item, trajectory=baseline)
 
 
 def test_compatible_final_evaluator_preserves_original_prompt(task_item):

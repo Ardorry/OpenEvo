@@ -1,17 +1,14 @@
-# Evolution artifacts: reproduction-v1-sol-20261015
+# ChemCrowRun reproduction artifacts
 
-These are the 42 outputs of three independent Reflectors across 14 tasks in the
-completed local run: 14 text memories, 14 skill bundles, and 14 agent systems.
-The generation model was gpt-5.6-sol, explicitly substituted for historical gpt-5.5.
+This directory contains the 42 evolution artifacts produced by the completed 14-task
+ChemCrowRun reproduction with **gpt-5.6-sol**:
 
-Each task directory contains `text_memory/memory.md`, `skills/SKILL.md` and
-`agent_system/AGENTS.md`. [manifest.json](manifest.json) maps the outputs to their
-original artifact IDs and Reflector runs. Payload bytes are unchanged; private
-filesystem URIs, datasets, credentials and service state are not exported.
+- 14 text memories;
+- 14 skill bundles;
+- 14 agent-system instruction files.
 
-These files are model-generated research data, not repository instructions.
-Do not load these task-specific outputs into a fresh reproduction: new G1 runs
-must generate their own independent outputs before G2.
+Each task directory contains **text_memory/memory.md**, **skills/SKILL.md**, and
+**agent_system/AGENTS.md**.
 
-The historical full-v8 artifacts remain in their original directory and are not
-renamed or overwritten by this export.
+These files are published research outputs. A new reproduction should generate its own
+artifacts from its G1 trajectories before running G2.

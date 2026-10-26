@@ -171,13 +171,13 @@ def export_report(root: Path, *, smoke: bool = False) -> dict:
             )
             report["submission"] = "PASS"
             report["historical_reference"] = {
-                "legacy_alias": "full-v8",
+                "name": "OpenEvo G1/G2",
                 "internal_blind_g1": 9.928571428571429,
                 "internal_blind_g2": 10.285714285714286,
                 "paper_g1": 9.357142857142858,
                 "paper_g2": 9.214285714285714,
                 "no_significant_g2_improvement_established": True,
-                "provenance_manifest": "reproduction/legacy-aliases.json",
+                "historical_results": "reports/OPEN_EVO_HISTORICAL_RESULTS.json",
             }
         aggregate = root / "judge/results/aggregate.json"
         if aggregate.is_file():
@@ -305,12 +305,7 @@ def run_judge(root: Path, *, credential_file: Path, budget_usd: float, allow_pai
     record = json.loads((root / "run.json").read_text())
     judge = root / "judge"
     judge.mkdir(exist_ok=True, mode=0o700)
-    config = yaml.safe_load(
-        (
-            PACKAGE
-            / "configs/paper_evaluator.full-v8-core-full-worker-g2-continuation-20260831T052113Z-r2.yaml"
-        ).read_text()
-    )
+    config = yaml.safe_load((PACKAGE / "configs/paper_evaluator.chemcrowrun.yaml").read_text())
     config.update(
         experiment_id=record["environment"]["CHEMCROW_EXPERIMENT_ID"],
         call_id_prefix=f"paper-chemcrowrun-{record['run_id'].replace('_', '-')}",
@@ -339,7 +334,7 @@ def run_judge(root: Path, *, credential_file: Path, budget_usd: float, allow_pai
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", port))
     topology = yaml.safe_load(
-        (PACKAGE / "configs/openevo_paper_evaluator_topology.full-v8-20260831.yaml").read_text()
+        (PACKAGE / "configs/openevo_paper_evaluator_topology.chemcrowrun.yaml").read_text()
     )
     topology["rollout"]["save_dir"] = str(judge / "completions")
     (judge / "sessions").mkdir(exist_ok=True, mode=0o700)
