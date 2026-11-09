@@ -1,0 +1,536 @@
+[
+  {
+    "task": "llm-inference-batching-scheduler",
+    "tag": "alexgshaw/llm-inference-batching-scheduler:20251031",
+    "image_id": "sha256:0aff6db1f586c1b1e14999750d1cdf8fb94f11bc69c700fcad9b43a7c2ef5686",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "filter-js-from-html",
+    "tag": "alexgshaw/filter-js-from-html:20251031",
+    "image_id": "sha256:afdd2693169844c7a66ff66012b4c8470f3ca7c2420607d3b1629e38da9d4517",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "adaptive-rejection-sampler",
+    "tag": "alexgshaw/adaptive-rejection-sampler:20251031",
+    "image_id": "sha256:65b25be2c34967a7db2332794da5a1f6d8235e1792a1d747aff46b5bff77b9d7",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "fix-git",
+    "tag": "alexgshaw/fix-git:20260403",
+    "image_id": "sha256:bed9051fa1e09cdadf5fe0c3bbba6c90d23fc74b0d67d6f5d05fb075e8a4acd6",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "rstan-to-pystan",
+    "tag": "alexgshaw/rstan-to-pystan:20251031",
+    "image_id": "sha256:1b14d62b12dd1cb5420463579116a69e26fafc7d56745f8f896eb503a656b000",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "raman-fitting",
+    "tag": "alexgshaw/raman-fitting:20251031",
+    "image_id": "sha256:64fc1c6d2f3db01a8defcf978d3a9dc2d3f0a71c536b0baf5155b24e3a092284",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "bn-fit-modify",
+    "tag": "alexgshaw/bn-fit-modify:20251031",
+    "image_id": "sha256:e22baa862c29eb5076f82ba45527df74ce0b393a03ee6c08697279b852acd354",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "configure-git-webserver",
+    "tag": "alexgshaw/configure-git-webserver:20251031",
+    "image_id": "sha256:ec4bd4a5223850005caf80b223cbd98adb8999dbc5326786169d7998db53b65f",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "make-doom-for-mips",
+    "tag": "alexgshaw/make-doom-for-mips:20251031",
+    "image_id": "sha256:c503768044b13ea799f26ee48c83c5885cd9697114bc3e320e1e5f926276188f",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "mailman",
+    "tag": "alexgshaw/mailman:20251031",
+    "image_id": "sha256:db488c3287e44deaa76c7bdb4b57019a9602b117a1132c99b2c1ae28b21c7ec7",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "headless-terminal",
+    "tag": "alexgshaw/headless-terminal:20251031",
+    "image_id": "sha256:41e1eca1ec72a2873c91d2e1b988b0565c0b1e9a0e65ddc6df95faa786336838",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "reshard-c4-data",
+    "tag": "alexgshaw/reshard-c4-data:20251031",
+    "image_id": "sha256:a1ea118e6dbb44200cb77c4de3dc38023bf80387b0e781512c2d615189ad2562",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "build-pov-ray",
+    "tag": "alexgshaw/build-pov-ray:20251031",
+    "image_id": "sha256:bdd54bc6df23947ecd7277cbb5ff569b6436d8f697ecfe585f06d8265fcb1941",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "compile-compcert",
+    "tag": "alexgshaw/compile-compcert:20260403",
+    "image_id": "sha256:773582f15daca73360cd02f77d61626cd90ca0ff5b13c474500c41234c7d59f5",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "nginx-request-logging",
+    "tag": "alexgshaw/nginx-request-logging:20251031",
+    "image_id": "sha256:41217bae6667f04a767dc1b2c5c12b034dfc51a18226202003313aaf86832055",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "sam-cell-seg",
+    "tag": "alexgshaw/sam-cell-seg:20251031",
+    "image_id": "sha256:792f56b9413a280dfbeb0c5b64067e4f7217f0fba16cd84918eb28928f406fd2",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "log-summary-date-ranges",
+    "tag": "alexgshaw/log-summary-date-ranges:20251031",
+    "image_id": "sha256:748e8485201e72133a9400dc8f6f524eb20e9812655eef41b32a1cc21796bdef",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "write-compressor",
+    "tag": "alexgshaw/write-compressor:20251031",
+    "image_id": "sha256:795a10ee52aa610a840b6587c5a1d2194175faa76c58879c8846a115b601902a",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "cancel-async-tasks",
+    "tag": "alexgshaw/cancel-async-tasks:20251031",
+    "image_id": "sha256:760c5426807dc80edd6a1b1c3675c197599fc3f9cb46b1a06e7539cb94818553",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "feal-linear-cryptanalysis",
+    "tag": "alexgshaw/feal-linear-cryptanalysis:20251031",
+    "image_id": "sha256:4adae8befa34922a8cac7344ad89aef223bb7758956070a12641e64fdfdd45d8",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "tune-mjcf",
+    "tag": "alexgshaw/tune-mjcf:20251031",
+    "image_id": "sha256:9b16b1b03963fede220751f194eaa4e59c22a7341290a5a26fef85cbbaf09f14",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "git-multibranch",
+    "tag": "alexgshaw/git-multibranch:20251031",
+    "image_id": "sha256:ec6eeb02cecf35faf5badd75646ab0dd2e02cab484638b413ccd4606a2e2ef7d",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "pytorch-model-recovery",
+    "tag": "alexgshaw/pytorch-model-recovery:20260430",
+    "image_id": "sha256:038b41ad0d7a8bc956173db3e27d7460dae907d859b844b4df1afd7826cdb114",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "break-filter-js-from-html",
+    "tag": "alexgshaw/break-filter-js-from-html:20251031",
+    "image_id": "sha256:1c09e20b95f90415fe2f5424335b3bca11e36ee915715b2891aeaaefec475645",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "fix-code-vulnerability",
+    "tag": "alexgshaw/fix-code-vulnerability:20251031",
+    "image_id": "sha256:fe9be33bb13823b31284102c8b366e3fc83f5e84cedbba42d2540081c2d9899a",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "pypi-server",
+    "tag": "alexgshaw/pypi-server:20251031",
+    "image_id": "sha256:14bdb79aabffeb5b4635c42038a4eb7de3f4935f49d0bcd53dd9e726b1d6d1b2",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "train-fasttext",
+    "tag": "alexgshaw/train-fasttext:20251031",
+    "image_id": "sha256:ea991ff9add049c6956d2501b6f38fc612948cb30edaf8f6d61f63f90808272e",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "build-cython-ext",
+    "tag": "alexgshaw/build-cython-ext:20251031",
+    "image_id": "sha256:b2a41c10dde020d36fbea4643794d8791118afb77db125e61837f21a02c1a3af",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "mteb-leaderboard",
+    "tag": "alexgshaw/mteb-leaderboard:20260430",
+    "image_id": "sha256:0cdccdd4ec71822cd55179e77e0dca2be313be44d8ec046d94861e4147d5a4af",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "protein-assembly",
+    "tag": "alexgshaw/protein-assembly:20260403",
+    "image_id": "sha256:2a47b0bd852b71effd01caaded10f3897b25712c8b87b0921a5f67079338ac5f",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "dna-insert",
+    "tag": "alexgshaw/dna-insert:20251031",
+    "image_id": "sha256:2e68029a49d11b454994967b2eddb94333ef321b688f865ada3c09a3b534c110",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "count-dataset-tokens",
+    "tag": "alexgshaw/count-dataset-tokens:20251031",
+    "image_id": "sha256:acc8c39db027c0cf3f45f960cb88e06be954dc34b15d7ab7622f4614ff21130a",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "portfolio-optimization",
+    "tag": "alexgshaw/portfolio-optimization:20251031",
+    "image_id": "sha256:b0ef263fdd85ca609faafead645c86c8a03f534178b3368e3eedc0a273b3fed9",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "install-windows-3.11",
+    "tag": "alexgshaw/install-windows-3.11:20251031",
+    "image_id": "sha256:c476efafe0214c2c6263fcbc0b2ed0b67be0b19c053bd7c81865cc4786f79e5f",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "git-leak-recovery",
+    "tag": "alexgshaw/git-leak-recovery:20251031",
+    "image_id": "sha256:ac4c027aef4e069789e75e13a1b03b9cecb5f42faef5c828cac183d25ba08fe2",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "custom-memory-heap-crash",
+    "tag": "alexgshaw/custom-memory-heap-crash:20251031",
+    "image_id": "sha256:7d4d46573a68e9463df7b9dd12cc791d94a310e6a5fa6ab318c368e258de3162",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "schemelike-metacircular-eval",
+    "tag": "alexgshaw/schemelike-metacircular-eval:20251031",
+    "image_id": "sha256:85149ed74db9444b32fe96d058048ecbe604dfd39f19cf5deb4c0d7c10db57c9",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "path-tracing-reverse",
+    "tag": "alexgshaw/path-tracing-reverse:20251031",
+    "image_id": "sha256:158e1425861e7daff35d76555db6bc9df63ac411a856b3b83c433ec331bee1cf",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "prove-plus-comm",
+    "tag": "alexgshaw/prove-plus-comm:20251031",
+    "image_id": "sha256:daba7f4d626336854298dd6e021c4b85486844e34474b2928e261fc35c312547",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "sparql-university",
+    "tag": "alexgshaw/sparql-university:20251031",
+    "image_id": "sha256:4b477a009da63f0cff40da8caa52e09a382bf4a0ce011cd371c09650e665ba9c",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "mteb-retrieve",
+    "tag": "alexgshaw/mteb-retrieve:20260430",
+    "image_id": "sha256:0edfab046492caa503d2f5796122e86540d3a915d73b77230d93d28678c68479",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "model-extraction-relu-logits",
+    "tag": "alexgshaw/model-extraction-relu-logits:20251031",
+    "image_id": "sha256:cc17ca081e08612a89a3d185fc4af6735ee2a08eaeb9478f8b2474392c4feac8",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "hf-model-inference",
+    "tag": "alexgshaw/hf-model-inference:20260430",
+    "image_id": "sha256:43a3ff616ca45a6b1693e4cd436c14c6449367e090f4a50f379c9da89cd5062f",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "merge-diff-arc-agi-task",
+    "tag": "alexgshaw/merge-diff-arc-agi-task:20251031",
+    "image_id": "sha256:1994f7ed8975cf2a616e00daa45fc556e842418f8040398053f064cf0bba3c69",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "modernize-scientific-stack",
+    "tag": "alexgshaw/modernize-scientific-stack:20251031",
+    "image_id": "sha256:725e815168e64c91e9b45a71f3c989d3672b510647b98e7392c0bf9e7dc203c6",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "code-from-image",
+    "tag": "alexgshaw/code-from-image:20251031",
+    "image_id": "sha256:95e8a914c522fb26db230a1f28a895f260a3f0b3351f3de8d5bd04e88f316998",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "dna-assembly",
+    "tag": "alexgshaw/dna-assembly:20251031",
+    "image_id": "sha256:940e10327e89b8034aa335c48e8e643414809f5ee2ffd2d2854688b996c822ee",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "overfull-hbox",
+    "tag": "alexgshaw/overfull-hbox:20260403",
+    "image_id": "sha256:492bea53bb36318ba79f670c0449d388229bed86eb82f12845ad8e1ebe93a83e",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "regex-log",
+    "tag": "alexgshaw/regex-log:20251031",
+    "image_id": "sha256:0a15c19cc78685f8d322945e882ba702ef3d0265d1f621ee00991b8e64ddb750",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "sqlite-with-gcov",
+    "tag": "alexgshaw/sqlite-with-gcov:20251031",
+    "image_id": "sha256:b9726244945382a5d73839440e391c88aceeb52346805eebd8712eb1b6ba8b3a",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "cobol-modernization",
+    "tag": "alexgshaw/cobol-modernization:20251031",
+    "image_id": "sha256:14e6e693be70ee0c7f07105dfc0f3cae71fd495cc0106042dd530fc5fbd8e637",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "gcode-to-text",
+    "tag": "alexgshaw/gcode-to-text:20251031",
+    "image_id": "sha256:174ac52b2c4ae7e2bad19ae1f5e61ee91b1344c8ab1bf57bed5333c15249a402",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "db-wal-recovery",
+    "tag": "alexgshaw/db-wal-recovery:20251031",
+    "image_id": "sha256:0ff6d2977f94533d8a7a0cdc5a16efd42cb3ccfeb2f5684cdc8db0836b43b9e3",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "extract-moves-from-video",
+    "tag": "alexgshaw/extract-moves-from-video:20260403",
+    "image_id": "sha256:d8a5aaba96f55ee0826f58c6d5c47aa8df70c66c88a9dae1aca92462d3d31158",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "make-mips-interpreter",
+    "tag": "alexgshaw/make-mips-interpreter:20251031",
+    "image_id": "sha256:818505509c7be8f53b6133b093076cb03527f7539c8ad980435cf556143ddcb8",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "openssl-selfsigned-cert",
+    "tag": "alexgshaw/openssl-selfsigned-cert:20251031",
+    "image_id": "sha256:7082de4dab44888b5b5e9c0f9de09b30bc8cd28b329edc6d153fb5ce3dca5f24",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "sanitize-git-repo",
+    "tag": "alexgshaw/sanitize-git-repo:20251031",
+    "image_id": "sha256:aed7717e5fcd600ca2db5e8c5ce33954a20b5543f0c9775429915ced251d7f55",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "path-tracing",
+    "tag": "alexgshaw/path-tracing:20251031",
+    "image_id": "sha256:189b026301d200f7d2dec5cc9dc617c3c70163e687b407201a6a9300fdf8d655",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "sqlite-db-truncate",
+    "tag": "alexgshaw/sqlite-db-truncate:20251031",
+    "image_id": "sha256:33e71d5cd2768815d8c822af32020cd12ff3b0c35f4609dbd65523d8ee98d358",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "password-recovery",
+    "tag": "alexgshaw/password-recovery:20251031",
+    "image_id": "sha256:9a77f7a2317527330ca8403b1826a283c8ca7d39fd064022cd9285e6e8cd2d7c",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "qemu-startup",
+    "tag": "alexgshaw/qemu-startup:20251031",
+    "image_id": "sha256:7feacb1ee3f271a6a99b1ab8a04f0872411d651ef9319b5d6da2eb11b61bc210",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "gpt2-codegolf",
+    "tag": "alexgshaw/gpt2-codegolf:20251031",
+    "image_id": "sha256:f4771870b08b96c63feb567c49bcc2c2b4deefd0fc3acab5ccb781ed4fc492a6",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "query-optimize",
+    "tag": "alexgshaw/query-optimize:20251031",
+    "image_id": "sha256:5654e241057913a0f1a234583c62e12ed7bfab560d9c3f0dc5da985d9f3514eb",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "torch-pipeline-parallelism",
+    "tag": "alexgshaw/torch-pipeline-parallelism:20251031",
+    "image_id": "sha256:3e61cb3c7516e90e3a5a49171a673fd3d30f9a1e2ada2358a227bfa7369e2295",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "circuit-fibsqrt",
+    "tag": "alexgshaw/circuit-fibsqrt:20251031",
+    "image_id": "sha256:133688d2a04ad9fd39267badd3d61ac22c91c09162d682e44d4396b3445123ab",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "torch-tensor-parallelism",
+    "tag": "alexgshaw/torch-tensor-parallelism:20251031",
+    "image_id": "sha256:fea44fb62b9c5cf7bb98548d09f2d5f3cb564773e9ea2688bcd184390c247dcf",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "polyglot-rust-c",
+    "tag": "alexgshaw/polyglot-rust-c:20251031",
+    "image_id": "sha256:42e1c101034156ab6a0cbefc63ee654ab7fccb668e1580a090abba89244f6a93",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "pytorch-model-cli",
+    "tag": "alexgshaw/pytorch-model-cli:20251031",
+    "image_id": "sha256:2d19236650cc866ba441762e3d89edfa452756e0e4833cfdb984257d50b446e7",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "polyglot-c-py",
+    "tag": "alexgshaw/polyglot-c-py:20251031",
+    "image_id": "sha256:e1956576c394084e01441646e27f54bf0a246d83b764d9d14b04273e00302f07",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "caffe-cifar-10",
+    "tag": "alexgshaw/caffe-cifar-10:20260403",
+    "image_id": "sha256:67f40b2f90da4a0e49d475a4d58450d3c0605756ba4b1c68e258141d1db200d1",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "vulnerable-secret",
+    "tag": "alexgshaw/vulnerable-secret:20251031",
+    "image_id": "sha256:54e36ed5f26ccc7489bde8745c86e6d8f2ce8927d2a5719316480716f550bf54",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "largest-eigenval",
+    "tag": "alexgshaw/largest-eigenval:20251031",
+    "image_id": "sha256:c46388bf47c6faec1324b39da95fd7bb7d1eee9e3a3a61e46f59a34ee1850805",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "kv-store-grpc",
+    "tag": "alexgshaw/kv-store-grpc:20251031",
+    "image_id": "sha256:b9412389bb791988d341f7dcbf456fb68feea133d9e3e6a705fbea976a8acb2b",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "fix-ocaml-gc",
+    "tag": "alexgshaw/fix-ocaml-gc:20251031",
+    "image_id": "sha256:64b43d0dbddfbc0291d03486954c3def53d5d19c67426c8f758631d5dd9d7d85",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "build-pmars",
+    "tag": "alexgshaw/build-pmars:20251031",
+    "image_id": "sha256:7b5bae6c1dea946c16c088a0f254182013f7040298420d0021612fe1b1a2e5ee",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "crack-7z-hash",
+    "tag": "alexgshaw/crack-7z-hash:20251031",
+    "image_id": "sha256:cd0a22dc1d928e3075936ac702626ae529a683ac25aed25103ffaf33b72074d5",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "distribution-search",
+    "tag": "alexgshaw/distribution-search:20251031",
+    "image_id": "sha256:0c39e3eb6c2fb13618ed2a075343d52ab35dfef59a30e19c1173e534b9179b06",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "large-scale-text-editing",
+    "tag": "alexgshaw/large-scale-text-editing:20251031",
+    "image_id": "sha256:4ca0b429596fd62b9fab0a787e276ee7ee3faf2761b56473232327218c462c56",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "extract-elf",
+    "tag": "alexgshaw/extract-elf:20251031",
+    "image_id": "sha256:ce2d818d338482f97d2dc224b884271798ccd801e922ef08606a64103e08489f",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "feal-differential-cryptanalysis",
+    "tag": "alexgshaw/feal-differential-cryptanalysis:20251031",
+    "image_id": "sha256:ad58defcdd2544ac3494b06b77af0f6715fa1b94221e6d509578b156ef4817e2",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "mcmc-sampling-stan",
+    "tag": "alexgshaw/mcmc-sampling-stan:20251031",
+    "image_id": "sha256:c7ba1f1f9d2df36db0338e4d1e429692aaf653ef6faa13dc4694a7c457593d6e",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "winning-avg-corewars",
+    "tag": "alexgshaw/winning-avg-corewars:20251031",
+    "image_id": "sha256:d372f2022972a03c8a7d16f631e9171dad3a65e1d119a97d4875167f8db3e6ca",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "chess-best-move",
+    "tag": "alexgshaw/chess-best-move:20251031",
+    "image_id": "sha256:0977c69064c0e9d25a2267d99794290653e3683349a52e974c6f171e4293828f",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "financial-document-processor",
+    "tag": "alexgshaw/financial-document-processor:20251031",
+    "image_id": "sha256:d53ef35af0ce9ed2f68741a7175355c731bf170dbf35971166a906b61e4c647c",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "qemu-alpine-ssh",
+    "tag": "alexgshaw/qemu-alpine-ssh:20251031",
+    "image_id": "sha256:e868510787ba024e1fced364e94b5ae42c9b3076fa2345498edb833752188f93",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "regex-chess",
+    "tag": "alexgshaw/regex-chess:20251031",
+    "image_id": "sha256:f75b4cea8135bedd201959332e8a6f68acc00bd1cf55faedd966319d3f70e842",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "multi-source-data-merger",
+    "tag": "alexgshaw/multi-source-data-merger:20251031",
+    "image_id": "sha256:5096d3409e5c692afd62a136f90a2e52dd87653aa6637a3e1ca31ad30fab1096",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "video-processing",
+    "tag": "alexgshaw/video-processing:20251031",
+    "image_id": "sha256:48c2f3683967aff593e02b1ef5b138ae5e4db7980bccd403ea550694b6fa8e43",
+    "matches_prior_pinned_image": true
+  },
+  {
+    "task": "constraints-scheduling",
+    "tag": "alexgshaw/constraints-scheduling:20251031",
+    "image_id": "sha256:65694556a87deb6f2c0f643841d4d4ff3fabd1e794999978694d891ccb24e703",
+    "matches_prior_pinned_image": true
+  }
+]

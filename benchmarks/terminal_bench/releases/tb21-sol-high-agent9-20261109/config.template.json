@@ -1,0 +1,80 @@
+{
+  "job_name": "openevo-tb21-reproduction",
+  "jobs_dir": "${JOBS_DIR}",
+  "n_attempts": 5,
+  "install_only": false,
+  "timeout_multiplier": 1.0,
+  "debug": false,
+  "n_concurrent_trials": 4,
+  "quiet": true,
+  "retry": {
+    "max_retries": 0,
+    "exclude_exceptions": [
+      "AgentTimeoutError",
+      "RewardFileEmptyError",
+      "AgentSafetyRefusalError",
+      "RewardFileNotFoundError",
+      "VerifierOutputParseError",
+      "ModelNotFoundError",
+      "AgentAuthenticationError",
+      "VerifierTimeoutError",
+      "ApiUsageLimitError"
+    ],
+    "wait_multiplier": 1.0,
+    "min_wait_sec": 1.0,
+    "max_wait_sec": 60.0
+  },
+  "environment": {
+    "type": "docker",
+    "force_build": false,
+    "delete": true,
+    "cpu_enforcement_policy": "auto",
+    "memory_enforcement_policy": "auto",
+    "extra_docker_compose": [],
+    "kwargs": {},
+    "extra_allowed_hosts": []
+  },
+  "verifier": {
+    "disable": false
+  },
+  "metrics": [],
+  "agents": [
+    {
+      "import_path": "openevo_terminal_bench.agent9_candidate:AgentNineCandidate",
+      "model_name": "gpt-6.1-sol",
+      "skills": [],
+      "resume_trajectory": false,
+      "extra_allowed_hosts": [],
+      "kwargs": {
+        "version": "0.166.0",
+        "reasoning_effort": "high",
+        "injection_manifest_path": "${RESOLVED_INJECTION_MANIFEST_PATH}",
+        "injection_manifest_sha256": "516672e3feab663417dc9f5525cab616c9cbabf4afe2fdf8ab5a17491450b4e1",
+        "toolchain_bundle_path": "${RESOLVED_TOOLCHAIN_BUNDLE_PATH}",
+        "toolchain_bundle_sha256": "81d93721aef2c8713ea518da1b0ad0e04b49b8abd3be7f3449038a3e6c646995",
+        "ca_bundle_path": "${RESOLVED_CA_BUNDLE_PATH}",
+        "ca_bundle_sha256": "9610eadbb09a1efdd45dfdd7582e6d4f09f5dde6d0454336c7a3b06e8ebb72d7",
+        "public_uv_dir": "${RESOLVED_PUBLIC_UV_DIR}",
+        "public_uv_hashes": {
+          "uv": "d3dc3ca8e29337dd602a9a4df9e6edb15ebc52aed91461debeedb96939dc4ce0",
+          "uvx": "421b1bb58429180a04ade98da066b5a5b6763e8ed74edef97359701c4cb42db8"
+        }
+      },
+      "env": {
+        "CODEX_AUTH_JSON_PATH": "${CODEX_AUTH_JSON_PATH}"
+      },
+      "mcp_servers": []
+    }
+  ],
+  "datasets": [
+    {
+      "name": "terminal-bench/terminal-bench-2-1",
+      "ref": "sha256:7d7bdc1cbedad549fc1140404bd4dc45e5fd0ea7c4186773687d177ad3a0699a",
+      "overwrite": false
+    }
+  ],
+  "tasks": [],
+  "artifacts": [],
+  "extra_instruction_paths": [],
+  "source_jobs": []
+}

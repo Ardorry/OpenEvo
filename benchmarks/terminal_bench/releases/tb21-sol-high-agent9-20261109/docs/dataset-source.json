@@ -1,0 +1,8 @@
+{
+  "source_commit": "dde3cd95b80ff25af5abd99a80b6513a018ad3b4",
+  "source_manifest_sha256": "d90b4389992d07ed6f4ab8de963a70241eaa4b60072eeaec4c3b261b6c4a6dd8",
+  "hub_dataset_digest_identity": "sha256:7d7bdc1cbedad549fc1140404bd4dc45e5fd0ea7c4186773687d177ad3a0699a",
+  "harbor_local_manifest_digest": "sha256:0fd3dbc55e6d7a6207dc0d93c5e933684b3ec87ac12941de0420b73c08627ee5",
+  "all_task_digests_match": true,
+  "git_clean": true
+}

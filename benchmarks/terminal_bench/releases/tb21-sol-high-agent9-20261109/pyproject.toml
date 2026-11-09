@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openevo-tb21-agent9-reproduction"
+version = "0.1.0"
+description = "Auditable OpenEvo Codex adapter and selected TB2.1 research cohort."
+readme = "README.md"
+requires-python = ">=3.12"
+license = {file = "LICENSE"}
+dependencies = ["harbor==0.21.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.4,<9"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["openevo_terminal_bench*"]
+
+[tool.pytest.ini_options]
+addopts = ["--import-mode=importlib"]
+pythonpath = ["src"]
+testpaths = ["tests"]

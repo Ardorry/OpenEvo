@@ -1,0 +1,22 @@
+{
+  "codex": {
+    "filename": "codex-0.166.0-x86_64-linux.tar.gz",
+    "sha256": "81d93721aef2c8713ea518da1b0ad0e04b49b8abd3be7f3449038a3e6c646995",
+    "bytes": 151555852
+  },
+  "ca_bundle": {
+    "filename": "ca-certificates-20261103.pem",
+    "sha256": "9610eadbb09a1efdd45dfdd7582e6d4f09f5dde6d0454336c7a3b06e8ebb72d7",
+    "bytes": 180744
+  },
+  "uv": {
+    "filename": "uv",
+    "sha256": "d3dc3ca8e29337dd602a9a4df9e6edb15ebc52aed91461debeedb96939dc4ce0",
+    "bytes": 53001952
+  },
+  "uvx": {
+    "filename": "uvx",
+    "sha256": "421b1bb58429180a04ade98da066b5a5b6763e8ed74edef97359701c4cb42db8",
+    "bytes": 362448
+  }
+}

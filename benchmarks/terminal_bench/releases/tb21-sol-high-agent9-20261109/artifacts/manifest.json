@@ -1,0 +1,249 @@
+{
+  "tasks": {
+    "configure-git-webserver": {
+      "path": "configure-git-webserver/AGENTS.md",
+      "sha256": "4b4cf62ff37af7b6164a98877004becc89ac7f2c68fe9a17d383b0f6aa848f2d",
+      "source_manifest": {
+        "artifacts": {
+          "agent_system": {
+            "path": "AGENTS.md",
+            "sha256": "4b4cf62ff37af7b6164a98877004becc89ac7f2c68fe9a17d383b0f6aa848f2d"
+          },
+          "memory": {
+            "path": "memory.md",
+            "sha256": "c1b224327bab1f1653574ea3498a009a804e113fc2a9645a537f63ad0341c540"
+          },
+          "skill": {
+            "path": "skill/SKILL.md",
+            "sha256": "4560cd7b492b686b76a733980b9f1f9a0be37b95ac1f3b94d71f8e9797f7672d"
+          }
+        },
+        "input_mode": "full_trajectory_no_chunking",
+        "manifest_sha256": "bea5dc2caf02c0dd854172ad4f608326d693ae314550155cc6203e12c3d7b9a0",
+        "reflection_manifest_sha256": "af9af2a36b84b3ba260772c43c0d4e61c31d916425344673b32f73d7d3de452f",
+        "schema_version": "openevo.tb21.task-local-artifacts.v1",
+        "task_id": "configure-git-webserver",
+        "trajectory_byte_count": 103374,
+        "trajectory_sha256": "2d6d2c11aee7941a2f8d526a70c2542132305d99805830bcc967ab4325be8b7d"
+      }
+    },
+    "extract-elf": {
+      "path": "extract-elf/AGENTS.md",
+      "sha256": "a19db1e9c1847377913558e91432dce7d3680a210e71a77d8eb24de886b57828",
+      "source_manifest": {
+        "artifacts": {
+          "agent_system": {
+            "path": "AGENTS.md",
+            "sha256": "a19db1e9c1847377913558e91432dce7d3680a210e71a77d8eb24de886b57828"
+          },
+          "memory": {
+            "path": "memory.md",
+            "sha256": "1febff94b10cb424b68ff3841a2e830840807cd7c18d945be1b24ede291d91f5"
+          },
+          "skill": {
+            "path": "skill/SKILL.md",
+            "sha256": "1bf6e898c96071958e944c36a69a1d96f75d8df547528578d9021d3f42eb3477"
+          }
+        },
+        "input_mode": "full_trajectory_no_chunking",
+        "manifest_sha256": "a81f0399b247f081438ea382c92eac77a372c5595b2bf77d1302b74b47e5230b",
+        "reflection_manifest_sha256": "8201763a60a11d2e61504f83eb328305c6bf15564ff0b3aa888fe00f9fb67bcf",
+        "schema_version": "openevo.tb21.task-local-artifacts.v1",
+        "task_id": "extract-elf",
+        "trajectory_byte_count": 128145,
+        "trajectory_sha256": "344001b59e70b3c21c885991f1c8e66005c248f957473a645384a6b77eecc056"
+      }
+    },
+    "filter-js-from-html": {
+      "path": "filter-js-from-html/AGENTS.md",
+      "sha256": "8a69be6a8bd212d1c5ebd7c08ef285e495ce1d36ee15a249651dd611823aa6fb",
+      "source_manifest": {
+        "artifacts": {
+          "agent_system": {
+            "path": "AGENTS.md",
+            "sha256": "8a69be6a8bd212d1c5ebd7c08ef285e495ce1d36ee15a249651dd611823aa6fb"
+          },
+          "memory": {
+            "path": "memory.md",
+            "sha256": "8778b566fbd0ea8867be64ab615b83736c54563ad00ec73d2065c82189fe1a45"
+          },
+          "skill": {
+            "path": "skill/SKILL.md",
+            "sha256": "d18a9329115f61b065e1cbb88799685a5bc05b8a26ac479148c9d47a9eaf96c0"
+          }
+        },
+        "input_mode": "full_trajectory_no_chunking",
+        "manifest_sha256": "c877699f2e51ec707a598021bf214c0c06b4f447028f8e62e68799d7edce9f5b",
+        "reflection_manifest_sha256": "68e919a6e57e37294206cd65b175801ebc586dd5a0227f442ef3a28a947868d5",
+        "schema_version": "openevo.tb21.task-local-artifacts.v1",
+        "task_id": "filter-js-from-html",
+        "trajectory_byte_count": 160714,
+        "trajectory_sha256": "2e61b679ac64a4a4c73e2d15fad1294239549ad8510163ff9d081070f76e1e1f"
+      }
+    },
+    "headless-terminal": {
+      "path": "headless-terminal/AGENTS.md",
+      "sha256": "4360e4e92c35dce160225afaf6f4f658d286cc7623a1e326bbdaeba7c4a050f9",
+      "source_manifest": {
+        "artifacts": {
+          "agent_system": {
+            "path": "AGENTS.md",
+            "sha256": "4360e4e92c35dce160225afaf6f4f658d286cc7623a1e326bbdaeba7c4a050f9"
+          },
+          "memory": {
+            "path": "memory.md",
+            "sha256": "1c88f428648ed5c3d520c81f4bda5076cd0d299c573fa90fcf0130afab20c178"
+          },
+          "skill": {
+            "path": "skill/SKILL.md",
+            "sha256": "5d18ef550617ad9d0ea535abb680f081232cd945f0d0e42b2f245dfbf8df2fb2"
+          }
+        },
+        "input_mode": "full_trajectory_no_chunking",
+        "manifest_sha256": "97e5225c6bd6f1289cd50739919e59ce7570ba986b6254c064eb3ae538d8f4ca",
+        "reflection_manifest_sha256": "e941aa96b8c24ce92e8e8cdd77a73f722707c978d0f25eb67a6173a72831a6ab",
+        "schema_version": "openevo.tb21.task-local-artifacts.v1",
+        "task_id": "headless-terminal",
+        "trajectory_byte_count": 117250,
+        "trajectory_sha256": "e18b7bc6d713b4c500445c267432e041cecaf1ffc5884c5f2e14ba360aed9395"
+      }
+    },
+    "largest-eigenval": {
+      "path": "largest-eigenval/AGENTS.md",
+      "sha256": "ba859064128cfa3129e6eec1735b9b98961707be0549ef95131028569d9d695e",
+      "source_manifest": {
+        "artifacts": {
+          "agent_system": {
+            "path": "AGENTS.md",
+            "sha256": "ba859064128cfa3129e6eec1735b9b98961707be0549ef95131028569d9d695e"
+          },
+          "memory": {
+            "path": "memory.md",
+            "sha256": "73288f67fa9e5dcce0452f38e33208ccb1c984165821a519ff01b1f80ad3219e"
+          },
+          "skill": {
+            "path": "skill/SKILL.md",
+            "sha256": "2de952ca57be62b4f03769b8eb860595eeed14989a56ba34a80c4a7d0ef71898"
+          }
+        },
+        "input_mode": "full_trajectory_no_chunking",
+        "manifest_sha256": "6e82b052bcffcae3c677743cfbaae404f6f976b5566a05995c5410adc2ddb24e",
+        "reflection_manifest_sha256": "1a1430603a0feadcdc7d7bce45c75cf6ccf1f7c1ff9b28ab8f173cfc8c82c0d2",
+        "schema_version": "openevo.tb21.task-local-artifacts.v1",
+        "task_id": "largest-eigenval",
+        "trajectory_byte_count": 134041,
+        "trajectory_sha256": "bc43c84783ac144d8e1d8bccf1c194700bd23ccdced106494472f4506d40364c"
+      }
+    },
+    "mteb-retrieve": {
+      "path": "mteb-retrieve/AGENTS.md",
+      "sha256": "3f19b3b100bf884ddb9f6f98f643d6a87a3412f0d5ab041383ee51029bd140a4",
+      "source_manifest": {
+        "artifacts": {
+          "agent_system": {
+            "path": "AGENTS.md",
+            "sha256": "3f19b3b100bf884ddb9f6f98f643d6a87a3412f0d5ab041383ee51029bd140a4"
+          },
+          "memory": {
+            "path": "memory.md",
+            "sha256": "cfab0791362a4d0c3ce93fc89149320479f19391bfe81aa5152f73c99c78f8c8"
+          },
+          "skill": {
+            "path": "skill/SKILL.md",
+            "sha256": "334a40c3fa7874271fa1b9da21bcfe3d009868912c9f325308a1a83c4ddc7746"
+          }
+        },
+        "input_mode": "full_trajectory_no_chunking",
+        "manifest_sha256": "cf07ad9519a6d6399780d76f7f461dec760d61308392fecf232b9b9780fa4c9c",
+        "reflection_manifest_sha256": "ee10c10c684e50e27c684eddde4b262ef1ad8e877809e62097899c323feaf6c2",
+        "schema_version": "openevo.tb21.task-local-artifacts.v1",
+        "task_id": "mteb-retrieve",
+        "trajectory_byte_count": 99238,
+        "trajectory_sha256": "54b153897e2efbe148ac098677527909fc07440daba2a8b925a8e013667e3209"
+      }
+    },
+    "pytorch-model-cli": {
+      "path": "pytorch-model-cli/AGENTS.md",
+      "sha256": "32e664b0f3a73bff5fedbb18625e9cb9ee19337fcf7414585b7b8d307d4cdfed",
+      "source_manifest": {
+        "artifacts": {
+          "agent_system": {
+            "path": "AGENTS.md",
+            "sha256": "32e664b0f3a73bff5fedbb18625e9cb9ee19337fcf7414585b7b8d307d4cdfed"
+          },
+          "memory": {
+            "path": "memory.md",
+            "sha256": "f95267f5b54f892c0052ebe283d83c6042b75d714bf5cd59e6882a21a21cd96a"
+          },
+          "skill": {
+            "path": "skill/SKILL.md",
+            "sha256": "937d8b562787e5efed6cba634bb7af74ed28f9195d088b69f69f481cd700356a"
+          }
+        },
+        "input_mode": "full_trajectory_no_chunking",
+        "manifest_sha256": "db0d7a643369e4e8e91bc37abd5d7a39bdb1a60686c180faa7752166aabcca09",
+        "reflection_manifest_sha256": "04ea86da15a51b48f6e232f3d284a36ee79f572370dad9fe30cc2561f7eb0ee6",
+        "schema_version": "openevo.tb21.task-local-artifacts.v1",
+        "task_id": "pytorch-model-cli",
+        "trajectory_byte_count": 167443,
+        "trajectory_sha256": "1333e179b67887306ffc91e75ad88d61623597ef6138413c8bef2b892022f47e"
+      }
+    },
+    "raman-fitting": {
+      "path": "raman-fitting/AGENTS.md",
+      "sha256": "dde6de023d1b0c689888796d272007efb3f4c72c47a0be0a856fa33cb88a8353",
+      "source_manifest": {
+        "artifacts": {
+          "agent_system": {
+            "path": "AGENTS.md",
+            "sha256": "dde6de023d1b0c689888796d272007efb3f4c72c47a0be0a856fa33cb88a8353"
+          },
+          "memory": {
+            "path": "memory.md",
+            "sha256": "c3de5b690bf6c5f2559eb8ef3824e97dcc1643320fd14332a37afca2ef9abe0d"
+          },
+          "skill": {
+            "path": "skill/SKILL.md",
+            "sha256": "1b774b1c9ab41796947eecdf5585fa4d3ce082eaf8805d3a0817207e188a436e"
+          }
+        },
+        "input_mode": "full_trajectory_no_chunking",
+        "manifest_sha256": "0af7511becc17c76c126103a7fc27a3c267aff3715a39f12e83d8e6d2cc94377",
+        "reflection_manifest_sha256": "ca324cae1c15d764b851e8e6c0c59b19aba8de1eb3985835caaed3010748a537",
+        "schema_version": "openevo.tb21.task-local-artifacts.v1",
+        "task_id": "raman-fitting",
+        "trajectory_byte_count": 80576,
+        "trajectory_sha256": "bdcf95b123fc0a6a9216bb51ec96ad39ec0261845eaed9b2d768da95a0a4b2a0"
+      }
+    },
+    "sanitize-git-repo": {
+      "path": "sanitize-git-repo/AGENTS.md",
+      "sha256": "317e7547736c7b4799c13f3019b14b75dd31f9e1890e329cfe4b856405f10e95",
+      "source_manifest": {
+        "artifacts": {
+          "agent_system": {
+            "path": "AGENTS.md",
+            "sha256": "317e7547736c7b4799c13f3019b14b75dd31f9e1890e329cfe4b856405f10e95"
+          },
+          "memory": {
+            "path": "memory.md",
+            "sha256": "432230d200efb1c88a8477b123f089f90154d58db14a3808885d5d229ca66d4f"
+          },
+          "skill": {
+            "path": "skill/SKILL.md",
+            "sha256": "ba776c045e435f52468007380b862289a9ead3ff3350883f3a7c6ecbda223d2a"
+          }
+        },
+        "input_mode": "full_trajectory_no_chunking",
+        "manifest_sha256": "b65773197bd52f81866d6c196f7c0c4a27af73bfa2ee68f5a5c770e2bfe4e6ad",
+        "reflection_manifest_sha256": "a53ce89090262a1d8989b2733a268864b6caee26661e7cb63fad2684fc74a9f6",
+        "schema_version": "openevo.tb21.task-local-artifacts.v1",
+        "task_id": "sanitize-git-repo",
+        "trajectory_byte_count": 248128,
+        "trajectory_sha256": "fe436df4dd99e1ba0597c0e6acb21e5964c42fd778e2c038884e58a1d735d12f"
+      }
+    }
+  },
+  "provenance": "Same-task prior execution trajectories and grading feedback; frozen artifacts, no new evolution during evaluation.",
+  "doom_injection": false
+}
