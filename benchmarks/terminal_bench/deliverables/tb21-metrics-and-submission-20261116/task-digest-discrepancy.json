@@ -1,0 +1,35 @@
+{
+  "dataset": "terminal-bench/terminal-bench-2-1",
+  "dataset_ref": "sha256:7d7bdc1cbedad549fc1140404bd4dc45e5fd0ea7c4186773687d177ad3a0699a",
+  "registry_task_count": 89,
+  "source_task_count": 89,
+  "mismatches": [
+    {
+      "task": "terminal-bench/sanitize-git-repo",
+      "verified_git_source_ref": "sha256:73c94a21ebe370bae843adbeeaaa9e991374867b18483aaf56c7cd470dcddea7",
+      "registry_ref": "sha256:6e86297715fae62cd499fbdd27013e11a38d05d7e05b7f661cb50b4ecead128f"
+    }
+  ],
+  "historical_records_edited": false,
+  "file_differences": [
+    {
+      "path": ".gitignore",
+      "in_git": true,
+      "in_registry": false,
+      "git_sha256": "9a8dd8d9b6c3adb8e9e56328df27deef859a3e98fffc9b8133c8b22207c25953",
+      "registry_sha256": null
+    },
+    {
+      "path": "tests/test_outputs.py",
+      "in_git": true,
+      "in_registry": true,
+      "git_sha256": "8b3c1094b4628f80fc402c867c21ab5a373f529ad5ae54e49a0a8ac3eb7aae5d",
+      "registry_sha256": "57e4904177acac5807b51f7c32444bde1968ba0445855fa4333d9eb73865b59e"
+    }
+  ],
+  "compared_file_count_git": 12,
+  "compared_file_count_registry": 11,
+  "test_ast_equal_after_literal_string_folding": true,
+  "test_constant_values_equal": true,
+  "official_static_check_still_fails": true
+}

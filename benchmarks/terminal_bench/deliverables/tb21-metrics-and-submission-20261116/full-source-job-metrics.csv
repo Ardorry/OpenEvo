@@ -1,0 +1,38 @@
+metric,value,scope
+scope,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+model,gpt-6.1-sol,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+reasoning_effort,high,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+agent,openevo-agent9-codex,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+n_tasks,89,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+n_trials,623,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+successes,541,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+reward_zero,64,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+ungraded,18,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+accuracy,86.8378812199037,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+accuracy_stderr,0.9496115221668726,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+accuracy_ci95_normal_half_width,1.8612385834470704,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+uncertainty_method,Per-task standard error used in the reviewed TB2.1 metrics.py; normal 95% approximation is descriptive for the current record collection; post-completion selection is not an unbiased estimate.,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+pass_at_1,0.8683788121990368,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+pass_at_2,0.9245585874799359,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+pass_at_3,0.9383627608346709,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+pass_at_4,0.9428571428571428,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+pass_at_5,0.9438202247191011,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+uncached_input_tokens,18850389,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+cached_input_tokens,437493376,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+input_tokens,456343765,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+output_tokens,4670043,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+total_tokens,461013808,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+total_cost_usd,128.157656,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+avg_cost_per_finished_trial_usd,0.20571052327447834,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+avg_trial_duration_sec,531.5957751075441,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+input_cache_hit_percent,95.86925680906367,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+missing_usage_receipts,3,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+cost_includes_evolution,False,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+sandbox_cost_included,False,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+tasks_passed_all_attempts,59,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+tasks_passed_at_least_once,84,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+official_review_completed,False,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+hub_uploaded,True,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+score_PR_created,True,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+official_protocol_request,https://github.com/harbor-framework/terminal-bench-2-1/issues/255,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收
+generated_at,2026-11-16T14:41:07.653633+00:00,两个完整来源 job，全部七次重复；提交来源口径，尚未获官方接收

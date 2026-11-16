@@ -1,0 +1,25 @@
+❌ **Static Analysis** [2 checks failed]
+
+| Check | Result |
+| --- | --- |
+| Valid source_filter | no matching agent in job config |
+| Valid task digests | 7/623 bad (terminal-bench/sanitize-git-repo ref mismatch) |
+
+<details><summary>8 checks passed</summary>
+
+| Check | Result |
+| --- | :---: |
+| Valid metadata | ✅ |
+| timeout_multiplier default (None or 1.0) | ✅ |
+| No agent timeout overrides | ✅ |
+| No verifier timeout overrides | ✅ |
+| No resource overrides | ✅ |
+| Valid trial count (89 tasks × ≥5) | ✅ |
+| Valid per-trial records | ✅ |
+| Rewarded trials have trajectories | ✅ |
+
+</details>
+
+**This is not a valid submission.**
+
+<sub><a href="https://github.com/harbor-framework/lb-template/actions/runs/0">Ran</a> on <a href="https://github.com/harbor-framework/lb-template/commit/0000000"><code>0000000</code></a>. See <a href="https://github.com/harbor-framework/lb-template/blob/main/.github/workflows/static-analysis.yml">workflow</a>.</sub>

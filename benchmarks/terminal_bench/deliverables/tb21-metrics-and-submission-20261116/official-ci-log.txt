@@ -1,0 +1,447 @@
+﻿2026-11-16T14:39:21.0953079Z Current runner version: '2.338.2'
+2026-11-16T14:39:21.0993809Z ##[group]Runner Image Provisioner
+2026-11-16T14:39:21.0994509Z Hosted Compute Agent
+2026-11-16T14:39:21.0995339Z Version: 20261103.629
+2026-11-16T14:39:21.0995918Z Commit: 15dbd9ccb5dbf34fae002b6ed1a2670f52df37bc
+2026-11-16T14:39:21.0996552Z Build Date: 2026-11-03T17:26:59Z
+2026-11-16T14:39:21.0997116Z Worker ID: {56e41340-215b-48e6-a132-4fcce71ad8e3}
+2026-11-16T14:39:21.0997693Z Region: westus2
+2026-11-16T14:39:21.0998231Z Cloud: Azure
+2026-11-16T14:39:21.0998682Z ##[endgroup]
+2026-11-16T14:39:21.1000208Z ##[group]Operating System
+2026-11-16T14:39:21.1000745Z Ubuntu
+2026-11-16T14:39:21.1001178Z 26.04.1
+2026-11-16T14:39:21.1001681Z LTS
+2026-11-16T14:39:21.1002110Z ##[endgroup]
+2026-11-16T14:39:21.1002548Z ##[group]Runner Image
+2026-11-16T14:39:21.1003131Z Image: ubuntu-26.04
+2026-11-16T14:39:21.1003623Z Version: 20261111.196.1
+2026-11-16T14:39:21.1004687Z Included Software: https://github.com/actions/runner-images/blob/ubuntu26/20261111.196/images/ubuntu/Ubuntu2604-Readme.md
+2026-11-16T14:39:21.1006090Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu26%2F20261111.196
+2026-11-16T14:39:21.1006898Z ##[endgroup]
+2026-11-16T14:39:21.1007971Z ##[group]GITHUB_TOKEN Permissions
+2026-11-16T14:39:21.1009683Z Contents: read
+2026-11-16T14:39:21.1010179Z Metadata: read
+2026-11-16T14:39:21.1010750Z PullRequests: write
+2026-11-16T14:39:21.1011251Z ##[endgroup]
+2026-11-16T14:39:21.1012919Z Secret source: Actions
+2026-11-16T14:39:21.1013706Z Cache mode: read
+2026-11-16T14:39:21.1014469Z Prepare workflow directory
+2026-11-16T14:39:21.1274198Z Prepare all required actions
+2026-11-16T14:39:21.1315222Z Getting action download info
+2026-11-16T14:39:21.4994853Z Download action repository 'actions/checkout@v7.0.0' (SHA:9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0)
+2026-11-16T14:39:21.7165952Z Download action repository 'astral-sh/setup-uv@v8.3.0' (SHA:d31148d669074a8d0a63714ba94f3201e7020bc3)
+2026-11-16T14:39:21.9869277Z Download action repository 'marocchino/sticky-pull-request-comment@v3.0.5' (SHA:5770ad5eb8f42dd2c4f34da00c94c5381e49af88)
+2026-11-16T14:39:22.2651383Z Complete job name: static-analysis
+2026-11-16T14:39:22.3405977Z ##[group]Run actions/checkout@v7.0.0
+2026-11-16T14:39:22.3406720Z with:
+2026-11-16T14:39:22.3407117Z   repository: harbor-framework/terminal-bench-2-1
+2026-11-16T14:39:22.3410473Z   token: ***
+2026-11-16T14:39:22.3410822Z   ssh-strict: true
+2026-11-16T14:39:22.3411176Z   ssh-user: git
+2026-11-16T14:39:22.3411535Z   persist-credentials: true
+2026-11-16T14:39:22.3411924Z   clean: true
+2026-11-16T14:39:22.3412271Z   sparse-checkout-cone-mode: true
+2026-11-16T14:39:22.3412685Z   fetch-depth: 1
+2026-11-16T14:39:22.3413037Z   fetch-tags: false
+2026-11-16T14:39:22.3413388Z   show-progress: true
+2026-11-16T14:39:22.3413743Z   lfs: false
+2026-11-16T14:39:22.3414075Z   submodules: false
+2026-11-16T14:39:22.3414430Z   set-safe-directory: true
+2026-11-16T14:39:22.3415118Z   allow-unsafe-pr-checkout: false
+2026-11-16T14:39:22.3415707Z ##[endgroup]
+2026-11-16T14:39:23.4415882Z Syncing repository: harbor-framework/terminal-bench-2-1
+2026-11-16T14:39:23.4418965Z ##[group]Getting Git version info
+2026-11-16T14:39:23.4420607Z Working directory is '/home/runner/work/terminal-bench-2-1/terminal-bench-2-1'
+2026-11-16T14:39:23.4422466Z [command]/usr/bin/git version
+2026-11-16T14:39:23.4429668Z git version 2.56.1
+2026-11-16T14:39:23.4448882Z ##[endgroup]
+2026-11-16T14:39:23.4469983Z Temporarily overriding HOME='/home/runner/work/_temp/687bbf6b-0c84-4ed8-8630-d97178f8f5af' before making global git config changes
+2026-11-16T14:39:23.4473067Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-16T14:39:23.4475777Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/terminal-bench-2-1/terminal-bench-2-1
+2026-11-16T14:39:23.4533519Z Deleting the contents of '/home/runner/work/terminal-bench-2-1/terminal-bench-2-1'
+2026-11-16T14:39:23.4537982Z ##[group]Determining repository object format
+2026-11-16T14:39:23.4540804Z ##[endgroup]
+2026-11-16T14:39:23.4542666Z ##[group]Initializing the repository
+2026-11-16T14:39:23.4545989Z [command]/usr/bin/git init /home/runner/work/terminal-bench-2-1/terminal-bench-2-1
+2026-11-16T14:39:23.4630781Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-11-16T14:39:23.4633428Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-11-16T14:39:23.4636134Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-11-16T14:39:23.4638211Z hint: call:
+2026-11-16T14:39:23.4639619Z hint:
+2026-11-16T14:39:23.4641224Z hint: 	git config --global init.defaultBranch <name>
+2026-11-16T14:39:23.4643030Z hint:
+2026-11-16T14:39:23.4645001Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-11-16T14:39:23.4647696Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-11-16T14:39:23.4649682Z hint:
+2026-11-16T14:39:23.4650728Z hint: 	git branch -m <name>
+2026-11-16T14:39:23.4651989Z hint:
+2026-11-16T14:39:23.4653500Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-11-16T14:39:23.4749917Z Initialized empty Git repository in /home/runner/work/terminal-bench-2-1/terminal-bench-2-1/.git/
+2026-11-16T14:39:23.4758542Z [command]/usr/bin/git remote add origin https://github.com/harbor-framework/terminal-bench-2-1
+2026-11-16T14:39:23.4805512Z ##[endgroup]
+2026-11-16T14:39:23.4807943Z ##[group]Disabling automatic garbage collection
+2026-11-16T14:39:23.4809879Z [command]/usr/bin/git config --local gc.auto 0
+2026-11-16T14:39:23.4861924Z ##[endgroup]
+2026-11-16T14:39:23.4864105Z ##[group]Setting up auth
+2026-11-16T14:39:23.4865598Z Removing SSH command configuration
+2026-11-16T14:39:23.4867599Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-16T14:39:23.4913502Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-16T14:39:23.5314287Z Removing HTTP extra header
+2026-11-16T14:39:23.5356451Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-16T14:39:23.5363183Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-16T14:39:23.5594070Z Removing includeIf entries pointing to credentials config files
+2026-11-16T14:39:23.5597748Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-16T14:39:23.5630588Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-16T14:39:23.5869912Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-4f6c5d97-23aa-4dfc-8470-94f1e0f70fb2.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-11-16T14:39:23.5964071Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/terminal-bench-2-1/terminal-bench-2-1/.git.path /home/runner/work/_temp/git-credentials-4f6c5d97-23aa-4dfc-8470-94f1e0f70fb2.config
+2026-11-16T14:39:23.6291474Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/terminal-bench-2-1/terminal-bench-2-1/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-4f6c5d97-23aa-4dfc-8470-94f1e0f70fb2.config
+2026-11-16T14:39:23.6448107Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-4f6c5d97-23aa-4dfc-8470-94f1e0f70fb2.config
+2026-11-16T14:39:23.6478463Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-4f6c5d97-23aa-4dfc-8470-94f1e0f70fb2.config
+2026-11-16T14:39:23.6505859Z ##[endgroup]
+2026-11-16T14:39:23.6507516Z ##[group]Fetching the repository
+2026-11-16T14:39:23.6511028Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +12b7565679ce5006230b820666353673a133db93:refs/remotes/origin/main
+2026-11-16T14:39:24.9665719Z From https://github.com/harbor-framework/terminal-bench-2-1
+2026-11-16T14:39:24.9667773Z  * [new ref]         12b7565679ce5006230b820666353673a133db93 -> origin/main
+2026-11-16T14:39:24.9673018Z [command]/usr/bin/git branch --list --remote origin/main
+2026-11-16T14:39:24.9697737Z   origin/main
+2026-11-16T14:39:24.9704587Z [command]/usr/bin/git rev-parse refs/remotes/origin/main
+2026-11-16T14:39:24.9727013Z 12b7565679ce5006230b820666353673a133db93
+2026-11-16T14:39:24.9730855Z ##[endgroup]
+2026-11-16T14:39:24.9731458Z ##[group]Determining the checkout info
+2026-11-16T14:39:24.9732113Z ##[endgroup]
+2026-11-16T14:39:24.9735521Z [command]/usr/bin/git sparse-checkout disable
+2026-11-16T14:39:24.9786919Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-11-16T14:39:24.9815498Z ##[group]Checking out the ref
+2026-11-16T14:39:24.9818603Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+2026-11-16T14:39:25.2030552Z Switched to a new branch 'main'
+2026-11-16T14:39:25.2033621Z branch 'main' set up to track 'origin/main'.
+2026-11-16T14:39:25.2096791Z ##[endgroup]
+2026-11-16T14:39:25.2099270Z [command]/usr/bin/git log -1 --format=%H
+2026-11-16T14:39:25.2123561Z 12b7565679ce5006230b820666353673a133db93
+2026-11-16T14:39:25.2404135Z ##[group]Run astral-sh/setup-uv@v8.3.0
+2026-11-16T14:39:25.2404485Z with:
+2026-11-16T14:39:25.2404854Z   python-version: 3.14
+2026-11-16T14:39:25.2405124Z   activate-environment: false
+2026-11-16T14:39:25.2405392Z   no-project: false
+2026-11-16T14:39:25.2405735Z   working-directory: /home/runner/work/terminal-bench-2-1/terminal-bench-2-1
+2026-11-16T14:39:25.2408053Z   github-token: ***
+2026-11-16T14:39:25.2408300Z   enable-cache: auto
+2026-11-16T14:39:25.2408821Z   cache-dependency-glob: **/*requirements*.txt
+**/*requirements*.in
+**/*constraints*.txt
+**/*constraints*.in
+**/pyproject.toml
+**/uv.lock
+**/*.py.lock
+
+2026-11-16T14:39:25.2409394Z   restore-cache: true
+2026-11-16T14:39:25.2409641Z   save-cache: true
+2026-11-16T14:39:25.2409903Z   prune-cache: true
+2026-11-16T14:39:25.2410157Z   cache-python: false
+2026-11-16T14:39:25.2410409Z   ignore-nothing-to-cache: false
+2026-11-16T14:39:25.2410687Z   ignore-empty-workdir: false
+2026-11-16T14:39:25.2411014Z   download-from-astral-mirror: true
+2026-11-16T14:39:25.2411313Z   add-problem-matchers: true
+2026-11-16T14:39:25.2411572Z   quiet: false
+2026-11-16T14:39:25.2411811Z   resolution-strategy: highest
+2026-11-16T14:39:25.2412077Z ##[endgroup]
+2026-11-16T14:39:25.4653863Z Trying to find version for uv in: /home/runner/work/terminal-bench-2-1/terminal-bench-2-1/uv.toml
+2026-11-16T14:39:25.4654819Z Could not find file: /home/runner/work/terminal-bench-2-1/terminal-bench-2-1/uv.toml
+2026-11-16T14:39:25.4655621Z Trying to find version for uv in: /home/runner/work/terminal-bench-2-1/terminal-bench-2-1/pyproject.toml
+2026-11-16T14:39:25.4656490Z Could not find file: /home/runner/work/terminal-bench-2-1/terminal-bench-2-1/pyproject.toml
+2026-11-16T14:39:25.4657227Z Could not determine uv version from uv.toml or pyproject.toml. Falling back to latest.
+2026-11-16T14:39:25.4658368Z Fetching manifest data from https://raw.githubusercontent.com/astral-sh/versions/main/v1/uv.ndjson ...
+2026-11-16T14:39:26.0155934Z Downloading uv from "https://releases.astral.sh/github/uv/releases/download/0.13.8/uv-x86_64-unknown-linux-gnu.tar.gz" ...
+2026-11-16T14:39:26.1726744Z [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/7584b772-7e7c-4772-a459-b0b2d761b346 -f /home/runner/work/_temp/5509ea4c-84fb-4051-a71d-26931f90e0e4
+2026-11-16T14:39:26.5586082Z Added /home/runner/.local/bin to the path
+2026-11-16T14:39:26.5589471Z Added /opt/hostedtoolcache/uv/0.13.8/x86_64 to the path
+2026-11-16T14:39:26.5590869Z Set UV_PYTHON_INSTALL_DIR to /home/runner/work/_temp/uv-python-dir
+2026-11-16T14:39:26.5591784Z Added /home/runner/work/_temp/uv-python-dir to the path
+2026-11-16T14:39:26.5592117Z Set UV_PYTHON to 3.14
+2026-11-16T14:39:26.5611874Z Set UV_CACHE_DIR to /home/runner/work/_temp/setup-uv-cache
+2026-11-16T14:39:26.5612184Z Successfully installed uv version 0.13.8
+2026-11-16T14:39:26.5613849Z Searching files using cache dependency glob: /home/runner/work/terminal-bench-2-1/terminal-bench-2-1/**/*requirements*.txt,/home/runner/work/terminal-bench-2-1/terminal-bench-2-1/**/*requirements*.in,/home/runner/work/terminal-bench-2-1/terminal-bench-2-1/**/*constraints*.txt,/home/runner/work/terminal-bench-2-1/terminal-bench-2-1/**/*constraints*.in,/home/runner/work/terminal-bench-2-1/terminal-bench-2-1/**/pyproject.toml,/home/runner/work/terminal-bench-2-1/terminal-bench-2-1/**/uv.lock,/home/runner/work/terminal-bench-2-1/terminal-bench-2-1/**/*.py.lock
+2026-11-16T14:39:26.5735429Z /home/runner/work/terminal-bench-2-1/terminal-bench-2-1/leaderboard/pyproject.toml
+2026-11-16T14:39:26.6368760Z /home/runner/work/terminal-bench-2-1/terminal-bench-2-1/leaderboard/uv.lock
+2026-11-16T14:39:26.7063787Z /home/runner/work/terminal-bench-2-1/terminal-bench-2-1/tasks/modernize-scientific-stack/environment/climate_analyzer/requirements_old.txt
+2026-11-16T14:39:26.7071909Z /home/runner/work/terminal-bench-2-1/terminal-bench-2-1/tasks/modernize-scientific-stack/environment/pyproject.toml
+2026-11-16T14:39:26.7530287Z Found 4 files to hash.
+2026-11-16T14:39:26.7594664Z Trying to restore cache from GitHub Actions cache with key: setup-uv-2-x86_64-unknown-linux-gnu-ubuntu-26.04-3.14-pruned-0f1208aafc951e741a878d3e8125f7f3dfb0d3035f8ed4508a8a28599896ff49
+2026-11-16T14:39:26.9890473Z No GitHub Actions cache found for key: setup-uv-2-x86_64-unknown-linux-gnu-ubuntu-26.04-3.14-pruned-0f1208aafc951e741a878d3e8125f7f3dfb0d3035f8ed4508a8a28599896ff49
+2026-11-16T14:39:27.1040617Z ##[group]Run uv sync --project leaderboard
+2026-11-16T14:39:27.1040963Z [36;1muv sync --project leaderboard[0m
+2026-11-16T14:39:27.1090760Z shell: /usr/bin/bash -e {0}
+2026-11-16T14:39:27.1090976Z env:
+2026-11-16T14:39:27.1091214Z   UV_PYTHON_INSTALL_DIR: /home/runner/work/_temp/uv-python-dir
+2026-11-16T14:39:27.1091494Z   UV_PYTHON: 3.14
+2026-11-16T14:39:27.1091700Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-11-16T14:39:27.1091945Z ##[endgroup]
+2026-11-16T14:39:27.1599385Z Using CPython 3.14.4 interpreter at: /usr/bin/python3.14
+2026-11-16T14:39:27.1599933Z Creating virtual environment at: leaderboard/.venv
+2026-11-16T14:39:27.1624352Z Resolved 93 packages in 0.78ms
+2026-11-16T14:39:27.1756312Z    Building leaderboard @ file:///home/runner/work/terminal-bench-2-1/terminal-bench-2-1/leaderboard
+2026-11-16T14:39:27.2512696Z Downloading tiktoken (1.1MiB)
+2026-11-16T14:39:27.2517632Z Downloading openai (1.3MiB)
+2026-11-16T14:39:27.2520692Z Downloading pygments (1.2MiB)
+2026-11-16T14:39:27.2526110Z Downloading pydantic-core (2.0MiB)
+2026-11-16T14:39:27.2527257Z Downloading tokenizers (3.2MiB)
+2026-11-16T14:39:27.2528599Z Downloading cryptography (4.5MiB)
+2026-11-16T14:39:27.2530791Z Downloading hf-xet (4.3MiB)
+2026-11-16T14:39:27.2540656Z Downloading litellm (15.9MiB)
+2026-11-16T14:39:27.2546448Z Downloading harbor (1.7MiB)
+2026-11-16T14:39:27.2549988Z Downloading aiohttp (1.7MiB)
+2026-11-16T14:39:27.5680229Z  Downloaded tiktoken
+2026-11-16T14:39:27.5837098Z  Downloaded pygments
+2026-11-16T14:39:27.6017895Z  Downloaded harbor
+2026-11-16T14:39:27.6046630Z  Downloaded aiohttp
+2026-11-16T14:39:27.6046872Z  Downloaded openai
+2026-11-16T14:39:27.6095510Z  Downloaded pydantic-core
+2026-11-16T14:39:27.6304960Z  Downloaded tokenizers
+2026-11-16T14:39:27.6505091Z  Downloaded hf-xet
+2026-11-16T14:39:27.6627927Z  Downloaded cryptography
+2026-11-16T14:39:27.8142191Z  Downloaded litellm
+2026-11-16T14:39:27.8689067Z       Built leaderboard @ file:///home/runner/work/terminal-bench-2-1/terminal-bench-2-1/leaderboard
+2026-11-16T14:39:27.8698745Z Prepared 92 packages in 706ms
+2026-11-16T14:39:28.0084498Z Installed 92 packages in 138ms
+2026-11-16T14:39:28.0085509Z  + aiohappyeyeballs==2.7.1
+2026-11-16T14:39:28.0085811Z  + aiohttp==3.14.1
+2026-11-16T14:39:28.0086225Z  + aiosignal==1.4.0
+2026-11-16T14:39:28.0086542Z  + annotated-doc==0.0.4
+2026-11-16T14:39:28.0086850Z  + annotated-types==0.7.0
+2026-11-16T14:39:28.0087141Z  + anyio==4.14.1
+2026-11-16T14:39:28.0087389Z  + attrs==26.1.0
+2026-11-16T14:39:28.0087624Z  + cbor2==6.1.3
+2026-11-16T14:39:28.0087869Z  + certifi==2026.6.17
+2026-11-16T14:39:28.0088212Z  + cffi==2.0.0
+2026-11-16T14:39:28.0088571Z  + charset-normalizer==3.4.7
+2026-11-16T14:39:28.0088922Z  + click==8.4.2
+2026-11-16T14:39:28.0089344Z  + cryptography==49.0.0
+2026-11-16T14:39:28.0089713Z  + deprecation==2.1.0
+2026-11-16T14:39:28.0089979Z  + dirhash==0.5.0
+2026-11-16T14:39:28.0090224Z  + distro==1.9.0
+2026-11-16T14:39:28.0090484Z  + dockerfile-parse==2.0.1
+2026-11-16T14:39:28.0090793Z  + fastapi==0.139.0
+2026-11-16T14:39:28.0091122Z  + fastuuid==0.14.0
+2026-11-16T14:39:28.0091534Z  + filelock==3.29.5
+2026-11-16T14:39:28.0091894Z  + frozenlist==1.8.0
+2026-11-16T14:39:28.0092226Z  + fsspec==2026.6.0
+2026-11-16T14:39:28.0092569Z  + grpclib==0.4.9
+2026-11-16T14:39:28.0092935Z  + h11==0.16.0
+2026-11-16T14:39:28.0093282Z  + h2==4.3.0
+2026-11-16T14:39:28.0093747Z  + harbor==0.20.0
+2026-11-16T14:39:28.0094052Z  + hf-xet==1.5.1
+2026-11-16T14:39:28.0094471Z  + hpack==4.2.0
+2026-11-16T14:39:28.0095079Z  + httpcore==1.0.9
+2026-11-16T14:39:28.0095494Z  + httpx==0.28.1
+2026-11-16T14:39:28.0095996Z  + huggingface-hub==1.22.0
+2026-11-16T14:39:28.0096336Z  + hyperframe==6.1.0
+2026-11-16T14:39:28.0096591Z  + idna==3.18
+2026-11-16T14:39:28.0097075Z  + importlib-metadata==8.9.0
+2026-11-16T14:39:28.0097463Z  + jinja2==3.1.6
+2026-11-16T14:39:28.0097809Z  + jiter==0.16.0
+2026-11-16T14:39:28.0098228Z  + jsonschema==4.26.0
+2026-11-16T14:39:28.0098607Z  + jsonschema-specifications==2025.9.1
+2026-11-16T14:39:28.0099722Z  + leaderboard==0.1.0 (from file:///home/runner/work/terminal-bench-2-1/terminal-bench-2-1/leaderboard)
+2026-11-16T14:39:28.0100317Z  + litellm==1.91.0
+2026-11-16T14:39:28.0100579Z  + markdown-it-py==4.2.0
+2026-11-16T14:39:28.0100860Z  + markupsafe==3.0.3
+2026-11-16T14:39:28.0101109Z  + mdurl==0.1.2
+2026-11-16T14:39:28.0101339Z  + modal==1.5.1
+2026-11-16T14:39:28.0101613Z  + multidict==6.7.1
+2026-11-16T14:39:28.0102091Z  + openai==2.44.0
+2026-11-16T14:39:28.0102486Z  + packaging==26.2
+2026-11-16T14:39:28.0102968Z  + pathspec==1.1.1
+2026-11-16T14:39:28.0103440Z  + platformdirs==4.10.0
+2026-11-16T14:39:28.0103785Z  + postgrest==2.31.0
+2026-11-16T14:39:28.0104151Z  + propcache==0.5.2
+2026-11-16T14:39:28.0104498Z  + protobuf==6.33.6
+2026-11-16T14:39:28.0104909Z  + pycparser==3.0
+2026-11-16T14:39:28.0105475Z  + pydantic==2.13.4
+2026-11-16T14:39:28.0105851Z  + pydantic-core==2.46.4
+2026-11-16T14:39:28.0106269Z  + pygments==2.20.0
+2026-11-16T14:39:28.0106560Z  + pyjwt==2.13.0
+2026-11-16T14:39:28.0106977Z  + python-dotenv==1.2.2
+2026-11-16T14:39:28.0107346Z  + pyyaml==6.0.3
+2026-11-16T14:39:28.0107678Z  + realtime==2.31.0
+2026-11-16T14:39:28.0108028Z  + referencing==0.37.0
+2026-11-16T14:39:28.0108365Z  + regex==2026.6.28
+2026-11-16T14:39:28.0108721Z  + requests==2.34.2
+2026-11-16T14:39:28.0109131Z  + rich==15.0.0
+2026-11-16T14:39:28.0109606Z  + rpds-py==2026.6.3
+2026-11-16T14:39:28.0109943Z  + scantree==0.0.4
+2026-11-16T14:39:28.0110297Z  + shellingham==1.5.4
+2026-11-16T14:39:28.0110647Z  + shortuuid==1.0.13
+2026-11-16T14:39:28.0111106Z  + sniffio==1.3.1
+2026-11-16T14:39:28.0111449Z  + starlette==1.3.1
+2026-11-16T14:39:28.0111785Z  + storage3==2.31.0
+2026-11-16T14:39:28.0112140Z  + strenum==0.4.15
+2026-11-16T14:39:28.0112499Z  + supabase==2.31.0
+2026-11-16T14:39:28.0112860Z  + supabase-auth==2.31.0
+2026-11-16T14:39:28.0113263Z  + supabase-functions==2.31.0
+2026-11-16T14:39:28.0113598Z  + synchronicity==0.12.5
+2026-11-16T14:39:28.0113935Z  + tenacity==9.1.4
+2026-11-16T14:39:28.0114301Z  + tiktoken==0.13.0
+2026-11-16T14:39:28.0114663Z  + tokenizers==0.23.1
+2026-11-16T14:39:28.0115345Z  + toml==0.10.2
+2026-11-16T14:39:28.0115724Z  + tqdm==4.68.3
+2026-11-16T14:39:28.0116262Z  + typer==0.26.8
+2026-11-16T14:39:28.0116630Z  + types-certifi==2021.10.8.3
+2026-11-16T14:39:28.0117012Z  + types-toml==0.10.8.20260518
+2026-11-16T14:39:28.0117321Z  + typing-extensions==4.16.0
+2026-11-16T14:39:28.0117627Z  + typing-inspection==0.4.2
+2026-11-16T14:39:28.0117911Z  + urllib3==2.7.0
+2026-11-16T14:39:28.0118184Z  + uvicorn==0.50.0
+2026-11-16T14:39:28.0118434Z  + watchfiles==1.2.0
+2026-11-16T14:39:28.0118691Z  + websockets==15.0.1
+2026-11-16T14:39:28.0118945Z  + yarl==1.24.2
+2026-11-16T14:39:28.0119178Z  + zipp==4.1.0
+2026-11-16T14:39:28.0305260Z ##[group]Run set -euo pipefail
+2026-11-16T14:39:28.0305581Z [36;1mset -euo pipefail[0m
+2026-11-16T14:39:28.0305963Z [36;1madded=$(gh api --paginate "repos/harbor-framework/terminal-bench-2-1/pulls/$PR/files" \[0m
+2026-11-16T14:39:28.0306383Z [36;1m  --jq '.[] | select(.status == "added") | .filename')[0m
+2026-11-16T14:39:28.0306718Z [36;1madded_subs=$(grep '^leaderboard/submissions/' <<< "$added" || true)[0m
+2026-11-16T14:39:28.0307032Z [36;1mif [ -z "$added_subs" ]; then[0m
+2026-11-16T14:39:28.0307257Z [36;1m  {[0m
+2026-11-16T14:39:28.0307482Z [36;1m    echo "ℹ️ **Static Analysis** [not a new submission]"[0m
+2026-11-16T14:39:28.0307764Z [36;1m    echo[0m
+2026-11-16T14:39:28.0308343Z [36;1m    echo "Promotion only runs for PRs that **add** a new \`leaderboard/submissions/<name>.json\`. This PR does not add one (edits to existing submissions are left alone). No validation or promotion will run."[0m
+2026-11-16T14:39:28.0308948Z [36;1m  } > /tmp/comment.md[0m
+2026-11-16T14:39:28.0309192Z [36;1m  echo "found=false" >> "$GITHUB_OUTPUT"[0m
+2026-11-16T14:39:28.0309469Z [36;1m  echo "edits_only=true" >> "$GITHUB_OUTPUT"[0m
+2026-11-16T14:39:28.0309695Z [36;1m  exit 0[0m
+2026-11-16T14:39:28.0309851Z [36;1mfi[0m
+2026-11-16T14:39:28.0310157Z [36;1mgood=$(grep -Ex 'leaderboard/submissions/[A-Za-z0-9._-]+\.json' <<< "$added_subs" || true)[0m
+2026-11-16T14:39:28.0310523Z [36;1mn_subs=$(wc -l <<< "$added_subs")[0m
+2026-11-16T14:39:28.0310800Z [36;1mn_good=0; [ -n "$good" ] && n_good=$(wc -l <<< "$good")[0m
+2026-11-16T14:39:28.0311089Z [36;1mif [ "$n_subs" -ne 1 ] || [ "$n_good" -ne 1 ]; then[0m
+2026-11-16T14:39:28.0311322Z [36;1m  {[0m
+2026-11-16T14:39:28.0311545Z [36;1m    echo "❌ **Static Analysis** [invalid submission layout]"[0m
+2026-11-16T14:39:28.0311803Z [36;1m    echo[0m
+2026-11-16T14:39:28.0312297Z [36;1m    echo "A submission PR must **add** exactly one new file matching \`leaderboard/submissions/<name>.json\` (letters, digits, \`.\`, \`_\`, \`-\`; no subdirectories). This PR adds:"[0m
+2026-11-16T14:39:28.0312881Z [36;1m    echo[0m
+2026-11-16T14:39:28.0313079Z [36;1m    sed 's/^/- `/; s/$/`/' <<< "$added_subs"[0m
+2026-11-16T14:39:28.0313328Z [36;1m  } > /tmp/comment.md[0m
+2026-11-16T14:39:28.0313548Z [36;1m  echo "found=false" >> "$GITHUB_OUTPUT"[0m
+2026-11-16T14:39:28.0313800Z [36;1m  echo "invalid=true" >> "$GITHUB_OUTPUT"[0m
+2026-11-16T14:39:28.0314031Z [36;1m  exit 0[0m
+2026-11-16T14:39:28.0314185Z [36;1mfi[0m
+2026-11-16T14:39:28.0314351Z [36;1mpath=$good[0m
+2026-11-16T14:39:28.0314545Z [36;1mecho "found=true" >> "$GITHUB_OUTPUT"[0m
+2026-11-16T14:39:28.0314983Z [36;1mecho "path=$path" >> "$GITHUB_OUTPUT"[0m
+2026-11-16T14:39:28.0315209Z [36;1mmkdir -p /tmp/sub[0m
+2026-11-16T14:39:28.0315545Z [36;1mgh api "repos/harbor-framework/terminal-bench-2-1/contents/$path?ref=$HEAD_SHA" \[0m
+2026-11-16T14:39:28.0315940Z [36;1m  --jq '.content' | base64 -d > /tmp/sub/submission.json[0m
+2026-11-16T14:39:28.0316205Z [36;1mecho "Checking $path"[0m
+2026-11-16T14:39:28.0362334Z shell: /usr/bin/bash -e {0}
+2026-11-16T14:39:28.0362546Z env:
+2026-11-16T14:39:28.0362785Z   UV_PYTHON_INSTALL_DIR: /home/runner/work/_temp/uv-python-dir
+2026-11-16T14:39:28.0363062Z   UV_PYTHON: 3.14
+2026-11-16T14:39:28.0363269Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-11-16T14:39:28.0365639Z   GH_TOKEN: ***
+2026-11-16T14:39:28.0365828Z   PR: 256
+2026-11-16T14:39:28.0366021Z   HEAD_SHA: 0386bcadee4a7eaef35be692e987ab2c8a869a6b
+2026-11-16T14:39:28.0366435Z ##[endgroup]
+2026-11-16T14:39:29.3231582Z Checking leaderboard/submissions/2026-11-08-openai-gpt-6-1-sol-high-openevo-agent9-codex.json
+2026-11-16T14:39:29.3312285Z ##[group]Run # Display fields are {url, label} link objects; fall back to the raw filter key.
+2026-11-16T14:39:29.3313066Z [36;1m# Display fields are {url, label} link objects; fall back to the raw filter key.[0m
+2026-11-16T14:39:29.3315272Z [36;1mt=$(uv run --project leaderboard python -c "import json; s=json.load(open('/tmp/sub/submission.json')); md=s.get('metadata') or {}; g=s.get('source_filter') or {}; lab=lambda v, fb: ((v or {}).get('label') or fb) if isinstance(v, dict) else (v or fb); m=lab(md.get('model_display'), g.get('model_name')); e=g.get('reasoning_effort'); m=f'{m} ({e})' if e else m; a=lab(md.get('agent_display'), g.get('agent')); print(f'Leaderboard Submission: {m} + {a}')")[0m
+2026-11-16T14:39:29.3317161Z [36;1mecho "title=$t" >> "$GITHUB_OUTPUT"[0m
+2026-11-16T14:39:29.3317541Z [36;1mgh pr edit "$PR" --title "$t"[0m
+2026-11-16T14:39:29.3361776Z shell: /usr/bin/bash -e {0}
+2026-11-16T14:39:29.3361981Z env:
+2026-11-16T14:39:29.3362243Z   UV_PYTHON_INSTALL_DIR: /home/runner/work/_temp/uv-python-dir
+2026-11-16T14:39:29.3362525Z   UV_PYTHON: 3.14
+2026-11-16T14:39:29.3362737Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-11-16T14:39:29.3365095Z   GH_TOKEN: ***
+2026-11-16T14:39:29.3365277Z   PR: 256
+2026-11-16T14:39:29.3365439Z ##[endgroup]
+2026-11-16T14:39:31.5149987Z https://github.com/harbor-framework/terminal-bench-2-1/pull/256
+2026-11-16T14:39:31.5218366Z ##[group]Run gh pr edit "$PR" --add-label lb-submission \
+2026-11-16T14:39:31.5218712Z [36;1mgh pr edit "$PR" --add-label lb-submission \[0m
+2026-11-16T14:39:31.5219111Z [36;1m  || echo "::warning::could not add the lb-submission label (create it per leaderboard/SETUP.md)"[0m
+2026-11-16T14:39:31.5263576Z shell: /usr/bin/bash -e {0}
+2026-11-16T14:39:31.5263788Z env:
+2026-11-16T14:39:31.5264013Z   UV_PYTHON_INSTALL_DIR: /home/runner/work/_temp/uv-python-dir
+2026-11-16T14:39:31.5264305Z   UV_PYTHON: 3.14
+2026-11-16T14:39:31.5264518Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-11-16T14:39:31.5266831Z   GH_TOKEN: ***
+2026-11-16T14:39:31.5267009Z   PR: 256
+2026-11-16T14:39:31.5267170Z ##[endgroup]
+2026-11-16T14:39:33.5041611Z https://github.com/harbor-framework/terminal-bench-2-1/pull/256
+2026-11-16T14:39:33.5102918Z ##[group]Run uv run --project leaderboard python -m leaderboard.ci.static_analysis /tmp/sub/submission.json > /tmp/comment.md
+2026-11-16T14:39:33.5103605Z [36;1muv run --project leaderboard python -m leaderboard.ci.static_analysis /tmp/sub/submission.json > /tmp/comment.md[0m
+2026-11-16T14:39:33.5104051Z [36;1mecho "status=$?" >> "$GITHUB_OUTPUT"[0m
+2026-11-16T14:39:33.5147202Z shell: /usr/bin/bash -e {0}
+2026-11-16T14:39:33.5147402Z env:
+2026-11-16T14:39:33.5147627Z   UV_PYTHON_INSTALL_DIR: /home/runner/work/_temp/uv-python-dir
+2026-11-16T14:39:33.5147899Z   UV_PYTHON: 3.14
+2026-11-16T14:39:33.5148121Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-11-16T14:39:33.5148592Z   HARBOR_API_KEY: ***
+2026-11-16T14:39:33.5148822Z   COMMIT_SHA: 0386bcadee4a7eaef35be692e987ab2c8a869a6b
+2026-11-16T14:39:33.5149067Z ##[endgroup]
+2026-11-16T14:39:35.8547109Z `harbor hub job show 862a2581-7850-46f9-b955-58aa3e8cc58f` failed:
+2026-11-16T14:39:35.8547375Z 
+2026-11-16T14:39:35.8700200Z ##[error]Process completed with exit code 1.
+2026-11-16T14:39:35.8798005Z ##[group]Run marocchino/sticky-pull-request-comment@v3.0.5
+2026-11-16T14:39:35.8798284Z with:
+2026-11-16T14:39:35.8798455Z   number: 256
+2026-11-16T14:39:35.8798636Z   header: static-analysis
+2026-11-16T14:39:35.8798849Z   path: /tmp/comment.md
+2026-11-16T14:39:35.8799034Z   append: false
+2026-11-16T14:39:35.8799202Z   recreate: false
+2026-11-16T14:39:35.8799366Z   delete: false
+2026-11-16T14:39:35.8799528Z   only_create: false
+2026-11-16T14:39:35.8799703Z   only_update: false
+2026-11-16T14:39:35.8799874Z   hide_details: false
+2026-11-16T14:39:35.8800200Z   hide: false
+2026-11-16T14:39:35.8800374Z   hide_and_recreate: false
+2026-11-16T14:39:35.8800566Z   hide_classify: OUTDATED
+2026-11-16T14:39:35.8800750Z   ignore_empty: false
+2026-11-16T14:39:35.8800923Z   skip_unchanged: false
+2026-11-16T14:39:35.8801106Z   follow_symbolic_links: false
+2026-11-16T14:39:35.8803167Z   GITHUB_TOKEN: ***
+2026-11-16T14:39:35.8803345Z env:
+2026-11-16T14:39:35.8803624Z   UV_PYTHON_INSTALL_DIR: /home/runner/work/_temp/uv-python-dir
+2026-11-16T14:39:35.8803898Z   UV_PYTHON: 3.14
+2026-11-16T14:39:35.8804099Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-11-16T14:39:35.8804345Z ##[endgroup]
+2026-11-16T14:39:35.9507469Z ##[error]Either message or path input is required
+2026-11-16T14:39:35.9773766Z Post job cleanup.
+2026-11-16T14:39:36.0518614Z [command]/usr/bin/git version
+2026-11-16T14:39:36.0555797Z git version 2.56.1
+2026-11-16T14:39:36.0584184Z Temporarily overriding HOME='/home/runner/work/_temp/ce70f762-ca6a-4272-b0c1-ee0dfa4edcca' before making global git config changes
+2026-11-16T14:39:36.0585618Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-16T14:39:36.0588483Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/terminal-bench-2-1/terminal-bench-2-1
+2026-11-16T14:39:36.0617073Z Removing SSH command configuration
+2026-11-16T14:39:36.0621754Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-16T14:39:36.0652028Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-16T14:39:36.0927033Z Removing HTTP extra header
+2026-11-16T14:39:36.0955869Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-16T14:39:36.0965607Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-16T14:39:36.1228812Z Removing includeIf entries pointing to credentials config files
+2026-11-16T14:39:36.1229717Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-16T14:39:36.1254443Z includeif.gitdir:/home/runner/work/terminal-bench-2-1/terminal-bench-2-1/.git.path
+2026-11-16T14:39:36.1255356Z includeif.gitdir:/home/runner/work/terminal-bench-2-1/terminal-bench-2-1/.git/worktrees/*.path
+2026-11-16T14:39:36.1255898Z includeif.gitdir:/github/workspace/.git.path
+2026-11-16T14:39:36.1256395Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-11-16T14:39:36.1261550Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/terminal-bench-2-1/terminal-bench-2-1/.git.path
+2026-11-16T14:39:36.1281859Z /home/runner/work/_temp/git-credentials-4f6c5d97-23aa-4dfc-8470-94f1e0f70fb2.config
+2026-11-16T14:39:36.1290216Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/terminal-bench-2-1/terminal-bench-2-1/.git.path /home/runner/work/_temp/git-credentials-4f6c5d97-23aa-4dfc-8470-94f1e0f70fb2.config
+2026-11-16T14:39:36.1323567Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/terminal-bench-2-1/terminal-bench-2-1/.git/worktrees/*.path
+2026-11-16T14:39:36.1345588Z /home/runner/work/_temp/git-credentials-4f6c5d97-23aa-4dfc-8470-94f1e0f70fb2.config
+2026-11-16T14:39:36.1351289Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/terminal-bench-2-1/terminal-bench-2-1/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-4f6c5d97-23aa-4dfc-8470-94f1e0f70fb2.config
+2026-11-16T14:39:36.1384918Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-11-16T14:39:36.1404290Z /github/runner_temp/git-credentials-4f6c5d97-23aa-4dfc-8470-94f1e0f70fb2.config
+2026-11-16T14:39:36.1410849Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-4f6c5d97-23aa-4dfc-8470-94f1e0f70fb2.config
+2026-11-16T14:39:36.1439443Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-11-16T14:39:36.1459515Z /github/runner_temp/git-credentials-4f6c5d97-23aa-4dfc-8470-94f1e0f70fb2.config
+2026-11-16T14:39:36.1465007Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-4f6c5d97-23aa-4dfc-8470-94f1e0f70fb2.config
+2026-11-16T14:39:36.1492759Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-16T14:39:36.1721165Z Removing credentials config '/home/runner/work/_temp/git-credentials-4f6c5d97-23aa-4dfc-8470-94f1e0f70fb2.config'
+2026-11-16T14:39:36.1852569Z Evaluate and set job outputs
+2026-11-16T14:39:36.1857874Z Set output 'found'
+2026-11-16T14:39:36.1859303Z Set output 'path'
+2026-11-16T14:39:36.1860048Z Set output 'title'
+2026-11-16T14:39:36.1860530Z Cleaning up orphan processes
+2026-11-16T14:39:36.2135267Z Terminate orphan process: pid (2353) (python)

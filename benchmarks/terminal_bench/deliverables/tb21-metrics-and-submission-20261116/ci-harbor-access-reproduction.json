@@ -1,0 +1,9 @@
+{
+  "harbor_version": "0.20.0",
+  "isolated_wheel": true,
+  "same_job_show_command_exit_code": 0,
+  "valid_JSON": true,
+  "anonymous_public_job_header_read": true,
+  "official_ci_failure_before_static_report": true,
+  "official_ci_exact_root_cause_confirmed": false
+}

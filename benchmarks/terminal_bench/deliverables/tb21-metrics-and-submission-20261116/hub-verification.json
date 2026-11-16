@@ -1,0 +1,34 @@
+{
+  "jobs": [
+    {
+      "job_id": "862a2581-7850-46f9-b955-58aa3e8cc58f",
+      "trials": 445,
+      "rewards_preserved": true,
+      "successful_trajectories_present": 387,
+      "visibility": "private",
+      "url": "https://hub.harborframework.com/jobs/862a2581-7850-46f9-b955-58aa3e8cc58f"
+    },
+    {
+      "job_id": "1f474dd2-013a-48a4-ab8e-1f90289ff85c",
+      "trials": 178,
+      "rewards_preserved": true,
+      "successful_trajectories_present": 154,
+      "visibility": "private",
+      "url": "https://hub.harborframework.com/jobs/1f474dd2-013a-48a4-ab8e-1f90289ff85c"
+    }
+  ],
+  "trials": 623,
+  "tasks": 89,
+  "attempts_per_task": 7,
+  "passes": 541,
+  "accuracy": 86.8378812199037,
+  "accuracy_stderr": 0.9496115221668728,
+  "uncached_input_tokens": 18850389,
+  "cached_input_tokens": 437493376,
+  "output_tokens": 4670043,
+  "total_cost_usd": 128.16,
+  "display_total_cost_usd": "$128.16",
+  "avg_trial_duration_sec": 531.6,
+  "all_original_UUIDs_and_rewards_verified": true,
+  "successful_ATIF_paths": 541
+}

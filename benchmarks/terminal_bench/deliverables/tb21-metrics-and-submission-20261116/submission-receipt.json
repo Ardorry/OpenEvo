@@ -1,0 +1,23 @@
+{
+  "pr_url": "https://github.com/harbor-framework/terminal-bench-2-1/pull/256",
+  "pr_number": 256,
+  "draft": true,
+  "state": "open",
+  "head_sha": "0386bcadee4a7eaef35be692e987ab2c8a869a6b",
+  "branch": "submission/2026-11-08-openai-gpt-6-1-sol-high-openevo-agent9-codex",
+  "source_jobs": [
+    "https://hub.harborframework.com/jobs/862a2581-7850-46f9-b955-58aa3e8cc58f",
+    "https://hub.harborframework.com/jobs/1f474dd2-013a-48a4-ab8e-1f90289ff85c"
+  ],
+  "workflow_url": "https://github.com/harbor-framework/terminal-bench-2-1/actions/runs/43887991663",
+  "workflow_status": "completed",
+  "official_accepted": false,
+  "official_judge_run": false,
+  "local_static_checks": {
+    "passed": 8,
+    "failed": 2
+  },
+  "created_at": "2026-11-16T14:39:10Z",
+  "workflow_conclusion": "failure",
+  "workflow_failure": "harbor hub job show failed before static-check report; comment action then failed on empty report"
+}

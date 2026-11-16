@@ -1,0 +1,23 @@
+{
+  "source_jobs": [
+    "https://hub.harborframework.com/jobs/862a2581-7850-46f9-b955-58aa3e8cc58f",
+    "https://hub.harborframework.com/jobs/1f474dd2-013a-48a4-ab8e-1f90289ff85c"
+  ],
+  "source_filter": {
+    "agent": "openevo-agent9-codex",
+    "agent_version": "0.166.0",
+    "model_name": "openai/gpt-6.1-sol",
+    "reasoning_effort": null
+  },
+  "metadata": {
+    "agent_display": null,
+    "agent_org": null,
+    "model_display": null,
+    "model_org": null,
+    "date": "2026-11-08",
+    "display_date": "Nov 8, 2026",
+    "reasoning_effort": "none"
+  },
+  "metrics": null,
+  "disqualified_trials": []
+}
