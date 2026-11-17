@@ -1,0 +1,82 @@
+{
+  "cohort": "selected-five-completed-attempts",
+  "selection_timing": "post_completion",
+  "description": "Five completed attempts per task selected for this presentation; batch labels preserve trial IDs and source ancestry.",
+  "tasks": 89,
+  "trials": 445,
+  "attempts_per_task": 5,
+  "passes": 394,
+  "reward_zero": 44,
+  "ungraded": 7,
+  "accuracy": 0.8853932584269663,
+  "accuracy_percent": 88.53932584269663,
+  "error_trials_in_denominator": true,
+  "model": "gpt-6.1-sol",
+  "reasoning_effort": "high",
+  "agent": "openevo-agent9-codex",
+  "codex_version": "0.166.0",
+  "concurrency": 4,
+  "batches": [
+    {
+      "batch": "A",
+      "tasks": 89,
+      "passes": 81,
+      "reward_zero": 7,
+      "ungraded": 1,
+      "accuracy": 0.9101123595505618
+    },
+    {
+      "batch": "B",
+      "tasks": 89,
+      "passes": 79,
+      "reward_zero": 9,
+      "ungraded": 1,
+      "accuracy": 0.8876404494382022
+    },
+    {
+      "batch": "C",
+      "tasks": 89,
+      "passes": 80,
+      "reward_zero": 8,
+      "ungraded": 1,
+      "accuracy": 0.898876404494382
+    },
+    {
+      "batch": "D",
+      "tasks": 89,
+      "passes": 79,
+      "reward_zero": 8,
+      "ungraded": 2,
+      "accuracy": 0.8876404494382022
+    },
+    {
+      "batch": "E",
+      "tasks": 89,
+      "passes": 75,
+      "reward_zero": 12,
+      "ungraded": 2,
+      "accuracy": 0.8426966292134831
+    }
+  ],
+  "exception_counts": {
+    "AgentSafetyRefusalError": 7,
+    "VerifierTimeoutError": 7,
+    "AgentTimeoutError": 1
+  },
+  "recorded_usage": {
+    "n_input_tokens": 318246778,
+    "n_cache_tokens": 305244544,
+    "n_output_tokens": 3321508,
+    "cost_usd": 89.74400240000004
+  },
+  "missing_input_usage_receipts": 2,
+  "AGENTS_injected_trials": 45,
+  "injection_policy": "Nine fixed task-local AGENTS files; Doom and remaining tasks have no evolved artifact.",
+  "artifact_provenance": "Same-task prior execution trajectories and grading feedback; frozen artifacts, no new evolution during evaluation.",
+  "verifier": "native Harbor verifier; original task tests and default budgets",
+  "dependency_cache_repair_applied": false,
+  "officially_submitted": false,
+  "official_acceptance_claimed": false,
+  "raw_verdicts_changed": false,
+  "prepared_utc": "2026-11-09T00:38:15.493267+00:00"
+}

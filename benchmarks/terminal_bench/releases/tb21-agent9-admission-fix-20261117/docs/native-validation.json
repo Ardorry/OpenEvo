@@ -1,0 +1,8 @@
+{
+  "future_agent_filter_match": true,
+  "planned_trials": 445,
+  "canonical_lock_task_count": 89,
+  "canonical_task_refs_verified": true,
+  "paid_model_calls": 0,
+  "original_job_config_and_results_unchanged": true
+}

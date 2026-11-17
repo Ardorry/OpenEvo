@@ -1,0 +1,32 @@
+[
+  {
+    "file": "src/openevo_terminal_bench/agent9_candidate.py",
+    "sha256": "6bc79b5d001ac770c2980588ae7bb9ddf433e0aa85a76c5e978efb5a165db9bb",
+    "byte_identical_to_execution_source": true
+  },
+  {
+    "file": "src/openevo_terminal_bench/seven_arm_agent.py",
+    "sha256": "058c090842ce04c0ae0b4ea05608c696c169c21d3baa36e10ab34c41af635c50",
+    "byte_identical_to_execution_source": true
+  },
+  {
+    "file": "src/openevo_terminal_bench/codex_toolchain.py",
+    "sha256": "0a347652e3aa8a54feb53d1e146991800bd622abc6fe8d0fca02f4550e7d8aa5",
+    "byte_identical_to_execution_source": true
+  },
+  {
+    "file": "src/openevo_terminal_bench/source_cached_job.py",
+    "sha256": "ff1537219d9b165e2919d59fa1aa836e38ef1d9617758d6c5a31877298ec7deb",
+    "byte_identical_to_execution_source": true
+  },
+  {
+    "file": "src/openevo_terminal_bench/hub_manifest.py",
+    "sha256": "cbb5fa0cbec2f9b83531cee560fabd172e911ffa09031a595f77c2aff135b436",
+    "byte_identical_to_execution_source": true
+  },
+  {
+    "file": "src/openevo_terminal_bench/campaign.py",
+    "sha256": "8aa8d32e3c84caf07db7067723c14cfd4c107b54c0aa618430a80dde65886ed6",
+    "byte_identical_to_execution_source": true
+  }
+]
