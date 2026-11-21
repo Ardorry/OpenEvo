@@ -1,6 +1,6 @@
-# OpenEvo Agent9 on Terminal-Bench 2.1
+# OpenEvo on Terminal-Bench 2.1
 
-This archive records the November 2026 GPT-6.1 Sol (high) evaluation with OpenEvo Agent9, Codex 0.166.0, and Harbor 0.21.0. It preserves three evidence sets with distinct denominators.
+This archive records the November 2026 GPT-6.1 Sol (high) evaluation with OpenEvo, Codex 0.166.0, and Harbor 0.21.0. It preserves three evidence sets with distinct denominators.
 
 | Evidence set | Scope | Passes | Recorded inference cost |
 | --- | --- | ---: | ---: |
@@ -18,7 +18,7 @@ The historical `sanitize-git-repo` records used a noncanonical task ref. Seven n
 - The original and corrected trial tables include task refs, rewards, usage, timestamps, trial identifiers and result hashes. The corrected table identifies the historical trial and actual grading source separately. The original table also includes ATIF hashes where a file was present.
 - Harbor Hub hosts the published logs and trajectories. The trial IDs in the tables identify the corresponding records. [Rounds 1–5 on Hub](https://hub.harborframework.com/jobs/862a2581-7850-46f9-b955-58aa3e8cc58f) · [Rounds 6–7 on Hub](https://hub.harborframework.com/jobs/1f474dd2-013a-48a4-ab8e-1f90289ff85c) · [Corrected A–E on Hub](https://hub.harborframework.com/jobs/e4ab0103-3b2c-5b16-b093-5740765c5255)
 - The seven-attempt ledger includes verifier receipts, original and graded trial IDs, and trajectory hashes. Full raw files for the two canonical attempts outside A–E remain in the private run archive. The Git branch carries results, provenance, and the frozen instructions. Hub carries the published trial archives.
-- The executable harness is pinned separately from the OpenEvo base of this documentation branch. [Executed harness and frozen inputs](https://github.com/Ardorry/OpenEvo/tree/bae1b900e043685d5ebc3a93dc6edd2ee5c9ddfd/benchmarks/terminal_bench/releases/tb21-sol-high-agent9-20261109) · [Canonical admission package](https://github.com/Ardorry/OpenEvo/tree/015569bda1478d385fd08a70d2c33d928e1c12a3/benchmarks/terminal_bench/releases/tb21-agent9-admission-fix-20261117)
+- The executable harness is pinned separately from the OpenEvo base of this documentation branch. [Executed harness and frozen inputs](https://github.com/Ardorry/OpenEvo/commit/bae1b900e043685d5ebc3a93dc6edd2ee5c9ddfd) · [Canonical admission package](https://github.com/Ardorry/OpenEvo/commit/015569bda1478d385fd08a70d2c33d928e1c12a3)
 
 ## Submission materials
 
