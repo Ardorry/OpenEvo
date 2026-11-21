@@ -1,0 +1,21 @@
+{
+  "pr_url": "https://github.com/harbor-framework/terminal-bench-2-1/pull/256",
+  "head_sha": "f782208b0f4cf0785f6c29526af3d0de53008a8a",
+  "draft": false,
+  "hub_job": "https://hub.harborframework.com/jobs/e4ab0103-3b2c-5b16-b093-5740765c5255",
+  "seven_passes": 7,
+  "five_passes": 394,
+  "five_trials": 445,
+  "local_static_checks": "10/10",
+  "official_run_id": 44088415544,
+  "official_run_number": 145,
+  "official_result": "failure before static checks during initial Hub CLI read",
+  "promotion": "skipped",
+  "underlying_official_read_exception": "not exposed in log",
+  "diagnostic_lines": [
+    "2026-11-17T13:00:29.9123921Z   HARBOR_API_KEY: ***",
+    "2026-11-17T13:00:31.9520716Z `harbor hub job show e4ab0103-3b2c-5b16-b093-5740765c5255` failed:",
+    "2026-11-17T13:00:31.9649366Z ##[error]Process completed with exit code 1.",
+    "2026-11-17T13:00:32.0403389Z ##[error]Either message or path input is required"
+  ]
+}

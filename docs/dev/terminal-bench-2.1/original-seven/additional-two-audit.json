@@ -1,0 +1,61 @@
+{
+  "completed": 178,
+  "tasks": 89,
+  "new_rounds": [
+    {
+      "round": 6,
+      "tasks": 89,
+      "passes": 79,
+      "reward_zero": 8,
+      "ungraded": 2
+    },
+    {
+      "round": 7,
+      "tasks": 89,
+      "passes": 75,
+      "reward_zero": 12,
+      "ungraded": 2
+    }
+  ],
+  "passes": 154,
+  "reward_zero": 20,
+  "ungraded": 4,
+  "accuracy": 0.8651685393258427,
+  "exceptions": {
+    "VerifierTimeoutError": 4,
+    "AgentSafetyRefusalError": 3,
+    "AgentTimeoutError": 1
+  },
+  "recorded_usage": {
+    "n_input_tokens": 127577000,
+    "n_cache_tokens": 122251776,
+    "n_output_tokens": 1315533,
+    "cost_usd": 36.0309556
+  },
+  "valid_success_ATIF": 154,
+  "AGENTS_injected_trials": 18,
+  "raw_results_modified": false,
+  "parent_results_replaced": false,
+  "dependency_cache_repair_applied": false,
+  "finish_utc": "2026-11-08T20:50:17.589229+00:00",
+  "duration_hours": 6.399344506859779,
+  "seven_rounds": {
+    "passes": 541,
+    "trials": 623,
+    "accuracy": 0.8683788121990369
+  },
+  "exploratory_rounds_3_to_7": {
+    "rounds": [
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "passes": 394,
+    "trials": 445,
+    "accuracy": 0.8853932584269663,
+    "label": "Post-hoc rolling-five analysis only; not an official accepted replacement score."
+  },
+  "combined_formal_recorded_cost_usd": 128.157656
+}
