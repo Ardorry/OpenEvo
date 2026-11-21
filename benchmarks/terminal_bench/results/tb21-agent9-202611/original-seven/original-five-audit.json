@@ -1,0 +1,77 @@
+{
+  "planned": 445,
+  "completed": 445,
+  "tasks": 89,
+  "attempts_per_task": 5,
+  "passes": 387,
+  "accuracy_full_denominator": 0.8696629213483146,
+  "reward_zero": 44,
+  "ungraded": 14,
+  "exception_counts": {
+    "VerifierTimeoutError": 14,
+    "AgentTimeoutError": 4,
+    "AgentSafetyRefusalError": 5
+  },
+  "ordinary_reward_zero_without_exception": 36,
+  "passed_with_agent_timeout": 1,
+  "valid_success_ATIF": 387,
+  "injected_trials": 45,
+  "five_of_five_tasks": 62,
+  "zero_of_five_tasks": [
+    "extract-elf",
+    "filter-js-from-html",
+    "make-doom-for-mips",
+    "qemu-alpine-ssh",
+    "torch-pipeline-parallelism"
+  ],
+  "per_execution_index": [
+    {
+      "execution_index": 1,
+      "tasks": 89,
+      "passes": 76,
+      "reward_zero": 9,
+      "ungraded": 4
+    },
+    {
+      "execution_index": 2,
+      "tasks": 89,
+      "passes": 71,
+      "reward_zero": 11,
+      "ungraded": 7
+    },
+    {
+      "execution_index": 3,
+      "tasks": 89,
+      "passes": 81,
+      "reward_zero": 7,
+      "ungraded": 1
+    },
+    {
+      "execution_index": 4,
+      "tasks": 89,
+      "passes": 79,
+      "reward_zero": 9,
+      "ungraded": 1
+    },
+    {
+      "execution_index": 5,
+      "tasks": 89,
+      "passes": 80,
+      "reward_zero": 8,
+      "ungraded": 1
+    }
+  ],
+  "recorded_usage": {
+    "n_input_tokens": 328766765,
+    "n_cache_tokens": 315241600,
+    "n_output_tokens": 3354510,
+    "cost_usd": 92.1267004
+  },
+  "missing_input_usage_receipts": 3,
+  "start_utc": "2026-11-07T08:29:36.665506+00:00",
+  "finished_utc": "2026-11-08T01:29:42.195754+00:00",
+  "duration_hours": 17.001536179913415,
+  "raw_verdicts_modified": false,
+  "official_acceptance_claimed": false,
+  "registry_verified": false
+}
