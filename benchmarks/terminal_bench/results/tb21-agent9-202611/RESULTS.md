@@ -23,6 +23,17 @@ OpenEvo's Reflector uses a complete prior execution trajectory, the task descrip
 
 In a separate comparison on ten previously unsolved tasks, we ran each task three times under each setting. The frozen `AGENTS.md` setting achieved the highest pass rate at **21/30 (70.0%)**, compared with **14/30 (46.7%)** without an artifact. That is a **23.3 percentage point** gain on this set. Skill-only and memory-only settings passed 18/30 and 17/30, respectively. Both `configure-git-webserver` and `mteb-retrieve` passed 3/3 with `AGENTS.md` and 0/3 without an artifact. This comparison shows that feedback from earlier attempts can translate into repeatable corrections on specific tasks while keeping the base model fixed.
 
+## Terminal-Bench 2.1 leaderboard comparison
+
+The reference rows are the first three entries on the Terminal-Bench 2.1 leaderboard as viewed on November 21, 2026. Their costs are shown as displayed on the leaderboard. [Terminal-Bench 2.1 leaderboard](https://www.tbench.ai/?version=2.1)
+
+| Model (reasoning effort) | Agent | Resolution rate | Reported cost (USD) |
+| --- | --- | ---: | ---: |
+| GPT-6.1 Sol (high) | OpenEvo | 88.54% | $89.79 |
+| GPT-6 Astra (high) | Codex | 87.4% | $0.8k |
+| Fable 5 (xhigh) | Claude Code | 83.8% | $0.6k |
+| GPT-5.5 (xhigh) | Codex | 83.2% | $2.1k |
+
 ## Why seven rounds were recorded
 
 The first campaign ran five rounds. We added two full repetitions under the same settings to check the results after the early rounds had more incomplete verifications. The archive retains all seven original rounds. The reported five-round result uses rounds 3–7 with the canonical replacements described above. [Original seven-round archive](original-seven/)
