@@ -1,6 +1,6 @@
-# OpenEvo Agent9 results on Terminal-Bench 2.1
+# OpenEvo results on Terminal-Bench 2.1
 
-**OpenEvo Agent9 with GPT-6.1 Sol (high) passed 394 of 445 trials (88.54%) at a recorded inference cost of $89.79.** The evaluation covered all 89 Terminal-Bench 2.1 tasks with five trials per task. Sixty-eight tasks passed in all five rounds, and 84 tasks passed at least once.
+**OpenEvo with GPT-6.1 Sol (high) passed 394 of 445 trials (88.54%) at a recorded inference cost of $89.79.** The evaluation covered all 89 Terminal-Bench 2.1 tasks with five trials per task. Sixty-eight tasks passed in all five rounds, and 84 tasks passed at least once.
 
 ## Five-round evaluation
 
