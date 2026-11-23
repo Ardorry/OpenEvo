@@ -1,0 +1,51 @@
+{
+  "tasks": 89,
+  "trials": 445,
+  "passes": 394,
+  "accuracy": 0.8853932584269663,
+  "canonical_replacements": 5,
+  "other_trials_preserved": 440,
+  "model_calls_for_regrading": 0,
+  "batches": [
+    {
+      "batch": "A",
+      "tasks": 89,
+      "passes": 81,
+      "accuracy": 0.9101123595505618
+    },
+    {
+      "batch": "B",
+      "tasks": 89,
+      "passes": 79,
+      "accuracy": 0.8876404494382022
+    },
+    {
+      "batch": "C",
+      "tasks": 89,
+      "passes": 80,
+      "accuracy": 0.898876404494382
+    },
+    {
+      "batch": "D",
+      "tasks": 89,
+      "passes": 79,
+      "accuracy": 0.8876404494382022
+    },
+    {
+      "batch": "E",
+      "tasks": 89,
+      "passes": 75,
+      "accuracy": 0.8426966292134831
+    }
+  ],
+  "job_id": "e4ab0103-3b2c-5b16-b093-5740765c5255",
+  "accuracy_percent": 88.53932584269663,
+  "accuracy_stderr_percent": 0.9665534007913065,
+  "uncached_input_tokens": 13026825,
+  "cached_input_tokens": 305106176,
+  "output_tokens": 3322891,
+  "total_cost_usd": 89.79,
+  "display_total_cost_usd": "$89.79",
+  "avg_trial_duration_sec": 474.6,
+  "grading_additional_model_calls": 0
+}

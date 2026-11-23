@@ -1,0 +1,42 @@
+{
+  "method": "task-specific agent instructions from one complete earlier same-task trajectory, task information, and grading feedback including failed-test names",
+  "tasks": {
+    "configure-git-webserver": {
+      "path": "configure-git-webserver/AGENTS.md",
+      "sha256": "4b4cf62ff37af7b6164a98877004becc89ac7f2c68fe9a17d383b0f6aa848f2d"
+    },
+    "extract-elf": {
+      "path": "extract-elf/AGENTS.md",
+      "sha256": "a19db1e9c1847377913558e91432dce7d3680a210e71a77d8eb24de886b57828"
+    },
+    "filter-js-from-html": {
+      "path": "filter-js-from-html/AGENTS.md",
+      "sha256": "8a69be6a8bd212d1c5ebd7c08ef285e495ce1d36ee15a249651dd611823aa6fb"
+    },
+    "headless-terminal": {
+      "path": "headless-terminal/AGENTS.md",
+      "sha256": "4360e4e92c35dce160225afaf6f4f658d286cc7623a1e326bbdaeba7c4a050f9"
+    },
+    "largest-eigenval": {
+      "path": "largest-eigenval/AGENTS.md",
+      "sha256": "ba859064128cfa3129e6eec1735b9b98961707be0549ef95131028569d9d695e"
+    },
+    "mteb-retrieve": {
+      "path": "mteb-retrieve/AGENTS.md",
+      "sha256": "3f19b3b100bf884ddb9f6f98f643d6a87a3412f0d5ab041383ee51029bd140a4"
+    },
+    "pytorch-model-cli": {
+      "path": "pytorch-model-cli/AGENTS.md",
+      "sha256": "32e664b0f3a73bff5fedbb18625e9cb9ee19337fcf7414585b7b8d307d4cdfed"
+    },
+    "raman-fitting": {
+      "path": "raman-fitting/AGENTS.md",
+      "sha256": "dde6de023d1b0c689888796d272007efb3f4c72c47a0be0a856fa33cb88a8353"
+    },
+    "sanitize-git-repo": {
+      "path": "sanitize-git-repo/AGENTS.md",
+      "sha256": "317e7547736c7b4799c13f3019b14b75dd31f9e1890e329cfe4b856405f10e95"
+    }
+  },
+  "other_tasks_receive_artifacts": false
+}
