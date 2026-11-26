@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "openevo-terminal-bench"
 version = "0.1.0"
-description = "Maintainer automation for running Terminal Bench through OpenEvo Core."
+description = "Maintainer automation for running Terminal Bench through EvoLab Core."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

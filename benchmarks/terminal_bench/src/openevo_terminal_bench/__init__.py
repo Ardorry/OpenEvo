@@ -1,3 +1,3 @@
-"""Standalone Terminal Bench automation for OpenEvo maintainers."""
+"""Standalone Terminal Bench automation for EvoLab maintainers."""
 
 __all__: list[str] = []

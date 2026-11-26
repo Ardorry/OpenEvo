@@ -1,4 +1,4 @@
-"""Offline Terminal Bench result conversion for OpenEvo evolution."""
+"""Offline Terminal Bench result conversion for EvoLab evolution."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def build_terminal_bench_events(
     policy_version: str | None = None,
     rollout_step: int | None = None,
 ) -> list[EventIngestRequest]:
-    """Build OpenEvo event ingest requests from a Terminal Bench trial or job directory."""
+    """Build EvoLab event ingest requests from a Terminal Bench trial or job directory."""
 
     root = Path(path)
     if root.is_file():

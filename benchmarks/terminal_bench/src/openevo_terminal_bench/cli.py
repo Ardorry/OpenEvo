@@ -61,7 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     tb_events = subparsers.add_parser(
         "terminal-bench-events",
-        help="Convert Terminal Bench Harbor/EvoLab results to OpenEvo event JSONL.",
+        help="Convert Terminal Bench Harbor/EvoLab results to EvoLab event JSONL.",
     )
     tb_events.add_argument("--input", required=True, help="Terminal Bench trial or job directory.")
     tb_events.add_argument("--output", help="Output JSONL path. Defaults to stdout.")
@@ -71,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     tb_events.add_argument("--rollout-step", type=int)
     tb_dataset = subparsers.add_parser(
         "terminal-bench-dataset",
-        help="Ingest Terminal Bench Harbor/EvoLab results into a local OpenEvo dataset.",
+        help="Ingest Terminal Bench Harbor/EvoLab results into a local EvoLab dataset.",
     )
     tb_dataset.add_argument(
         "--input", required=True, help="Terminal Bench trial or job directory."
