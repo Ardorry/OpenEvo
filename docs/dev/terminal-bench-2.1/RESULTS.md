@@ -1,6 +1,6 @@
-# OpenEvo results on Terminal-Bench 2.1
+# EvoLab results on Terminal-Bench 2.1
 
-**OpenEvo with GPT-6.1 Sol (high) passed 394 of 445 trials (88.54%) at a recorded inference cost of $89.79.** The evaluation covered all 89 Terminal-Bench 2.1 tasks with five trials per task. Sixty-eight tasks passed in all five rounds, and 84 tasks passed at least once.
+**EvoLab with GPT-6.1 Sol (high) passed 394 of 445 trials (88.54%) at a recorded inference cost of $89.79.** The evaluation covered all 89 Terminal-Bench 2.1 tasks with five trials per task. Sixty-eight tasks passed in all five rounds, and 84 tasks passed at least once.
 
 ## Five-round evaluation
 
@@ -19,7 +19,7 @@ The five rounds recorded 321,455,892 tokens: 13,026,825 uncached input, 305,106,
 
 ## Learning from failed attempts
 
-OpenEvo's Reflector uses a complete prior execution trajectory, the task description, and grading feedback to produce revised instructions for a subsequent attempt. In this evaluation, nine tasks received a frozen task-specific `AGENTS.md` derived from prior attempts on those same tasks. The other 80 tasks ran without an evolved artifact. The underlying model remained fixed. [Frozen instructions and provenance](artifacts/manifest.json)
+EvoLab's Reflector uses a complete prior execution trajectory, the task description, and grading feedback to produce revised instructions for a subsequent attempt. In this evaluation, nine tasks received a frozen task-specific `AGENTS.md` derived from prior attempts on those same tasks. The other 80 tasks ran without an evolved artifact. The underlying model remained fixed. [Frozen instructions and provenance](artifacts/manifest.json)
 
 In a separate comparison on ten previously unsolved tasks, we ran each task three times under each setting. The frozen `AGENTS.md` setting achieved the highest pass rate at **21/30 (70.0%)**, compared with **14/30 (46.7%)** without an artifact. That is a **23.3 percentage point** gain on this set. Skill-only and memory-only settings passed 18/30 and 17/30, respectively. Both `configure-git-webserver` and `mteb-retrieve` passed 3/3 with `AGENTS.md` and 0/3 without an artifact. This comparison shows that feedback from earlier attempts can translate into repeatable corrections on specific tasks while keeping the base model fixed.
 
@@ -29,7 +29,7 @@ The reference rows are the first three entries on the Terminal-Bench 2.1 leaderb
 
 | Model (reasoning effort) | Agent | Resolution rate | Reported cost (USD) |
 | --- | --- | ---: | ---: |
-| GPT-6.1 Sol (high) | OpenEvo | 88.54% | $89.79 |
+| GPT-6.1 Sol (high) | EvoLab | 88.54% | $89.79 |
 | GPT-6 Astra (high) | Codex | 87.4% | $0.8k |
 | Fable 5 (xhigh) | Claude Code | 83.8% | $0.6k |
 | GPT-5.5 (xhigh) | Codex | 83.2% | $2.1k |

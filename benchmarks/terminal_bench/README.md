@@ -1,13 +1,16 @@
-# OpenEvo Terminal Bench Automation
+# EvoLab Terminal Bench Automation
 
 This standalone package owns Terminal Bench-specific trial I/O, Harbor execution,
 reporting, task-local orchestration, and maintainer commands. It imports the installed
-OpenEvo Core package for event, dataset, job, artifact, worker, method, and protected
-GEPA transition contracts. OpenEvo Core and Desktop do not import or package this
-automation.
+`openevo` Core package for event, dataset, job, artifact, worker, method, and protected
+GEPA transition contracts. This package is distributed separately from Core and
+Desktop.
 
-This is release-maintainer benchmark automation, not an ordinary-user OpenEvo CLI.
-There is no legacy `openevo.evolution.terminal_bench_*` module or Core CLI alias.
+Release maintainers invoke this automation through the `openevo-terminal-bench`
+command. The package and command names identify the archived tooling. See the
+[EvoLab Terminal-Bench 2.1 audit archive](../../docs/dev/terminal-bench-2.1/README.md)
+for the published run and its pinned harness. The archived tooling has no
+`openevo.evolution.terminal_bench_*` module or Core CLI alias.
 
 ## Install
 

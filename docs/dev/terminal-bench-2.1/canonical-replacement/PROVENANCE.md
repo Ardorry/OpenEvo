@@ -36,7 +36,7 @@ Each replacement archive contains analysis.md and artifacts/regrading-provenance
 
 ## Agent protocol and source
 
-GPT-6.1 Sol high, Codex 0.166.0, OpenEvo, Harbor 0.21.0; model concurrency 4 and no automatic solver retries. Nine fixed task names receive frozen AGENTS derived from earlier same-task full trajectories and grading feedback. Doom receives no evolved artifact. No memory/skill bundle or old session is loaded.
+GPT-6.1 Sol high, Codex 0.166.0, EvoLab, Harbor 0.21.0; model concurrency 4 and no automatic solver retries. Nine fixed task names receive frozen AGENTS derived from earlier same-task full trajectories and grading feedback. Doom receives no evolved artifact. No memory/skill bundle or old session is loaded.
 
 Original agent and artifacts: https://github.com/Ardorry/OpenEvo/commit/bae1b900e043685d5ebc3a93dc6edd2ee5c9ddfd
 

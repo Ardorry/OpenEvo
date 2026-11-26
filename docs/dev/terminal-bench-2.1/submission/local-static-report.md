@@ -1,6 +1,6 @@
 ✅ **Static Analysis** [PASS]
 
-Agent display name updated to OpenEvo for this copy of the local report.
+This archived copy uses the EvoLab display name.
 
 <details><summary>10 checks passed</summary>
 
@@ -32,6 +32,6 @@ Agent display name updated to OpenEvo for this copy of the local report.
 **Submission Summary**
 | Model [org] | Effort | Agent [org] | Date | Accuracy | ± SE | Tokens | Cost |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| GPT-6.1 Sol [OpenAI] | high | OpenEvo [Ardorry] | 2026-11-17 | 88.54% | 0.97% | 321,455,892 | $89.79 |
+| GPT-6.1 Sol [OpenAI] | high | EvoLab [Ardorry] | 2026-11-17 | 88.54% | 0.97% | 321,455,892 | $89.79 |
 
 <sub><a href="https://github.com/harbor-framework/lb-template/actions/runs/0">Ran</a> on <a href="https://github.com/harbor-framework/lb-template/commit/0000000"><code>0000000</code></a>. Errored trials count `reward 0` in the metric computation.</sub>
